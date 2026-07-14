@@ -15,6 +15,7 @@ const dir = await mkdtemp(join(tmpdir(), "shibahama-sdk-contract-"));
 const port = await unusedPort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const apiKey = "sdk-contract-key";
+const encryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const namespace = "sdk-contract";
 const scope = { repository: namespace, visibility: "repository" };
 const mcpScope = { ...scope, team: null };
@@ -38,7 +39,7 @@ const server = spawn(
     "--bind",
     `127.0.0.1:${port}`,
   ],
-  { cwd: root, stdio: "ignore" },
+  { cwd: root, env: { ...process.env, SHIBAHAMA_ENCRYPTION_KEY: encryptionKey }, stdio: "ignore" },
 );
 
 try {

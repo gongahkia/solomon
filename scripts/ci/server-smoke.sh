@@ -12,11 +12,12 @@ db="$tmpdir/server-smoke.redb"
 bind="${SHIBAHAMA_SERVER_SMOKE_BIND:-127.0.0.1:8876}"
 base="http://${bind}"
 api_key="smoke"
+encryption_key="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 namespace="smoke"
 
 cd "$ROOT"
 
-cargo run -q -p shibahama-cli -- serve \
+SHIBAHAMA_ENCRYPTION_KEY="$encryption_key" cargo run -q -p shibahama-cli -- serve \
   --path "$db" \
   --dimensions 2 \
   --api-key "$api_key" \
@@ -194,6 +195,13 @@ request GET /graph?as_of_unix=0 >/dev/null
 request POST /graph/traverse "{\"start_entity\":\"${project_id}\",\"max_hops\":1,\"as_of_unix\":0}" >/dev/null
 request DELETE "/graph/relations/${relation_id}?valid_to_unix=10" >/dev/null
 request DELETE "/graph/entities/${claim_id}?valid_to_unix=10" >/dev/null
+
+for payload in "Server smoke memory" "Invalidated server smoke memory" "Server Smoke Project" "Server Smoke Claim"; do
+  if rg -a -F -q -- "$payload" "$db"; then
+    echo "encrypted service store contained plaintext payload" >&2
+    exit 1
+  fi
+done
 
 mcp_init_headers="$tmpdir/mcp-init.headers"
 mcp_init_body="$tmpdir/mcp-init.json"

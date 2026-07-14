@@ -1516,6 +1516,8 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
         MemoryEvent::AutomaticCaptureRecorded { .. } => "automatic_capture",
         MemoryEvent::ObservabilityRecorded { .. } => "observability",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
+        MemoryEvent::MemoryRecordKeyDestroyed { .. } => "memory_record_key_destroyed",
+        MemoryEvent::MemorySemanticallyErased { .. } => "memory_semantically_erased",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
         MemoryEvent::TierChanged { .. } => "tier_changed",
@@ -1547,10 +1549,14 @@ fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
             record.memory_id.iter().map(ToString::to_string).collect()
         }
         MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
         | MemoryEvent::TierChanged { id, .. }
         | MemoryEvent::ContentCompacted { id, .. } => vec![id.to_string()],
+        MemoryEvent::MemorySemanticallyErased { tombstone } => {
+            vec![tombstone.memory_id.to_string()]
+        }
         MemoryEvent::ReconstructionApplied {
             superseded_id,
             replacement_id,
@@ -1592,10 +1598,12 @@ fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
             record.memory_id.is_some_and(|memory_id| memory_id == id)
         }
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }
         | MemoryEvent::TierChanged { id: event_id, .. }
         | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::MemorySemanticallyErased { tombstone } => tombstone.memory_id == id,
         MemoryEvent::ReconstructionApplied {
             superseded_id,
             replacement_id,

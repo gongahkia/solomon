@@ -5,6 +5,7 @@
 use serde_json::{Map, Value, json};
 use shibahama_core::model::MemoryScope;
 use shibahama_core::policy::PolicyActorClass;
+use shibahama_core::storage::{AuthorizationPrincipalClass, RbacRole};
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
 
@@ -102,6 +103,8 @@ pub struct McpServerContext {
     scope: MemoryScope,
     principal: String,
     actor: PolicyActorClass,
+    credential_role: Option<RbacRole>,
+    principal_class: Option<AuthorizationPrincipalClass>,
 }
 
 impl McpServerContext {
@@ -112,6 +115,26 @@ impl McpServerContext {
             scope,
             principal,
             actor,
+            credential_role: None,
+            principal_class: None,
+        }
+    }
+
+    /// Creates one immutable context with a transport-authenticated credential role ceiling.
+    #[must_use]
+    pub fn new_with_authorization(
+        scope: MemoryScope,
+        principal: String,
+        actor: PolicyActorClass,
+        credential_role: Option<RbacRole>,
+        principal_class: AuthorizationPrincipalClass,
+    ) -> Self {
+        Self {
+            scope,
+            principal,
+            actor,
+            credential_role,
+            principal_class: Some(principal_class),
         }
     }
 
@@ -131,6 +154,18 @@ impl McpServerContext {
     #[must_use]
     pub const fn actor(&self) -> PolicyActorClass {
         self.actor
+    }
+
+    /// Returns the credential role ceiling fixed by the transport, when any.
+    #[must_use]
+    pub const fn credential_role(&self) -> Option<RbacRole> {
+        self.credential_role
+    }
+
+    /// Returns the authentication mechanism fixed by the transport, when available.
+    #[must_use]
+    pub const fn principal_class(&self) -> Option<AuthorizationPrincipalClass> {
+        self.principal_class
     }
 }
 

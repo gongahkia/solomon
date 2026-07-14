@@ -522,6 +522,9 @@ pub struct Entity {
     /// Repository/team visibility boundary for this graph node.
     #[serde(default)]
     pub scope: MemoryScope,
+    /// Optional memory that supplied or extracted this entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_memory_id: Option<MemoryId>,
     /// Caller-defined entity type, such as `Person`, `Project`, or `Claim`.
     pub entity_type: String,
     /// Canonical display label.
@@ -546,6 +549,7 @@ impl Entity {
         Self {
             id: EntityId::new_v7(),
             scope: MemoryScope::default(),
+            source_memory_id: None,
             entity_type: entity_type.into(),
             label: label.into(),
             stable_key: stable_key.into(),
@@ -558,6 +562,13 @@ impl Entity {
     #[must_use]
     pub fn with_scope(mut self, scope: MemoryScope) -> Self {
         self.scope = scope;
+        self
+    }
+
+    /// Links this entity to the memory that supplied it.
+    #[must_use]
+    pub const fn with_source_memory(mut self, source_memory_id: MemoryId) -> Self {
+        self.source_memory_id = Some(source_memory_id);
         self
     }
 }

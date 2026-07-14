@@ -52,6 +52,7 @@ cargo run -q -p shibahama-cli -- serve \
   --path "$DB" \
   --dimensions 2 \
   --api-key "$API_KEY" \
+  --unsafe-development-plaintext \
   --namespace "$NAMESPACE" \
   --bind "$BIND" &
 server_pid=$!

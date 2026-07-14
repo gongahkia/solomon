@@ -351,6 +351,7 @@ fn forgetting_mode(value: ForgettingMode) -> &'static str {
     match value {
         ForgettingMode::SoftInvalidate => "soft_invalidate",
         ForgettingMode::FlagForReverification => "flag_for_reverification",
+        ForgettingMode::FullSemanticErase => "full_semantic_erase",
     }
 }
 

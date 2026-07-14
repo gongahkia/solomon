@@ -40,6 +40,7 @@ and final registry publication are still pending release credentials.
 - [Runtime Modes](#runtime-modes)
 - [Benchmark Snapshot](#benchmark-snapshot)
 - [Security Posture](#security-posture)
+- [Container Image](./docs/container.md)
 - [Documentation](#documentation)
 - [Development & Evaluation](#development--evaluation)
 - [Repository Layout](#repository-layout)

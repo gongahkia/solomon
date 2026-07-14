@@ -440,6 +440,13 @@ fn snapshot_for_range(start_index: usize, count: usize) -> (StoreSnapshot, Vec<M
             cold_contents: Vec::new(),
             graph_entities: Vec::new(),
             graph_relations: Vec::new(),
+            administration_state: None,
+            administration_bootstrap_secret_commitment: None,
+            administration_audit: Vec::new(),
+            rbac_grants: Vec::new(),
+            authorization_audit: Vec::new(),
+            service_tokens: Vec::new(),
+            service_token_audit: Vec::new(),
         },
         quality_ids,
     )

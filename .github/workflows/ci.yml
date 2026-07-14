@@ -57,6 +57,24 @@ jobs:
       - name: MCP conformance and adversarial authorization suite
         run: bash scripts/ci/mcp-conformance.sh
 
+      - name: Administrator bootstrap service smoke test
+        run: bash scripts/ci/admin-bootstrap-smoke.sh
+
+      - name: RBAC service smoke test
+        run: bash scripts/ci/rbac-smoke.sh
+
+      - name: Service-token smoke test
+        run: bash scripts/ci/service-token-smoke.sh
+
+      - name: CORS browser-preflight smoke test
+        run: bash scripts/ci/cors-smoke.sh
+
+      - name: Rate-limit service smoke test
+        run: bash scripts/ci/rate-limit-smoke.sh
+
+      - name: Semantic-erasure service smoke test
+        run: bash scripts/ci/semantic-erasure-smoke.sh
+
       - name: Upload MCP conformance artifact
         if: always()
         uses: actions/upload-artifact@v6

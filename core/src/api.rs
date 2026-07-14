@@ -8,6 +8,7 @@ use crate::consolidation::{
     plan_offline_consolidation,
 };
 use crate::embedding::{EmbeddingProvider, EmbeddingPurpose, validate_embedding};
+use crate::encryption::EncryptionAtRest;
 use crate::learned_policy::{
     ContextualBanditExperimentConfig, ContextualBanditExperimentReport, OfflinePolicyDecision,
     OfflinePolicyEvaluationConfig, OfflinePolicyEvaluationReport, PolicyEvaluationError,
@@ -22,8 +23,8 @@ use crate::model::{
 use crate::observability::{ObservabilityOperation, ObservabilityRecord};
 use crate::policy::{
     CapturePolicy, CapturePolicyRequest, CapturePolicySimulation, EffectivePolicy,
-    PolicyAuditDisposition, PolicyAuditRecord, PolicyError, PolicyLayerSet, RecallPolicy,
-    RecallPolicyDecision, RecallPolicySimulation, resolve_policy_inheritance,
+    PolicyActorClass, PolicyAuditDisposition, PolicyAuditRecord, PolicyError, PolicyLayerSet,
+    RecallPolicy, RecallPolicyDecision, RecallPolicySimulation, resolve_policy_inheritance,
 };
 use crate::reconstruction::{
     BackgroundReconstructionConfig, CorroborationDecision, CorroborationPolicy,
@@ -43,9 +44,13 @@ use crate::review::{
 };
 use crate::significance::{SignificanceBreakdown, SignificanceConfig};
 use crate::storage::{
-    ConsolidationDecisionRecord, EventRecord, GraphSnapshot, GraphTraversalRequest,
-    GraphTraversalResult, HumanSignalRecord, IngestCredencePolicy, MemoryAuditEntry, MemoryEvent,
-    MemoryWriteEvent, ReconstructionReplacementRecord, RedbMemoryStore, ScopePromotionRecord,
+    AdministrationAuditRecord, AdministrationBootstrapOutcome, AdministrationRecoveryOutcome,
+    AdministrationState, AuthorizationAction, AuthorizationAuditRecord,
+    AuthorizationPrincipalClass, ConsolidationDecisionRecord, EventRecord, GraphSnapshot,
+    GraphTraversalRequest, GraphTraversalResult, HumanSignalRecord, IngestCredencePolicy,
+    MemoryAuditEntry, MemoryEvent, MemoryWriteEvent, RbacGrant, RbacRole,
+    ReconstructionReplacementRecord, RedbMemoryStore, ScopePromotionRecord,
+    SemanticErasureTombstone, ServiceToken, ServiceTokenAuditRecord, ServiceTokenStoredMaterial,
     StorageError, SubgraphRequest, TierCapacityConfig,
 };
 use crate::vector::{VectorIndex, VectorIndexError};
@@ -522,6 +527,44 @@ pub enum ForgettingMode {
     SoftInvalidate,
     /// Keep the memory valid and append a durable flag for explicit re-verification.
     FlagForReverification,
+    /// Destroy encrypted record keys and retain only a content-free authorization tombstone.
+    FullSemanticErase,
+}
+
+/// Explicit authorization required for irreversible semantic erasure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticErasureRequest {
+    /// Principal or workflow that authorized destruction.
+    pub authorized_by: String,
+    /// Opaque authorization reference with no semantic content.
+    pub authorization_id: String,
+    /// Time at which authorization is applied.
+    pub erased_at: OffsetDateTime,
+}
+
+impl SemanticErasureRequest {
+    /// Creates one explicit semantic-erasure authorization request.
+    #[must_use]
+    pub fn new(
+        authorized_by: impl Into<String>,
+        authorization_id: impl Into<String>,
+        erased_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            authorized_by: authorized_by.into(),
+            authorization_id: authorization_id.into(),
+            erased_at,
+        }
+    }
+}
+
+/// Outcome of a completed irreversible semantic erasure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticErasureOutcome {
+    /// The content-free durable tombstone retained after erasure.
+    pub tombstone: SemanticErasureTombstone,
+    /// Always true for a completed semantic erasure.
+    pub irreversible: bool,
 }
 
 /// Embedding metadata supplied to `write_with_embedding`.
@@ -1112,6 +1155,27 @@ impl<V: VectorIndex> Shibahama<V> {
         Self::open_with_config(path, vector_index, ShibahamaConfig::default())
     }
 
+    /// Opens a store using an explicit at-rest encryption provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened or decrypted.
+    pub fn open_with_encryption<E>(
+        path: impl AsRef<Path>,
+        vector_index: V,
+        encryption: E,
+    ) -> Result<Self, ShibahamaError>
+    where
+        E: EncryptionAtRest + 'static,
+    {
+        Self::open_with_config_and_encryption(
+            path,
+            vector_index,
+            ShibahamaConfig::default(),
+            encryption,
+        )
+    }
+
     /// Opens an engine only after strict runtime configuration validation succeeds.
     ///
     /// # Errors
@@ -1142,6 +1206,39 @@ impl<V: VectorIndex> Shibahama<V> {
         )
     }
 
+    /// Opens an engine from runtime configuration with an explicit encryption provider.
+    ///
+    /// This is the required opening path when `storage.encryption` is `required`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before opening storage when configuration is invalid, dimensions differ,
+    /// or the provider cannot decrypt the durable store.
+    pub fn open_from_runtime_config_with_encryption<E>(
+        runtime_config: &crate::config::RuntimeConfig,
+        vector_index: V,
+        encryption: E,
+    ) -> Result<Self, ShibahamaError>
+    where
+        E: EncryptionAtRest + 'static,
+    {
+        runtime_config.validate().map_err(|_| {
+            ShibahamaError::InvalidRequest("runtime configuration is invalid".to_owned())
+        })?;
+        if runtime_config.provider.dimensions != vector_index.dimensions() {
+            return Err(ShibahamaError::InvalidRequest(
+                "runtime provider dimensions do not match the vector index".to_owned(),
+            ));
+        }
+
+        Self::open_with_config_and_encryption(
+            &runtime_config.storage.path,
+            vector_index,
+            runtime_config.engine_config(),
+            encryption,
+        )
+    }
+
     /// Opens a Shibahama store with an explicit engine config.
     ///
     /// # Errors
@@ -1154,6 +1251,32 @@ impl<V: VectorIndex> Shibahama<V> {
     ) -> Result<Self, ShibahamaError> {
         let mut engine = Self {
             store: RedbMemoryStore::open(path)?,
+            vector_index,
+            config,
+            scope_authorization: Box::new(DenyScopePromotionPolicy),
+        };
+
+        engine.hydrate_vector_index()?;
+
+        Ok(engine)
+    }
+
+    /// Opens a store with explicit engine configuration and at-rest encryption.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable store cannot be opened or decrypted.
+    pub fn open_with_config_and_encryption<E>(
+        path: impl AsRef<Path>,
+        vector_index: V,
+        config: ShibahamaConfig,
+        encryption: E,
+    ) -> Result<Self, ShibahamaError>
+    where
+        E: EncryptionAtRest + 'static,
+    {
+        let mut engine = Self {
+            store: RedbMemoryStore::open_with_encryption(path, encryption)?,
             vector_index,
             config,
             scope_authorization: Box::new(DenyScopePromotionPolicy),
@@ -1745,7 +1868,45 @@ impl<V: VectorIndex> Shibahama<V> {
                 .store
                 .flag_for_reverification(id, valid_to, "forgetting-disabled".to_owned())?
                 .is_some()),
+            ForgettingMode::FullSemanticErase => Err(ShibahamaError::InvalidRequest(
+                "full semantic erasure requires an explicit authorization request".to_owned(),
+            )),
         }
+    }
+
+    /// Irreversibly erases one scoped memory after explicit authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless full semantic erasure is explicitly configured, envelope
+    /// encryption is active, authorization metadata is valid, and the durable transaction and
+    /// vector deletion complete.
+    pub fn semantic_erase(
+        &mut self,
+        id: MemoryId,
+        request: SemanticErasureRequest,
+    ) -> Result<Option<SemanticErasureOutcome>, ShibahamaError> {
+        self.require_scope_context()?;
+        if self.config.forgetting.mode != ForgettingMode::FullSemanticErase {
+            return Err(ShibahamaError::InvalidRequest(
+                "full semantic erasure is not enabled".to_owned(),
+            ));
+        }
+        let record = self.store.semantic_erase(
+            id,
+            request.authorized_by,
+            request.authorization_id,
+            request.erased_at,
+        )?;
+
+        if record.is_some() {
+            self.vector_index.delete_by_id(id)?;
+        }
+
+        Ok(record.map(|record| SemanticErasureOutcome {
+            tombstone: record.tombstone,
+            irreversible: true,
+        }))
     }
 
     /// Copies an approved repository-local memory into one team scope without mutating its source.
@@ -1830,6 +1991,274 @@ impl<V: VectorIndex> Shibahama<V> {
     pub fn event_records(&self) -> Result<Vec<EventRecord>, ShibahamaError> {
         self.require_scope_context()?;
         Ok(self.store.events()?)
+    }
+
+    /// Opens the durable first-administrator bootstrap window only when no administration state
+    /// exists yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the commitment is invalid or durable administration state cannot be
+    /// written.
+    pub fn ensure_administration_bootstrap_window(
+        &self,
+        bootstrap_secret_commitment: &str,
+        opened_at: OffsetDateTime,
+        expires_at: OffsetDateTime,
+    ) -> Result<AdministrationState, ShibahamaError> {
+        Ok(self.store.ensure_administration_bootstrap_window(
+            bootstrap_secret_commitment,
+            opened_at,
+            expires_at,
+        )?)
+    }
+
+    /// Atomically consumes the first-administrator bootstrap window for one principal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read or written.
+    pub fn bootstrap_administrator(
+        &self,
+        bootstrap_secret_commitment: &str,
+        principal: impl Into<String>,
+        initialized_at: OffsetDateTime,
+    ) -> Result<AdministrationBootstrapOutcome, ShibahamaError> {
+        Ok(self.store.bootstrap_administrator(
+            bootstrap_secret_commitment,
+            principal,
+            initialized_at,
+        )?)
+    }
+
+    /// Replaces an initialized administrator after the host verifies an operator recovery secret.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read or written.
+    pub fn recover_administrator(
+        &self,
+        principal: impl Into<String>,
+        recovered_at: OffsetDateTime,
+    ) -> Result<AdministrationRecoveryOutcome, ShibahamaError> {
+        Ok(self.store.recover_administrator(principal, recovered_at)?)
+    }
+
+    /// Returns current durable first-administrator state, if the service has been configured.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read.
+    pub fn administration_state(&self) -> Result<Option<AdministrationState>, ShibahamaError> {
+        Ok(self.store.administration_state()?)
+    }
+
+    /// Returns append-only, content-free service-administration audit records.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when audit records cannot be read.
+    pub fn administration_audit(&self) -> Result<Vec<AdministrationAuditRecord>, ShibahamaError> {
+        Ok(self.store.administration_audit()?)
+    }
+
+    /// Creates or replaces one explicit role grant for an exact repository/team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the grant is invalid or cannot be durably persisted.
+    pub fn grant_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        role: RbacRole,
+        granted_by: impl Into<String>,
+        granted_at: OffsetDateTime,
+    ) -> Result<RbacGrant, ShibahamaError> {
+        Ok(self
+            .store
+            .grant_rbac_role(scope, principal, role, granted_by, granted_at)?)
+    }
+
+    /// Revokes one explicit role grant from an exact repository/team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the grant selector is invalid or durable state cannot be updated.
+    pub fn revoke_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        revoked_by: impl Into<String>,
+        revoked_at: OffsetDateTime,
+    ) -> Result<Option<RbacGrant>, ShibahamaError> {
+        Ok(self
+            .store
+            .revoke_rbac_role(scope, principal, revoked_by, revoked_at)?)
+    }
+
+    /// Evaluates and durably audits a scoped role decision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the decision input is invalid or durable role/audit state fails.
+    pub fn authorize_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        action: AuthorizationAction,
+        required_role: RbacRole,
+        global_administrator: bool,
+        decided_at: OffsetDateTime,
+    ) -> Result<bool, ShibahamaError> {
+        Ok(self.store.authorize_rbac_role(
+            scope,
+            principal,
+            action,
+            required_role,
+            global_administrator,
+            decided_at,
+        )?)
+    }
+
+    /// Evaluates and durably audits one scope-role decision with an explicit credential ceiling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the decision input is invalid or durable role/audit state fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_rbac_role_with_credential(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        action: AuthorizationAction,
+        required_role: RbacRole,
+        global_administrator: bool,
+        credential_role: Option<RbacRole>,
+        principal_class: Option<AuthorizationPrincipalClass>,
+        actor_class: Option<PolicyActorClass>,
+        decided_at: OffsetDateTime,
+    ) -> Result<bool, ShibahamaError> {
+        Ok(self.store.authorize_rbac_role_with_credential(
+            scope,
+            principal,
+            action,
+            required_role,
+            global_administrator,
+            credential_role,
+            principal_class,
+            actor_class,
+            decided_at,
+        )?)
+    }
+
+    /// Issues one scoped automation token with a non-recoverable bearer commitment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token metadata is invalid or durable state cannot be written.
+    pub fn issue_service_token(
+        &self,
+        material: &ServiceTokenStoredMaterial,
+    ) -> Result<ServiceToken, ShibahamaError> {
+        Ok(self.store.issue_service_token(material)?)
+    }
+
+    /// Atomically rotates one active scoped automation token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token metadata is invalid or durable state cannot be read or written.
+    pub fn rotate_service_token(
+        &self,
+        token_id: &str,
+        successor: &ServiceTokenStoredMaterial,
+        actor: impl Into<String>,
+        rotated_at: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, ShibahamaError> {
+        Ok(self
+            .store
+            .rotate_service_token(token_id, successor, actor, rotated_at)?)
+    }
+
+    /// Revokes one active scoped automation token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token metadata is invalid or durable state cannot be read or written.
+    pub fn revoke_service_token(
+        &self,
+        token_id: &str,
+        actor: impl Into<String>,
+        revoked_at: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, ShibahamaError> {
+        Ok(self
+            .store
+            .revoke_service_token(token_id, actor, revoked_at)?)
+    }
+
+    /// Authenticates one active scoped automation token using a non-recoverable commitment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token state is corrupt or cannot be read.
+    pub fn authenticate_service_token(
+        &self,
+        token_id: &str,
+        secret_commitment: &str,
+        now: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, ShibahamaError> {
+        Ok(self
+            .store
+            .authenticate_service_token(token_id, secret_commitment, now)?)
+    }
+
+    /// Returns service-token metadata for one exact scope without bearer material.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token state cannot be read.
+    pub fn service_tokens_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<ServiceToken>, ShibahamaError> {
+        Ok(self.store.service_tokens_in_scope(scope)?)
+    }
+
+    /// Returns content-free service-token lifecycle audit records for one exact scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token audit state cannot be read.
+    pub fn service_token_audit_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<ServiceTokenAuditRecord>, ShibahamaError> {
+        Ok(self.store.service_token_audit_in_scope(scope)?)
+    }
+
+    /// Returns explicit role grants for one exact repository/team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when grant state cannot be read.
+    pub fn rbac_grants_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<RbacGrant>, ShibahamaError> {
+        Ok(self.store.rbac_grants_in_scope(scope)?)
+    }
+
+    /// Returns content-free authorization decisions for one exact repository/team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when authorization audit state cannot be read.
+    pub fn authorization_audit_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<AuthorizationAuditRecord>, ShibahamaError> {
+        Ok(self.store.authorization_audit_in_scope(scope)?)
     }
 
     /// Writes a local full-store snapshot when local single-store mode is enabled.
@@ -3128,6 +3557,21 @@ impl<V: VectorIndex> ScopedShibahama<'_, V> {
         self.engine.invalidate(id, valid_to)
     }
 
+    /// Irreversibly erases one memory only when it belongs to this scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id belongs to another scope, semantic erasure is disabled, or
+    /// the authorized encrypted-store transaction fails.
+    pub fn semantic_erase(
+        &mut self,
+        id: MemoryId,
+        request: SemanticErasureRequest,
+    ) -> Result<Option<SemanticErasureOutcome>, ShibahamaError> {
+        self.ensure_memory_scope(id)?;
+        self.engine.semantic_erase(id, request)
+    }
+
     /// Promotes a repository-local memory in this context into one team scope.
     ///
     /// # Errors
@@ -3449,6 +3893,23 @@ where
         let inner = Arc::clone(&self.inner);
 
         tokio::task::spawn_blocking(move || inner.blocking_lock().invalidate(id, valid_to)).await?
+    }
+
+    /// Irreversibly erases one memory after explicit authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when semantic erasure is disabled, authorization is invalid, the encrypted
+    /// store rejects destruction, or the blocking task fails.
+    pub async fn semantic_erase(
+        &self,
+        id: MemoryId,
+        request: SemanticErasureRequest,
+    ) -> Result<Option<SemanticErasureOutcome>, ShibahamaError> {
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || inner.blocking_lock().semantic_erase(id, request))
+            .await?
     }
 
     /// Returns all current materialized memory rows.
@@ -3793,6 +4254,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encryption::{EnvelopeEncryption, LocalKeyProvider};
     use crate::extraction::{CandidateValidity, EvidenceSpan, ExtractionCandidate, SourceEvidence};
     use crate::model::{
         ConsolidationAction, HumanSignalAction, MemoryKind, MemoryScope, Provenance, ScopeId,
@@ -4005,6 +4467,71 @@ mod tests {
         assert!((why.significance.base_score - why.item.base_significance).abs() < f64::EPSILON);
         assert_eq!(why.audit_trail.len(), why.tier.audit.len());
         assert!(why.audit_trail.len() >= 2);
+    }
+
+    #[test]
+    fn semantic_erasure_requires_explicit_mode_and_reports_irreversible_status() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let config = ShibahamaConfig {
+            forgetting: ForgettingConfig {
+                mode: ForgettingMode::FullSemanticErase,
+            },
+            ..ShibahamaConfig::default()
+        };
+        let mut shibahama = Shibahama::open_with_config_and_encryption(
+            file.path(),
+            HnswVectorIndex::with_capacity(2, 8),
+            config,
+            EnvelopeEncryption::new(LocalKeyProvider::new("api-erase-kek", [61; 32])),
+        )
+        .expect("encrypted api should open");
+        let item = shibahama
+            .write_with_embedding(
+                MemoryWriteEvent::new(
+                    "api semantic erasure payload",
+                    Provenance::new(SourceKind::User, None, "api-test"),
+                    OffsetDateTime::UNIX_EPOCH,
+                    OffsetDateTime::UNIX_EPOCH,
+                ),
+                WriteEmbedding {
+                    vector: &[1.0, 0.0],
+                    index_name: "api-test",
+                    model: "embedding-model",
+                    model_version: "v1",
+                },
+            )
+            .expect("write should work");
+        let outcome = shibahama
+            .semantic_erase(
+                item.id,
+                SemanticErasureRequest::new(
+                    "api-operator",
+                    "case-2026-003",
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(1),
+                ),
+            )
+            .expect("semantic erase should work")
+            .expect("memory should be erased");
+
+        assert!(outcome.irreversible);
+        assert_eq!(outcome.tombstone.memory_id, item.id);
+        assert!(
+            shibahama
+                .store()
+                .get(item.id)
+                .expect("get should work")
+                .is_none()
+        );
+        assert!(
+            shibahama
+                .recall(&RecallRequest::new(
+                    &[1.0, 0.0],
+                    1,
+                    OffsetDateTime::UNIX_EPOCH,
+                ))
+                .expect("recall should work")
+                .is_empty()
+        );
     }
 
     #[test]

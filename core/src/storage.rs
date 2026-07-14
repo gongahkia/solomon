@@ -14,7 +14,7 @@ use crate::model::{
     ScopeAuthorizationAction, ScopePromotionRef, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
 use crate::observability::ObservabilityRecord;
-use crate::policy::PolicyAuditRecord;
+use crate::policy::{PolicyActorClass, PolicyAuditRecord};
 use crate::review::{
     ReviewCandidate, ReviewCandidateId, ReviewDecision, ReviewError, ReviewQueueItem,
 };
@@ -23,7 +23,7 @@ use crate::vector::{VectorIndex, VectorIndexError};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, Table,
-    TableDefinition,
+    TableDefinition, WriteTransaction,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,26 @@ const EMBEDDINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("emb
 const COLD_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("cold_content");
 const GRAPH_ENTITIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_entities");
 const GRAPH_RELATIONS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("graph_relations");
+const ADMINISTRATION_STATE_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("administration_state");
+const ADMINISTRATION_AUDIT_TABLE: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("administration_audit");
+const RBAC_GRANTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("rbac_grants");
+const AUTHORIZATION_AUDIT_TABLE: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("authorization_audit");
+const SERVICE_TOKENS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("service_tokens");
+const SERVICE_TOKEN_AUDIT_TABLE: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("service_token_audit");
 const LZ4_SIZE_PREPENDED: &str = "lz4-size-prepended";
+const ADMINISTRATION_SCHEMA_VERSION: u8 = 1;
+const RBAC_SCHEMA_VERSION: u8 = 1;
+const SERVICE_TOKEN_SCHEMA_VERSION: u8 = 1;
+const ADMINISTRATION_STATE_KEY: &str = "state";
+const SEMANTIC_ERASURE_TOMBSTONE_SCHEMA_VERSION: u8 = 1;
+const SEMANTIC_ERASURE_AUTHORIZATION_DOMAIN: &[u8] =
+    b"shibahama:semantic-erasure:authorization-reference:v1";
+const SEMANTIC_ERASURE_INTEGRITY_DOMAIN: &[u8] =
+    b"shibahama:semantic-erasure:tombstone-integrity:v1";
 
 #[derive(Clone, Copy)]
 enum StorageTableName {
@@ -53,6 +72,12 @@ enum StorageTableName {
     ColdContent,
     GraphEntities,
     GraphRelations,
+    AdministrationState,
+    AdministrationAudit,
+    RbacGrants,
+    AuthorizationAudit,
+    ServiceTokens,
+    ServiceTokenAudit,
 }
 
 impl StorageTableName {
@@ -65,6 +90,12 @@ impl StorageTableName {
             Self::ColdContent => "cold_content",
             Self::GraphEntities => "graph_entities",
             Self::GraphRelations => "graph_relations",
+            Self::AdministrationState => "administration_state",
+            Self::AdministrationAudit => "administration_audit",
+            Self::RbacGrants => "rbac_grants",
+            Self::AuthorizationAudit => "authorization_audit",
+            Self::ServiceTokens => "service_tokens",
+            Self::ServiceTokenAudit => "service_token_audit",
         }
     }
 }
@@ -106,6 +137,15 @@ pub enum StorageError {
     /// Snapshot export would write decrypted data from an encrypted store.
     #[error("plaintext snapshot export is disabled for encrypted stores")]
     EncryptedSnapshotExportDisabled,
+    /// Semantic erasure requires per-record envelope keys.
+    #[error("semantic erasure requires envelope encryption with unique record keys")]
+    SemanticErasureRequiresEnvelopeEncryption,
+    /// Semantic-erasure authorization metadata was malformed.
+    #[error("semantic erasure authorization is invalid")]
+    InvalidSemanticErasureAuthorization,
+    /// Semantic-erasure tombstone metadata or integrity evidence was invalid.
+    #[error("semantic erasure tombstone is invalid: {0}")]
+    InvalidSemanticErasureTombstone(#[from] SemanticErasureTombstoneVerificationError),
 }
 
 /// Deterministic storage-write fault point for failure testing.
@@ -190,6 +230,18 @@ pub enum MemoryEvent {
         id: MemoryId,
         /// Timestamp that closes the valid-time interval.
         valid_to: OffsetDateTime,
+    },
+    /// A prior encrypted event record was replaced after its per-record key was destroyed.
+    MemoryRecordKeyDestroyed {
+        /// Memory whose historical encrypted record was destroyed.
+        id: MemoryId,
+        /// Timestamp of the authorized semantic erasure.
+        erased_at: OffsetDateTime,
+    },
+    /// Content-free tombstone proving one authorized irreversible semantic erasure.
+    MemorySemanticallyErased {
+        /// Immutable authorization and destruction metadata.
+        tombstone: SemanticErasureTombstone,
     },
     /// A memory was kept current but flagged for explicit re-verification.
     ReverificationFlagged {
@@ -360,6 +412,398 @@ pub struct EventRecord {
     pub recorded_at: OffsetDateTime,
     /// Stored event payload.
     pub event: MemoryEvent,
+}
+
+/// Durable, content-free state for the service's first administrator.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdministrationState {
+    /// Administration-state schema version.
+    pub schema_version: u8,
+    /// One-time bootstrap window expiry fixed when the operator first configures it.
+    pub bootstrap_expires_at: OffsetDateTime,
+    /// Administrator identity once bootstrap succeeds.
+    pub administrator: Option<AdministratorIdentity>,
+}
+
+/// Stable administrator identity and recovery history.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdministratorIdentity {
+    /// Opaque authenticated principal granted administrator access.
+    pub principal: String,
+    /// First successful bootstrap timestamp.
+    pub initialized_at: OffsetDateTime,
+    /// Number of explicit operator-authorized recoveries.
+    pub recovery_count: u32,
+    /// Most recent recovery timestamp, when recovery has occurred.
+    pub last_recovered_at: Option<OffsetDateTime>,
+}
+
+/// Content-free service-administration audit action.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministrationAuditAction {
+    /// An operator opened the initial time-bounded bootstrap window.
+    BootstrapWindowOpened,
+    /// An authenticated principal consumed the bootstrap window.
+    AdministratorBootstrapped,
+    /// An authenticated principal replaced the administrator with the recovery secret configured.
+    AdministratorRecovered,
+}
+
+/// Append-only administration audit record with no raw secret values.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdministrationAuditRecord {
+    /// Administration-audit schema version.
+    pub schema_version: u8,
+    /// Monotonic administration-audit sequence.
+    pub sequence: u64,
+    /// Lifecycle action recorded.
+    pub action: AdministrationAuditAction,
+    /// Timestamp at which the action committed.
+    pub occurred_at: OffsetDateTime,
+    /// Principal granted administrator access, when applicable.
+    pub principal: Option<String>,
+    /// Previous administrator principal for recovery records only.
+    pub previous_principal: Option<String>,
+    /// Bootstrap expiry for the initial-window record only.
+    pub bootstrap_expires_at: Option<OffsetDateTime>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct StoredAdministrationState {
+    state: AdministrationState,
+    bootstrap_secret_commitment: String,
+}
+
+/// Result of attempting the one-time administrator bootstrap transition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdministrationBootstrapOutcome {
+    /// The caller consumed the bootstrap window and became administrator.
+    Initialized(AdministratorIdentity),
+    /// An administrator already exists; bootstrap cannot be repeated.
+    AlreadyInitialized(AdministratorIdentity),
+    /// The fixed bootstrap window elapsed before the transition.
+    Expired,
+    /// The submitted secret commitment did not match the operator-configured commitment.
+    SecretMismatch,
+    /// No bootstrap window was configured in durable state.
+    NotConfigured,
+}
+
+/// Result of attempting a service-administrator recovery transition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdministrationRecoveryOutcome {
+    /// The caller replaced the previous administrator.
+    Recovered(AdministratorIdentity),
+    /// Recovery cannot occur until bootstrap has initialized an administrator.
+    NotInitialized,
+}
+
+/// Least-privilege role granted to one authenticated principal in one memory scope.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RbacRole {
+    /// Read scoped memories, timelines, graph state, and audit views.
+    Reader,
+    /// Reader permissions plus ordinary scoped writes.
+    Writer,
+    /// Writer permissions plus maintenance, promotion, and configured erasure actions.
+    Maintainer,
+    /// Maintainer permissions plus scoped role-grant administration.
+    Administrator,
+}
+
+/// Explicit durable grant for one principal and one repository/team scope.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RbacGrant {
+    /// RBAC grant schema version.
+    pub schema_version: u8,
+    /// Opaque authenticated principal receiving the role.
+    pub principal: String,
+    /// Exact repository or team scope the role applies to.
+    pub scope: MemoryScope,
+    /// Granted role.
+    pub role: RbacRole,
+    /// Opaque principal that made the grant.
+    pub granted_by: String,
+    /// Grant timestamp.
+    pub granted_at: OffsetDateTime,
+}
+
+/// Service operation whose role decision is retained in the authorization audit.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationAction {
+    /// Scoped read-only service operation.
+    Read,
+    /// Ordinary scoped data mutation.
+    Write,
+    /// Scoped maintenance operation.
+    Maintain,
+    /// Irreversible semantic erasure.
+    SemanticErase,
+    /// Repository-to-team promotion.
+    Promote,
+    /// Scoped role grant or revocation.
+    ManageRoles,
+}
+
+/// Authentication mechanism that established an authorization principal.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationPrincipalClass {
+    /// Static server API key.
+    ApiKey,
+    /// Validated `OpenID` Connect identity.
+    Oidc,
+    /// Scoped non-human service token.
+    ServiceToken,
+    /// No configured authentication mechanism.
+    Anonymous,
+}
+
+/// Authorization audit lifecycle action.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationAuditAction {
+    /// A role was granted or changed.
+    RoleGranted,
+    /// A role grant was revoked.
+    RoleRevoked,
+    /// A scoped authorization decision was evaluated.
+    Decision,
+}
+
+/// Content-free, append-only authorization audit record.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationAuditRecord {
+    /// Authorization-audit schema version.
+    pub schema_version: u8,
+    /// Monotonic authorization-audit sequence.
+    pub sequence: u64,
+    /// Audit lifecycle action.
+    pub audit_action: AuthorizationAuditAction,
+    /// Authenticated actor requesting access or changing a grant.
+    pub principal: String,
+    /// Authentication mechanism that established `principal`, when provided by the service host.
+    #[serde(default)]
+    pub principal_class: Option<AuthorizationPrincipalClass>,
+    /// Trusted actor class supplied by the service transport, never from request content.
+    #[serde(default)]
+    pub actor_class: Option<PolicyActorClass>,
+    /// Grant subject for grant/revoke records only.
+    pub subject: Option<String>,
+    /// Exact repository or team scope affected.
+    pub scope: MemoryScope,
+    /// Service action evaluated or role-management action.
+    pub action: AuthorizationAction,
+    /// Minimum role required for the action.
+    pub required_role: RbacRole,
+    /// Effective decision role, or role affected by a grant/revoke transition.
+    pub effective_role: Option<RbacRole>,
+    /// Whether the decision or grant transition was allowed.
+    pub allowed: bool,
+    /// Timestamp at which the record committed.
+    pub occurred_at: OffsetDateTime,
+}
+
+/// Public metadata for one scoped automation token; it never contains bearer material.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceToken {
+    /// Service-token schema version.
+    pub schema_version: u8,
+    /// Opaque server-generated token identifier.
+    pub id: String,
+    /// Opaque derived principal, always distinct from OIDC identities.
+    pub principal: String,
+    /// Exact repository or team scope that the token may access.
+    pub scope: MemoryScope,
+    /// Maximum role available through this credential.
+    pub role: RbacRole,
+    /// Principal that issued this token.
+    pub issued_by: String,
+    /// Token issuance timestamp.
+    pub issued_at: OffsetDateTime,
+    /// Mandatory expiry timestamp.
+    pub expires_at: OffsetDateTime,
+    /// Revocation timestamp, including rotation revocation.
+    pub revoked_at: Option<OffsetDateTime>,
+    /// Predecessor token identifier when this token was issued by rotation.
+    pub rotated_from: Option<String>,
+    /// Successor token identifier when this token was rotated.
+    pub rotated_to: Option<String>,
+}
+
+/// Persisted non-recoverable bearer commitment paired with public token metadata.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceTokenStoredMaterial {
+    /// Public token metadata.
+    pub token: ServiceToken,
+    /// One-way commitment to the token's random bearer material; never the bearer value.
+    pub secret_commitment: String,
+}
+
+/// Lifecycle action recorded for service-token state transitions.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceTokenAuditAction {
+    /// A new token was issued.
+    Issued,
+    /// An active token was revoked and replaced by a successor.
+    Rotated,
+    /// An active token was explicitly revoked.
+    Revoked,
+}
+
+/// Content-free service-token lifecycle audit record.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceTokenAuditRecord {
+    /// Service-token audit schema version.
+    pub schema_version: u8,
+    /// Monotonic audit sequence.
+    pub sequence: u64,
+    /// Lifecycle transition.
+    pub action: ServiceTokenAuditAction,
+    /// Principal that initiated the transition.
+    pub actor: String,
+    /// Affected token identifier.
+    pub token_id: String,
+    /// Derived non-human service principal.
+    pub principal: String,
+    /// Exact token scope.
+    pub scope: MemoryScope,
+    /// Maximum role bound to the token.
+    pub role: RbacRole,
+    /// Mandatory token expiry.
+    pub expires_at: OffsetDateTime,
+    /// Prior token identifier for rotations only.
+    pub previous_token_id: Option<String>,
+    /// Commit timestamp.
+    pub occurred_at: OffsetDateTime,
+}
+
+impl RbacRole {
+    /// Returns whether this role includes every permission of `required`.
+    #[must_use]
+    pub const fn allows(self, required: Self) -> bool {
+        (self as u8) >= (required as u8)
+    }
+}
+
+/// Content-free authorization metadata retained after irreversible semantic erasure.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticErasureTombstone {
+    /// Tombstone metadata schema version.
+    pub schema_version: u8,
+    /// Erased memory identifier.
+    pub memory_id: MemoryId,
+    /// Scope that owned the erased memory.
+    pub scope: MemoryScope,
+    /// Principal or workflow that authorized the erasure.
+    pub authorized_by: String,
+    /// One-way BLAKE3 commitment to the opaque authorization reference, never the raw reference.
+    pub authorization_id_hash: String,
+    /// Timestamp at which erasure was authorized and applied.
+    pub erased_at: OffsetDateTime,
+    /// Number of prior encrypted record keys destroyed from the live store.
+    pub destroyed_record_key_count: u32,
+    /// One-way BLAKE3 integrity commitment over every allowed tombstone field.
+    pub integrity_hash: String,
+}
+
+/// Tombstone validation failure for semantic-erasure audit records.
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub enum SemanticErasureTombstoneVerificationError {
+    /// The tombstone schema is not supported.
+    #[error("unsupported schema")]
+    UnsupportedSchema,
+    /// The tombstone contains invalid scope or authorization metadata.
+    #[error("metadata is invalid")]
+    InvalidMetadata,
+    /// The authorization-reference commitment is malformed.
+    #[error("authorization commitment is invalid")]
+    InvalidAuthorizationCommitment,
+    /// The integrity commitment does not bind the tombstone fields.
+    #[error("integrity commitment does not match")]
+    IntegrityMismatch,
+}
+
+impl SemanticErasureTombstone {
+    /// Builds a content-free tombstone with one-way authorization and integrity commitments.
+    #[must_use]
+    pub fn new(
+        memory_id: MemoryId,
+        scope: MemoryScope,
+        authorized_by: String,
+        authorization_id: &str,
+        erased_at: OffsetDateTime,
+        destroyed_record_key_count: u32,
+    ) -> Self {
+        let mut tombstone = Self {
+            schema_version: SEMANTIC_ERASURE_TOMBSTONE_SCHEMA_VERSION,
+            memory_id,
+            scope,
+            authorized_by,
+            authorization_id_hash: semantic_erasure_authorization_hash(authorization_id),
+            erased_at,
+            destroyed_record_key_count,
+            integrity_hash: String::new(),
+        };
+
+        tombstone.integrity_hash = semantic_erasure_tombstone_integrity_hash(&tombstone);
+
+        tombstone
+    }
+
+    /// Verifies the schema, bounded metadata, and one-way integrity commitment.
+    ///
+    /// This proves that a decoded tombstone contains only its allowed fields and has not been
+    /// modified since construction; it does not recover the erased authorization reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns a verification error for malformed metadata, unsupported schemas, or mismatched
+    /// commitments.
+    pub fn verify_integrity(&self) -> Result<(), SemanticErasureTombstoneVerificationError> {
+        if self.schema_version != SEMANTIC_ERASURE_TOMBSTONE_SCHEMA_VERSION {
+            return Err(SemanticErasureTombstoneVerificationError::UnsupportedSchema);
+        }
+        if !valid_semantic_erasure_token(&self.authorized_by)
+            || self.scope.validate().is_err()
+            || self.destroyed_record_key_count == 0
+        {
+            return Err(SemanticErasureTombstoneVerificationError::InvalidMetadata);
+        }
+        if !valid_blake3_hash(&self.authorization_id_hash) {
+            return Err(SemanticErasureTombstoneVerificationError::InvalidAuthorizationCommitment);
+        }
+        if !valid_blake3_hash(&self.integrity_hash)
+            || self.integrity_hash != semantic_erasure_tombstone_integrity_hash(self)
+        {
+            return Err(SemanticErasureTombstoneVerificationError::IntegrityMismatch);
+        }
+
+        Ok(())
+    }
+}
+
+/// Durable result of one authorized semantic erasure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticErasureRecord {
+    /// Content-free retained tombstone.
+    pub tombstone: SemanticErasureTombstone,
+    /// Append-only tombstone event.
+    pub event: EventRecord,
 }
 
 /// Summary of startup recovery validation.
@@ -583,6 +1027,27 @@ pub struct StoreSnapshot {
     pub graph_entities: Vec<Entity>,
     /// Current graph relations.
     pub graph_relations: Vec<Relation>,
+    /// Global first-administrator state, included only in complete-store snapshots.
+    #[serde(default)]
+    pub administration_state: Option<AdministrationState>,
+    /// One-way bootstrap-secret commitment paired with administration state in complete snapshots.
+    #[serde(default)]
+    pub administration_bootstrap_secret_commitment: Option<String>,
+    /// Global service-administration audit records, included only in complete-store snapshots.
+    #[serde(default)]
+    pub administration_audit: Vec<AdministrationAuditRecord>,
+    /// Explicit scoped role grants.
+    #[serde(default)]
+    pub rbac_grants: Vec<RbacGrant>,
+    /// Content-free scoped authorization audit records.
+    #[serde(default)]
+    pub authorization_audit: Vec<AuthorizationAuditRecord>,
+    /// Scoped service-token metadata and non-recoverable commitments.
+    #[serde(default)]
+    pub service_tokens: Vec<ServiceTokenStoredMaterial>,
+    /// Content-free service-token lifecycle audit records.
+    #[serde(default)]
+    pub service_token_audit: Vec<ServiceTokenAuditRecord>,
 }
 
 /// Persisted embedding vector for local index hydration.
@@ -956,6 +1421,18 @@ impl RedbMemoryStore {
         sequence.to_be_bytes()
     }
 
+    fn administration_audit_key(sequence: u64) -> [u8; 8] {
+        sequence.to_be_bytes()
+    }
+
+    fn authorization_audit_key(sequence: u64) -> [u8; 8] {
+        sequence.to_be_bytes()
+    }
+
+    fn service_token_audit_key(sequence: u64) -> [u8; 8] {
+        sequence.to_be_bytes()
+    }
+
     fn scope_index_key(scope: &MemoryScope) -> String {
         let visibility = match scope.visibility {
             ScopeVisibility::Repository => "repository",
@@ -964,6 +1441,10 @@ impl RedbMemoryStore {
         let team = scope.team.as_ref().map_or("", |team| team.as_str());
 
         format!("{visibility}\u{1f}{}\u{1f}{team}", scope.repository)
+    }
+
+    fn rbac_grant_key(scope: &MemoryScope, principal: &str) -> String {
+        format!("{}\u{1e}{principal}", Self::scope_index_key(scope))
     }
 
     fn index_memory_scope(
@@ -991,6 +1472,38 @@ impl RedbMemoryStore {
         if !ids.contains(&item.id) {
             ids.push(item.id);
             ids.sort_unstable();
+            let bytes =
+                self.encode_json(StorageTableName::MemoryScopeIndex, key.as_bytes(), &ids)?;
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+
+        Ok(())
+    }
+
+    fn deindex_memory_scope(
+        &self,
+        table: &mut Table<'_, &str, &[u8]>,
+        item: &MemoryItem,
+    ) -> Result<(), StorageError> {
+        let key = Self::scope_index_key(&item.scope);
+        let mut ids: Vec<MemoryId> = {
+            let Some(value) = table.get(key.as_str()).map_err(embed)? else {
+                return Ok(());
+            };
+
+            self.decode_json(
+                StorageTableName::MemoryScopeIndex,
+                key.as_bytes(),
+                value.value(),
+            )?
+        };
+
+        ids.retain(|id| *id != item.id);
+        if ids.is_empty() {
+            table.remove(key.as_str()).map_err(embed)?;
+        } else {
             let bytes =
                 self.encode_json(StorageTableName::MemoryScopeIndex, key.as_bytes(), &ids)?;
             table
@@ -1062,6 +1575,7 @@ impl RedbMemoryStore {
                 recorded_at: OffsetDateTime::now_utc(),
                 event,
             };
+            validate_event_schema_version(&record)?;
             let event_key = Self::event_key(sequence);
             let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
 
@@ -1865,6 +2379,911 @@ impl RedbMemoryStore {
         Ok(records)
     }
 
+    /// Opens the durable, one-time service-administration bootstrap window when absent.
+    ///
+    /// Existing administration state is never modified, including after the configured expiry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the commitment is malformed or durable state cannot be read or
+    /// written.
+    pub fn ensure_administration_bootstrap_window(
+        &self,
+        bootstrap_secret_commitment: &str,
+        opened_at: OffsetDateTime,
+        expires_at: OffsetDateTime,
+    ) -> Result<AdministrationState, StorageError> {
+        if !valid_administration_secret_commitment(bootstrap_secret_commitment)
+            || expires_at <= opened_at
+        {
+            return Err(StorageError::InvariantViolation(
+                "administration bootstrap configuration is invalid".to_owned(),
+            ));
+        }
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (state, opened) = {
+            let mut state_table = write_txn
+                .open_table(ADMINISTRATION_STATE_TABLE)
+                .map_err(embed)?;
+            let existing = administration_state_from_table(self, &state_table)?;
+
+            if let Some(existing) = existing {
+                (existing.state, false)
+            } else {
+                let state = AdministrationState {
+                    schema_version: ADMINISTRATION_SCHEMA_VERSION,
+                    bootstrap_expires_at: expires_at,
+                    administrator: None,
+                };
+                let stored = StoredAdministrationState {
+                    state: state.clone(),
+                    bootstrap_secret_commitment: bootstrap_secret_commitment.to_owned(),
+                };
+                let bytes = self.encode_json(
+                    StorageTableName::AdministrationState,
+                    ADMINISTRATION_STATE_KEY.as_bytes(),
+                    &stored,
+                )?;
+                state_table
+                    .insert(ADMINISTRATION_STATE_KEY, bytes.as_slice())
+                    .map_err(embed)?;
+                (state, true)
+            }
+        };
+        if opened {
+            append_administration_audit(
+                self,
+                &mut write_txn,
+                AdministrationAuditAction::BootstrapWindowOpened,
+                opened_at,
+                None,
+                None,
+                Some(expires_at),
+            )?;
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(state)
+    }
+
+    /// Atomically consumes the configured bootstrap window for one authenticated principal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read or written.
+    pub fn bootstrap_administrator(
+        &self,
+        bootstrap_secret_commitment: &str,
+        principal: impl Into<String>,
+        initialized_at: OffsetDateTime,
+    ) -> Result<AdministrationBootstrapOutcome, StorageError> {
+        if !valid_administration_secret_commitment(bootstrap_secret_commitment) {
+            return Err(StorageError::InvariantViolation(
+                "administration bootstrap commitment is invalid".to_owned(),
+            ));
+        }
+        let principal = principal.into();
+        validate_administration_principal(&principal)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (outcome, initialized) = {
+            let mut state_table = write_txn
+                .open_table(ADMINISTRATION_STATE_TABLE)
+                .map_err(embed)?;
+            let Some(mut stored) = administration_state_from_table(self, &state_table)? else {
+                return Ok(AdministrationBootstrapOutcome::NotConfigured);
+            };
+
+            validate_stored_administration_state(&stored)?;
+            if let Some(administrator) = stored.state.administrator.clone() {
+                (
+                    AdministrationBootstrapOutcome::AlreadyInitialized(administrator),
+                    None,
+                )
+            } else if initialized_at >= stored.state.bootstrap_expires_at {
+                (AdministrationBootstrapOutcome::Expired, None)
+            } else if stored.bootstrap_secret_commitment != bootstrap_secret_commitment {
+                (AdministrationBootstrapOutcome::SecretMismatch, None)
+            } else {
+                let administrator = AdministratorIdentity {
+                    principal: principal.clone(),
+                    initialized_at,
+                    recovery_count: 0,
+                    last_recovered_at: None,
+                };
+                stored.state.administrator = Some(administrator.clone());
+                let bytes = self.encode_json(
+                    StorageTableName::AdministrationState,
+                    ADMINISTRATION_STATE_KEY.as_bytes(),
+                    &stored,
+                )?;
+                state_table
+                    .insert(ADMINISTRATION_STATE_KEY, bytes.as_slice())
+                    .map_err(embed)?;
+                (
+                    AdministrationBootstrapOutcome::Initialized(administrator),
+                    Some(principal.clone()),
+                )
+            }
+        };
+        if let Some(principal) = initialized {
+            append_administration_audit(
+                self,
+                &mut write_txn,
+                AdministrationAuditAction::AdministratorBootstrapped,
+                initialized_at,
+                Some(principal),
+                None,
+                None,
+            )?;
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(outcome)
+    }
+
+    /// Replaces an initialized administrator after caller-side recovery-secret verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read or written.
+    pub fn recover_administrator(
+        &self,
+        principal: impl Into<String>,
+        recovered_at: OffsetDateTime,
+    ) -> Result<AdministrationRecoveryOutcome, StorageError> {
+        let principal = principal.into();
+        validate_administration_principal(&principal)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (outcome, audit) = {
+            let mut state_table = write_txn
+                .open_table(ADMINISTRATION_STATE_TABLE)
+                .map_err(embed)?;
+            let Some(mut stored) = administration_state_from_table(self, &state_table)? else {
+                return Ok(AdministrationRecoveryOutcome::NotInitialized);
+            };
+
+            validate_stored_administration_state(&stored)?;
+            let Some(previous) = stored.state.administrator.clone() else {
+                return Ok(AdministrationRecoveryOutcome::NotInitialized);
+            };
+            let recovery_count = previous.recovery_count.checked_add(1).ok_or_else(|| {
+                StorageError::InvariantViolation(
+                    "administration recovery count overflowed".to_owned(),
+                )
+            })?;
+            let administrator = AdministratorIdentity {
+                principal: principal.clone(),
+                initialized_at: previous.initialized_at,
+                recovery_count,
+                last_recovered_at: Some(recovered_at),
+            };
+            stored.state.administrator = Some(administrator.clone());
+            let bytes = self.encode_json(
+                StorageTableName::AdministrationState,
+                ADMINISTRATION_STATE_KEY.as_bytes(),
+                &stored,
+            )?;
+            state_table
+                .insert(ADMINISTRATION_STATE_KEY, bytes.as_slice())
+                .map_err(embed)?;
+            (
+                AdministrationRecoveryOutcome::Recovered(administrator),
+                Some((principal.clone(), previous.principal)),
+            )
+        };
+        if let Some((principal, previous_principal)) = audit {
+            append_administration_audit(
+                self,
+                &mut write_txn,
+                AdministrationAuditAction::AdministratorRecovered,
+                recovered_at,
+                Some(principal),
+                Some(previous_principal),
+                None,
+            )?;
+        }
+
+        write_txn.commit().map_err(embed)?;
+
+        Ok(outcome)
+    }
+
+    /// Returns the durable service-administration state when a bootstrap window was configured.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when durable administration state cannot be read or decoded.
+    pub fn administration_state(&self) -> Result<Option<AdministrationState>, StorageError> {
+        Ok(self
+            .stored_administration_state()?
+            .map(|stored| stored.state))
+    }
+
+    fn stored_administration_state(
+        &self,
+    ) -> Result<Option<StoredAdministrationState>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(ADMINISTRATION_STATE_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+
+        administration_state_from_table(self, &table)
+    }
+
+    /// Returns append-only, content-free service-administration audit records.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when audit records cannot be read or validated.
+    pub fn administration_audit(&self) -> Result<Vec<AdministrationAuditRecord>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(ADMINISTRATION_AUDIT_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut records = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (sequence, value) = row.map_err(embed)?;
+            let key = Self::administration_audit_key(sequence.value());
+            let record: AdministrationAuditRecord =
+                self.decode_json(StorageTableName::AdministrationAudit, &key, value.value())?;
+            validate_administration_audit_record(&record, sequence.value())?;
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
+    /// Creates or replaces one explicit role grant and appends a durable authorization audit row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the grant is invalid or durable state cannot be written.
+    pub fn grant_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        role: RbacRole,
+        granted_by: impl Into<String>,
+        granted_at: OffsetDateTime,
+    ) -> Result<RbacGrant, StorageError> {
+        let principal = principal.into();
+        let granted_by = granted_by.into();
+        validate_rbac_scope_and_principals(&scope, &principal, &granted_by)?;
+        let grant = RbacGrant {
+            schema_version: RBAC_SCHEMA_VERSION,
+            principal: principal.clone(),
+            scope: scope.clone(),
+            role,
+            granted_by: granted_by.clone(),
+            granted_at,
+        };
+        let key = Self::rbac_grant_key(&scope, &principal);
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(RBAC_GRANTS_TABLE).map_err(embed)?;
+            let bytes = self.encode_json(StorageTableName::RbacGrants, key.as_bytes(), &grant)?;
+
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+        append_authorization_audit(
+            self,
+            &mut write_txn,
+            AuthorizationAuditAction::RoleGranted,
+            granted_by,
+            None,
+            None,
+            Some(principal),
+            scope,
+            AuthorizationAction::ManageRoles,
+            RbacRole::Administrator,
+            Some(role),
+            true,
+            granted_at,
+        )?;
+        write_txn.commit().map_err(embed)?;
+
+        Ok(grant)
+    }
+
+    /// Revokes one explicit role grant and appends a durable authorization audit row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when input is invalid or durable state cannot be read or written.
+    pub fn revoke_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        revoked_by: impl Into<String>,
+        revoked_at: OffsetDateTime,
+    ) -> Result<Option<RbacGrant>, StorageError> {
+        let principal = principal.into();
+        let revoked_by = revoked_by.into();
+        validate_rbac_scope_and_principals(&scope, &principal, &revoked_by)?;
+        let key = Self::rbac_grant_key(&scope, &principal);
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let removed = {
+            let mut table = write_txn.open_table(RBAC_GRANTS_TABLE).map_err(embed)?;
+            let removed = table.remove(key.as_str()).map_err(embed)?;
+
+            removed
+                .map(|value| {
+                    self.decode_json(StorageTableName::RbacGrants, key.as_bytes(), value.value())
+                })
+                .transpose()?
+        };
+        if let Some(grant) = &removed {
+            validate_rbac_grant(grant)?;
+            if grant.scope != scope || grant.principal != principal {
+                return Err(StorageError::InvariantViolation(
+                    "RBAC grant key does not match its payload".to_owned(),
+                ));
+            }
+            append_authorization_audit(
+                self,
+                &mut write_txn,
+                AuthorizationAuditAction::RoleRevoked,
+                revoked_by,
+                None,
+                None,
+                Some(principal),
+                scope,
+                AuthorizationAction::ManageRoles,
+                RbacRole::Administrator,
+                Some(grant.role),
+                true,
+                revoked_at,
+            )?;
+        }
+        write_txn.commit().map_err(embed)?;
+
+        Ok(removed)
+    }
+
+    /// Evaluates and durably audits one scope-role decision.
+    ///
+    /// `global_administrator` is supplied by the host's independently bootstrapped identity
+    /// path and is recorded as an administrator-equivalent decision without an implicit grant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when input is invalid or durable role/audit state cannot be accessed.
+    pub fn authorize_rbac_role(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        action: AuthorizationAction,
+        required_role: RbacRole,
+        global_administrator: bool,
+        decided_at: OffsetDateTime,
+    ) -> Result<bool, StorageError> {
+        self.authorize_rbac_role_with_credential(
+            scope,
+            principal,
+            action,
+            required_role,
+            global_administrator,
+            None,
+            None,
+            None,
+            decided_at,
+        )
+    }
+
+    /// Evaluates and durably audits one scope-role decision with a credential role ceiling.
+    ///
+    /// A supplied credential role is authoritative for that request and cannot be elevated by an
+    /// unrelated durable RBAC grant for the same opaque principal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when input is invalid or durable role/audit state cannot be accessed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_rbac_role_with_credential(
+        &self,
+        scope: MemoryScope,
+        principal: impl Into<String>,
+        action: AuthorizationAction,
+        required_role: RbacRole,
+        global_administrator: bool,
+        credential_role: Option<RbacRole>,
+        principal_class: Option<AuthorizationPrincipalClass>,
+        actor_class: Option<PolicyActorClass>,
+        decided_at: OffsetDateTime,
+    ) -> Result<bool, StorageError> {
+        let principal = principal.into();
+        validate_rbac_scope_and_principals(&scope, &principal, &principal)?;
+        let key = Self::rbac_grant_key(&scope, &principal);
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let effective_role = if global_administrator {
+            Some(RbacRole::Administrator)
+        } else if credential_role.is_some() {
+            credential_role
+        } else {
+            let table = write_txn.open_table(RBAC_GRANTS_TABLE).map_err(embed)?;
+
+            table
+                .get(key.as_str())
+                .map_err(embed)?
+                .map(|value| {
+                    self.decode_json(StorageTableName::RbacGrants, key.as_bytes(), value.value())
+                })
+                .transpose()?
+                .map(|grant: RbacGrant| {
+                    validate_rbac_grant(&grant)?;
+                    if grant.scope != scope || grant.principal != principal {
+                        return Err(StorageError::InvariantViolation(
+                            "RBAC grant key does not match its payload".to_owned(),
+                        ));
+                    }
+
+                    Ok(grant.role)
+                })
+                .transpose()?
+        };
+        let allowed = effective_role.is_some_and(|role| role.allows(required_role));
+        append_authorization_audit(
+            self,
+            &mut write_txn,
+            AuthorizationAuditAction::Decision,
+            principal,
+            principal_class,
+            actor_class,
+            None,
+            scope,
+            action,
+            required_role,
+            effective_role,
+            allowed,
+            decided_at,
+        )?;
+        write_txn.commit().map_err(embed)?;
+
+        Ok(allowed)
+    }
+
+    /// Issues one scoped automation token and persists only its one-way bearer commitment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token metadata is invalid, the identifier already exists, or durable
+    /// state cannot be written.
+    pub fn issue_service_token(
+        &self,
+        material: &ServiceTokenStoredMaterial,
+    ) -> Result<ServiceToken, StorageError> {
+        validate_service_token_material(material)?;
+        let token = material.token.clone();
+        let key = token.id.clone();
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        {
+            let mut table = write_txn.open_table(SERVICE_TOKENS_TABLE).map_err(embed)?;
+            if table.get(key.as_str()).map_err(embed)?.is_some() {
+                return Err(StorageError::InvariantViolation(
+                    "service token identifier already exists".to_owned(),
+                ));
+            }
+            let bytes =
+                self.encode_json(StorageTableName::ServiceTokens, key.as_bytes(), &material)?;
+            table
+                .insert(key.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+        }
+        append_service_token_audit(
+            self,
+            &mut write_txn,
+            ServiceTokenAuditAction::Issued,
+            token.issued_by.clone(),
+            &token,
+            None,
+            token.issued_at,
+        )?;
+        write_txn.commit().map_err(embed)?;
+
+        Ok(token)
+    }
+
+    /// Atomically revokes one active automation token and issues its same-scope, same-role successor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token metadata is invalid or durable state cannot be read or written.
+    pub fn rotate_service_token(
+        &self,
+        token_id: &str,
+        successor: &ServiceTokenStoredMaterial,
+        actor: impl Into<String>,
+        rotated_at: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, StorageError> {
+        validate_service_token_id(token_id)?;
+        validate_service_token_material(successor)?;
+        let actor = actor.into();
+        validate_administration_principal(&actor)?;
+        let successor_token = successor.token.clone();
+        if successor_token.rotated_from.as_deref() != Some(token_id)
+            || successor_token.issued_by != actor
+            || successor_token.issued_at != rotated_at
+        {
+            return Err(StorageError::InvariantViolation(
+                "service token rotation metadata is invalid".to_owned(),
+            ));
+        }
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let previous = {
+            let mut table = write_txn.open_table(SERVICE_TOKENS_TABLE).map_err(embed)?;
+            let previous: ServiceTokenStoredMaterial = {
+                let Some(value) = table.get(token_id).map_err(embed)? else {
+                    return Ok(None);
+                };
+                self.decode_json(
+                    StorageTableName::ServiceTokens,
+                    token_id.as_bytes(),
+                    value.value(),
+                )?
+            };
+            validate_service_token_material(&previous)?;
+            let successor_exists = table
+                .get(successor_token.id.as_str())
+                .map_err(embed)?
+                .is_some();
+            if !previous.token.is_active_at(rotated_at)
+                || previous.token.scope != successor_token.scope
+                || previous.token.role != successor_token.role
+                || successor_exists
+            {
+                return Ok(None);
+            }
+            let mut revoked = previous.token.clone();
+            revoked.revoked_at = Some(rotated_at);
+            revoked.rotated_to = Some(successor_token.id.clone());
+            validate_service_token(&revoked)?;
+            let revoked_material = ServiceTokenStoredMaterial {
+                token: revoked,
+                secret_commitment: previous.secret_commitment,
+            };
+            let bytes = self.encode_json(
+                StorageTableName::ServiceTokens,
+                token_id.as_bytes(),
+                &revoked_material,
+            )?;
+            table.insert(token_id, bytes.as_slice()).map_err(embed)?;
+            let bytes = self.encode_json(
+                StorageTableName::ServiceTokens,
+                successor_token.id.as_bytes(),
+                &successor,
+            )?;
+            table
+                .insert(successor_token.id.as_str(), bytes.as_slice())
+                .map_err(embed)?;
+
+            previous.token
+        };
+        append_service_token_audit(
+            self,
+            &mut write_txn,
+            ServiceTokenAuditAction::Rotated,
+            actor,
+            &successor_token,
+            Some(previous.id),
+            rotated_at,
+        )?;
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(successor_token))
+    }
+
+    /// Revokes one active automation token without exposing its bearer material.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when input is invalid or durable state cannot be read or written.
+    pub fn revoke_service_token(
+        &self,
+        token_id: &str,
+        actor: impl Into<String>,
+        revoked_at: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, StorageError> {
+        validate_service_token_id(token_id)?;
+        let actor = actor.into();
+        validate_administration_principal(&actor)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let token = {
+            let mut table = write_txn.open_table(SERVICE_TOKENS_TABLE).map_err(embed)?;
+            let stored: ServiceTokenStoredMaterial = {
+                let Some(value) = table.get(token_id).map_err(embed)? else {
+                    return Ok(None);
+                };
+                self.decode_json(
+                    StorageTableName::ServiceTokens,
+                    token_id.as_bytes(),
+                    value.value(),
+                )?
+            };
+            validate_service_token_material(&stored)?;
+            if !stored.token.is_active_at(revoked_at) {
+                return Ok(None);
+            }
+            let mut revoked = stored.token;
+            revoked.revoked_at = Some(revoked_at);
+            validate_service_token(&revoked)?;
+            let material = ServiceTokenStoredMaterial {
+                token: revoked.clone(),
+                secret_commitment: stored.secret_commitment,
+            };
+            let bytes = self.encode_json(
+                StorageTableName::ServiceTokens,
+                token_id.as_bytes(),
+                &material,
+            )?;
+            table.insert(token_id, bytes.as_slice()).map_err(embed)?;
+
+            revoked
+        };
+        append_service_token_audit(
+            self,
+            &mut write_txn,
+            ServiceTokenAuditAction::Revoked,
+            actor,
+            &token,
+            None,
+            revoked_at,
+        )?;
+        write_txn.commit().map_err(embed)?;
+
+        Ok(Some(token))
+    }
+
+    /// Authenticates one active service-token identifier and one-way bearer commitment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when persisted token state is corrupt or cannot be read.
+    pub fn authenticate_service_token(
+        &self,
+        token_id: &str,
+        secret_commitment: &str,
+        now: OffsetDateTime,
+    ) -> Result<Option<ServiceToken>, StorageError> {
+        validate_service_token_id(token_id)?;
+        if !valid_service_token_commitment(secret_commitment) {
+            return Ok(None);
+        }
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(SERVICE_TOKENS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(embed(error)),
+        };
+        let Some(value) = table.get(token_id).map_err(embed)? else {
+            return Ok(None);
+        };
+        let stored: ServiceTokenStoredMaterial = self.decode_json(
+            StorageTableName::ServiceTokens,
+            token_id.as_bytes(),
+            value.value(),
+        )?;
+        validate_service_token_material(&stored)?;
+
+        if service_token_commitments_match(&stored.secret_commitment, secret_commitment)
+            && stored.token.is_active_at(now)
+        {
+            Ok(Some(stored.token))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns active and inactive service-token metadata for one exact scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when token state cannot be read or validated.
+    pub fn service_tokens_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<ServiceToken>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let mut tokens = self
+            .all_service_token_materials()?
+            .into_iter()
+            .map(|material| material.token)
+            .filter(|token| token.scope == *scope)
+            .collect::<Vec<_>>();
+        tokens.sort_by(|left, right| left.id.cmp(&right.id));
+
+        Ok(tokens)
+    }
+
+    /// Returns content-free token lifecycle records for one exact scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when audit state cannot be read or validated.
+    pub fn service_token_audit_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<ServiceTokenAuditRecord>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        Ok(self
+            .all_service_token_audit()?
+            .into_iter()
+            .filter(|record| record.scope == *scope)
+            .collect())
+    }
+
+    fn all_service_token_materials(&self) -> Result<Vec<ServiceTokenStoredMaterial>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(SERVICE_TOKENS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut tokens = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+            let material: ServiceTokenStoredMaterial = self.decode_json(
+                StorageTableName::ServiceTokens,
+                key.as_bytes(),
+                value.value(),
+            )?;
+            validate_service_token_material(&material)?;
+            if material.token.id != key {
+                return Err(StorageError::InvariantViolation(
+                    "service token key does not match its payload".to_owned(),
+                ));
+            }
+            tokens.push(material);
+        }
+
+        Ok(tokens)
+    }
+
+    fn all_service_token_audit(&self) -> Result<Vec<ServiceTokenAuditRecord>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(SERVICE_TOKEN_AUDIT_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut records = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (sequence, value) = row.map_err(embed)?;
+            let key = Self::service_token_audit_key(sequence.value());
+            let record: ServiceTokenAuditRecord =
+                self.decode_json(StorageTableName::ServiceTokenAudit, &key, value.value())?;
+            validate_service_token_audit_record(&record, sequence.value())?;
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
+    /// Returns every explicit RBAC grant for one repository or team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when grants cannot be read or validated.
+    pub fn rbac_grants_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<RbacGrant>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        let mut grants = self
+            .all_rbac_grants()?
+            .into_iter()
+            .filter(|grant| grant.scope == *scope)
+            .collect::<Vec<_>>();
+        grants.sort_by(|left, right| left.principal.cmp(&right.principal));
+
+        Ok(grants)
+    }
+
+    fn all_rbac_grants(&self) -> Result<Vec<RbacGrant>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(RBAC_GRANTS_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut grants = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value();
+            let grant: RbacGrant =
+                self.decode_json(StorageTableName::RbacGrants, key.as_bytes(), value.value())?;
+            validate_rbac_grant(&grant)?;
+            grants.push(grant);
+        }
+
+        Ok(grants)
+    }
+
+    /// Returns content-free authorization audit records for one repository or team scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when audit records cannot be read or validated.
+    pub fn authorization_audit_in_scope(
+        &self,
+        scope: &MemoryScope,
+    ) -> Result<Vec<AuthorizationAuditRecord>, StorageError> {
+        scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        Ok(self
+            .all_authorization_audit()?
+            .into_iter()
+            .filter(|record| record.scope == *scope)
+            .collect())
+    }
+
+    fn all_authorization_audit(&self) -> Result<Vec<AuthorizationAuditRecord>, StorageError> {
+        let read_txn = self.db.begin_read().map_err(embed)?;
+        let table = match read_txn.open_table(AUTHORIZATION_AUDIT_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => return Err(embed(error)),
+        };
+        let mut records = Vec::new();
+
+        for row in table.iter().map_err(embed)? {
+            let (sequence, value) = row.map_err(embed)?;
+            let key = Self::authorization_audit_key(sequence.value());
+            let record: AuthorizationAuditRecord =
+                self.decode_json(StorageTableName::AuthorizationAudit, &key, value.value())?;
+            validate_authorization_audit_record(&record, sequence.value())?;
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
     /// Reconstructs memory rows believed at `as_of` from the event log.
     ///
     /// Writes become visible at their ingestion time. Backdated invalidations only affect an
@@ -1932,6 +3351,8 @@ impl RedbMemoryStore {
                     }
                 }
                 MemoryEvent::ReverificationFlagged { .. }
+                | MemoryEvent::MemoryRecordKeyDestroyed { .. }
+                | MemoryEvent::MemorySemanticallyErased { .. }
                 | MemoryEvent::ReconstructionApplied { .. }
                 | MemoryEvent::ConsolidationDecision { .. }
                 | MemoryEvent::MemoryScopePromoted { .. }
@@ -1962,6 +3383,12 @@ impl RedbMemoryStore {
         let _stored_embeddings = self.stored_embeddings()?;
         let _graph_entities = self.graph_entities()?;
         let _graph_relations = self.graph_relations()?;
+        let _administration_state = self.stored_administration_state()?;
+        let _administration_audit = self.administration_audit()?;
+        let _rbac_grants = self.all_rbac_grants()?;
+        let _authorization_audit = self.all_authorization_audit()?;
+        let _service_tokens = self.all_service_token_materials()?;
+        let _service_token_audit = self.all_service_token_audit()?;
 
         Ok(RecoveryReport {
             event_count: events.len(),
@@ -2176,6 +3603,7 @@ impl RedbMemoryStore {
             return Err(StorageError::EncryptedSnapshotExportDisabled);
         }
 
+        let administration = self.stored_administration_state()?;
         let snapshot = StoreSnapshot {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             scope: None,
@@ -2185,6 +3613,14 @@ impl RedbMemoryStore {
             cold_contents: self.cold_content_records()?,
             graph_entities: self.graph_entities()?,
             graph_relations: self.graph_relations()?,
+            administration_state: administration.as_ref().map(|stored| stored.state.clone()),
+            administration_bootstrap_secret_commitment: administration
+                .map(|stored| stored.bootstrap_secret_commitment),
+            administration_audit: self.administration_audit()?,
+            rbac_grants: self.all_rbac_grants()?,
+            authorization_audit: self.all_authorization_audit()?,
+            service_tokens: self.all_service_token_materials()?,
+            service_token_audit: self.all_service_token_audit()?,
         };
         let bytes = serde_json::to_vec_pretty(&snapshot)?;
 
@@ -2235,6 +3671,17 @@ impl RedbMemoryStore {
                 .into_iter()
                 .filter(|relation| relation.scope == *scope)
                 .collect(),
+            administration_state: None,
+            administration_bootstrap_secret_commitment: None,
+            administration_audit: Vec::new(),
+            rbac_grants: self.rbac_grants_in_scope(scope)?,
+            authorization_audit: self.authorization_audit_in_scope(scope)?,
+            service_tokens: self
+                .all_service_token_materials()?
+                .into_iter()
+                .filter(|material| material.token.scope == *scope)
+                .collect(),
+            service_token_audit: self.service_token_audit_in_scope(scope)?,
         };
         let bytes = serde_json::to_vec_pretty(&snapshot)?;
 
@@ -2544,6 +3991,7 @@ impl RedbMemoryStore {
         Ok(relations)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn restore(&self, snapshot: StoreSnapshot) -> Result<(), StorageError> {
         validate_memory_schema_version("store snapshot", snapshot.schema_version)?;
 
@@ -2561,8 +4009,24 @@ impl RedbMemoryStore {
             let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
             let mut entity_table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
             let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
+            let mut administration_state_table = write_txn
+                .open_table(ADMINISTRATION_STATE_TABLE)
+                .map_err(embed)?;
+            let mut administration_audit_table = write_txn
+                .open_table(ADMINISTRATION_AUDIT_TABLE)
+                .map_err(embed)?;
+            let mut rbac_grants_table = write_txn.open_table(RBAC_GRANTS_TABLE).map_err(embed)?;
+            let mut authorization_audit_table = write_txn
+                .open_table(AUTHORIZATION_AUDIT_TABLE)
+                .map_err(embed)?;
+            let mut service_tokens_table =
+                write_txn.open_table(SERVICE_TOKENS_TABLE).map_err(embed)?;
+            let mut service_token_audit_table = write_txn
+                .open_table(SERVICE_TOKEN_AUDIT_TABLE)
+                .map_err(embed)?;
 
             for event in snapshot.events {
+                validate_event_schema_version(&event)?;
                 let event_key = Self::event_key(event.sequence);
                 let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &event)?;
 
@@ -2627,6 +4091,87 @@ impl RedbMemoryStore {
                     .insert(key.as_str(), bytes.as_slice())
                     .map_err(embed)?;
             }
+
+            match (
+                snapshot.administration_state,
+                snapshot.administration_bootstrap_secret_commitment,
+            ) {
+                (Some(state), Some(bootstrap_secret_commitment)) => {
+                    let stored = StoredAdministrationState {
+                        state,
+                        bootstrap_secret_commitment,
+                    };
+                    validate_stored_administration_state(&stored)?;
+                    let bytes = self.encode_json(
+                        StorageTableName::AdministrationState,
+                        ADMINISTRATION_STATE_KEY.as_bytes(),
+                        &stored,
+                    )?;
+                    administration_state_table
+                        .insert(ADMINISTRATION_STATE_KEY, bytes.as_slice())
+                        .map_err(embed)?;
+                }
+                (None, None) => {}
+                (Some(_), None) | (None, Some(_)) => {
+                    return Err(StorageError::InvariantViolation(
+                        "administration snapshot state is incomplete".to_owned(),
+                    ));
+                }
+            }
+
+            for record in snapshot.administration_audit {
+                validate_administration_audit_record(&record, record.sequence)?;
+                let key = Self::administration_audit_key(record.sequence);
+                let bytes =
+                    self.encode_json(StorageTableName::AdministrationAudit, &key, &record)?;
+
+                administration_audit_table
+                    .insert(record.sequence, bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for grant in snapshot.rbac_grants {
+                validate_rbac_grant(&grant)?;
+                let key = Self::rbac_grant_key(&grant.scope, &grant.principal);
+                let bytes =
+                    self.encode_json(StorageTableName::RbacGrants, key.as_bytes(), &grant)?;
+
+                rbac_grants_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for record in snapshot.authorization_audit {
+                validate_authorization_audit_record(&record, record.sequence)?;
+                let key = Self::authorization_audit_key(record.sequence);
+                let bytes =
+                    self.encode_json(StorageTableName::AuthorizationAudit, &key, &record)?;
+
+                authorization_audit_table
+                    .insert(record.sequence, bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for material in snapshot.service_tokens {
+                validate_service_token_material(&material)?;
+                let key = material.token.id.clone();
+                let bytes =
+                    self.encode_json(StorageTableName::ServiceTokens, key.as_bytes(), &material)?;
+
+                service_tokens_table
+                    .insert(key.as_str(), bytes.as_slice())
+                    .map_err(embed)?;
+            }
+
+            for record in snapshot.service_token_audit {
+                validate_service_token_audit_record(&record, record.sequence)?;
+                let key = Self::service_token_audit_key(record.sequence);
+                let bytes = self.encode_json(StorageTableName::ServiceTokenAudit, &key, &record)?;
+
+                service_token_audit_table
+                    .insert(record.sequence, bytes.as_slice())
+                    .map_err(embed)?;
+            }
         }
 
         write_txn.commit().map_err(embed)
@@ -2658,10 +4203,7 @@ impl RedbMemoryStore {
     ///
     /// Returns an error when the entity cannot be serialized, written, or committed.
     pub fn put_entity(&self, entity: &Entity) -> Result<(), StorageError> {
-        entity
-            .scope
-            .validate()
-            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        self.validate_graph_entity_scope(entity)?;
         let mut write_txn = self.db.begin_write().map_err(embed)?;
         write_txn
             .set_durability(Durability::Immediate)
@@ -2863,6 +4405,29 @@ impl RedbMemoryStore {
                 return Err(StorageError::InvariantViolation(format!(
                     "relation {} scope must match its superseded relation",
                     relation.id
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_graph_entity_scope(&self, entity: &Entity) -> Result<(), StorageError> {
+        entity
+            .scope
+            .validate()
+            .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+        if let Some(memory_id) = entity.source_memory_id {
+            let memory = self.get(memory_id)?.ok_or_else(|| {
+                StorageError::InvariantViolation(format!(
+                    "entity {} references missing source memory {memory_id}",
+                    entity.id
+                ))
+            })?;
+            if memory.scope != entity.scope {
+                return Err(StorageError::InvariantViolation(format!(
+                    "entity {} scope must match its source memory",
+                    entity.id
                 )));
             }
         }
@@ -3264,6 +4829,148 @@ impl RedbMemoryStore {
                 StorageError::Embedded("committed invalidation event was not readable".to_owned())
             })
             .map(Some)
+    }
+
+    /// Irreversibly removes one memory's live semantic material after explicit authorization.
+    ///
+    /// The transaction removes materialized, embedding, and compacted-content rows; replaces each
+    /// related historical event with a content-free key-destruction marker; and appends one
+    /// content-free authorization tombstone. It requires envelope encryption so each replaced
+    /// ciphertext has a unique record key.
+    ///
+    /// Returns `Ok(None)` when the memory does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the store lacks envelope encryption, authorization metadata is
+    /// invalid, or the atomic durable mutation cannot be completed.
+    #[allow(clippy::too_many_lines)]
+    pub fn semantic_erase(
+        &self,
+        id: MemoryId,
+        authorized_by: impl Into<String>,
+        authorization_id: impl Into<String>,
+        erased_at: OffsetDateTime,
+    ) -> Result<Option<SemanticErasureRecord>, StorageError> {
+        if !self.encryption.supports_record_key_destruction() {
+            return Err(StorageError::SemanticErasureRequiresEnvelopeEncryption);
+        }
+        let authorized_by = authorized_by.into();
+        let authorization_id = authorization_id.into();
+
+        validate_semantic_erasure_authorization(&authorized_by, &authorization_id)?;
+        let mut write_txn = self.db.begin_write().map_err(embed)?;
+        write_txn
+            .set_durability(Durability::Immediate)
+            .map_err(embed)?;
+        let (sequence, tombstone) = {
+            let mut event_table = write_txn.open_table(EVENT_LOG_TABLE).map_err(embed)?;
+            let mut item_table = write_txn.open_table(MEMORY_ITEMS_TABLE).map_err(embed)?;
+            let mut scope_table = write_txn
+                .open_table(MEMORY_SCOPE_INDEX_TABLE)
+                .map_err(embed)?;
+            let mut embedding_table = write_txn.open_table(EMBEDDINGS_TABLE).map_err(embed)?;
+            let mut cold_table = write_txn.open_table(COLD_CONTENT_TABLE).map_err(embed)?;
+            let mut entity_table = write_txn.open_table(GRAPH_ENTITIES_TABLE).map_err(embed)?;
+            let mut relation_table = write_txn.open_table(GRAPH_RELATIONS_TABLE).map_err(embed)?;
+            let key = id.to_string();
+            let item: MemoryItem = {
+                let Some(value) = item_table.get(key.as_str()).map_err(embed)? else {
+                    return Ok(None);
+                };
+
+                self.decode_json(StorageTableName::MemoryItems, key.as_bytes(), value.value())?
+            };
+            let related_sequences = semantic_erasure_event_sequences(self, &event_table, id)?;
+            let (entity_keys, relation_keys) =
+                semantic_erasure_graph_keys(self, &entity_table, &relation_table, id)?;
+            let mut destroyed_record_key_count = 1_usize + related_sequences.len();
+
+            item_table.remove(key.as_str()).map_err(embed)?;
+            self.deindex_memory_scope(&mut scope_table, &item)?;
+            if embedding_table
+                .remove(key.as_str())
+                .map_err(embed)?
+                .is_some()
+            {
+                destroyed_record_key_count += 1;
+            }
+            let cold_key = item
+                .compaction
+                .as_ref()
+                .map_or(key.as_str(), |pointer| pointer.storage_key.as_str());
+            if cold_table.remove(cold_key).map_err(embed)?.is_some() {
+                destroyed_record_key_count += 1;
+            }
+            for entity_key in entity_keys {
+                if entity_table
+                    .remove(entity_key.as_str())
+                    .map_err(embed)?
+                    .is_some()
+                {
+                    destroyed_record_key_count += 1;
+                }
+            }
+            for relation_key in relation_keys {
+                if relation_table
+                    .remove(relation_key.as_str())
+                    .map_err(embed)?
+                    .is_some()
+                {
+                    destroyed_record_key_count += 1;
+                }
+            }
+            for related_sequence in related_sequences {
+                let record = EventRecord {
+                    sequence: related_sequence,
+                    recorded_at: erased_at,
+                    event: MemoryEvent::MemoryRecordKeyDestroyed { id, erased_at },
+                };
+                let event_key = Self::event_key(related_sequence);
+                let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+
+                event_table
+                    .insert(related_sequence, bytes.as_slice())
+                    .map_err(embed)?;
+            }
+            let destroyed_record_key_count =
+                u32::try_from(destroyed_record_key_count).map_err(|_| {
+                    StorageError::InvariantViolation(
+                        "semantic erasure exceeded the supported record-key count".to_owned(),
+                    )
+                })?;
+            let tombstone = SemanticErasureTombstone::new(
+                id,
+                item.scope,
+                authorized_by,
+                &authorization_id,
+                erased_at,
+                destroyed_record_key_count,
+            );
+            let sequence = event_table.len().map_err(embed)?;
+            let record = EventRecord {
+                sequence,
+                recorded_at: erased_at,
+                event: MemoryEvent::MemorySemanticallyErased {
+                    tombstone: tombstone.clone(),
+                },
+            };
+            let event_key = Self::event_key(sequence);
+            let bytes = self.encode_json(StorageTableName::EventLog, &event_key, &record)?;
+
+            event_table
+                .insert(sequence, bytes.as_slice())
+                .map_err(embed)?;
+
+            (sequence, tombstone)
+        };
+
+        write_txn.commit().map_err(embed)?;
+        let event = self.event(sequence)?.ok_or_else(|| {
+            StorageError::Embedded("committed semantic-erasure event was not readable".to_owned())
+        })?;
+
+        Ok(Some(SemanticErasureRecord { tombstone, event }))
     }
 
     /// Flags a memory for explicit re-verification without changing valid-time or vector state.
@@ -4796,12 +6503,419 @@ fn embed(error: impl std::error::Error) -> StorageError {
     StorageError::Embedded(error.to_string())
 }
 
+fn administration_state_from_table<T>(
+    store: &RedbMemoryStore,
+    table: &T,
+) -> Result<Option<StoredAdministrationState>, StorageError>
+where
+    T: ReadableTable<&'static str, &'static [u8]>,
+{
+    let Some(value) = table.get(ADMINISTRATION_STATE_KEY).map_err(embed)? else {
+        return Ok(None);
+    };
+    let stored: StoredAdministrationState = store.decode_json(
+        StorageTableName::AdministrationState,
+        ADMINISTRATION_STATE_KEY.as_bytes(),
+        value.value(),
+    )?;
+    validate_stored_administration_state(&stored)?;
+
+    Ok(Some(stored))
+}
+
+fn append_administration_audit(
+    store: &RedbMemoryStore,
+    write_txn: &mut WriteTransaction,
+    action: AdministrationAuditAction,
+    occurred_at: OffsetDateTime,
+    principal: Option<String>,
+    previous_principal: Option<String>,
+    bootstrap_expires_at: Option<OffsetDateTime>,
+) -> Result<(), StorageError> {
+    let mut table = write_txn
+        .open_table(ADMINISTRATION_AUDIT_TABLE)
+        .map_err(embed)?;
+    let sequence = table.len().map_err(embed)?;
+    let record = AdministrationAuditRecord {
+        schema_version: ADMINISTRATION_SCHEMA_VERSION,
+        sequence,
+        action,
+        occurred_at,
+        principal,
+        previous_principal,
+        bootstrap_expires_at,
+    };
+    validate_administration_audit_record(&record, sequence)?;
+    let key = RedbMemoryStore::administration_audit_key(sequence);
+    let bytes = store.encode_json(StorageTableName::AdministrationAudit, &key, &record)?;
+
+    table.insert(sequence, bytes.as_slice()).map_err(embed)?;
+
+    Ok(())
+}
+
+fn validate_stored_administration_state(
+    stored: &StoredAdministrationState,
+) -> Result<(), StorageError> {
+    if stored.state.schema_version != ADMINISTRATION_SCHEMA_VERSION
+        || !valid_administration_secret_commitment(&stored.bootstrap_secret_commitment)
+    {
+        return Err(StorageError::InvariantViolation(
+            "administration state schema or commitment is invalid".to_owned(),
+        ));
+    }
+    if let Some(administrator) = &stored.state.administrator {
+        validate_administration_principal(&administrator.principal)?;
+        if administrator.last_recovered_at.is_some_and(|recovered_at| {
+            recovered_at < administrator.initialized_at || administrator.recovery_count == 0
+        }) {
+            return Err(StorageError::InvariantViolation(
+                "administration recovery history is invalid".to_owned(),
+            ));
+        }
+        if administrator.last_recovered_at.is_none() && administrator.recovery_count != 0 {
+            return Err(StorageError::InvariantViolation(
+                "administration recovery count is invalid".to_owned(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_administration_audit_record(
+    record: &AdministrationAuditRecord,
+    expected_sequence: u64,
+) -> Result<(), StorageError> {
+    if record.schema_version != ADMINISTRATION_SCHEMA_VERSION
+        || record.sequence != expected_sequence
+    {
+        return Err(StorageError::InvariantViolation(
+            "administration audit schema or sequence is invalid".to_owned(),
+        ));
+    }
+    if record
+        .principal
+        .as_deref()
+        .is_some_and(|principal| validate_administration_principal(principal).is_err())
+        || record
+            .previous_principal
+            .as_deref()
+            .is_some_and(|principal| validate_administration_principal(principal).is_err())
+    {
+        return Err(StorageError::InvariantViolation(
+            "administration audit principal is invalid".to_owned(),
+        ));
+    }
+    match record.action {
+        AdministrationAuditAction::BootstrapWindowOpened
+            if record.principal.is_none()
+                && record.previous_principal.is_none()
+                && record.bootstrap_expires_at.is_some() =>
+        {
+            Ok(())
+        }
+        AdministrationAuditAction::AdministratorBootstrapped
+            if record.principal.is_some()
+                && record.previous_principal.is_none()
+                && record.bootstrap_expires_at.is_none() =>
+        {
+            Ok(())
+        }
+        AdministrationAuditAction::AdministratorRecovered
+            if record.principal.is_some()
+                && record.previous_principal.is_some()
+                && record.bootstrap_expires_at.is_none() =>
+        {
+            Ok(())
+        }
+        AdministrationAuditAction::BootstrapWindowOpened
+        | AdministrationAuditAction::AdministratorBootstrapped
+        | AdministrationAuditAction::AdministratorRecovered => Err(
+            StorageError::InvariantViolation("administration audit record is invalid".to_owned()),
+        ),
+    }
+}
+
+fn validate_administration_principal(value: &str) -> Result<(), StorageError> {
+    if !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        Ok(())
+    } else {
+        Err(StorageError::InvariantViolation(
+            "administration principal is invalid".to_owned(),
+        ))
+    }
+}
+
+fn valid_administration_secret_commitment(value: &str) -> bool {
+    valid_blake3_hash(value)
+}
+
+fn validate_rbac_scope_and_principals(
+    scope: &MemoryScope,
+    principal: &str,
+    actor: &str,
+) -> Result<(), StorageError> {
+    scope
+        .validate()
+        .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+    validate_administration_principal(principal)?;
+    validate_administration_principal(actor)
+}
+
+fn validate_rbac_grant(grant: &RbacGrant) -> Result<(), StorageError> {
+    if grant.schema_version != RBAC_SCHEMA_VERSION {
+        return Err(StorageError::InvariantViolation(
+            "RBAC grant schema is invalid".to_owned(),
+        ));
+    }
+    validate_rbac_scope_and_principals(&grant.scope, &grant.principal, &grant.granted_by)
+}
+
+fn validate_service_token_id(value: &str) -> Result<(), StorageError> {
+    if value.len() == 32
+        && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+        })
+    {
+        Ok(())
+    } else {
+        Err(StorageError::InvariantViolation(
+            "service token identifier is invalid".to_owned(),
+        ))
+    }
+}
+
+fn valid_service_token_commitment(value: &str) -> bool {
+    valid_blake3_hash(value)
+}
+
+fn service_token_commitments_match(expected: &str, submitted: &str) -> bool {
+    let bytes = expected.as_bytes().iter().zip(submitted.as_bytes());
+    let difference = bytes.fold(
+        u8::try_from(expected.len() ^ submitted.len()).unwrap_or(u8::MAX),
+        |value, pair| value | (pair.0 ^ pair.1),
+    );
+
+    difference == 0
+}
+
+impl ServiceToken {
+    /// Returns whether the token has not expired and has not been revoked at `now`.
+    #[must_use]
+    pub fn is_active_at(&self, now: OffsetDateTime) -> bool {
+        self.revoked_at.is_none() && now < self.expires_at
+    }
+}
+
+fn validate_service_token(token: &ServiceToken) -> Result<(), StorageError> {
+    if token.schema_version != SERVICE_TOKEN_SCHEMA_VERSION {
+        return Err(StorageError::InvariantViolation(
+            "service token schema is invalid".to_owned(),
+        ));
+    }
+    validate_service_token_id(&token.id)?;
+    if token.principal != format!("service:{}", token.id) {
+        return Err(StorageError::InvariantViolation(
+            "service token principal is invalid".to_owned(),
+        ));
+    }
+    validate_rbac_scope_and_principals(&token.scope, &token.principal, &token.issued_by)?;
+    if token.expires_at <= token.issued_at
+        || token
+            .revoked_at
+            .is_some_and(|revoked_at| revoked_at < token.issued_at)
+        || (token.rotated_to.is_some() && token.revoked_at.is_none())
+    {
+        return Err(StorageError::InvariantViolation(
+            "service token lifecycle metadata is invalid".to_owned(),
+        ));
+    }
+    if let Some(predecessor) = &token.rotated_from {
+        validate_service_token_id(predecessor)?;
+    }
+    if let Some(successor) = &token.rotated_to {
+        validate_service_token_id(successor)?;
+    }
+
+    Ok(())
+}
+
+fn validate_service_token_material(
+    material: &ServiceTokenStoredMaterial,
+) -> Result<(), StorageError> {
+    validate_service_token(&material.token)?;
+    if valid_service_token_commitment(&material.secret_commitment) {
+        Ok(())
+    } else {
+        Err(StorageError::InvariantViolation(
+            "service token commitment is invalid".to_owned(),
+        ))
+    }
+}
+
+fn append_service_token_audit(
+    store: &RedbMemoryStore,
+    write_txn: &mut WriteTransaction,
+    action: ServiceTokenAuditAction,
+    actor: String,
+    token: &ServiceToken,
+    previous_token_id: Option<String>,
+    occurred_at: OffsetDateTime,
+) -> Result<(), StorageError> {
+    let mut table = write_txn
+        .open_table(SERVICE_TOKEN_AUDIT_TABLE)
+        .map_err(embed)?;
+    let sequence = table.len().map_err(embed)?;
+    let record = ServiceTokenAuditRecord {
+        schema_version: SERVICE_TOKEN_SCHEMA_VERSION,
+        sequence,
+        action,
+        actor,
+        token_id: token.id.clone(),
+        principal: token.principal.clone(),
+        scope: token.scope.clone(),
+        role: token.role,
+        expires_at: token.expires_at,
+        previous_token_id,
+        occurred_at,
+    };
+    validate_service_token_audit_record(&record, sequence)?;
+    let key = RedbMemoryStore::service_token_audit_key(sequence);
+    let bytes = store.encode_json(StorageTableName::ServiceTokenAudit, &key, &record)?;
+
+    table.insert(sequence, bytes.as_slice()).map_err(embed)?;
+
+    Ok(())
+}
+
+fn validate_service_token_audit_record(
+    record: &ServiceTokenAuditRecord,
+    expected_sequence: u64,
+) -> Result<(), StorageError> {
+    if record.schema_version != SERVICE_TOKEN_SCHEMA_VERSION || record.sequence != expected_sequence
+    {
+        return Err(StorageError::InvariantViolation(
+            "service token audit schema or sequence is invalid".to_owned(),
+        ));
+    }
+    validate_administration_principal(&record.actor)?;
+    validate_service_token_id(&record.token_id)?;
+    if record.principal != format!("service:{}", record.token_id) {
+        return Err(StorageError::InvariantViolation(
+            "service token audit principal is invalid".to_owned(),
+        ));
+    }
+    record
+        .scope
+        .validate()
+        .map_err(|error| StorageError::InvariantViolation(error.to_string()))?;
+    if let Some(previous_token_id) = &record.previous_token_id {
+        validate_service_token_id(previous_token_id)?;
+    }
+    match record.action {
+        ServiceTokenAuditAction::Issued | ServiceTokenAuditAction::Revoked
+            if record.previous_token_id.is_none() =>
+        {
+            Ok(())
+        }
+        ServiceTokenAuditAction::Rotated if record.previous_token_id.is_some() => Ok(()),
+        ServiceTokenAuditAction::Issued
+        | ServiceTokenAuditAction::Rotated
+        | ServiceTokenAuditAction::Revoked => Err(StorageError::InvariantViolation(
+            "service token audit record is invalid".to_owned(),
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_authorization_audit(
+    store: &RedbMemoryStore,
+    write_txn: &mut WriteTransaction,
+    audit_action: AuthorizationAuditAction,
+    principal: String,
+    principal_class: Option<AuthorizationPrincipalClass>,
+    actor_class: Option<PolicyActorClass>,
+    subject: Option<String>,
+    scope: MemoryScope,
+    action: AuthorizationAction,
+    required_role: RbacRole,
+    effective_role: Option<RbacRole>,
+    allowed: bool,
+    occurred_at: OffsetDateTime,
+) -> Result<(), StorageError> {
+    let mut table = write_txn
+        .open_table(AUTHORIZATION_AUDIT_TABLE)
+        .map_err(embed)?;
+    let sequence = table.len().map_err(embed)?;
+    let record = AuthorizationAuditRecord {
+        schema_version: RBAC_SCHEMA_VERSION,
+        sequence,
+        audit_action,
+        principal,
+        principal_class,
+        actor_class,
+        subject,
+        scope,
+        action,
+        required_role,
+        effective_role,
+        allowed,
+        occurred_at,
+    };
+    validate_authorization_audit_record(&record, sequence)?;
+    let key = RedbMemoryStore::authorization_audit_key(sequence);
+    let bytes = store.encode_json(StorageTableName::AuthorizationAudit, &key, &record)?;
+
+    table.insert(sequence, bytes.as_slice()).map_err(embed)?;
+
+    Ok(())
+}
+
+fn validate_authorization_audit_record(
+    record: &AuthorizationAuditRecord,
+    expected_sequence: u64,
+) -> Result<(), StorageError> {
+    if record.schema_version != RBAC_SCHEMA_VERSION || record.sequence != expected_sequence {
+        return Err(StorageError::InvariantViolation(
+            "authorization audit schema or sequence is invalid".to_owned(),
+        ));
+    }
+    validate_rbac_scope_and_principals(&record.scope, &record.principal, &record.principal)?;
+    if let Some(subject) = &record.subject {
+        validate_administration_principal(subject)?;
+    }
+    match record.audit_action {
+        AuthorizationAuditAction::Decision if record.subject.is_none() => Ok(()),
+        AuthorizationAuditAction::RoleGranted | AuthorizationAuditAction::RoleRevoked
+            if record.subject.is_some()
+                && record.action == AuthorizationAction::ManageRoles
+                && record.required_role == RbacRole::Administrator =>
+        {
+            Ok(())
+        }
+        AuthorizationAuditAction::Decision
+        | AuthorizationAuditAction::RoleGranted
+        | AuthorizationAuditAction::RoleRevoked => Err(StorageError::InvariantViolation(
+            "authorization audit record is invalid".to_owned(),
+        )),
+    }
+}
+
 fn validate_event_schema_version(record: &EventRecord) -> Result<(), StorageError> {
     if let MemoryEvent::MemoryWritten { item } = &record.event {
         validate_memory_schema_version(
             &format!("event {} memory {}", record.sequence, item.id),
             item.schema_version,
         )?;
+    }
+    if let MemoryEvent::MemorySemanticallyErased { tombstone } = &record.event {
+        tombstone.verify_integrity()?;
     }
 
     Ok(())
@@ -4830,6 +6944,7 @@ fn event_belongs_to_memory_ids(
             item.scope == *scope && memory_ids.contains(&item.id)
         }
         MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
         | MemoryEvent::TierChanged { id, .. }
@@ -4874,7 +6989,256 @@ fn event_belongs_to_memory_ids(
             .scope
             .as_ref()
             .is_some_and(|record_scope| record_scope == scope),
+        MemoryEvent::MemorySemanticallyErased { tombstone } => tombstone.scope == *scope,
     }
+}
+
+fn event_references_memory(record: &EventRecord, id: MemoryId) -> bool {
+    match &record.event {
+        MemoryEvent::MemoryWritten { item } => item.id == id,
+        MemoryEvent::MemoryScopePromoted {
+            source_id,
+            promoted_id,
+            ..
+        } => *source_id == id || *promoted_id == id,
+        MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id: event_id, .. }
+        | MemoryEvent::ReverificationFlagged { id: event_id, .. }
+        | MemoryEvent::AccessRecorded { id: event_id, .. }
+        | MemoryEvent::TierChanged { id: event_id, .. }
+        | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::MemorySemanticallyErased { tombstone } => tombstone.memory_id == id,
+        MemoryEvent::ReviewDecisionRecorded { decision } => decision.approved_memory_id == Some(id),
+        MemoryEvent::AutomaticCaptureRecorded { record } => record.memory_id == Some(id),
+        MemoryEvent::ReconstructionApplied {
+            superseded_id,
+            replacement_id,
+            ..
+        } => *superseded_id == id || *replacement_id == id,
+        MemoryEvent::ConsolidationDecision {
+            input_ids,
+            output_id,
+            ..
+        } => input_ids.contains(&id) || *output_id == Some(id),
+        MemoryEvent::HumanSignalRecorded { signal } => {
+            signal.memory_id == id || signal.proposal_id == Some(id)
+        }
+        MemoryEvent::ScopeAuthorizationDenied { .. }
+        | MemoryEvent::PolicyDecisionRecorded { .. }
+        | MemoryEvent::ReviewCandidateQueued { .. }
+        | MemoryEvent::ObservabilityRecorded { .. } => false,
+    }
+}
+
+fn semantic_erasure_event_sequences(
+    store: &RedbMemoryStore,
+    event_table: &Table<'_, u64, &[u8]>,
+    id: MemoryId,
+) -> Result<Vec<u64>, StorageError> {
+    let events = event_table
+        .iter()
+        .map_err(embed)?
+        .map(|row| {
+            let (sequence, value) = row.map_err(embed)?;
+            let sequence = sequence.value();
+            let event_key = RedbMemoryStore::event_key(sequence);
+            let record =
+                store.decode_json(StorageTableName::EventLog, &event_key, value.value())?;
+
+            Ok((sequence, record))
+        })
+        .collect::<Result<Vec<(u64, EventRecord)>, StorageError>>()?;
+    let candidate_ids = events
+        .iter()
+        .filter_map(|(_, record)| match &record.event {
+            MemoryEvent::ReviewDecisionRecorded { decision }
+                if decision.approved_memory_id == Some(id) =>
+            {
+                Some(decision.candidate_id)
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+
+    Ok(events
+        .into_iter()
+        .filter_map(|(sequence, record)| {
+            (event_references_memory(&record, id)
+                || matches!(
+                    record.event,
+                    MemoryEvent::ReviewCandidateQueued { ref candidate }
+                        if candidate_ids.contains(&candidate.id)
+                ))
+            .then_some(sequence)
+        })
+        .collect())
+}
+
+fn semantic_erasure_graph_keys(
+    store: &RedbMemoryStore,
+    entity_table: &Table<'_, &str, &[u8]>,
+    relation_table: &Table<'_, &str, &[u8]>,
+    id: MemoryId,
+) -> Result<(Vec<String>, Vec<String>), StorageError> {
+    let entities = entity_table
+        .iter()
+        .map_err(embed)?
+        .map(|row| {
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value().to_owned();
+            let entity = store.decode_json(
+                StorageTableName::GraphEntities,
+                key.as_bytes(),
+                value.value(),
+            )?;
+
+            Ok((key, entity))
+        })
+        .collect::<Result<Vec<(String, Entity)>, StorageError>>()?;
+    let entity_ids = entities
+        .iter()
+        .filter_map(|(_, entity)| (entity.source_memory_id == Some(id)).then_some(entity.id))
+        .collect::<BTreeSet<_>>();
+    let entity_keys = entities
+        .into_iter()
+        .filter_map(|(key, entity)| entity_ids.contains(&entity.id).then_some(key))
+        .collect::<Vec<_>>();
+    let relations = relation_table
+        .iter()
+        .map_err(embed)?
+        .map(|row| {
+            let (key, value) = row.map_err(embed)?;
+            let key = key.value().to_owned();
+            let relation = store.decode_json(
+                StorageTableName::GraphRelations,
+                key.as_bytes(),
+                value.value(),
+            )?;
+
+            Ok((key, relation))
+        })
+        .collect::<Result<Vec<(String, Relation)>, StorageError>>()?;
+    let mut relation_ids = relations
+        .iter()
+        .filter_map(|(_, relation)| {
+            (relation.memory_id == Some(id)
+                || entity_ids.contains(&relation.from_entity)
+                || entity_ids.contains(&relation.to_entity))
+            .then_some(relation.id)
+        })
+        .collect::<BTreeSet<_>>();
+    let mut changed = true;
+
+    while changed {
+        changed = false;
+        for (_, relation) in &relations {
+            if relation
+                .supersedes
+                .is_some_and(|supersedes| relation_ids.contains(&supersedes))
+                && relation_ids.insert(relation.id)
+            {
+                changed = true;
+            }
+        }
+    }
+
+    let relation_keys = relations
+        .into_iter()
+        .filter_map(|(key, relation)| relation_ids.contains(&relation.id).then_some(key))
+        .collect();
+
+    Ok((entity_keys, relation_keys))
+}
+
+fn validate_semantic_erasure_authorization(
+    authorized_by: &str,
+    authorization_id: &str,
+) -> Result<(), StorageError> {
+    if valid_semantic_erasure_token(authorized_by) && valid_semantic_erasure_token(authorization_id)
+    {
+        Ok(())
+    } else {
+        Err(StorageError::InvalidSemanticErasureAuthorization)
+    }
+}
+
+fn valid_semantic_erasure_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+}
+
+fn valid_blake3_hash(value: &str) -> bool {
+    value.len() == 64
+        && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+        })
+}
+
+fn semantic_erasure_authorization_hash(authorization_id: &str) -> String {
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(SEMANTIC_ERASURE_AUTHORIZATION_DOMAIN);
+    append_semantic_erasure_hash_field(&mut hasher, "authorization_id", authorization_id);
+
+    hasher.finalize().to_hex().to_string()
+}
+
+fn semantic_erasure_tombstone_integrity_hash(tombstone: &SemanticErasureTombstone) -> String {
+    let mut hasher = blake3::Hasher::new();
+    let visibility = match tombstone.scope.visibility {
+        ScopeVisibility::Repository => "repository",
+        ScopeVisibility::Team => "team",
+    };
+    let team = tombstone
+        .scope
+        .team
+        .as_ref()
+        .map_or_else(String::new, ToString::to_string);
+
+    hasher.update(SEMANTIC_ERASURE_INTEGRITY_DOMAIN);
+    append_semantic_erasure_hash_field(
+        &mut hasher,
+        "schema_version",
+        &tombstone.schema_version.to_string(),
+    );
+    append_semantic_erasure_hash_field(&mut hasher, "memory_id", &tombstone.memory_id.to_string());
+    append_semantic_erasure_hash_field(
+        &mut hasher,
+        "scope_repository",
+        &tombstone.scope.repository.to_string(),
+    );
+    append_semantic_erasure_hash_field(&mut hasher, "scope_team", &team);
+    append_semantic_erasure_hash_field(&mut hasher, "scope_visibility", visibility);
+    append_semantic_erasure_hash_field(&mut hasher, "authorized_by", &tombstone.authorized_by);
+    append_semantic_erasure_hash_field(
+        &mut hasher,
+        "authorization_id_hash",
+        &tombstone.authorization_id_hash,
+    );
+    append_semantic_erasure_hash_field(
+        &mut hasher,
+        "erased_at_unix_nanos",
+        &tombstone.erased_at.unix_timestamp_nanos().to_string(),
+    );
+    append_semantic_erasure_hash_field(
+        &mut hasher,
+        "destroyed_record_key_count",
+        &tombstone.destroyed_record_key_count.to_string(),
+    );
+
+    hasher.finalize().to_hex().to_string()
+}
+
+fn append_semantic_erasure_hash_field(hasher: &mut blake3::Hasher, name: &str, value: &str) {
+    hasher.update(name.as_bytes());
+    hasher.update(&[0]);
+    hasher.update(value.len().to_string().as_bytes());
+    hasher.update(&[0]);
+    hasher.update(value.as_bytes());
+    hasher.update(&[0xff]);
 }
 
 fn review_storage_error(error: ReviewError) -> StorageError {
@@ -6487,8 +8851,11 @@ mod tests {
             timestamps,
         );
         let cold_pointer = {
-            let store = RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new(key))
-                .expect("encrypted store should open");
+            let store = RedbMemoryStore::open_with_encryption(
+                &path,
+                EnvelopeEncryption::new(LocalKeyProvider::new("storage-test-kek", key)),
+            )
+            .expect("encrypted store should open");
 
             cold_item.tier = Tier::Cold;
             store.write(&hot_item).expect("hot item should write");
@@ -6565,8 +8932,11 @@ mod tests {
             );
         }
 
-        let reopened = RedbMemoryStore::open_with_encryption(&path, Aes256GcmEncryption::new(key))
-            .expect("encrypted store should reopen with the same key");
+        let reopened = RedbMemoryStore::open_with_encryption(
+            &path,
+            EnvelopeEncryption::new(LocalKeyProvider::new("storage-test-kek", key)),
+        )
+        .expect("encrypted store should reopen with the same key");
         assert_eq!(
             reopened
                 .get(hot_item.id)
@@ -6684,6 +9054,370 @@ mod tests {
     }
 
     #[test]
+    fn semantic_erasure_destroys_live_record_keys_and_retains_only_a_tombstone() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let path = file.path().to_path_buf();
+        let mut item = test_item("semantic erasure payload must not survive");
+        let mut vector_index = HnswVectorIndex::with_capacity(2, 8);
+        let store = RedbMemoryStore::open_with_encryption(
+            &path,
+            EnvelopeEncryption::new(LocalKeyProvider::new("erase-test-kek", [51_u8; 32])),
+        )
+        .expect("envelope store should open");
+
+        item.tier = Tier::Cold;
+        store
+            .write_embedded(
+                &mut item,
+                &mut vector_index,
+                &[0.5, 0.5],
+                "erase-test-index",
+                "erase-test-model",
+                "v1",
+            )
+            .expect("item should write with an embedding");
+        store
+            .compact_cold_item(item.id)
+            .expect("cold item should compact");
+        let pointer = store
+            .get(item.id)
+            .expect("item should read")
+            .expect("item should exist")
+            .compaction
+            .expect("item should be compacted");
+        let outcome = store
+            .semantic_erase(
+                item.id,
+                "erase-operator",
+                "case-2026-001",
+                OffsetDateTime::UNIX_EPOCH + Duration::seconds(1),
+            )
+            .expect("semantic erase should succeed")
+            .expect("item should be erased");
+
+        assert_eq!(outcome.tombstone.memory_id, item.id);
+        assert_eq!(outcome.tombstone.authorized_by, "erase-operator");
+        assert!(outcome.tombstone.destroyed_record_key_count >= 4);
+        assert!(outcome.tombstone.verify_integrity().is_ok());
+        assert!(
+            store
+                .get(item.id)
+                .expect("erased get should work")
+                .is_none()
+        );
+        assert!(
+            store
+                .stored_embeddings()
+                .expect("embeddings should read")
+                .is_empty()
+        );
+        assert!(
+            store
+                .read_compacted_content(&pointer)
+                .expect("cold content should read")
+                .is_none()
+        );
+        let events = store.events().expect("events should read");
+        let audit = serde_json::to_string(&events).expect("events should serialize");
+
+        assert!(!audit.contains("semantic erasure payload must not survive"));
+        assert!(!audit.contains("case-2026-001"));
+        assert!(events.iter().any(|record| {
+            matches!(
+                record.event,
+                MemoryEvent::MemorySemanticallyErased { ref tombstone }
+                    if tombstone.memory_id == item.id
+            )
+        }));
+        assert!(events.iter().all(|record| !matches!(
+            record.event,
+            MemoryEvent::MemoryWritten { item: ref event_item } if event_item.id == item.id
+        )));
+        assert!(
+            store
+                .semantic_erase(
+                    item.id,
+                    "erase-operator",
+                    "case-2026-001",
+                    OffsetDateTime::UNIX_EPOCH + Duration::seconds(2),
+                )
+                .expect("repeated semantic erase should be readable")
+                .is_none()
+        );
+        drop(store);
+
+        let reopened = RedbMemoryStore::open_with_encryption(
+            &path,
+            EnvelopeEncryption::new(LocalKeyProvider::new("erase-test-kek", [51_u8; 32])),
+        )
+        .expect("erased encrypted store should reopen");
+        assert!(
+            reopened
+                .get(item.id)
+                .expect("reopened erased get should work")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn semantic_erasure_tombstone_verifier_rejects_tampering_and_payload_fields() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open_with_encryption(
+            file.path(),
+            EnvelopeEncryption::new(LocalKeyProvider::new("integrity-test-kek", [62_u8; 32])),
+        )
+        .expect("envelope store should open");
+        let item = test_item("tombstone integrity payload");
+
+        store.write(&item).expect("item should write");
+        let outcome = store
+            .semantic_erase(
+                item.id,
+                "integrity-operator",
+                "case-2026-006",
+                OffsetDateTime::UNIX_EPOCH + Duration::seconds(1),
+            )
+            .expect("semantic erase should succeed")
+            .expect("item should erase");
+        let mut tampered = outcome.tombstone.clone();
+
+        tampered.authorized_by = "tampered-operator".to_owned();
+        assert_eq!(
+            tampered.verify_integrity(),
+            Err(SemanticErasureTombstoneVerificationError::IntegrityMismatch)
+        );
+        assert!(matches!(
+            store.append_event(MemoryEvent::MemorySemanticallyErased {
+                tombstone: tampered,
+            }),
+            Err(StorageError::InvalidSemanticErasureTombstone(
+                SemanticErasureTombstoneVerificationError::IntegrityMismatch
+            ))
+        ));
+        let mut leaked = serde_json::to_value(&outcome.tombstone).expect("tombstone should encode");
+
+        leaked
+            .as_object_mut()
+            .expect("tombstone should be an object")
+            .insert(
+                "semantic_payload".to_owned(),
+                serde_json::Value::String("tombstone integrity payload".to_owned()),
+            );
+        assert!(serde_json::from_value::<SemanticErasureTombstone>(leaked).is_err());
+        let mut malformed_commitment = outcome.tombstone.clone();
+
+        malformed_commitment.authorization_id_hash = "tombstone-integrity-payload".to_owned();
+        assert_eq!(
+            malformed_commitment.verify_integrity(),
+            Err(SemanticErasureTombstoneVerificationError::InvalidAuthorizationCommitment)
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn semantic_erasure_removes_linked_graph_and_review_source_residue() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open_with_encryption(
+            file.path(),
+            EnvelopeEncryption::new(LocalKeyProvider::new("residue-test-kek", [71_u8; 32])),
+        )
+        .expect("envelope store should open");
+        let content = "review source semantic payload";
+        let source_ref = "file:semantic-erasure-source";
+        let mut item = test_item(content);
+
+        item.provenance = Provenance::new(
+            SourceKind::File,
+            Some(source_ref.to_owned()),
+            "residue-test",
+        );
+        store.write(&item).expect("item should write");
+        let candidate = ReviewCandidate {
+            id: ReviewCandidateId::new_v7(),
+            candidate: crate::extraction::ExtractionCandidate {
+                content: content.to_owned(),
+                kind: MemoryKind::Fact,
+                validity: crate::extraction::CandidateValidity {
+                    valid_from_unix: 0,
+                    valid_to_unix: None,
+                    ingested_at_unix: 0,
+                },
+                evidence_spans: vec![crate::extraction::EvidenceSpan {
+                    evidence_index: 0,
+                    start: 0,
+                    end: content.len(),
+                }],
+                confidence_percent: 99,
+                rationale: "review source supports the memory".to_owned(),
+                suggested_scope: item.scope.clone(),
+            },
+            evidence: vec![crate::extraction::SourceEvidence {
+                source_kind: SourceKind::File,
+                source_ref: source_ref.to_owned(),
+                content: content.to_owned(),
+            }],
+            submitted_by: "residue-test".to_owned(),
+            submitted_at: OffsetDateTime::UNIX_EPOCH,
+        };
+
+        store
+            .enqueue_review_candidate(candidate.clone())
+            .expect("candidate should queue");
+        store
+            .record_review_decision(ReviewDecision {
+                candidate_id: candidate.id,
+                scope: item.scope.clone(),
+                action: crate::review::ReviewAction::Approve,
+                reviewed_by: "residue-reviewer".to_owned(),
+                reviewer_actor: crate::policy::PolicyActorClass::Human,
+                rationale: "approved semantic evidence".to_owned(),
+                reviewed_at: OffsetDateTime::UNIX_EPOCH,
+                approved_memory_id: Some(item.id),
+            })
+            .expect("review decision should record");
+        store
+            .record_automatic_capture(AutomaticCaptureAuditRecord {
+                run_id: "residue-run".to_owned(),
+                idempotency_key: "residue-key".to_owned(),
+                disposition: crate::capture_worker::AutomaticCaptureDisposition::Persisted,
+                actor: crate::policy::PolicyActorClass::Automation,
+                scope: item.scope.clone(),
+                source_kind: SourceKind::File,
+                source_ref_fingerprint: "source-fingerprint".to_owned(),
+                memory_id: Some(item.id),
+            })
+            .expect("capture audit should record");
+
+        let mut linked_entity = Entity::new(
+            "Claim",
+            "graph entity semantic payload",
+            "claim:semantic-erasure",
+            TemporalBounds::open_from(OffsetDateTime::UNIX_EPOCH, OffsetDateTime::UNIX_EPOCH),
+        )
+        .with_source_memory(item.id);
+        linked_entity.attributes.insert(
+            "evidence".to_owned(),
+            "graph attribute semantic payload".to_owned(),
+        );
+        let retained_entity = Entity::new(
+            "Project",
+            "retained entity",
+            "project:retained",
+            TemporalBounds::open_from(OffsetDateTime::UNIX_EPOCH, OffsetDateTime::UNIX_EPOCH),
+        );
+        store
+            .put_entity(&linked_entity)
+            .expect("linked entity should write");
+        store
+            .put_entity(&retained_entity)
+            .expect("retained entity should write");
+        let mut relation = Relation::new(
+            "supports",
+            linked_entity.id,
+            retained_entity.id,
+            Some(item.id),
+            TemporalBounds::open_from(OffsetDateTime::UNIX_EPOCH, OffsetDateTime::UNIX_EPOCH),
+        );
+        relation.attributes.insert(
+            "evidence".to_owned(),
+            "relation attribute semantic payload".to_owned(),
+        );
+        store
+            .put_relation(&relation)
+            .expect("relation should write");
+
+        store
+            .semantic_erase(
+                item.id,
+                "erase-operator",
+                "case-2026-005",
+                OffsetDateTime::UNIX_EPOCH + Duration::seconds(1),
+            )
+            .expect("semantic erase should succeed");
+
+        assert!(
+            store
+                .get_entity(linked_entity.id)
+                .expect("linked entity lookup should work")
+                .is_none()
+        );
+        assert!(
+            store
+                .get_relation(relation.id)
+                .expect("linked relation lookup should work")
+                .is_none()
+        );
+        assert_eq!(
+            store
+                .get_entity(retained_entity.id)
+                .expect("retained entity lookup should work"),
+            Some(retained_entity.clone())
+        );
+        let snapshot = store
+            .graph_snapshot(OffsetDateTime::UNIX_EPOCH)
+            .expect("snapshot should work");
+        assert_eq!(snapshot.entities.len(), 1);
+        assert!(snapshot.relations.is_empty());
+        let traversal = store
+            .traverse_graph(&GraphTraversalRequest::new(retained_entity.id, 2))
+            .expect("traversal should work");
+        assert_eq!(traversal.entities, vec![retained_entity]);
+        assert!(traversal.relations.is_empty());
+        assert!(
+            store
+                .review_queue(None)
+                .expect("review queue should work")
+                .is_empty()
+        );
+        assert!(
+            store
+                .automatic_capture_terminal_keys()
+                .expect("capture keys should work")
+                .is_empty()
+        );
+        let audit = serde_json::to_string(&store.events().expect("events should read"))
+            .expect("events should serialize");
+
+        for residue in [
+            content,
+            source_ref,
+            "approved semantic evidence",
+            "source-fingerprint",
+        ] {
+            assert!(
+                !audit.contains(residue),
+                "audit retained residue: {residue}"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_erasure_fails_closed_without_envelope_record_keys() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("plaintext store should open");
+        let item = test_item("plaintext semantic erase must fail");
+
+        store.write(&item).expect("item should write");
+        assert!(matches!(
+            store.semantic_erase(
+                item.id,
+                "erase-operator",
+                "case-2026-002",
+                OffsetDateTime::UNIX_EPOCH,
+            ),
+            Err(StorageError::SemanticErasureRequiresEnvelopeEncryption)
+        ));
+        assert_eq!(
+            store
+                .get(item.id)
+                .expect("item should remain readable")
+                .expect("item should still exist")
+                .content,
+            item.content
+        );
+    }
+
+    #[test]
     fn encrypted_store_refuses_plaintext_snapshot_export() {
         let file = NamedTempFile::new().expect("tempfile should be created");
         let snapshot_file = NamedTempFile::new().expect("snapshot tempfile should be created");
@@ -6704,6 +9438,365 @@ mod tests {
     }
 
     #[test]
+    fn administration_bootstrap_is_single_use_time_bound_and_auditable() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let opened_at = OffsetDateTime::UNIX_EPOCH;
+        let expires_at = opened_at + Duration::minutes(15);
+        let commitment = "a".repeat(64);
+        let other_commitment = "b".repeat(64);
+
+        let pending = store
+            .ensure_administration_bootstrap_window(&commitment, opened_at, expires_at)
+            .expect("bootstrap window should open");
+        assert_eq!(pending.administrator, None);
+        assert_eq!(pending.bootstrap_expires_at, expires_at);
+        assert_eq!(
+            store
+                .bootstrap_administrator(&other_commitment, "oidc:alice", opened_at)
+                .expect("mismatched bootstrap should read"),
+            AdministrationBootstrapOutcome::SecretMismatch
+        );
+        let initialized = store
+            .bootstrap_administrator(&commitment, "oidc:alice", opened_at)
+            .expect("bootstrap should initialize");
+        assert!(matches!(
+            initialized,
+            AdministrationBootstrapOutcome::Initialized(AdministratorIdentity {
+                ref principal,
+                recovery_count: 0,
+                ..
+            }) if principal == "oidc:alice"
+        ));
+        assert!(matches!(
+            store
+                .bootstrap_administrator(&commitment, "oidc:bob", opened_at)
+                .expect("repeat bootstrap should read"),
+            AdministrationBootstrapOutcome::AlreadyInitialized(_)
+        ));
+        let recovered = store
+            .recover_administrator("oidc:bob", opened_at + Duration::seconds(1))
+            .expect("recovery should update");
+        assert!(matches!(
+            recovered,
+            AdministrationRecoveryOutcome::Recovered(AdministratorIdentity {
+                ref principal,
+                recovery_count: 1,
+                ..
+            }) if principal == "oidc:bob"
+        ));
+
+        let audit = store.administration_audit().expect("audit should read");
+        assert_eq!(audit.len(), 3);
+        assert_eq!(
+            audit[0].action,
+            AdministrationAuditAction::BootstrapWindowOpened
+        );
+        assert_eq!(
+            audit[1].action,
+            AdministrationAuditAction::AdministratorBootstrapped
+        );
+        assert_eq!(
+            audit[2].action,
+            AdministrationAuditAction::AdministratorRecovered
+        );
+        assert_eq!(audit[2].previous_principal.as_deref(), Some("oidc:alice"));
+    }
+
+    #[test]
+    fn administration_bootstrap_expiry_is_fixed_across_restarts() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let commitment = "c".repeat(64);
+        let opened_at = OffsetDateTime::UNIX_EPOCH;
+        let expires_at = opened_at + Duration::seconds(1);
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+
+        store
+            .ensure_administration_bootstrap_window(&commitment, opened_at, expires_at)
+            .expect("bootstrap window should open");
+        drop(store);
+        let reopened = RedbMemoryStore::open(file.path()).expect("store should reopen");
+
+        assert_eq!(
+            reopened
+                .bootstrap_administrator(&commitment, "oidc:alice", expires_at)
+                .expect("expired bootstrap should read"),
+            AdministrationBootstrapOutcome::Expired
+        );
+        assert_eq!(
+            reopened
+                .administration_state()
+                .expect("state should read")
+                .expect("state should exist")
+                .administrator,
+            None
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn rbac_grants_are_scoped_least_privilege_and_audited() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let store = RedbMemoryStore::open(file.path()).expect("store should open");
+        let repository = ScopeId::new("repository-rbac").expect("repository should validate");
+        let repository_scope = MemoryScope::repository(repository.clone());
+        let team_scope = MemoryScope::team(
+            repository,
+            ScopeId::new("team-rbac").expect("team should validate"),
+        );
+        let now = OffsetDateTime::UNIX_EPOCH;
+
+        store
+            .grant_rbac_role(
+                repository_scope.clone(),
+                "oidc:reader",
+                RbacRole::Reader,
+                "oidc:admin",
+                now,
+            )
+            .expect("reader grant should persist");
+        assert!(
+            store
+                .authorize_rbac_role(
+                    repository_scope.clone(),
+                    "oidc:reader",
+                    AuthorizationAction::Read,
+                    RbacRole::Reader,
+                    false,
+                    now,
+                )
+                .expect("reader decision should persist")
+        );
+        assert!(
+            !store
+                .authorize_rbac_role(
+                    repository_scope.clone(),
+                    "oidc:reader",
+                    AuthorizationAction::Write,
+                    RbacRole::Writer,
+                    false,
+                    now,
+                )
+                .expect("writer denial should persist")
+        );
+        assert!(
+            !store
+                .authorize_rbac_role(
+                    team_scope.clone(),
+                    "oidc:reader",
+                    AuthorizationAction::Read,
+                    RbacRole::Reader,
+                    false,
+                    now,
+                )
+                .expect("cross-scope denial should persist")
+        );
+        assert!(
+            store
+                .authorize_rbac_role(
+                    team_scope.clone(),
+                    "oidc:bootstrap-admin",
+                    AuthorizationAction::ManageRoles,
+                    RbacRole::Administrator,
+                    true,
+                    now,
+                )
+                .expect("global administrator decision should persist")
+        );
+        store
+            .grant_rbac_role(
+                repository_scope.clone(),
+                "oidc:reader",
+                RbacRole::Maintainer,
+                "oidc:admin",
+                now,
+            )
+            .expect("role update should persist");
+        assert!(
+            store
+                .authorize_rbac_role(
+                    repository_scope.clone(),
+                    "oidc:reader",
+                    AuthorizationAction::SemanticErase,
+                    RbacRole::Maintainer,
+                    false,
+                    now,
+                )
+                .expect("maintainer decision should persist")
+        );
+        let revoked = store
+            .revoke_rbac_role(repository_scope.clone(), "oidc:reader", "oidc:admin", now)
+            .expect("role revocation should persist")
+            .expect("grant should exist");
+        assert_eq!(revoked.role, RbacRole::Maintainer);
+        assert!(
+            !store
+                .authorize_rbac_role(
+                    repository_scope.clone(),
+                    "oidc:reader",
+                    AuthorizationAction::Read,
+                    RbacRole::Reader,
+                    false,
+                    now,
+                )
+                .expect("post-revocation denial should persist")
+        );
+        assert!(
+            store
+                .rbac_grants_in_scope(&repository_scope)
+                .expect("grants should read")
+                .is_empty()
+        );
+        let audit = store
+            .authorization_audit_in_scope(&repository_scope)
+            .expect("authorization audit should read");
+        assert!(audit.iter().any(|record| {
+            record.audit_action == AuthorizationAuditAction::RoleGranted
+                && record.effective_role == Some(RbacRole::Maintainer)
+        }));
+        assert!(audit.iter().any(|record| {
+            record.audit_action == AuthorizationAuditAction::RoleRevoked
+                && record.subject.as_deref() == Some("oidc:reader")
+        }));
+        assert!(audit.iter().any(|record| {
+            record.audit_action == AuthorizationAuditAction::Decision
+                && !record.allowed
+                && record.required_role == RbacRole::Writer
+        }));
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn service_tokens_are_scoped_nonrecoverable_rotatable_and_revocable() {
+        let database = NamedTempFile::new().expect("tempfile should be created");
+        let snapshot = NamedTempFile::new().expect("snapshot tempfile should be created");
+        let store = RedbMemoryStore::open(database.path()).expect("store should open");
+        let scope = MemoryScope::repository(
+            ScopeId::new("service-token-repository").expect("repository should validate"),
+        );
+        let issued_at = OffsetDateTime::UNIX_EPOCH;
+        let raw_bearer = "shb_at_11111111111111111111111111111111_22222222222222222222222222222222";
+        let commitment = blake3::hash(raw_bearer.as_bytes()).to_hex().to_string();
+        let material = ServiceTokenStoredMaterial {
+            token: ServiceToken {
+                schema_version: SERVICE_TOKEN_SCHEMA_VERSION,
+                id: "11111111111111111111111111111111".to_owned(),
+                principal: "service:11111111111111111111111111111111".to_owned(),
+                scope: scope.clone(),
+                role: RbacRole::Writer,
+                issued_by: "oidc:administrator".to_owned(),
+                issued_at,
+                expires_at: issued_at + Duration::hours(1),
+                revoked_at: None,
+                rotated_from: None,
+                rotated_to: None,
+            },
+            secret_commitment: commitment.clone(),
+        };
+        let issued = store
+            .issue_service_token(&material)
+            .expect("service token should issue");
+        assert_eq!(issued.role, RbacRole::Writer);
+        assert!(
+            store
+                .authenticate_service_token(&issued.id, &commitment, issued_at)
+                .expect("token should authenticate")
+                .is_some()
+        );
+        assert!(
+            store
+                .authenticate_service_token(&issued.id, &"f".repeat(64), issued_at)
+                .expect("wrong commitment should read")
+                .is_none()
+        );
+        store
+            .snapshot(snapshot.path())
+            .expect("snapshot should write");
+        let snapshot_bytes = fs::read(snapshot.path()).expect("snapshot should read");
+        assert!(!String::from_utf8_lossy(&snapshot_bytes).contains(raw_bearer));
+
+        let rotated_at = issued_at + Duration::minutes(1);
+        let successor_commitment = blake3::hash(b"replacement-token-material")
+            .to_hex()
+            .to_string();
+        let successor = ServiceTokenStoredMaterial {
+            token: ServiceToken {
+                schema_version: SERVICE_TOKEN_SCHEMA_VERSION,
+                id: "33333333333333333333333333333333".to_owned(),
+                principal: "service:33333333333333333333333333333333".to_owned(),
+                scope: scope.clone(),
+                role: RbacRole::Writer,
+                issued_by: "oidc:administrator".to_owned(),
+                issued_at: rotated_at,
+                expires_at: rotated_at + Duration::hours(2),
+                revoked_at: None,
+                rotated_from: Some(issued.id.clone()),
+                rotated_to: None,
+            },
+            secret_commitment: successor_commitment.clone(),
+        };
+        let successor = store
+            .rotate_service_token(&issued.id, &successor, "oidc:administrator", rotated_at)
+            .expect("rotation should persist")
+            .expect("active token should rotate");
+        assert!(
+            store
+                .authenticate_service_token(&issued.id, &commitment, rotated_at)
+                .expect("rotated predecessor should read")
+                .is_none()
+        );
+        assert!(
+            store
+                .authenticate_service_token(&successor.id, &successor_commitment, rotated_at)
+                .expect("successor should authenticate")
+                .is_some()
+        );
+        assert!(
+            store
+                .revoke_service_token(
+                    &successor.id,
+                    "oidc:administrator",
+                    rotated_at + Duration::seconds(1)
+                )
+                .expect("revocation should persist")
+                .is_some()
+        );
+        assert!(
+            store
+                .authenticate_service_token(
+                    &successor.id,
+                    &successor_commitment,
+                    rotated_at + Duration::seconds(2),
+                )
+                .expect("revoked token should read")
+                .is_none()
+        );
+        assert_eq!(
+            store
+                .service_tokens_in_scope(&scope)
+                .expect("tokens should read")
+                .len(),
+            2
+        );
+        let audit = store
+            .service_token_audit_in_scope(&scope)
+            .expect("token audit should read");
+        assert_eq!(
+            audit.iter().map(|record| record.action).collect::<Vec<_>>(),
+            vec![
+                ServiceTokenAuditAction::Issued,
+                ServiceTokenAuditAction::Rotated,
+                ServiceTokenAuditAction::Revoked,
+            ]
+        );
+        assert_eq!(
+            audit[1].previous_token_id.as_deref(),
+            Some(issued.id.as_str())
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
     fn snapshot_and_restore_round_trip_full_store_state() {
         let source_db = NamedTempFile::new().expect("source tempfile should be created");
         let snapshot_file = NamedTempFile::new().expect("snapshot tempfile should be created");
@@ -6719,6 +9812,30 @@ mod tests {
         source
             .compact_cold_item(cold.id)
             .expect("cold should compact");
+        let administration_commitment = "d".repeat(64);
+        source
+            .ensure_administration_bootstrap_window(
+                &administration_commitment,
+                OffsetDateTime::UNIX_EPOCH,
+                OffsetDateTime::UNIX_EPOCH + Duration::minutes(15),
+            )
+            .expect("administration bootstrap should open");
+        source
+            .bootstrap_administrator(
+                &administration_commitment,
+                "oidc:alice",
+                OffsetDateTime::UNIX_EPOCH,
+            )
+            .expect("administrator should bootstrap");
+        source
+            .grant_rbac_role(
+                MemoryScope::default(),
+                "oidc:reader",
+                RbacRole::Reader,
+                "oidc:alice",
+                OffsetDateTime::UNIX_EPOCH,
+            )
+            .expect("RBAC grant should persist");
         source
             .snapshot(snapshot_file.path())
             .expect("snapshot should write");
@@ -6745,6 +9862,46 @@ mod tests {
         assert_eq!(restored_cold.content, "");
         assert_eq!(restored_cold_content.as_deref(), Some("cold content"));
         assert_eq!(restored.events().expect("events should read").len(), 3);
+        assert_eq!(
+            restored
+                .administration_state()
+                .expect("administration state should read")
+                .expect("administration state should exist")
+                .administrator
+                .expect("administrator should restore")
+                .principal,
+            "oidc:alice"
+        );
+        assert_eq!(
+            restored
+                .administration_audit()
+                .expect("administration audit should read")
+                .len(),
+            2
+        );
+        assert!(matches!(
+            restored
+                .bootstrap_administrator(
+                    &administration_commitment,
+                    "oidc:bob",
+                    OffsetDateTime::UNIX_EPOCH,
+                )
+                .expect("restored bootstrap state should read"),
+            AdministrationBootstrapOutcome::AlreadyInitialized(_)
+        ));
+        assert_eq!(
+            restored
+                .rbac_grants_in_scope(&MemoryScope::default())
+                .expect("RBAC grants should restore"),
+            vec![RbacGrant {
+                schema_version: RBAC_SCHEMA_VERSION,
+                principal: "oidc:reader".to_owned(),
+                scope: MemoryScope::default(),
+                role: RbacRole::Reader,
+                granted_by: "oidc:alice".to_owned(),
+                granted_at: OffsetDateTime::UNIX_EPOCH,
+            }]
+        );
     }
 
     #[test]

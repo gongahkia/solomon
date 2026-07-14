@@ -7,11 +7,12 @@
 mod mcp;
 mod mcp_resources;
 mod mcp_tools;
+mod oidc;
 
 use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderName, ORIGIN, RETRY_AFTER};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -20,9 +21,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shibahama_core::api::{
-    ConsolidationPassReport, HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest,
-    Shibahama, ShibahamaErrorMetadata, WhyTrace, WriteEmbedding,
+    ConsolidationPassReport, ForgettingConfig, ForgettingMode, HumanCorrectionOutcome,
+    HumanSignalOutcome, HumanSignalRequest, SemanticErasureRequest, Shibahama, ShibahamaConfig,
+    ShibahamaErrorMetadata, WhyTrace, WriteEmbedding,
 };
+use shibahama_core::encryption::{EnvelopeEncryption, LocalKeyProvider};
 use shibahama_core::model::{
     AccessOutcome, ConsolidationAction, ConsolidationWhy, CredenceTier, Entity, EntityId,
     HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance,
@@ -35,8 +38,10 @@ use shibahama_core::retrieval::{
 };
 use shibahama_core::significance::SignificanceBreakdown;
 use shibahama_core::storage::{
-    EventRecord, GraphTraversalRequest, GraphTraversalResult, MemoryEvent, MemoryWriteEvent,
-    RedbMemoryStore,
+    AdministrationAuditRecord, AdministrationBootstrapOutcome, AdministrationRecoveryOutcome,
+    AuthorizationAction, AuthorizationAuditRecord, AuthorizationPrincipalClass, EventRecord,
+    GraphTraversalRequest, GraphTraversalResult, MemoryEvent, MemoryWriteEvent, RbacGrant,
+    RbacRole, RedbMemoryStore, ServiceToken, ServiceTokenAuditRecord, ServiceTokenStoredMaterial,
 };
 use shibahama_core::vector::HnswVectorIndex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,15 +54,23 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
+use url::Url;
 use uuid::Uuid;
 
+use crate::oidc::{OidcAuthenticator, OidcConfig};
+
 type CliResult<T> = Result<T, Box<dyn Error>>;
+
+const ADMIN_BOOTSTRAP_SECRET_DOMAIN: &[u8] = b"shibahama:admin:bootstrap-secret:v1";
+const ADMIN_RECOVERY_SECRET_DOMAIN: &[u8] = b"shibahama:admin:recovery-secret:v1";
+const SERVICE_TOKEN_SECRET_DOMAIN: &[u8] = b"shibahama:service-token:bearer:v1";
+const SERVICE_TOKEN_PREFIX: &str = "shb_at_";
 
 #[derive(Parser)]
 #[command(author, version, about = "Shibahama memory engine CLI")]
@@ -67,6 +80,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Initialise or open a store.
     Init(StoreCommand),
@@ -298,6 +312,7 @@ struct ExportCommand {
 }
 
 #[derive(Args)]
+#[allow(clippy::struct_excessive_bools)]
 struct ServeCommand {
     #[command(flatten)]
     store: StoreArgs,
@@ -310,15 +325,75 @@ struct ServeCommand {
     /// Optional API key. Also falls back to `SHIBAHAMA_API_KEY`.
     #[arg(long)]
     api_key: Option<String>,
+    /// Exact HTTPS OIDC issuer. Also falls back to `SHIBAHAMA_OIDC_ISSUER`.
+    #[arg(long)]
+    oidc_issuer: Option<String>,
+    /// Required OIDC audience/client identifier. Also falls back to `SHIBAHAMA_OIDC_AUDIENCE`.
+    #[arg(long)]
+    oidc_audience: Option<String>,
+    /// OIDC string claim mapped to the opaque internal principal. Defaults to `sub`.
+    #[arg(long)]
+    oidc_principal_claim: Option<String>,
+    /// One-time first-administrator secret. Also falls back to `SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET`.
+    #[arg(long)]
+    admin_bootstrap_secret: Option<String>,
+    /// Bootstrap window duration in seconds. Defaults to 15 minutes.
+    #[arg(long, default_value_t = 900)]
+    admin_bootstrap_ttl_seconds: u64,
+    /// Recovery secret required to replace the initialized administrator. Also falls back to `SHIBAHAMA_ADMIN_RECOVERY_SECRET`.
+    #[arg(long)]
+    admin_recovery_secret: Option<String>,
+    /// Require scoped RBAC grants even before bootstrap administration is initialized.
+    #[arg(long)]
+    rbac_enforce: bool,
+    /// Minimum role for semantic erasure: `maintainer` or `administrator`.
+    #[arg(long, default_value = "maintainer")]
+    rbac_erasure_min_role: String,
+    /// Minimum role for repository-to-team promotion: `maintainer` or `administrator`.
+    #[arg(long, default_value = "maintainer")]
+    rbac_promotion_min_role: String,
+    /// 64-character hexadecimal local envelope key. Also falls back to `SHIBAHAMA_ENCRYPTION_KEY`.
+    #[arg(long)]
+    encryption_key: Option<String>,
+    /// Stable local envelope-key identifier, stored as ciphertext metadata only.
+    #[arg(long, default_value = "service-local")]
+    encryption_key_id: String,
+    /// Permit an unencrypted service store for local development only.
+    #[arg(long)]
+    unsafe_development_plaintext: bool,
+    /// Enable the irreversible, authorization-bound semantic-erasure endpoint.
+    #[arg(long)]
+    full_semantic_erasure: bool,
     /// Maximum materialized memories allowed per namespace.
     #[arg(long, default_value_t = 10_000)]
     max_memories_per_namespace: usize,
+    /// Sustained requests permitted per authenticated principal and exact scope window.
+    #[arg(long, default_value_t = 120)]
+    rate_limit_requests_per_window: u32,
+    /// Token-bucket refill window in seconds.
+    #[arg(long, default_value_t = 60)]
+    rate_limit_window_seconds: u64,
+    /// Immediate requests permitted before token-bucket refills are required.
+    #[arg(long, default_value_t = 30)]
+    rate_limit_burst: u32,
     /// Exact scope granted to HTTP MCP sessions.
     #[arg(long, default_value = "repository")]
     mcp_scope_visibility: String,
     /// Team required when `--mcp-scope-visibility team` is selected.
     #[arg(long)]
     mcp_scope_team: Option<String>,
+    /// Allowed browser origin. Repeat or comma-separate values; also reads `SHIBAHAMA_CORS_ORIGINS`.
+    #[arg(long, value_delimiter = ',')]
+    cors_origin: Vec<String>,
+    /// Allowed browser request method. Repeat or comma-separate values; also reads `SHIBAHAMA_CORS_METHODS`.
+    #[arg(long, value_delimiter = ',')]
+    cors_method: Vec<String>,
+    /// Allowed browser request header. Repeat or comma-separate values; also reads `SHIBAHAMA_CORS_HEADERS`.
+    #[arg(long, value_delimiter = ',')]
+    cors_header: Vec<String>,
+    /// Emit Access-Control-Allow-Credentials; also reads `SHIBAHAMA_CORS_ALLOW_CREDENTIALS`.
+    #[arg(long)]
+    cors_allow_credentials: bool,
 }
 
 #[derive(Args)]
@@ -622,6 +697,7 @@ struct TidelineGraphEdgeDto {
 struct GraphEntityDto {
     id: String,
     scope: MemoryScopeDto,
+    source_memory_id: Option<String>,
     entity_type: String,
     label: String,
     stable_key: String,
@@ -659,7 +735,10 @@ struct ServerState {
     mcp_sessions: Arc<Mutex<BTreeMap<String, mcp::McpSession>>>,
     path: String,
     default_namespace: String,
-    api_key: Option<String>,
+    authentication: ServerAuthentication,
+    administration: ServerAdministration,
+    rbac: ServerRbacPolicy,
+    rate_limiter: Arc<Mutex<ServerRateLimiter>>,
     mcp_scope: MemoryScope,
     max_memories_per_namespace: usize,
 }
@@ -667,7 +746,126 @@ struct ServerState {
 struct ServerRequestContext {
     namespace: String,
     scope: MemoryScope,
-    principal: &'static str,
+    principal: String,
+    principal_class: AuthorizationPrincipalClass,
+    actor_class: PolicyActorClass,
+    credential_role: Option<RbacRole>,
+}
+
+struct ServerAuthenticatedPrincipal {
+    principal: String,
+    principal_class: AuthorizationPrincipalClass,
+    actor_class: PolicyActorClass,
+    credential_role: Option<RbacRole>,
+    token_scope: Option<MemoryScope>,
+}
+
+#[derive(Clone)]
+struct ServerAuthentication {
+    api_key: Option<String>,
+    oidc: Option<OidcAuthenticator>,
+}
+
+#[derive(Clone)]
+struct ServerAdministration {
+    bootstrap: Option<BootstrapAdministration>,
+    recovery_secret_commitment: Option<String>,
+}
+
+#[derive(Clone)]
+struct BootstrapAdministration {
+    secret_commitment: String,
+    ttl_seconds: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ServerRbacPolicy {
+    enforce: bool,
+    erasure_min_role: RbacRole,
+    promotion_min_role: RbacRole,
+}
+
+struct ServerCorsPolicy {
+    origins: Vec<HeaderValue>,
+    methods: Vec<Method>,
+    headers: Vec<HeaderName>,
+    allow_credentials: bool,
+    uses_unsafe_local_defaults: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ServerRateLimitPolicy {
+    requests_per_window: u32,
+    window: Duration,
+    burst: u32,
+}
+
+struct ServerRateLimiter {
+    policy: ServerRateLimitPolicy,
+    buckets: BTreeMap<String, ServerRateLimitBucket>,
+}
+
+struct ServerRateLimitBucket {
+    available: f64,
+    last_refill: Instant,
+}
+
+impl ServerCorsPolicy {
+    fn layer(self) -> CorsLayer {
+        CorsLayer::new()
+            .allow_origin(self.origins)
+            .allow_methods(self.methods)
+            .allow_headers(self.headers)
+            .allow_credentials(self.allow_credentials)
+    }
+}
+
+impl ServerRateLimiter {
+    fn new(policy: ServerRateLimitPolicy) -> Self {
+        Self {
+            policy,
+            buckets: BTreeMap::new(),
+        }
+    }
+
+    fn admit(&mut self, context: &ServerRequestContext, now: Instant) -> Result<(), u64> {
+        let key = format!(
+            "{}\u{1f}{:?}\u{1f}{}\u{1f}",
+            context.principal, context.scope.visibility, context.scope.repository,
+        ) + context.scope.team.as_ref().map_or("", ScopeId::as_str);
+        let capacity = f64::from(self.policy.burst);
+        let refill_per_second =
+            f64::from(self.policy.requests_per_window) / self.policy.window.as_secs_f64();
+        let bucket = self
+            .buckets
+            .entry(key)
+            .or_insert_with(|| ServerRateLimitBucket {
+                available: capacity,
+                last_refill: now,
+            });
+        let elapsed = now
+            .saturating_duration_since(bucket.last_refill)
+            .as_secs_f64();
+
+        bucket.available = (bucket.available + elapsed * refill_per_second).min(capacity);
+        bucket.last_refill = now;
+        if bucket.available >= 1.0 {
+            bucket.available -= 1.0;
+            return Ok(());
+        }
+        let retry_after = Duration::from_secs_f64((1.0 - bucket.available) / refill_per_second);
+        let retry_after = retry_after
+            .as_secs()
+            .saturating_add(u64::from(retry_after.subsec_nanos() > 0));
+
+        Err(retry_after.max(1))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RbacRequirement {
+    action: AuthorizationAction,
+    role: RbacRole,
 }
 
 #[derive(Clone, Deserialize)]
@@ -724,6 +922,43 @@ struct ServerRecallPolicySimulationRequest {
 struct ServerInvalidateRequest {
     memory_id: String,
     valid_to_unix: i64,
+}
+
+#[derive(Deserialize)]
+struct ServerSemanticEraseRequest {
+    memory_id: String,
+    authorization_id: String,
+}
+
+#[derive(Deserialize)]
+struct ServerRbacGrantRequest {
+    principal: String,
+    role: String,
+    scope: Option<ServerScopeRequest>,
+}
+
+#[derive(Deserialize)]
+struct ServerRbacRevokeRequest {
+    principal: String,
+    scope: Option<ServerScopeRequest>,
+}
+
+#[derive(Deserialize)]
+struct ServerServiceTokenIssueRequest {
+    role: String,
+    expires_at_unix: i64,
+    scope: Option<ServerScopeRequest>,
+}
+
+#[derive(Deserialize)]
+struct ServerServiceTokenRotateRequest {
+    expires_at_unix: i64,
+}
+
+#[derive(Serialize)]
+struct ServerIssuedServiceToken {
+    token: ServiceToken,
+    access_token: String,
 }
 
 #[derive(Deserialize)]
@@ -787,6 +1022,7 @@ struct GraphDeleteQuery {
 #[derive(Deserialize)]
 struct ServerGraphEntityRequest {
     id: Option<String>,
+    memory_id: Option<String>,
     entity_type: String,
     label: String,
     stable_key: String,
@@ -824,6 +1060,7 @@ struct ServerError {
     code: String,
     severity: &'static str,
     retryable: bool,
+    retry_after_seconds: Option<u64>,
     detail: &'static str,
 }
 
@@ -836,6 +1073,7 @@ impl ServerError {
                 code: "SHIBA_INTERNAL".to_owned(),
                 severity: "fatal",
                 retryable: false,
+                retry_after_seconds: None,
                 detail: "internal server error",
             };
         };
@@ -845,6 +1083,7 @@ impl ServerError {
                 code: "SHIBA_INTERNAL".to_owned(),
                 severity: "fatal",
                 retryable: false,
+                retry_after_seconds: None,
                 detail: "internal server error",
             };
         };
@@ -858,6 +1097,7 @@ impl ServerError {
             code: metadata.code.to_owned(),
             severity: metadata.severity.as_str(),
             retryable: metadata.retryable,
+            retry_after_seconds: None,
             detail: metadata.detail,
         }
     }
@@ -868,6 +1108,7 @@ impl ServerError {
             code: "SHIBA_INVALID_REQUEST".to_owned(),
             severity: "fatal",
             retryable: false,
+            retry_after_seconds: None,
             detail: "invalid request",
         }
     }
@@ -878,6 +1119,7 @@ impl ServerError {
             code: "SHIBA_UNAUTHORIZED".to_owned(),
             severity: "fatal",
             retryable: false,
+            retry_after_seconds: None,
             detail: "authorization denied",
         }
     }
@@ -888,6 +1130,7 @@ impl ServerError {
             code: "SHIBA_UNAUTHORIZED".to_owned(),
             severity: "fatal",
             retryable: false,
+            retry_after_seconds: None,
             detail: "authorization denied",
         }
     }
@@ -898,6 +1141,7 @@ impl ServerError {
             code: "SHIBA_NOT_FOUND".to_owned(),
             severity: "fatal",
             retryable: false,
+            retry_after_seconds: None,
             detail: "resource not found",
         }
     }
@@ -908,6 +1152,18 @@ impl ServerError {
             code: "SHIBA_RATE_LIMITED".to_owned(),
             severity: "recoverable",
             retryable: true,
+            retry_after_seconds: None,
+            detail: "request rate limited",
+        }
+    }
+
+    fn rate_limited(retry_after_seconds: u64) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "SHIBA_RATE_LIMITED".to_owned(),
+            severity: "recoverable",
+            retryable: true,
+            retry_after_seconds: Some(retry_after_seconds),
             detail: "request rate limited",
         }
     }
@@ -915,17 +1171,26 @@ impl ServerError {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        (
+        let retry_after_seconds = self.retry_after_seconds;
+        let mut response = (
             self.status,
             Json(json!({
                 "error": self.detail,
                 "code": self.code,
                 "severity": self.severity,
                 "retryable": self.retryable,
+                "retry_after_seconds": retry_after_seconds,
                 "detail": self.detail,
             })),
         )
-            .into_response()
+            .into_response();
+        if let Some(retry_after_seconds) = retry_after_seconds
+            && let Ok(value) = HeaderValue::from_str(&retry_after_seconds.to_string())
+        {
+            response.headers_mut().insert(RETRY_AFTER, value);
+        }
+
+        response
     }
 }
 
@@ -1293,20 +1558,62 @@ fn mcp_principal(value: &str) -> CliResult<String> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn serve_async(command: ServeCommand) -> CliResult<()> {
     validate_namespace(&command.namespace)?;
     let mcp_scope = server_mcp_scope(&command)?;
-    let engine = open_engine(&command.store, None)?;
     let api_key = command
         .api_key
+        .clone()
         .or_else(|| env::var("SHIBAHAMA_API_KEY").ok())
         .filter(|value| !value.is_empty());
+    let oidc = oidc_authenticator(&command)?;
+    let administration = server_administration(&command)?;
+    let rbac = server_rbac_policy(&command)?;
+    let rate_limit = server_rate_limit_policy(&command)?;
+    let cors = server_cors_policy(&command)?;
+    if cors.uses_unsafe_local_defaults {
+        eprintln!(
+            "WARNING: unsafe local CORS defaults are active; configure --cors-origin for shared deployments"
+        );
+    }
+    if (administration.bootstrap.is_some() || administration.recovery_secret_commitment.is_some())
+        && api_key.is_none()
+        && oidc.is_none()
+    {
+        return Err(Box::new(CliError(
+            "administrator bootstrap and recovery require API-key or OIDC authentication"
+                .to_owned(),
+        )));
+    }
+    if command.full_semantic_erasure && api_key.is_none() && oidc.is_none() {
+        return Err(Box::new(CliError(
+            "--full-semantic-erasure requires API-key or OIDC authentication".to_owned(),
+        )));
+    }
+    let engine = open_service_engine(&command)?;
+    if let Some(bootstrap) = &administration.bootstrap {
+        let opened_at = OffsetDateTime::now_utc();
+        let ttl_seconds = i64::try_from(bootstrap.ttl_seconds).map_err(|_| {
+            Box::new(CliError(
+                "administrator bootstrap duration is invalid".to_owned(),
+            )) as Box<dyn Error>
+        })?;
+        engine.ensure_administration_bootstrap_window(
+            &bootstrap.secret_commitment,
+            opened_at,
+            opened_at + time::Duration::seconds(ttl_seconds),
+        )?;
+    }
     let state = ServerState {
         engine: Arc::new(Mutex::new(engine)),
         mcp_sessions: Arc::new(Mutex::new(BTreeMap::new())),
         path: command.store.path.display().to_string(),
         default_namespace: command.namespace,
-        api_key,
+        authentication: ServerAuthentication { api_key, oidc },
+        administration,
+        rbac,
+        rate_limiter: Arc::new(Mutex::new(ServerRateLimiter::new(rate_limit))),
         mcp_scope,
         max_memories_per_namespace: command.max_memories_per_namespace,
     };
@@ -1331,6 +1638,29 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
             post(server_simulate_recall_policy),
         )
         .route("/invalidate", post(server_invalidate))
+        .route("/erase", post(server_semantic_erase))
+        .route("/admin/bootstrap", post(server_admin_bootstrap))
+        .route("/admin/recover", post(server_admin_recover))
+        .route("/admin/audit", get(server_admin_audit))
+        .route(
+            "/tokens",
+            get(server_service_tokens).post(server_issue_service_token),
+        )
+        .route("/tokens/audit", get(server_service_token_audit))
+        .route(
+            "/tokens/{token_id}/rotate",
+            post(server_rotate_service_token),
+        )
+        .route(
+            "/tokens/{token_id}/revoke",
+            post(server_revoke_service_token),
+        )
+        .route(
+            "/rbac/grants",
+            get(server_rbac_grants).post(server_rbac_grant),
+        )
+        .route("/rbac/revoke", post(server_rbac_revoke))
+        .route("/rbac/audit", get(server_rbac_audit))
         .route("/recall", post(server_recall))
         .route("/recall/degraded", post(server_recall_degraded))
         .route("/timeline", post(server_timeline))
@@ -1359,12 +1689,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/tideline/snapshot", get(server_tideline_snapshot))
         .route("/tideline/recording", get(server_tideline_recording))
         .route("/tideline/live", get(server_tideline_live))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(cors.layer())
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(command.bind).await?;
     let local_addr = listener.local_addr()?;
@@ -1377,6 +1702,390 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
     Ok(())
 }
 
+fn oidc_authenticator(command: &ServeCommand) -> CliResult<Option<OidcAuthenticator>> {
+    let issuer = command
+        .oidc_issuer
+        .clone()
+        .or_else(|| env::var("SHIBAHAMA_OIDC_ISSUER").ok())
+        .filter(|value| !value.is_empty());
+    let audience = command
+        .oidc_audience
+        .clone()
+        .or_else(|| env::var("SHIBAHAMA_OIDC_AUDIENCE").ok())
+        .filter(|value| !value.is_empty());
+
+    let (Some(issuer), Some(audience)) = (issuer, audience) else {
+        if command.oidc_issuer.is_some()
+            || command.oidc_audience.is_some()
+            || command.oidc_principal_claim.is_some()
+            || env::var_os("SHIBAHAMA_OIDC_ISSUER").is_some()
+            || env::var_os("SHIBAHAMA_OIDC_AUDIENCE").is_some()
+            || env::var_os("SHIBAHAMA_OIDC_PRINCIPAL_CLAIM").is_some()
+        {
+            return Err(Box::new(CliError(
+                "OIDC requires issuer and audience".to_owned(),
+            )));
+        }
+        return Ok(None);
+    };
+    let principal_claim = command
+        .oidc_principal_claim
+        .clone()
+        .or_else(|| env::var("SHIBAHAMA_OIDC_PRINCIPAL_CLAIM").ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "sub".to_owned());
+    let config = OidcConfig::new(issuer, audience, principal_claim)
+        .map_err(|error| Box::new(CliError(error.to_string())) as Box<dyn Error>)?;
+
+    OidcAuthenticator::discover(config)
+        .map(Some)
+        .map_err(|error| Box::new(CliError(error.to_string())) as Box<dyn Error>)
+}
+
+fn server_administration(command: &ServeCommand) -> CliResult<ServerAdministration> {
+    let bootstrap_secret = command
+        .admin_bootstrap_secret
+        .clone()
+        .or_else(|| env::var("SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET").ok())
+        .filter(|value| !value.is_empty());
+    let recovery_secret = command
+        .admin_recovery_secret
+        .clone()
+        .or_else(|| env::var("SHIBAHAMA_ADMIN_RECOVERY_SECRET").ok())
+        .filter(|value| !value.is_empty());
+    let recovery_secret_commitment = recovery_secret
+        .as_deref()
+        .map(|secret| operator_secret_commitment(secret, ADMIN_RECOVERY_SECRET_DOMAIN))
+        .transpose()?;
+    let bootstrap = bootstrap_secret
+        .as_deref()
+        .map(|secret| {
+            if !(60..=86_400).contains(&command.admin_bootstrap_ttl_seconds) {
+                return Err(Box::new(CliError(
+                    "administrator bootstrap TTL must be between 60 and 86400 seconds".to_owned(),
+                )) as Box<dyn Error>);
+            }
+
+            Ok(BootstrapAdministration {
+                secret_commitment: operator_secret_commitment(
+                    secret,
+                    ADMIN_BOOTSTRAP_SECRET_DOMAIN,
+                )?,
+                ttl_seconds: command.admin_bootstrap_ttl_seconds,
+            })
+        })
+        .transpose()?;
+
+    if bootstrap.is_some() && recovery_secret_commitment.is_none() {
+        return Err(Box::new(CliError(
+            "administrator bootstrap requires --admin-recovery-secret or SHIBAHAMA_ADMIN_RECOVERY_SECRET"
+                .to_owned(),
+        )));
+    }
+
+    Ok(ServerAdministration {
+        bootstrap,
+        recovery_secret_commitment,
+    })
+}
+
+fn server_rbac_policy(command: &ServeCommand) -> CliResult<ServerRbacPolicy> {
+    Ok(ServerRbacPolicy {
+        enforce: command.rbac_enforce,
+        erasure_min_role: parse_rbac_minimum_role(&command.rbac_erasure_min_role)?,
+        promotion_min_role: parse_rbac_minimum_role(&command.rbac_promotion_min_role)?,
+    })
+}
+
+fn server_rate_limit_policy(command: &ServeCommand) -> CliResult<ServerRateLimitPolicy> {
+    if command.rate_limit_requests_per_window == 0
+        || command.rate_limit_burst == 0
+        || command.rate_limit_window_seconds == 0
+        || command.rate_limit_window_seconds > 86_400
+    {
+        return Err(Box::new(CliError(
+            "rate-limit requests, burst, and window must be positive; window must not exceed 86400 seconds"
+                .to_owned(),
+        )));
+    }
+
+    Ok(ServerRateLimitPolicy {
+        requests_per_window: command.rate_limit_requests_per_window,
+        window: Duration::from_secs(command.rate_limit_window_seconds),
+        burst: command.rate_limit_burst,
+    })
+}
+
+fn server_cors_policy(command: &ServeCommand) -> CliResult<ServerCorsPolicy> {
+    let configured_origins = cors_values(&command.cors_origin, "SHIBAHAMA_CORS_ORIGINS");
+    let uses_unsafe_local_defaults = configured_origins.is_empty();
+    let origins = if uses_unsafe_local_defaults {
+        vec![
+            "http://localhost:5173".to_owned(),
+            "http://127.0.0.1:5173".to_owned(),
+        ]
+    } else {
+        configured_origins
+    };
+    let methods = cors_values(&command.cors_method, "SHIBAHAMA_CORS_METHODS");
+    let methods = if methods.is_empty() {
+        vec!["GET".to_owned(), "POST".to_owned(), "DELETE".to_owned()]
+    } else {
+        methods
+    };
+    let headers = cors_values(&command.cors_header, "SHIBAHAMA_CORS_HEADERS");
+    let headers = if headers.is_empty() {
+        vec![
+            "accept".to_owned(),
+            "authorization".to_owned(),
+            "content-type".to_owned(),
+            "x-api-key".to_owned(),
+            "x-shibahama-bootstrap-secret".to_owned(),
+            "x-shibahama-namespace".to_owned(),
+            "x-shibahama-recovery-secret".to_owned(),
+            "x-shibahama-scope-team".to_owned(),
+            "x-shibahama-scope-visibility".to_owned(),
+        ]
+    } else {
+        headers
+    };
+
+    Ok(ServerCorsPolicy {
+        origins: parse_cors_origins(origins)?,
+        methods: parse_cors_methods(methods)?,
+        headers: parse_cors_headers(headers)?,
+        allow_credentials: command.cors_allow_credentials
+            || cors_allow_credentials_from_environment()?,
+        uses_unsafe_local_defaults,
+    })
+}
+
+fn cors_values(cli_values: &[String], environment_key: &str) -> Vec<String> {
+    let values = if cli_values.is_empty() {
+        env::var(environment_key)
+            .ok()
+            .map(|value| value.split(',').map(str::to_owned).collect())
+            .unwrap_or_default()
+    } else {
+        cli_values.to_vec()
+    };
+    values
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn cors_allow_credentials_from_environment() -> CliResult<bool> {
+    match env::var("SHIBAHAMA_CORS_ALLOW_CREDENTIALS") {
+        Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE") => Ok(true),
+        Ok(value) if matches!(value.as_str(), "0" | "false" | "FALSE") => Ok(false),
+        Ok(_) => Err(Box::new(CliError(
+            "SHIBAHAMA_CORS_ALLOW_CREDENTIALS must be true or false".to_owned(),
+        ))),
+        Err(env::VarError::NotPresent) => Ok(false),
+        Err(env::VarError::NotUnicode(_)) => Err(Box::new(CliError(
+            "SHIBAHAMA_CORS_ALLOW_CREDENTIALS must be valid UTF-8".to_owned(),
+        ))),
+    }
+}
+
+fn parse_cors_origins(values: Vec<String>) -> CliResult<Vec<HeaderValue>> {
+    let mut seen = BTreeSet::new();
+    let mut origins = Vec::new();
+
+    for value in values {
+        let origin = Url::parse(&value).map_err(|_| {
+            Box::new(CliError(
+                "CORS origin must be an exact HTTP(S) origin".to_owned(),
+            )) as Box<dyn Error>
+        })?;
+        if !matches!(origin.scheme(), "http" | "https")
+            || origin.host_str().is_none()
+            || !origin.username().is_empty()
+            || origin.password().is_some()
+            || origin.path() != "/"
+            || origin.query().is_some()
+            || origin.fragment().is_some()
+        {
+            return Err(Box::new(CliError(
+                "CORS origin must be an exact HTTP(S) origin without path, query, or credentials"
+                    .to_owned(),
+            )));
+        }
+        let canonical = origin.origin().ascii_serialization();
+        if canonical == "null" {
+            return Err(Box::new(CliError("CORS origin is invalid".to_owned())));
+        }
+        if seen.insert(canonical.clone()) {
+            origins.push(HeaderValue::from_str(&canonical).map_err(|_| {
+                Box::new(CliError("CORS origin header is invalid".to_owned())) as Box<dyn Error>
+            })?);
+        }
+    }
+    if origins.is_empty() {
+        return Err(Box::new(CliError(
+            "CORS must allow at least one explicit origin".to_owned(),
+        )));
+    }
+
+    Ok(origins)
+}
+
+fn parse_cors_methods(values: Vec<String>) -> CliResult<Vec<Method>> {
+    let mut seen = BTreeSet::new();
+    let mut methods = Vec::new();
+
+    for value in values {
+        let method = Method::from_bytes(value.as_bytes()).map_err(|_| {
+            Box::new(CliError("CORS method is invalid".to_owned())) as Box<dyn Error>
+        })?;
+        if seen.insert(method.as_str().to_owned()) {
+            methods.push(method);
+        }
+    }
+    if methods.is_empty() {
+        return Err(Box::new(CliError(
+            "CORS must allow at least one explicit method".to_owned(),
+        )));
+    }
+
+    Ok(methods)
+}
+
+fn parse_cors_headers(values: Vec<String>) -> CliResult<Vec<HeaderName>> {
+    let mut seen = BTreeSet::new();
+    let mut headers = Vec::new();
+
+    for value in values {
+        let header = HeaderName::from_bytes(value.as_bytes()).map_err(|_| {
+            Box::new(CliError("CORS header is invalid".to_owned())) as Box<dyn Error>
+        })?;
+        if seen.insert(header.as_str().to_owned()) {
+            headers.push(header);
+        }
+    }
+    if headers.is_empty() {
+        return Err(Box::new(CliError(
+            "CORS must allow at least one explicit request header".to_owned(),
+        )));
+    }
+
+    Ok(headers)
+}
+
+fn parse_rbac_minimum_role(value: &str) -> CliResult<RbacRole> {
+    match value {
+        "maintainer" => Ok(RbacRole::Maintainer),
+        "administrator" => Ok(RbacRole::Administrator),
+        _ => Err(Box::new(CliError(
+            "RBAC minimum role must be `maintainer` or `administrator`".to_owned(),
+        ))),
+    }
+}
+
+fn parse_rbac_role(value: &str) -> Result<RbacRole, ServerError> {
+    match value {
+        "reader" => Ok(RbacRole::Reader),
+        "writer" => Ok(RbacRole::Writer),
+        "maintainer" => Ok(RbacRole::Maintainer),
+        "administrator" => Ok(RbacRole::Administrator),
+        _ => Err(ServerError::bad_request("RBAC role is invalid")),
+    }
+}
+
+fn operator_secret_commitment(secret: &str, domain: &[u8]) -> CliResult<String> {
+    if !(32..=1024).contains(&secret.len()) {
+        return Err(Box::new(CliError(
+            "administrator secret must contain 32-1024 bytes".to_owned(),
+        )));
+    }
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(domain);
+    hasher.update(&[0]);
+    hasher.update(secret.len().to_string().as_bytes());
+    hasher.update(&[0]);
+    hasher.update(secret.as_bytes());
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn commitments_match(expected: &str, submitted: &str) -> bool {
+    let difference = expected.bytes().zip(submitted.bytes()).fold(
+        u8::try_from(expected.len() ^ submitted.len()).unwrap_or(u8::MAX),
+        |value, pair| value | (pair.0 ^ pair.1),
+    );
+
+    difference == 0
+}
+
+fn service_token_bearer_commitment(value: &str) -> Option<(String, String)> {
+    let value = value.strip_prefix(SERVICE_TOKEN_PREFIX)?;
+    let (token_id, token_secret) = value.split_once('_')?;
+    if !valid_service_token_component(token_id)
+        || !valid_service_token_component(token_secret)
+        || token_secret.contains('_')
+    {
+        return None;
+    }
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(SERVICE_TOKEN_SECRET_DOMAIN);
+    hasher.update(&[0]);
+    hasher.update(value.as_bytes());
+
+    Some((token_id.to_owned(), hasher.finalize().to_hex().to_string()))
+}
+
+fn valid_service_token_component(value: &str) -> bool {
+    value.len() == 32
+        && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+        })
+}
+
+fn issue_service_token_material(
+    scope: MemoryScope,
+    role: RbacRole,
+    issued_by: String,
+    issued_at: OffsetDateTime,
+    expires_at: OffsetDateTime,
+    rotated_from: Option<String>,
+) -> Result<(ServiceTokenStoredMaterial, String), ServerError> {
+    if expires_at <= issued_at {
+        return Err(ServerError::bad_request(
+            "service token expiry must be in the future",
+        ));
+    }
+    let token_id = Uuid::new_v4().simple().to_string();
+    let token_secret = Uuid::new_v4().simple().to_string();
+    let access_token = format!("{SERVICE_TOKEN_PREFIX}{token_id}_{token_secret}");
+    let (_, secret_commitment) = service_token_bearer_commitment(&access_token)
+        .ok_or_else(|| ServerError::internal("generated service token is invalid"))?;
+    let token = ServiceToken {
+        schema_version: 1,
+        principal: format!("service:{token_id}"),
+        id: token_id,
+        scope,
+        role,
+        issued_by,
+        issued_at,
+        expires_at,
+        revoked_at: None,
+        rotated_from,
+        rotated_to: None,
+    };
+
+    Ok((
+        ServiceTokenStoredMaterial {
+            token,
+            secret_commitment,
+        },
+        access_token,
+    ))
+}
+
 async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         eprintln!("failed to listen for shutdown signal: {error}");
@@ -1387,14 +2096,26 @@ fn server_context(
     headers: &HeaderMap,
     state: &ServerState,
 ) -> Result<ServerRequestContext, ServerError> {
-    let principal = authorize_server_request(headers, state)?;
+    let authenticated = authorize_server_request(headers, state)?;
     let namespace = request_namespace(headers, state)?;
     let scope = request_scope(headers, &namespace)?;
+    if authenticated
+        .token_scope
+        .as_ref()
+        .is_some_and(|token_scope| token_scope != &scope)
+    {
+        return Err(ServerError::forbidden(
+            "service token scope does not match the request scope",
+        ));
+    }
 
     Ok(ServerRequestContext {
         namespace,
         scope,
-        principal,
+        principal: authenticated.principal,
+        principal_class: authenticated.principal_class,
+        actor_class: authenticated.actor_class,
+        credential_role: authenticated.credential_role,
     })
 }
 
@@ -1402,18 +2123,28 @@ fn server_mcp_context(
     headers: &HeaderMap,
     state: &ServerState,
 ) -> Result<mcp::McpServerContext, ServerError> {
-    let principal = authorize_server_request(headers, state)?;
-    let namespace = request_namespace(headers, state)?;
-    let scope = request_scope(headers, &namespace)?;
-    if scope != state.mcp_scope {
+    let context = server_context(headers, state)?;
+    if context.scope != state.mcp_scope {
         return Err(ServerError::forbidden(
             "requested MCP scope does not match the transport grant",
         ));
     }
-    Ok(mcp::McpServerContext::new(
+    admit_server_request(state, &context)?;
+    authorize_server_rbac(
+        state,
+        &context,
+        RbacRequirement {
+            action: AuthorizationAction::Read,
+            role: RbacRole::Reader,
+        },
+        false,
+    )?;
+    Ok(mcp::McpServerContext::new_with_authorization(
         state.mcp_scope.clone(),
-        principal.to_owned(),
-        PolicyActorClass::Service,
+        context.principal,
+        context.actor_class,
+        context.credential_role,
+        context.principal_class,
     ))
 }
 
@@ -1448,7 +2179,34 @@ fn server_context_or_log(
     route: &str,
 ) -> Result<ServerRequestContext, ServerError> {
     match server_context(headers, state) {
-        Ok(context) => Ok(context),
+        Ok(context) => {
+            if let Err(error) = admit_server_request(state, &context) {
+                log_server_request(
+                    method,
+                    route,
+                    Some(&context.namespace),
+                    &context.principal,
+                    error.status,
+                    json!({ "request_units": 1 }),
+                );
+                return Err(error);
+            }
+            if let Some(requirement) = server_rbac_requirement(state, method, route)
+                && let Err(error) = authorize_server_rbac(state, &context, requirement, false)
+            {
+                log_server_request(
+                    method,
+                    route,
+                    Some(&context.namespace),
+                    &context.principal,
+                    error.status,
+                    json!({ "request_units": 1 }),
+                );
+                return Err(error);
+            }
+
+            Ok(context)
+        }
         Err(error) => {
             let namespace = request_namespace(headers, state)
                 .ok()
@@ -1466,15 +2224,122 @@ fn server_context_or_log(
     }
 }
 
+fn admit_server_request(
+    state: &ServerState,
+    context: &ServerRequestContext,
+) -> Result<(), ServerError> {
+    let mut limiter = state
+        .rate_limiter
+        .lock()
+        .map_err(|error| ServerError::internal(format!("rate limiter lock poisoned: {error}")))?;
+    limiter
+        .admit(context, Instant::now())
+        .map_err(ServerError::rate_limited)
+}
+
+fn server_rbac_requirement(
+    state: &ServerState,
+    method: &str,
+    route: &str,
+) -> Option<RbacRequirement> {
+    if route.starts_with("/admin/")
+        || route.starts_with("/rbac/")
+        || route.starts_with("/tokens/")
+        || route == "/tokens"
+        || route == "/mcp"
+    {
+        return None;
+    }
+    let read = RbacRequirement {
+        action: AuthorizationAction::Read,
+        role: RbacRole::Reader,
+    };
+    let write = RbacRequirement {
+        action: AuthorizationAction::Write,
+        role: RbacRole::Writer,
+    };
+    let maintain = RbacRequirement {
+        action: AuthorizationAction::Maintain,
+        role: RbacRole::Maintainer,
+    };
+
+    match (method, route) {
+        ("GET", _)
+        | (
+            "POST",
+            "/policy/simulate/capture"
+            | "/policy/simulate/recall"
+            | "/recall"
+            | "/recall/degraded"
+            | "/timeline"
+            | "/graph/traverse",
+        ) => Some(read),
+        ("POST", "/write" | "/reinforce" | "/graph/entities" | "/graph/relations") => Some(write),
+        ("POST", "/erase") => Some(RbacRequirement {
+            action: AuthorizationAction::SemanticErase,
+            role: state.rbac.erasure_min_role,
+        }),
+        _ => Some(maintain),
+    }
+}
+
+fn authorize_server_rbac(
+    state: &ServerState,
+    context: &ServerRequestContext,
+    requirement: RbacRequirement,
+    force_enforcement: bool,
+) -> Result<(), ServerError> {
+    let engine = state
+        .engine
+        .lock()
+        .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+    let administration = engine
+        .administration_state()
+        .map_err(ServerError::internal)?;
+    let global_administrator = administration
+        .as_ref()
+        .and_then(|administration| administration.administrator.as_ref())
+        .is_some_and(|administrator| administrator.principal == context.principal);
+    let active = context.credential_role.is_some()
+        || state.rbac.enforce
+        || administration
+            .as_ref()
+            .is_some_and(|administration| administration.administrator.is_some());
+    if !active {
+        return if force_enforcement {
+            Err(ServerError::forbidden("RBAC administration is unavailable"))
+        } else {
+            Ok(())
+        };
+    }
+    let allowed = engine
+        .authorize_rbac_role_with_credential(
+            context.scope.clone(),
+            context.principal.clone(),
+            requirement.action,
+            requirement.role,
+            global_administrator,
+            context.credential_role,
+            Some(context.principal_class),
+            Some(context.actor_class),
+            OffsetDateTime::now_utc(),
+        )
+        .map_err(ServerError::internal)?;
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(ServerError::forbidden("RBAC role grant is required"))
+    }
+}
+
 fn authorize_server_request(
     headers: &HeaderMap,
     state: &ServerState,
-) -> Result<&'static str, ServerError> {
-    let Some(api_key) = state.api_key.as_deref() else {
-        return Ok("anonymous");
-    };
+) -> Result<ServerAuthenticatedPrincipal, ServerError> {
+    let authentication = &state.authentication;
 
-    let bearer_key = headers
+    let bearer_token = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
@@ -1482,11 +2347,67 @@ fn authorize_server_request(
         .get("x-api-key")
         .and_then(|value| value.to_str().ok());
 
-    if bearer_key == Some(api_key) || header_key == Some(api_key) {
-        Ok("api_key")
-    } else {
-        Err(ServerError::unauthorized("missing or invalid API key"))
+    if let Some(token) = bearer_token.filter(|token| token.starts_with(SERVICE_TOKEN_PREFIX)) {
+        let Some((token_id, secret_commitment)) = service_token_bearer_commitment(token) else {
+            return Err(ServerError::unauthorized("invalid service token"));
+        };
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let Some(service_token) = engine
+            .authenticate_service_token(&token_id, &secret_commitment, OffsetDateTime::now_utc())
+            .map_err(ServerError::internal)?
+        else {
+            return Err(ServerError::unauthorized("invalid service token"));
+        };
+        return Ok(ServerAuthenticatedPrincipal {
+            principal: service_token.principal,
+            principal_class: AuthorizationPrincipalClass::ServiceToken,
+            actor_class: PolicyActorClass::Automation,
+            credential_role: Some(service_token.role),
+            token_scope: Some(service_token.scope),
+        });
     }
+
+    if authentication.api_key.is_none() && authentication.oidc.is_none() {
+        return Ok(ServerAuthenticatedPrincipal {
+            principal: "anonymous".to_owned(),
+            principal_class: AuthorizationPrincipalClass::Anonymous,
+            actor_class: PolicyActorClass::Service,
+            credential_role: None,
+            token_scope: None,
+        });
+    }
+
+    if let (Some(token), Some(oidc)) = (bearer_token, authentication.oidc.as_ref()) {
+        let principal = oidc
+            .authenticate(token)
+            .map_err(|_| ServerError::unauthorized("missing or invalid bearer token"))?;
+        return Ok(ServerAuthenticatedPrincipal {
+            principal,
+            principal_class: AuthorizationPrincipalClass::Oidc,
+            actor_class: PolicyActorClass::Human,
+            credential_role: None,
+            token_scope: None,
+        });
+    }
+
+    if let Some(api_key) = authentication.api_key.as_deref()
+        && (bearer_token == Some(api_key) || header_key == Some(api_key))
+    {
+        return Ok(ServerAuthenticatedPrincipal {
+            principal: "api_key".to_owned(),
+            principal_class: AuthorizationPrincipalClass::ApiKey,
+            actor_class: PolicyActorClass::Agent,
+            credential_role: None,
+            token_scope: None,
+        });
+    }
+
+    Err(ServerError::unauthorized(
+        "missing or invalid authentication",
+    ))
 }
 
 fn request_namespace(headers: &HeaderMap, state: &ServerState) -> Result<String, ServerError> {
@@ -1661,6 +2582,12 @@ fn graph_entity_from_request(
     if let Some(id) = body.id {
         entity.id = parse_entity_id(&id)?;
     }
+    entity.source_memory_id = body
+        .memory_id
+        .as_deref()
+        .map(parse_memory_id)
+        .transpose()
+        .map_err(ServerError::bad_request)?;
     entity = entity.with_scope(scope.clone());
     entity.attributes = namespace_graph_attributes(body.attributes, namespace);
 
@@ -1779,7 +2706,7 @@ fn server_json_result<T>(
                 method,
                 route,
                 Some(&context.namespace),
-                context.principal,
+                &context.principal,
                 StatusCode::OK,
                 cost,
             );
@@ -1790,7 +2717,7 @@ fn server_json_result<T>(
                 method,
                 route,
                 Some(&context.namespace),
-                context.principal,
+                &context.principal,
                 error.status,
                 json!({ "request_units": 1 }),
             );
@@ -1915,10 +2842,12 @@ fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
             record.memory_id.is_some_and(|memory_id| memory_id == id)
         }
         MemoryEvent::MemoryInvalidated { id: event_id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id: event_id, .. }
         | MemoryEvent::ReverificationFlagged { id: event_id, .. }
         | MemoryEvent::AccessRecorded { id: event_id, .. }
         | MemoryEvent::TierChanged { id: event_id, .. }
         | MemoryEvent::ContentCompacted { id: event_id, .. } => *event_id == id,
+        MemoryEvent::MemorySemanticallyErased { tombstone } => tombstone.memory_id == id,
         MemoryEvent::ReconstructionApplied {
             superseded_id,
             replacement_id,
@@ -1991,6 +2920,18 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
             event.valid_to_unix = Some(valid_to.unix_timestamp());
             event
         }
+        MemoryEvent::MemoryRecordKeyDestroyed { id, .. } => base_tideline_event(
+            sequence,
+            recorded_at,
+            "memory_record_key_destroyed",
+            vec![id],
+        ),
+        MemoryEvent::MemorySemanticallyErased { tombstone } => base_tideline_event(
+            sequence,
+            recorded_at,
+            "memory_semantically_erased",
+            vec![tombstone.memory_id],
+        ),
         MemoryEvent::ReverificationFlagged { id, flagged_at, .. } => {
             let mut event =
                 base_tideline_event(sequence, recorded_at, "reverification_flagged", vec![id]);
@@ -2200,6 +3141,8 @@ fn event_kind(event: &MemoryEvent) -> &'static str {
         MemoryEvent::AutomaticCaptureRecorded { .. } => "automatic_capture",
         MemoryEvent::ObservabilityRecorded { .. } => "observability",
         MemoryEvent::MemoryInvalidated { .. } => "memory_invalidated",
+        MemoryEvent::MemoryRecordKeyDestroyed { .. } => "memory_record_key_destroyed",
+        MemoryEvent::MemorySemanticallyErased { .. } => "memory_semantically_erased",
         MemoryEvent::ReverificationFlagged { .. } => "reverification_flagged",
         MemoryEvent::AccessRecorded { .. } => "access_recorded",
         MemoryEvent::TierChanged { .. } => "tier_changed",
@@ -2231,10 +3174,14 @@ fn event_memory_ids(event: &MemoryEvent) -> Vec<String> {
             record.memory_id.iter().map(ToString::to_string).collect()
         }
         MemoryEvent::MemoryInvalidated { id, .. }
+        | MemoryEvent::MemoryRecordKeyDestroyed { id, .. }
         | MemoryEvent::ReverificationFlagged { id, .. }
         | MemoryEvent::AccessRecorded { id, .. }
         | MemoryEvent::TierChanged { id, .. }
         | MemoryEvent::ContentCompacted { id, .. } => vec![id.to_string()],
+        MemoryEvent::MemorySemanticallyErased { tombstone } => {
+            vec![tombstone.memory_id.to_string()]
+        }
         MemoryEvent::ReconstructionApplied {
             superseded_id,
             replacement_id,
@@ -2438,7 +3385,7 @@ fn log_server_request(
     method: &str,
     route: &str,
     namespace: Option<&str>,
-    principal: &str,
+    principal: impl AsRef<str>,
     status: StatusCode,
     cost: serde_json::Value,
 ) {
@@ -2448,12 +3395,27 @@ fn log_server_request(
         "method": method,
         "route": route,
         "namespace": namespace.unwrap_or("unknown"),
-        "principal": principal,
+        "principal": principal.as_ref(),
+        "principal_class": service_principal_class(principal.as_ref()),
         "status": status.as_u16(),
         "cost": cost,
     });
 
     eprintln!("{record}");
+}
+
+fn service_principal_class(principal: &str) -> &'static str {
+    if principal.starts_with("service:") {
+        "service_token"
+    } else if principal.starts_with("oidc:") {
+        "oidc"
+    } else if principal == "api_key" {
+        "api_key"
+    } else if principal == "anonymous" {
+        "anonymous"
+    } else {
+        "unknown"
+    }
 }
 
 async fn server_mcp_post(
@@ -2543,7 +3505,14 @@ async fn server_mcp_post(
     let Ok(mut engine) = state.engine.lock() else {
         return mcp_transport_error(StatusCode::INTERNAL_SERVER_ERROR, -32603, "Internal error");
     };
-    let mut backend = mcp_tools::McpEngineBackend::new(&mut engine);
+    let mut backend = mcp_tools::McpEngineBackend::with_rbac(
+        &mut engine,
+        mcp_tools::McpRbacPolicy {
+            enforce: state.rbac.enforce,
+            erasure_min_role: state.rbac.erasure_min_role,
+            promotion_min_role: state.rbac.promotion_min_role,
+        },
+    );
     match session.handle_with(message, &mut backend) {
         Some(response) => mcp_json_response(StatusCode::OK, response, None),
         None => StatusCode::ACCEPTED.into_response(),
@@ -2985,6 +3954,635 @@ async fn server_invalidate(
     })();
 
     server_json_result("POST", "/invalidate", &context, result)
+}
+
+async fn server_semantic_erase(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerSemanticEraseRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/erase")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        if !valid_semantic_erasure_metadata(&body.authorization_id) {
+            return Err(ServerError::bad_request("authorization_id is invalid"));
+        }
+        let id = parse_memory_id(&body.memory_id).map_err(ServerError::bad_request)?;
+        let mut engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+
+        ensure_memory_in_scope(&engine, id, &context.scope)?;
+        let outcome = engine
+            .semantic_erase(
+                id,
+                SemanticErasureRequest::new(
+                    context.principal.clone(),
+                    body.authorization_id,
+                    OffsetDateTime::now_utc(),
+                ),
+            )
+            .map_err(ServerError::internal)?;
+        let applied = outcome.is_some();
+        let tombstone = outcome.map(|outcome| {
+            json!({
+                "memory_id": outcome.tombstone.memory_id.to_string(),
+                "scope": MemoryScopeDto::from(outcome.tombstone.scope),
+                "erased_at_unix": outcome.tombstone.erased_at.unix_timestamp(),
+                "destroyed_record_key_count": outcome.tombstone.destroyed_record_key_count,
+                "authorization_id_hash": outcome.tombstone.authorization_id_hash,
+                "integrity_hash": outcome.tombstone.integrity_hash,
+            })
+        });
+
+        Ok((
+            Json(json!({
+                "applied": applied,
+                "irreversible": applied,
+                "tombstone": tombstone,
+            })),
+            json!({ "request_units": 1, "memory_writes": i32::from(applied) }),
+        ))
+    })();
+
+    server_json_result("POST", "/erase", &context, result)
+}
+
+async fn server_admin_bootstrap(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/admin/bootstrap")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        require_authenticated_administration_principal(&context.principal)?;
+        let Some(bootstrap) = state.administration.bootstrap.as_ref() else {
+            return Err(ServerError::forbidden(
+                "administrator bootstrap is not configured",
+            ));
+        };
+        let submitted = operator_secret_from_headers(&headers, "x-shibahama-bootstrap-secret")?;
+        let submitted = operator_secret_commitment(&submitted, ADMIN_BOOTSTRAP_SECRET_DOMAIN)
+            .map_err(ServerError::unauthorized)?;
+        if !commitments_match(&bootstrap.secret_commitment, &submitted) {
+            return Err(ServerError::unauthorized(
+                "administrator bootstrap secret is invalid",
+            ));
+        }
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let outcome = engine
+            .bootstrap_administrator(
+                &submitted,
+                context.principal.clone(),
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(ServerError::internal)?;
+
+        match outcome {
+            AdministrationBootstrapOutcome::Initialized(_) => Ok((
+                Json(json!({ "initialized": true })),
+                json!({ "request_units": 1, "administration_writes": 1 }),
+            )),
+            AdministrationBootstrapOutcome::AlreadyInitialized(_)
+            | AdministrationBootstrapOutcome::Expired
+            | AdministrationBootstrapOutcome::SecretMismatch
+            | AdministrationBootstrapOutcome::NotConfigured => Err(ServerError::forbidden(
+                "administrator bootstrap is unavailable",
+            )),
+        }
+    })();
+
+    server_json_result("POST", "/admin/bootstrap", &context, result)
+}
+
+async fn server_admin_recover(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/admin/recover")?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        require_authenticated_administration_principal(&context.principal)?;
+        let Some(expected) = state.administration.recovery_secret_commitment.as_deref() else {
+            return Err(ServerError::forbidden(
+                "administrator recovery is not configured",
+            ));
+        };
+        let submitted = operator_secret_from_headers(&headers, "x-shibahama-recovery-secret")?;
+        let submitted = operator_secret_commitment(&submitted, ADMIN_RECOVERY_SECRET_DOMAIN)
+            .map_err(ServerError::unauthorized)?;
+        if !commitments_match(expected, &submitted) {
+            return Err(ServerError::unauthorized(
+                "administrator recovery secret is invalid",
+            ));
+        }
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let outcome = engine
+            .recover_administrator(context.principal.clone(), OffsetDateTime::now_utc())
+            .map_err(ServerError::internal)?;
+
+        match outcome {
+            AdministrationRecoveryOutcome::Recovered(_) => Ok((
+                Json(json!({ "recovered": true })),
+                json!({ "request_units": 1, "administration_writes": 1 }),
+            )),
+            AdministrationRecoveryOutcome::NotInitialized => Err(ServerError::forbidden(
+                "administrator recovery is unavailable",
+            )),
+        }
+    })();
+
+    server_json_result("POST", "/admin/recover", &context, result)
+}
+
+async fn server_admin_audit(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdministrationAuditRecord>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/admin/audit")?;
+    let result: Result<(Json<Vec<AdministrationAuditRecord>>, serde_json::Value), ServerError> =
+        (|| {
+            let engine = state
+                .engine
+                .lock()
+                .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+            require_administrator(&engine, &context.principal)?;
+            let audit = engine
+                .administration_audit()
+                .map_err(ServerError::internal)?;
+            let audit_count = audit.len();
+
+            Ok((
+                Json(audit),
+                json!({ "request_units": 1, "administration_records": audit_count }),
+            ))
+        })();
+
+    server_json_result("GET", "/admin/audit", &context, result)
+}
+
+async fn server_issue_service_token(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerServiceTokenIssueRequest>,
+) -> Result<Json<ServerIssuedServiceToken>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/tokens")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "POST",
+        "/tokens",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<ServerIssuedServiceToken>, serde_json::Value), ServerError> = (|| {
+        let scope = rbac_request_scope(body.scope.as_ref(), &context)?;
+        let role = parse_rbac_role(&body.role)?;
+        let now = OffsetDateTime::now_utc();
+        let expires_at = required_time_from_unix(body.expires_at_unix)?;
+        let (material, access_token) = issue_service_token_material(
+            scope,
+            role,
+            context.principal.clone(),
+            now,
+            expires_at,
+            None,
+        )?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let token = engine
+            .issue_service_token(&material)
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(ServerIssuedServiceToken {
+                token,
+                access_token,
+            }),
+            json!({ "request_units": 1, "service_tokens_issued": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/tokens", &context, result)
+}
+
+async fn server_service_tokens(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ServiceToken>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/tokens")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "GET",
+        "/tokens",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<Vec<ServiceToken>>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let tokens = engine
+            .service_tokens_in_scope(&context.scope)
+            .map_err(ServerError::internal)?;
+        let token_count = tokens.len();
+
+        Ok((
+            Json(tokens),
+            json!({ "request_units": 1, "service_tokens_returned": token_count }),
+        ))
+    })();
+
+    server_json_result("GET", "/tokens", &context, result)
+}
+
+async fn server_rotate_service_token(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(token_id): AxumPath<String>,
+    Json(body): Json<ServerServiceTokenRotateRequest>,
+) -> Result<Json<ServerIssuedServiceToken>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/tokens/{token_id}/rotate")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "POST",
+        "/tokens/{token_id}/rotate",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<ServerIssuedServiceToken>, serde_json::Value), ServerError> = (|| {
+        let now = OffsetDateTime::now_utc();
+        let expires_at = required_time_from_unix(body.expires_at_unix)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let previous = engine
+            .service_tokens_in_scope(&context.scope)
+            .map_err(ServerError::internal)?
+            .into_iter()
+            .find(|token| token.id == token_id)
+            .ok_or_else(|| ServerError::not_found("service token not found"))?;
+        let (successor, access_token) = issue_service_token_material(
+            previous.scope,
+            previous.role,
+            context.principal.clone(),
+            now,
+            expires_at,
+            Some(token_id.clone()),
+        )?;
+        let Some(token) = engine
+            .rotate_service_token(&token_id, &successor, context.principal.clone(), now)
+            .map_err(ServerError::internal)?
+        else {
+            return Err(ServerError::not_found("service token is not active"));
+        };
+
+        Ok((
+            Json(ServerIssuedServiceToken {
+                token,
+                access_token,
+            }),
+            json!({ "request_units": 1, "service_tokens_rotated": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/tokens/{token_id}/rotate", &context, result)
+}
+
+async fn server_revoke_service_token(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    AxumPath(token_id): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/tokens/{token_id}/revoke")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "POST",
+        "/tokens/{token_id}/revoke",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        if !engine
+            .service_tokens_in_scope(&context.scope)
+            .map_err(ServerError::internal)?
+            .iter()
+            .any(|token| token.id == token_id)
+        {
+            return Err(ServerError::not_found("service token not found"));
+        }
+        let Some(_) = engine
+            .revoke_service_token(
+                &token_id,
+                context.principal.clone(),
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(ServerError::internal)?
+        else {
+            return Err(ServerError::not_found("service token is not active"));
+        };
+
+        Ok((
+            Json(json!({ "revoked": true })),
+            json!({ "request_units": 1, "service_tokens_revoked": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/tokens/{token_id}/revoke", &context, result)
+}
+
+async fn server_service_token_audit(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ServiceTokenAuditRecord>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/tokens/audit")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "GET",
+        "/tokens/audit",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<Vec<ServiceTokenAuditRecord>>, serde_json::Value), ServerError> =
+        (|| {
+            let engine = state
+                .engine
+                .lock()
+                .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+            let audit = engine
+                .service_token_audit_in_scope(&context.scope)
+                .map_err(ServerError::internal)?;
+            let audit_count = audit.len();
+
+            Ok((
+                Json(audit),
+                json!({ "request_units": 1, "service_token_audit_records": audit_count }),
+            ))
+        })();
+
+    server_json_result("GET", "/tokens/audit", &context, result)
+}
+
+async fn server_rbac_grant(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerRbacGrantRequest>,
+) -> Result<Json<RbacGrant>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/rbac/grants")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "POST",
+        "/rbac/grants",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<RbacGrant>, serde_json::Value), ServerError> = (|| {
+        let scope = rbac_request_scope(body.scope.as_ref(), &context)?;
+        let role = parse_rbac_role(&body.role)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let grant = engine
+            .grant_rbac_role(
+                scope,
+                body.principal,
+                role,
+                context.principal.clone(),
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(ServerError::internal)?;
+
+        Ok((
+            Json(grant),
+            json!({ "request_units": 1, "role_grants_written": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/rbac/grants", &context, result)
+}
+
+async fn server_rbac_revoke(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ServerRbacRevokeRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/rbac/revoke")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "POST",
+        "/rbac/revoke",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<serde_json::Value>, serde_json::Value), ServerError> = (|| {
+        let scope = rbac_request_scope(body.scope.as_ref(), &context)?;
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let removed = engine
+            .revoke_rbac_role(
+                scope,
+                body.principal,
+                context.principal.clone(),
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(ServerError::internal)?;
+        let applied = removed.is_some();
+
+        Ok((
+            Json(json!({ "applied": applied })),
+            json!({ "request_units": 1, "role_grants_revoked": i32::from(applied) }),
+        ))
+    })();
+
+    server_json_result("POST", "/rbac/revoke", &context, result)
+}
+
+async fn server_rbac_grants(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<RbacGrant>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/rbac/grants")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "GET",
+        "/rbac/grants",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<Vec<RbacGrant>>, serde_json::Value), ServerError> = (|| {
+        let engine = state
+            .engine
+            .lock()
+            .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        let grants = engine
+            .rbac_grants_in_scope(&context.scope)
+            .map_err(ServerError::internal)?;
+        let grant_count = grants.len();
+
+        Ok((
+            Json(grants),
+            json!({ "request_units": 1, "role_grants_returned": grant_count }),
+        ))
+    })();
+
+    server_json_result("GET", "/rbac/grants", &context, result)
+}
+
+async fn server_rbac_audit(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AuthorizationAuditRecord>>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "GET", "/rbac/audit")?;
+    authorize_server_rbac_or_log(
+        &state,
+        &context,
+        "GET",
+        "/rbac/audit",
+        RbacRequirement {
+            action: AuthorizationAction::ManageRoles,
+            role: RbacRole::Administrator,
+        },
+        true,
+    )?;
+    let result: Result<(Json<Vec<AuthorizationAuditRecord>>, serde_json::Value), ServerError> =
+        (|| {
+            let engine = state
+                .engine
+                .lock()
+                .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+            let audit = engine
+                .authorization_audit_in_scope(&context.scope)
+                .map_err(ServerError::internal)?;
+            let audit_count = audit.len();
+
+            Ok((
+                Json(audit),
+                json!({ "request_units": 1, "authorization_records": audit_count }),
+            ))
+        })();
+
+    server_json_result("GET", "/rbac/audit", &context, result)
+}
+
+fn authorize_server_rbac_or_log(
+    state: &ServerState,
+    context: &ServerRequestContext,
+    method: &str,
+    route: &str,
+    requirement: RbacRequirement,
+    force_enforcement: bool,
+) -> Result<(), ServerError> {
+    match authorize_server_rbac(state, context, requirement, force_enforcement) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            log_server_request(
+                method,
+                route,
+                Some(&context.namespace),
+                &context.principal,
+                error.status,
+                json!({ "request_units": 1 }),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn rbac_request_scope(
+    request: Option<&ServerScopeRequest>,
+    context: &ServerRequestContext,
+) -> Result<MemoryScope, ServerError> {
+    let scope = server_memory_scope(request, &context.namespace)?;
+    if scope == context.scope {
+        Ok(scope)
+    } else {
+        Err(ServerError::bad_request(
+            "RBAC grant scope must match the request scope headers",
+        ))
+    }
+}
+
+fn operator_secret_from_headers(headers: &HeaderMap, name: &str) -> Result<String, ServerError> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| ServerError::unauthorized("administrator secret is required"))
+}
+
+fn require_authenticated_administration_principal(principal: &str) -> Result<(), ServerError> {
+    if principal == "anonymous" {
+        Err(ServerError::unauthorized(
+            "administrator operations require authentication",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_administrator(
+    engine: &Shibahama<HnswVectorIndex>,
+    principal: &str,
+) -> Result<(), ServerError> {
+    require_authenticated_administration_principal(principal)?;
+    let state = engine
+        .administration_state()
+        .map_err(ServerError::internal)?;
+    let authorized = state
+        .and_then(|state| state.administrator)
+        .is_some_and(|administrator| administrator.principal == principal);
+
+    if authorized {
+        Ok(())
+    } else {
+        Err(ServerError::forbidden("administrator access is required"))
+    }
 }
 
 async fn server_recall(
@@ -3574,6 +5172,9 @@ async fn server_put_graph_entity(
             .engine
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
+        if let Some(memory_id) = entity.source_memory_id {
+            ensure_memory_in_scope(&engine, memory_id, &context.scope)?;
+        }
         if engine
             .graph_entity(entity.id)
             .map_err(ServerError::internal)?
@@ -4039,6 +5640,172 @@ fn open_engine_with_dimensions(
     Ok(Shibahama::open(&store.path, vector_index)?)
 }
 
+enum ServiceStoreMode {
+    Envelope(Box<EnvelopeEncryption<LocalKeyProvider>>),
+    UnsafeDevelopmentPlaintext,
+}
+
+fn open_service_engine(command: &ServeCommand) -> CliResult<Shibahama<HnswVectorIndex>> {
+    let config = service_engine_config(command);
+    match service_store_mode(command)? {
+        ServiceStoreMode::UnsafeDevelopmentPlaintext => {
+            if command.full_semantic_erasure {
+                return Err(Box::new(CliError(
+                    "--full-semantic-erasure requires envelope encryption".to_owned(),
+                )));
+            }
+            let dimensions = command
+                .store
+                .dimensions
+                .or(persisted_embedding_dimensions(&command.store.path)?)
+                .unwrap_or(1);
+            let vector_index = HnswVectorIndex::with_capacity(dimensions, command.store.capacity);
+
+            Ok(Shibahama::open_with_config(
+                &command.store.path,
+                vector_index,
+                config,
+            )?)
+        }
+        ServiceStoreMode::Envelope(encryption) => {
+            let encryption = *encryption;
+            let dimensions = command
+                .store
+                .dimensions
+                .or(persisted_encrypted_embedding_dimensions(
+                    &command.store.path,
+                    encryption.clone(),
+                )?)
+                .unwrap_or(1);
+            let vector_index = HnswVectorIndex::with_capacity(dimensions, command.store.capacity);
+
+            Ok(Shibahama::open_with_config_and_encryption(
+                &command.store.path,
+                vector_index,
+                config,
+                encryption,
+            )?)
+        }
+    }
+}
+
+fn service_engine_config(command: &ServeCommand) -> ShibahamaConfig {
+    ShibahamaConfig {
+        forgetting: ForgettingConfig {
+            mode: service_forgetting_mode(command.full_semantic_erasure),
+        },
+        ..ShibahamaConfig::default()
+    }
+}
+
+fn service_forgetting_mode(full_semantic_erasure: bool) -> ForgettingMode {
+    if full_semantic_erasure {
+        ForgettingMode::FullSemanticErase
+    } else {
+        ForgettingMode::SoftInvalidate
+    }
+}
+
+fn persisted_encrypted_embedding_dimensions(
+    path: &Path,
+    encryption: EnvelopeEncryption<LocalKeyProvider>,
+) -> CliResult<Option<usize>> {
+    let store = RedbMemoryStore::open_with_encryption(path, encryption)?;
+
+    Ok(store
+        .stored_embeddings()?
+        .first()
+        .map(|embedding| embedding.vector.len()))
+}
+
+fn service_store_mode(command: &ServeCommand) -> CliResult<ServiceStoreMode> {
+    service_store_mode_from_options(
+        command
+            .encryption_key
+            .clone()
+            .or_else(|| env::var("SHIBAHAMA_ENCRYPTION_KEY").ok())
+            .filter(|value| !value.is_empty()),
+        &command.encryption_key_id,
+        command.unsafe_development_plaintext,
+    )
+}
+
+fn service_store_mode_from_options(
+    encryption_key: Option<String>,
+    key_id: &str,
+    unsafe_development_plaintext: bool,
+) -> CliResult<ServiceStoreMode> {
+    if unsafe_development_plaintext {
+        if encryption_key.is_some() {
+            return Err(Box::new(CliError(
+                "--unsafe-development-plaintext cannot be combined with an encryption key"
+                    .to_owned(),
+            )));
+        }
+
+        return Ok(ServiceStoreMode::UnsafeDevelopmentPlaintext);
+    }
+    if key_id.is_empty() || key_id.len() > 128 {
+        return Err(Box::new(CliError(
+            "service encryption key id must contain 1-128 bytes".to_owned(),
+        )));
+    }
+    let encryption_key = encryption_key.ok_or_else(|| {
+        Box::new(CliError(
+            "service encryption requires --encryption-key or SHIBAHAMA_ENCRYPTION_KEY; use --unsafe-development-plaintext only for local development"
+                .to_owned(),
+        )) as Box<dyn Error>
+    })?;
+    let key = parse_hex_encryption_key(&encryption_key)?;
+
+    Ok(ServiceStoreMode::Envelope(Box::new(
+        EnvelopeEncryption::new(LocalKeyProvider::new(key_id, key)),
+    )))
+}
+
+fn parse_hex_encryption_key(value: &str) -> CliResult<[u8; 32]> {
+    if value.len() != 64 {
+        return Err(Box::new(CliError(
+            "service encryption key must be exactly 64 hexadecimal characters".to_owned(),
+        )));
+    }
+    let mut key = [0_u8; 32];
+
+    for (index, byte) in key.iter_mut().enumerate() {
+        let high = hex_nibble(value.as_bytes()[index * 2]).ok_or_else(|| {
+            Box::new(CliError(
+                "service encryption key must be exactly 64 hexadecimal characters".to_owned(),
+            )) as Box<dyn Error>
+        })?;
+        let low = hex_nibble(value.as_bytes()[index * 2 + 1]).ok_or_else(|| {
+            Box::new(CliError(
+                "service encryption key must be exactly 64 hexadecimal characters".to_owned(),
+            )) as Box<dyn Error>
+        })?;
+
+        *byte = high << 4 | low;
+    }
+
+    Ok(key)
+}
+
+fn valid_semantic_erasure_metadata(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+}
+
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn write_event(
     content: String,
     source_kind: &str,
@@ -4461,6 +6228,7 @@ impl From<Entity> for GraphEntityDto {
         Self {
             id: value.id.to_string(),
             scope: MemoryScopeDto::from(value.scope),
+            source_memory_id: value.source_memory_id.map(|id| id.to_string()),
             entity_type: value.entity_type,
             label: value.label,
             stable_key: value.stable_key,
@@ -4615,8 +6383,23 @@ impl From<ConsolidationPassReport> for ConsolidationPassDto {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServerError, parse_vector};
+    use super::{
+        RbacRequirement, ServerAdministration, ServerAuthentication, ServerError,
+        ServerRateLimitPolicy, ServerRateLimiter, ServerRbacPolicy, ServerRequestContext,
+        ServerState, ServiceStoreMode, authorize_server_rbac, parse_cors_headers,
+        parse_cors_methods, parse_cors_origins, parse_hex_encryption_key, parse_vector,
+        service_forgetting_mode, service_store_mode_from_options,
+    };
     use axum::http::StatusCode;
+    use shibahama_core::api::Shibahama;
+    use shibahama_core::model::MemoryScope;
+    use shibahama_core::policy::PolicyActorClass;
+    use shibahama_core::storage::{AuthorizationAction, AuthorizationPrincipalClass, RbacRole};
+    use shibahama_core::vector::HnswVectorIndex;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+    use tempfile::NamedTempFile;
+    use time::OffsetDateTime;
 
     #[test]
     fn parse_vector_accepts_commas_and_spaces() {
@@ -4637,5 +6420,230 @@ mod tests {
         assert_eq!(error.severity, "fatal");
         assert!(!error.retryable);
         assert_eq!(error.detail, "vector index operation failed");
+    }
+
+    #[test]
+    fn service_store_requires_an_encryption_key_unless_unsafe_development_is_explicit() {
+        assert!(service_store_mode_from_options(None, "service-local", false).is_err());
+        assert!(matches!(
+            service_store_mode_from_options(None, "service-local", true),
+            Ok(ServiceStoreMode::UnsafeDevelopmentPlaintext)
+        ));
+        assert!(
+            service_store_mode_from_options(Some("00".repeat(32)), "service-local", true,).is_err()
+        );
+    }
+
+    #[test]
+    fn service_store_accepts_only_exact_hexadecimal_keys() {
+        assert_eq!(
+            parse_hex_encryption_key(&"ab".repeat(32)).expect("hex key should parse"),
+            [0xab; 32]
+        );
+        assert!(parse_hex_encryption_key("abc").is_err());
+        assert!(parse_hex_encryption_key(&"zz".repeat(32)).is_err());
+        assert!(matches!(
+            service_store_mode_from_options(Some("01".repeat(32)), "service-local", false),
+            Ok(ServiceStoreMode::Envelope(_))
+        ));
+    }
+
+    #[test]
+    fn full_semantic_erasure_selects_only_the_explicit_forgetting_mode() {
+        assert_eq!(
+            service_forgetting_mode(false),
+            shibahama_core::api::ForgettingMode::SoftInvalidate
+        );
+        assert_eq!(
+            service_forgetting_mode(true),
+            shibahama_core::api::ForgettingMode::FullSemanticErase
+        );
+    }
+
+    #[test]
+    fn cors_parsers_allow_only_explicit_exact_origins_methods_and_headers() {
+        let origins = parse_cors_origins(vec![
+            "http://localhost:5173/".to_owned(),
+            "https://console.example.test".to_owned(),
+        ])
+        .expect("exact origins should parse");
+        assert_eq!(origins[0].to_str().ok(), Some("http://localhost:5173"));
+        assert_eq!(
+            origins[1].to_str().ok(),
+            Some("https://console.example.test")
+        );
+        assert!(parse_cors_origins(vec!["https://console.example.test/path".to_owned()]).is_err());
+        assert!(parse_cors_origins(vec!["*".to_owned()]).is_err());
+        assert_eq!(
+            parse_cors_methods(vec!["GET".to_owned(), "POST".to_owned()])
+                .expect("methods should parse")
+                .len(),
+            2
+        );
+        assert!(parse_cors_methods(vec!["bad method".to_owned()]).is_err());
+        assert_eq!(
+            parse_cors_headers(vec!["authorization".to_owned(), "x-api-key".to_owned()])
+                .expect("headers should parse")
+                .len(),
+            2
+        );
+        assert!(parse_cors_headers(vec!["bad header".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn rate_limits_are_burst_bounded_scope_fair_and_retry_stable() {
+        let scope = MemoryScope::default();
+        let mut limiter = ServerRateLimiter::new(ServerRateLimitPolicy {
+            requests_per_window: 2,
+            window: std::time::Duration::from_secs(60),
+            burst: 2,
+        });
+        let now = std::time::Instant::now();
+        let context = ServerRequestContext {
+            namespace: "default".to_owned(),
+            scope: scope.clone(),
+            principal: "oidc:alice".to_owned(),
+            principal_class: AuthorizationPrincipalClass::Oidc,
+            actor_class: PolicyActorClass::Human,
+            credential_role: None,
+        };
+        assert!(limiter.admit(&context, now).is_ok());
+        assert!(limiter.admit(&context, now).is_ok());
+        assert_eq!(limiter.admit(&context, now), Err(30));
+
+        let different_scope = ServerRequestContext {
+            namespace: "default".to_owned(),
+            scope: MemoryScope::team(
+                scope.repository.clone(),
+                shibahama_core::model::ScopeId::new("rate-team").expect("scope should validate"),
+            ),
+            principal: "oidc:alice".to_owned(),
+            principal_class: AuthorizationPrincipalClass::Oidc,
+            actor_class: PolicyActorClass::Human,
+            credential_role: None,
+        };
+        let different_principal = ServerRequestContext {
+            namespace: "default".to_owned(),
+            scope,
+            principal: "oidc:bob".to_owned(),
+            principal_class: AuthorizationPrincipalClass::Oidc,
+            actor_class: PolicyActorClass::Human,
+            credential_role: None,
+        };
+        assert!(limiter.admit(&different_scope, now).is_ok());
+        assert!(limiter.admit(&different_principal, now).is_ok());
+        let error = ServerError::rate_limited(30);
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(error.code, "SHIBA_RATE_LIMITED");
+        assert_eq!(error.retry_after_seconds, Some(30));
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn active_server_rbac_requires_scoped_roles_and_audits_decisions() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let scope = MemoryScope::default();
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(1, 8))
+            .expect("engine should open");
+        let commitment = "a".repeat(64);
+
+        engine
+            .ensure_administration_bootstrap_window(
+                &commitment,
+                now,
+                now + time::Duration::hours(1),
+            )
+            .expect("bootstrap window should open");
+        engine
+            .bootstrap_administrator(&commitment, "oidc:global-admin", now)
+            .expect("administrator should bootstrap");
+        engine
+            .grant_rbac_role(
+                scope.clone(),
+                "oidc:reader",
+                RbacRole::Reader,
+                "oidc:global-admin",
+                now,
+            )
+            .expect("reader grant should persist");
+        let state = ServerState {
+            engine: Arc::new(Mutex::new(engine)),
+            mcp_sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            path: file.path().display().to_string(),
+            default_namespace: "default".to_owned(),
+            authentication: ServerAuthentication {
+                api_key: None,
+                oidc: None,
+            },
+            administration: ServerAdministration {
+                bootstrap: None,
+                recovery_secret_commitment: None,
+            },
+            rbac: ServerRbacPolicy {
+                enforce: false,
+                erasure_min_role: RbacRole::Maintainer,
+                promotion_min_role: RbacRole::Maintainer,
+            },
+            rate_limiter: Arc::new(Mutex::new(ServerRateLimiter::new(ServerRateLimitPolicy {
+                requests_per_window: 120,
+                window: std::time::Duration::from_secs(60),
+                burst: 30,
+            }))),
+            mcp_scope: scope.clone(),
+            max_memories_per_namespace: 1,
+        };
+        let context = ServerRequestContext {
+            namespace: "default".to_owned(),
+            scope: scope.clone(),
+            principal: "oidc:reader".to_owned(),
+            principal_class: AuthorizationPrincipalClass::Oidc,
+            actor_class: PolicyActorClass::Human,
+            credential_role: None,
+        };
+
+        assert!(
+            authorize_server_rbac(
+                &state,
+                &context,
+                RbacRequirement {
+                    action: AuthorizationAction::Read,
+                    role: RbacRole::Reader,
+                },
+                false,
+            )
+            .is_ok()
+        );
+        assert!(
+            authorize_server_rbac(
+                &state,
+                &context,
+                RbacRequirement {
+                    action: AuthorizationAction::Write,
+                    role: RbacRole::Writer,
+                },
+                false,
+            )
+            .is_err()
+        );
+        let audit = state
+            .engine
+            .lock()
+            .expect("engine lock should work")
+            .authorization_audit_in_scope(&scope)
+            .expect("audit should read");
+
+        assert!(audit.iter().any(|record| {
+            record.audit_action == shibahama_core::storage::AuthorizationAuditAction::Decision
+                && record.allowed
+                && record.required_role == RbacRole::Reader
+                && record.principal_class == Some(AuthorizationPrincipalClass::Oidc)
+                && record.actor_class == Some(PolicyActorClass::Human)
+        }));
+        assert!(audit.iter().any(|record| {
+            record.audit_action == shibahama_core::storage::AuthorizationAuditAction::Decision
+                && !record.allowed
+                && record.required_role == RbacRole::Writer
+        }));
     }
 }

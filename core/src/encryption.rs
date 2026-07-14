@@ -174,8 +174,7 @@ impl EnvelopeKeyProvider for LocalKeyProvider {
                 "wrapped local data key is malformed".to_owned(),
             ));
         }
-        let nonce =
-            aes_gcm::Nonce::from_slice(&metadata.wrapped_data_key[1..=AES_GCM_NONCE_LEN]);
+        let nonce = aes_gcm::Nonce::from_slice(&metadata.wrapped_data_key[1..=AES_GCM_NONCE_LEN]);
         let plaintext = self
             .cipher
             .decrypt(
@@ -198,6 +197,7 @@ impl EnvelopeKeyProvider for LocalKeyProvider {
 /// A fresh data key is generated for every encrypted payload. The serialized envelope carries
 /// provider metadata separately from the payload nonce and ciphertext, while both the wrapped key
 /// and payload are authenticated against the immutable storage context.
+#[derive(Clone)]
 pub struct EnvelopeEncryption<K> {
     key_provider: K,
 }
@@ -226,6 +226,10 @@ impl<K: std::fmt::Debug> std::fmt::Debug for EnvelopeEncryption<K> {
 }
 
 impl<K: EnvelopeKeyProvider> EncryptionAtRest for EnvelopeEncryption<K> {
+    fn supports_record_key_destruction(&self) -> bool {
+        true
+    }
+
     fn encrypt(&self, context: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, EncryptionError> {
         let mut data_key = [0_u8; DATA_KEY_LEN];
         OsRng.fill_bytes(&mut data_key);
@@ -352,6 +356,11 @@ pub trait EncryptionAtRest: Send + Sync {
     /// Returns true when this provider produces encrypted storage payloads.
     fn is_enabled(&self) -> bool {
         true
+    }
+
+    /// Returns whether replacing a record ciphertext destroys a unique record data key.
+    fn supports_record_key_destruction(&self) -> bool {
+        false
     }
 
     /// Encrypts `plaintext` for a backend-specific `context`.

@@ -1,0 +1,27 @@
+{
+  "realm": "shibahama",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "shibahama",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "shibahama-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "included.client.audience": "shibahama",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

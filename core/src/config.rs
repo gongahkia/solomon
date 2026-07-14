@@ -258,7 +258,8 @@ impl RuntimeConfig {
 mod tests {
     use super::*;
     use crate::api::{Shibahama, ShibahamaError};
-    use crate::vector::HnswVectorIndex;
+    use crate::encryption::{EnvelopeEncryption, LocalKeyProvider};
+    use crate::vector::{HnswVectorIndex, VectorIndex};
     use tempfile::tempdir;
 
     fn valid_config() -> RuntimeConfig {
@@ -347,5 +348,28 @@ mod tests {
             Err(ShibahamaError::InvalidRequest(_))
         ));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn required_encryption_opens_only_through_an_explicit_provider() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("memory.redb");
+        let mut config = valid_config();
+
+        config.storage.path = path.clone();
+        config.storage.encryption = StorageEncryptionMode::Required;
+        config.provider.dimensions = 2;
+        assert!(matches!(
+            Shibahama::open_from_runtime_config(&config, HnswVectorIndex::new(2)),
+            Err(ShibahamaError::InvalidRequest(_))
+        ));
+        let engine = Shibahama::open_from_runtime_config_with_encryption(
+            &config,
+            HnswVectorIndex::new(2),
+            EnvelopeEncryption::new(LocalKeyProvider::new("runtime-test-kek", [42; 32])),
+        )
+        .expect("explicit encryption provider should open the required store");
+
+        assert_eq!(engine.vector_index().dimensions(), 2);
     }
 }

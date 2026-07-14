@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: MIT
+
+services:
+  keycloak-db:
+    image: postgres:17.8-bookworm@sha256:45e40832755b7133da62e701ee496d65afc5e4527c8ff5446c2f3bdd11bc58e3
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD:?KEYCLOAK_DATABASE_PASSWORD is required}
+      POSTGRES_USER: keycloak
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=keycloak --dbname=keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.7@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_DB: postgres
+      KC_DB_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD:?KEYCLOAK_DATABASE_PASSWORD is required}
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_USERNAME: keycloak
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://keycloak:8080
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - ./keycloak/shibahama-realm.json:/opt/keycloak/data/import/shibahama-realm.json:ro
+
+  shibahama:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ${SHIBAHAMA_IMAGE:-shibahama:compose}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET: ${SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET:?SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET is required}
+      SHIBAHAMA_ADMIN_RECOVERY_SECRET: ${SHIBAHAMA_ADMIN_RECOVERY_SECRET:?SHIBAHAMA_ADMIN_RECOVERY_SECRET is required}
+      SHIBAHAMA_DIMENSIONS: ${SHIBAHAMA_DIMENSIONS:-2}
+      SHIBAHAMA_ENCRYPTION_KEY: ${SHIBAHAMA_ENCRYPTION_KEY:?SHIBAHAMA_ENCRYPTION_KEY is required}
+      SHIBAHAMA_NAMESPACE: ${SHIBAHAMA_NAMESPACE:-team-compose}
+      SHIBAHAMA_OIDC_AUDIENCE: shibahama
+      SHIBAHAMA_OIDC_ISSUER: http://keycloak:8080/realms/shibahama
+      SHIBAHAMA_RBAC_ENFORCE: "true"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8765/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:${SHIBAHAMA_PORT:-8765}:8765"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - shibahama-data:/var/lib/shibahama
+
+volumes:
+  keycloak-data:
+  shibahama-data:

@@ -12,20 +12,44 @@ use shibahama_core::model::{MemoryId, MemoryScope, Provenance, ScopeId, SourceKi
 use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
 use shibahama_core::retrieval::RecallRequest;
 use shibahama_core::review::{ReviewAction, ReviewCandidateId};
-use shibahama_core::storage::MemoryWriteEvent;
+use shibahama_core::storage::{AuthorizationAction, MemoryWriteEvent, RbacRole};
 use shibahama_core::vector::HnswVectorIndex;
 use time::OffsetDateTime;
 
 /// Engine-backed MCP memory-tool implementation.
 pub struct McpEngineBackend<'engine> {
     engine: &'engine mut Shibahama<HnswVectorIndex>,
+    rbac: Option<McpRbacPolicy>,
+}
+
+/// Active service RBAC policy passed to HTTP MCP tool execution.
+#[derive(Clone, Copy)]
+pub struct McpRbacPolicy {
+    /// Enforce explicit grants before first-administrator bootstrap, when configured.
+    pub enforce: bool,
+    /// Minimum role for erasure tools.
+    pub erasure_min_role: RbacRole,
+    /// Minimum role for repository-to-team promotion tools.
+    pub promotion_min_role: RbacRole,
 }
 
 impl<'engine> McpEngineBackend<'engine> {
     /// Wraps one engine for transport-scoped tool execution.
     #[must_use]
     pub const fn new(engine: &'engine mut Shibahama<HnswVectorIndex>) -> Self {
-        Self { engine }
+        Self { engine, rbac: None }
+    }
+
+    /// Wraps one engine with service RBAC enforcement for HTTP MCP tool execution.
+    #[must_use]
+    pub const fn with_rbac(
+        engine: &'engine mut Shibahama<HnswVectorIndex>,
+        rbac: McpRbacPolicy,
+    ) -> Self {
+        Self {
+            engine,
+            rbac: Some(rbac),
+        }
     }
 }
 
@@ -37,6 +61,7 @@ impl McpToolBackend for McpEngineBackend<'_> {
         arguments: &Map<String, Value>,
     ) -> Result<Value, McpToolError> {
         require_schema_and_scope(context, arguments)?;
+        self.require_rbac_role(context, name)?;
         match name {
             "shibahama_memory_write_v1" => self.write(context, arguments),
             "shibahama_memory_recall_v1" => self.recall(context, arguments),
@@ -67,6 +92,67 @@ impl McpToolBackend for McpEngineBackend<'_> {
 }
 
 impl McpEngineBackend<'_> {
+    fn require_rbac_role(
+        &self,
+        context: &McpServerContext,
+        tool_name: &str,
+    ) -> Result<(), McpToolError> {
+        let Some(policy) = self.rbac else {
+            return Ok(());
+        };
+        let administration = self.engine.administration_state().map_err(core_error)?;
+        let global_administrator = administration
+            .as_ref()
+            .and_then(|state| state.administrator.as_ref())
+            .is_some_and(|administrator| administrator.principal == context.principal());
+        let active = context.credential_role().is_some()
+            || policy.enforce
+            || administration
+                .as_ref()
+                .is_some_and(|state| state.administrator.is_some());
+        if !active {
+            return Ok(());
+        }
+        let (action, role) = match tool_name {
+            "shibahama_memory_recall_v1"
+            | "shibahama_memory_explain_v1"
+            | "shibahama_memory_timeline_v1" => (AuthorizationAction::Read, RbacRole::Reader),
+            "shibahama_memory_write_v1" => (AuthorizationAction::Write, RbacRole::Writer),
+            "shibahama_memory_review_v1" => (AuthorizationAction::Maintain, RbacRole::Maintainer),
+            "shibahama_memory_promote_v1" => {
+                (AuthorizationAction::Promote, policy.promotion_min_role)
+            }
+            "shibahama_memory_erase_v1" => {
+                (AuthorizationAction::SemanticErase, policy.erasure_min_role)
+            }
+            _ => return Err(invalid_arguments()),
+        };
+        let allowed = self
+            .engine
+            .authorize_rbac_role_with_credential(
+                context.scope().clone(),
+                context.principal(),
+                action,
+                role,
+                global_administrator,
+                context.credential_role(),
+                context.principal_class(),
+                Some(context.actor()),
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(core_error)?;
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(McpToolError::new(
+                "SHIBA_UNAUTHORIZED",
+                "RBAC role grant is required",
+                false,
+            ))
+        }
+    }
+
     fn write(
         &mut self,
         context: &McpServerContext,
@@ -1042,5 +1128,108 @@ mod tests {
             assert_suggested_capture_is_policy_rejected(&mut session, &mut backend);
         }
         assert_capture_audits_transport_actor(&engine);
+    }
+
+    #[test]
+    fn service_rbac_requires_explicit_mcp_roles_for_writes_and_maintenance() {
+        let file = NamedTempFile::new().expect("tempfile should be created");
+        let mut engine = Shibahama::open(file.path(), HnswVectorIndex::with_capacity(2, 8))
+            .expect("engine should open");
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let commitment = "a".repeat(64);
+        let context = context();
+
+        engine
+            .ensure_administration_bootstrap_window(
+                &commitment,
+                now,
+                now + time::Duration::hours(1),
+            )
+            .expect("bootstrap window should open");
+        engine
+            .bootstrap_administrator(&commitment, "oidc:admin", now)
+            .expect("administrator should bootstrap");
+        engine
+            .grant_rbac_role(
+                context.scope().clone(),
+                context.principal(),
+                RbacRole::Reader,
+                "oidc:admin",
+                now,
+            )
+            .expect("reader grant should persist");
+
+        {
+            let backend = McpEngineBackend::with_rbac(
+                &mut engine,
+                McpRbacPolicy {
+                    enforce: false,
+                    erasure_min_role: RbacRole::Maintainer,
+                    promotion_min_role: RbacRole::Maintainer,
+                },
+            );
+            assert!(
+                backend
+                    .require_rbac_role(&context, "shibahama_memory_recall_v1")
+                    .is_ok()
+            );
+            for tool in [
+                "shibahama_memory_write_v1",
+                "shibahama_memory_review_v1",
+                "shibahama_memory_promote_v1",
+                "shibahama_memory_erase_v1",
+            ] {
+                let error = backend
+                    .require_rbac_role(&context, tool)
+                    .expect_err("reader must not mutate or maintain via MCP");
+                assert_eq!(
+                    error,
+                    McpToolError::new("SHIBA_UNAUTHORIZED", "RBAC role grant is required", false)
+                );
+            }
+        }
+        engine
+            .grant_rbac_role(
+                context.scope().clone(),
+                context.principal(),
+                RbacRole::Maintainer,
+                "oidc:admin",
+                now,
+            )
+            .expect("maintainer grant should persist");
+        {
+            let backend = McpEngineBackend::with_rbac(
+                &mut engine,
+                McpRbacPolicy {
+                    enforce: false,
+                    erasure_min_role: RbacRole::Maintainer,
+                    promotion_min_role: RbacRole::Maintainer,
+                },
+            );
+            assert!(
+                backend
+                    .require_rbac_role(&context, "shibahama_memory_promote_v1")
+                    .is_ok()
+            );
+            assert!(
+                backend
+                    .require_rbac_role(&context, "shibahama_memory_erase_v1")
+                    .is_ok()
+            );
+        }
+        let audit = engine
+            .authorization_audit_in_scope(context.scope())
+            .expect("authorization audit should read");
+        assert!(audit.iter().any(|record| {
+            record.action == AuthorizationAction::Promote
+                && record.required_role == RbacRole::Maintainer
+                && record.allowed
+                && record.actor_class == Some(PolicyActorClass::Human)
+        }));
+        assert!(audit.iter().any(|record| {
+            record.action == AuthorizationAction::SemanticErase
+                && record.required_role == RbacRole::Maintainer
+                && record.allowed
+        }));
     }
 }

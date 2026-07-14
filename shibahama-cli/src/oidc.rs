@@ -4,11 +4,14 @@
 
 use jsonwebtoken::jwk::{Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use reqwest::Certificate;
 use reqwest::blocking::Client;
 use reqwest::redirect::Policy;
 use serde::Deserialize;
 use serde_json::Value;
+use std::fs;
 use std::fmt::{self, Display, Formatter};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use url::Url;
@@ -101,7 +104,20 @@ impl OidcAuthenticator {
     ///
     /// Returns an error when discovery or the provider key set cannot be securely validated.
     pub fn discover(config: OidcConfig) -> Result<Self, OidcError> {
-        let fetcher = Arc::new(HttpOidcDocumentFetcher::new()?);
+        Self::discover_with_ca_certificate(config, None)
+    }
+
+    /// Discovers OIDC metadata with an optional additional PEM root certificate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the configured certificate cannot be read or parsed, or provider
+    /// discovery and key retrieval fail.
+    pub fn discover_with_ca_certificate(
+        config: OidcConfig,
+        ca_certificate: Option<&Path>,
+    ) -> Result<Self, OidcError> {
+        let fetcher = Arc::new(HttpOidcDocumentFetcher::new(ca_certificate)?);
 
         Self::discover_with_fetcher(config, fetcher)
     }
@@ -250,11 +266,18 @@ struct HttpOidcDocumentFetcher {
 }
 
 impl HttpOidcDocumentFetcher {
-    fn new() -> Result<Self, OidcError> {
-        let client = Client::builder()
+    fn new(ca_certificate: Option<&Path>) -> Result<Self, OidcError> {
+        let mut builder = Client::builder()
             .https_only(true)
             .redirect(Policy::none())
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(5));
+        if let Some(path) = ca_certificate {
+            let pem = fs::read(path).map_err(|_| OidcError::Configuration)?;
+            let certificate = Certificate::from_pem(&pem).map_err(|_| OidcError::Configuration)?;
+
+            builder = builder.add_root_certificate(certificate);
+        }
+        let client = builder
             .build()
             .map_err(|_| OidcError::Configuration)?;
 

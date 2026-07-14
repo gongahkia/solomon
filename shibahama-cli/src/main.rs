@@ -334,6 +334,9 @@ struct ServeCommand {
     /// OIDC string claim mapped to the opaque internal principal. Defaults to `sub`.
     #[arg(long)]
     oidc_principal_claim: Option<String>,
+    /// Additional PEM root certificate trusted only for OIDC discovery and JWKS retrieval.
+    #[arg(long)]
+    oidc_ca_certificate: Option<PathBuf>,
     /// One-time first-administrator secret. Also falls back to `SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET`.
     #[arg(long)]
     admin_bootstrap_secret: Option<String>,
@@ -1713,14 +1716,20 @@ fn oidc_authenticator(command: &ServeCommand) -> CliResult<Option<OidcAuthentica
         .clone()
         .or_else(|| env::var("SHIBAHAMA_OIDC_AUDIENCE").ok())
         .filter(|value| !value.is_empty());
+    let ca_certificate = command
+        .oidc_ca_certificate
+        .clone()
+        .or_else(|| env::var_os("SHIBAHAMA_OIDC_CA_CERT_PATH").map(PathBuf::from));
 
     let (Some(issuer), Some(audience)) = (issuer, audience) else {
         if command.oidc_issuer.is_some()
             || command.oidc_audience.is_some()
             || command.oidc_principal_claim.is_some()
+            || command.oidc_ca_certificate.is_some()
             || env::var_os("SHIBAHAMA_OIDC_ISSUER").is_some()
             || env::var_os("SHIBAHAMA_OIDC_AUDIENCE").is_some()
             || env::var_os("SHIBAHAMA_OIDC_PRINCIPAL_CLAIM").is_some()
+            || env::var_os("SHIBAHAMA_OIDC_CA_CERT_PATH").is_some()
         {
             return Err(Box::new(CliError(
                 "OIDC requires issuer and audience".to_owned(),
@@ -1737,7 +1746,7 @@ fn oidc_authenticator(command: &ServeCommand) -> CliResult<Option<OidcAuthentica
     let config = OidcConfig::new(issuer, audience, principal_claim)
         .map_err(|error| Box::new(CliError(error.to_string())) as Box<dyn Error>)?;
 
-    OidcAuthenticator::discover(config)
+    OidcAuthenticator::discover_with_ca_certificate(config, ca_certificate.as_deref())
         .map(Some)
         .map_err(|error| Box::new(CliError(error.to_string())) as Box<dyn Error>)
 }

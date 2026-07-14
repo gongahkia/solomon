@@ -111,6 +111,7 @@ from stonks_cli.vnext.moomoo import (
 from stonks_cli.vnext.rate_limit import ReadOnlyRateLimiter
 from stonks_cli.vnext.retry import IdempotentReadRetryPolicy, retry_idempotent_read
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
+from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 
 __all__ = [
     "Clock",
@@ -128,6 +129,7 @@ __all__ = [
     "HealthReport",
     "HealthResult",
     "HealthStatus",
+    "IdempotentSnapshotCache",
     "IdempotentReadRetryPolicy",
     "LifecycleHook",
     "LifecycleState",

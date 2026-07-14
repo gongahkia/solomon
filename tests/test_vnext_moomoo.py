@@ -41,6 +41,7 @@ from stonks_cli.vnext.moomoo import (
     normalize_moomoo_instruments,
     probe_local_opend,
     read_moomoo_trade_unlock_state_without_secrets,
+    resolve_moomoo_us_equity_symbol,
     select_moomoo_account,
 )
 
@@ -783,3 +784,9 @@ def test_normalize_moomoo_instruments_validates_and_sorts_us_sg_records():
 def test_normalize_moomoo_instruments_rejects_malformed_or_ambiguous_records(records):
     with pytest.raises(ValueError):
         normalize_moomoo_instruments(records)
+
+
+def test_resolve_moomoo_us_equity_symbol_requires_canonical_moomoo_us_code():
+    assert resolve_moomoo_us_equity_symbol("US.BRK.B") == "US.BRK.B"
+    with pytest.raises(VNextExternalDataError, match="unresolved"):
+        resolve_moomoo_us_equity_symbol("AAPL")

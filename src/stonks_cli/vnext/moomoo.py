@@ -1076,6 +1076,13 @@ def _validate_moomoo_us_symbol(symbol: object) -> str:
     return symbol
 
 
+def resolve_moomoo_us_equity_symbol(symbol: object) -> str:
+    try:
+        return _validate_moomoo_us_symbol(symbol)
+    except ValueError as error:
+        raise VNextExternalDataError("Moomoo US equity symbol is unresolved") from error
+
+
 def _parse_moomoo_quote_time(value: object) -> None:
     if not isinstance(value, str) or not _MOOMOO_QUOTE_TIME_PATTERN.fullmatch(value):
         raise ValueError("Moomoo quote time must use HH:MM:SS[.ffffff]")

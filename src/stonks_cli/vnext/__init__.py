@@ -87,6 +87,7 @@ from stonks_cli.vnext.moomoo import (
     normalize_moomoo_instruments,
     probe_local_opend,
     read_moomoo_trade_unlock_state_without_secrets,
+    resolve_moomoo_us_equity_symbol,
     select_moomoo_account,
 )
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -178,6 +179,7 @@ __all__ = [
     "load_run_identity",
     "resolve_environment_secret",
     "read_moomoo_trade_unlock_state_without_secrets",
+    "resolve_moomoo_us_equity_symbol",
     "save_run_identity",
     "serialize_structured_event",
     "select_moomoo_account",

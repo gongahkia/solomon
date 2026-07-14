@@ -1,0 +1,2 @@
+{"event_id":"00000000-0000-4000-8000-000000000011","name":"research.snapshot.created","occurred_at":"2026-01-02T03:04:06Z","payload":{"asset":"BTC","snapshot_count":2},"run_id":"00000000-0000-4000-8000-000000000001","severity":"info","version":1}
+{"event_id":"00000000-0000-4000-8000-000000000012","name":"research.source.stale","occurred_at":"2026-01-02T03:04:07Z","payload":{"age_seconds":31,"source":"fixture"},"run_id":"00000000-0000-4000-8000-000000000001","severity":"warning","version":1}

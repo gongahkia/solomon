@@ -23,6 +23,14 @@ from stonks_cli.vnext.filesystem import (
     enforce_private_file,
     ensure_private_directory,
 )
+from stonks_cli.vnext.fixtures import (
+    FIXTURE_EVENT_IDS,
+    FIXTURE_RUN_ID,
+    FIXTURE_RUN_STARTED_AT,
+    deterministic_fixture_event_jsonl,
+    deterministic_fixture_events,
+    deterministic_fixture_run,
+)
 from stonks_cli.vnext.foundation import (
     RUN_IDENTITY_VERSION,
     Clock,
@@ -44,6 +52,9 @@ __all__ = [
     "Clock",
     "EventSeverity",
     "EVENT_SCHEMA_VERSION",
+    "FIXTURE_EVENT_IDS",
+    "FIXTURE_RUN_ID",
+    "FIXTURE_RUN_STARTED_AT",
     "FrozenUTCClock",
     "PRIVATE_DIRECTORY_MODE",
     "PRIVATE_FILE_MODE",
@@ -71,6 +82,9 @@ __all__ = [
     "as_utc",
     "create_run_identity",
     "create_structured_event",
+    "deterministic_fixture_event_jsonl",
+    "deterministic_fixture_events",
+    "deterministic_fixture_run",
     "deserialize_structured_event",
     "enforce_private_file",
     "ensure_private_directory",

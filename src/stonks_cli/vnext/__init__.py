@@ -183,6 +183,11 @@ from stonks_cli.vnext.moomoo import (
 )
 from stonks_cli.vnext.non_llm_explanation import NonLLMExplanation, build_non_llm_explanation
 from stonks_cli.vnext.opend_fixture import RecordedOpenDCall, RecordedOpenDFixtureAdapter
+from stonks_cli.vnext.paper_portfolio_accounting import (
+    PaperPortfolioAccount,
+    PaperPortfolioPosition,
+    run_paper_portfolio_accounting,
+)
 from stonks_cli.vnext.portfolio_domain import PortfolioAssetClass, PortfolioHolding, PortfolioSnapshot
 from stonks_cli.vnext.portfolio_exposure import PortfolioExposure, calculate_portfolio_exposure
 from stonks_cli.vnext.price_data import (
@@ -345,6 +350,8 @@ __all__ = [
     "RecordedOpenDFixtureAdapter",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
+    "PaperPortfolioAccount",
+    "PaperPortfolioPosition",
     "PortfolioAssetClass",
     "PortfolioExposure",
     "PortfolioHolding",
@@ -461,6 +468,7 @@ __all__ = [
     "probe_local_opend",
     "run_health_checks",
     "rank_weighted_assets",
+    "run_paper_portfolio_accounting",
     "render_broker_app_order_ticket",
     "validate_package_boundaries",
     "validate_exchange_lot_size",

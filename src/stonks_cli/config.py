@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 CONFIG_SCHEMA_VERSION = 2
 REDACTED_CONFIG_VALUE = "***REDACTED***"
@@ -293,11 +294,39 @@ class CryptoMarketCapProviderConfig(BaseModel):
         return environment_variable
 
 
+RESEARCH_FACTOR_IDS = ("trend", "momentum", "mean_reversion", "risk_adjusted_performance")
+_DEFAULT_RESEARCH_FACTOR_WEIGHTS = {factor_id: 0.25 for factor_id in RESEARCH_FACTOR_IDS}
+
+
+class FactorWeightsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    weights: dict[str, float] = Field(default_factory=lambda: dict(_DEFAULT_RESEARCH_FACTOR_WEIGHTS))
+
+    @field_validator("weights", mode="before")
+    @classmethod
+    def validate_weights(cls, value: object) -> dict[str, float]:
+        if not isinstance(value, dict) or set(value) != set(RESEARCH_FACTOR_IDS):
+            raise ValueError("research factor weights must define every supported factor exactly once")
+        if not all(isinstance(factor_id, str) and isinstance(weight, float) and math.isfinite(weight) and weight >= 0 for factor_id, weight in value.items()):
+            raise ValueError("research factor weights are invalid")
+        return {factor_id: value[factor_id] for factor_id in RESEARCH_FACTOR_IDS}
+
+    @model_validator(mode="after")
+    def validate_normalized_weights(self) -> FactorWeightsConfig:
+        if not math.isclose(sum(self.weights.values()), 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("research factor weights must sum to one")
+        return self
+
+    def ordered_items(self) -> tuple[tuple[str, float], ...]:
+        return tuple((factor_id, self.weights[factor_id]) for factor_id in RESEARCH_FACTOR_IDS)
+
+
 class VNextResearchConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: bool = False
     crypto_universe: CryptoUniverseConfig = Field(default_factory=CryptoUniverseConfig)
     market_cap_provider: CryptoMarketCapProviderConfig = Field(default_factory=CryptoMarketCapProviderConfig)
+    factor_weights: FactorWeightsConfig = Field(default_factory=FactorWeightsConfig)
     cadence: Literal["daily", "weekly"] = "daily"
     llm_summary_enabled: bool = False
 

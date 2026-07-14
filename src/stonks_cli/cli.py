@@ -137,6 +137,14 @@ def vnext_crypto_universe(
         raise _exit_for_error(error)
 
 
+@vnext_app.command("market-refresh")
+def vnext_market_refresh(
+    symbols: list[str] = typer.Option(..., "--symbol", "-s", help="Canonical Moomoo symbol; repeat for each quote"),
+) -> None:
+    """Refresh pre-entitled Moomoo US and SG quotes without subscribing."""
+    _render_moomoo_market_data_refresh(symbols)
+
+
 def _exit_for_error(e: Exception) -> typer.Exit:
     if isinstance(e, StonksError):
         Console().print(f"[red]Error:[/red] {e}")
@@ -280,6 +288,10 @@ def broker_market_data_refresh(
     symbols: list[str] = typer.Option(..., "--symbol", "-s", help="Canonical Moomoo symbol; repeat for each quote"),
 ) -> None:
     """Refresh pre-entitled Moomoo US and SG quotes without subscribing."""
+    _render_moomoo_market_data_refresh(symbols)
+
+
+def _render_moomoo_market_data_refresh(symbols: list[str]) -> None:
     try:
         config = load_config()
         quotes = refresh_moomoo_market_data(config, symbols)

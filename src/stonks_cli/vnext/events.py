@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
@@ -13,6 +14,7 @@ from stonks_cli.vnext.foundation import Clock, RunIdentity, as_utc
 
 _EVENT_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_.]*\Z")
 _SENSITIVE_PAYLOAD_MARKERS = ("token", "secret", "password", "authorization", "credential", "cookie")
+EVENT_SCHEMA_VERSION = 1
 
 
 class EventSeverity(StrEnum):
@@ -56,6 +58,54 @@ def create_structured_event(
     return StructuredEvent(event_id or uuid4(), run.run_id, clock.now(), name, severity, payload or {})
 
 
+def serialize_structured_event(event: StructuredEvent) -> str:
+    if not isinstance(event, StructuredEvent):
+        raise TypeError("structured event is required")
+    data = {
+        "version": EVENT_SCHEMA_VERSION,
+        "event_id": str(event.event_id),
+        "run_id": str(event.run_id),
+        "occurred_at": event.occurred_at.isoformat().replace("+00:00", "Z"),
+        "name": event.name,
+        "severity": event.severity.value,
+        "payload": _thaw_json(event.payload),
+    }
+    return json.dumps(data, allow_nan=False, separators=(",", ":"), sort_keys=True)
+
+
+def deserialize_structured_event(value: object) -> StructuredEvent:
+    if not isinstance(value, str):
+        raise TypeError("serialized event must be a string")
+    try:
+        data = json.loads(value)
+        if not isinstance(data, dict) or set(data) != {
+            "version",
+            "event_id",
+            "run_id",
+            "occurred_at",
+            "name",
+            "severity",
+            "payload",
+        }:
+            raise ValueError("invalid event fields")
+        if not isinstance(data["version"], int) or isinstance(data["version"], bool) or data["version"] != EVENT_SCHEMA_VERSION:
+            raise ValueError("unsupported event version")
+        if not all(isinstance(data[field], str) for field in ("event_id", "run_id", "occurred_at", "name", "severity")):
+            raise ValueError("invalid event field types")
+        if not isinstance(data["payload"], dict):
+            raise ValueError("event payload must be an object")
+        return StructuredEvent(
+            UUID(data["event_id"]),
+            UUID(data["run_id"]),
+            datetime.fromisoformat(data["occurred_at"]),
+            data["name"],
+            EventSeverity(data["severity"]),
+            data["payload"],
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("invalid serialized event") from error
+
+
 def _freeze_json(value: object, *, key: str = "") -> object:
     if _is_sensitive_key(key):
         raise ValueError(f"sensitive event payload key:{key}")
@@ -75,6 +125,14 @@ def _freeze_json(value: object, *, key: str = "") -> object:
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_json(item) for item in value)
     raise ValueError("event payload must contain JSON-safe values")
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
 
 
 def _is_sensitive_key(key: str) -> bool:

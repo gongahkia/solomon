@@ -8,7 +8,14 @@ from stonks_cli.vnext.errors import (
     VNextExternalDataError,
     VNextInvariantError,
 )
-from stonks_cli.vnext.events import EventSeverity, StructuredEvent, create_structured_event
+from stonks_cli.vnext.events import (
+    EVENT_SCHEMA_VERSION,
+    EventSeverity,
+    StructuredEvent,
+    create_structured_event,
+    deserialize_structured_event,
+    serialize_structured_event,
+)
 from stonks_cli.vnext.foundation import (
     RUN_IDENTITY_VERSION,
     Clock,
@@ -28,6 +35,7 @@ from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, Runti
 __all__ = [
     "Clock",
     "EventSeverity",
+    "EVENT_SCHEMA_VERSION",
     "FrozenUTCClock",
     "PACKAGE_BOUNDARIES",
     "PackageBoundary",
@@ -49,9 +57,11 @@ __all__ = [
     "as_utc",
     "create_run_identity",
     "create_structured_event",
+    "deserialize_structured_event",
     "load_run_identity",
     "resolve_environment_secret",
     "save_run_identity",
+    "serialize_structured_event",
     "runtime_directories",
     "validate_package_boundaries",
 ]

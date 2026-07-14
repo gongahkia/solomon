@@ -233,6 +233,7 @@ from stonks_cli.vnext.operator_acknowledgements import (
     record_operator_acknowledgement,
     save_operator_acknowledgement_log,
 )
+from stonks_cli.vnext.paper_gate import PaperGateEvidence, PaperGateOutcome
 from stonks_cli.vnext.paper_portfolio_accounting import (
     PaperPortfolioAccount,
     PaperPortfolioPosition,
@@ -440,6 +441,8 @@ __all__ = [
     "PackageBoundary",
     "PaperPortfolioAccount",
     "PaperPortfolioPosition",
+    "PaperGateEvidence",
+    "PaperGateOutcome",
     "PortfolioAssetClass",
     "PortfolioExposure",
     "PortfolioHolding",

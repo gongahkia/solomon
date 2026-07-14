@@ -108,6 +108,7 @@ from stonks_cli.vnext.fractional_share_constraints import (
     FractionalShareEligibility,
     validate_fractional_share_constraints,
 )
+from stonks_cli.vnext.fx_conversion_cost import FXConversionCostEstimate, estimate_fx_conversion_cost
 from stonks_cli.vnext.fx_reference_rates import (
     FXReferenceRate,
     FXReferenceRateBatch,
@@ -274,6 +275,7 @@ __all__ = [
     "FXReferenceRate",
     "FXReferenceRateBatch",
     "FXReferenceRateProvider",
+    "FXConversionCostEstimate",
     "FIXTURE_EVENT_IDS",
     "FIXTURE_RUN_ID",
     "FIXTURE_RUN_STARTED_AT",
@@ -447,6 +449,7 @@ __all__ = [
     "enforce_asset_class_exposure_limits",
     "enforce_minimum_liquidity_constraints",
     "enforce_single_asset_limits",
+    "estimate_fx_conversion_cost",
     "enforce_sector_concentration_limits",
     "ensure_private_directory",
     "load_run_identity",

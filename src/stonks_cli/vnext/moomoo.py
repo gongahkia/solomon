@@ -1391,6 +1391,68 @@ def normalize_moomoo_instruments(raw_instruments: object) -> tuple[MoomooInstrum
 
 
 @dataclass(frozen=True)
+class MoomooCorporateAction:
+    symbol: str
+    ex_dividend_date: str
+    split_ratio: float
+    cash_dividend_per_share: float
+    forward_factor_a: float
+    forward_factor_b: float
+    backward_factor_a: float
+    backward_factor_b: float
+
+    def __post_init__(self) -> None:
+        _validate_moomoo_us_or_sg_symbol(self.symbol)
+        _parse_moomoo_date(self.ex_dividend_date)
+        for value in (
+            self.split_ratio,
+            self.cash_dividend_per_share,
+            self.forward_factor_a,
+            self.forward_factor_b,
+            self.backward_factor_a,
+            self.backward_factor_b,
+        ):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("Moomoo corporate-action values must be finite floats")
+
+
+def normalize_moomoo_corporate_actions(symbol: object, raw_actions: object) -> tuple[MoomooCorporateAction, ...]:
+    normalized_symbol = _validate_moomoo_us_or_sg_symbol(symbol)
+    records = raw_actions.to_dict("records") if callable(getattr(raw_actions, "to_dict", None)) else raw_actions
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("Moomoo corporate actions must be a sequence")
+    actions: list[MoomooCorporateAction] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Moomoo corporate-action record must be an object")
+        ex_dividend_date = record.get("ex_div_date")
+        if not isinstance(ex_dividend_date, str):
+            raise ValueError("Moomoo corporate-action ex-dividend date is invalid")
+        actions.append(
+            MoomooCorporateAction(
+                normalized_symbol,
+                ex_dividend_date,
+                _finite_corporate_action_value(record, "split_ratio"),
+                _finite_corporate_action_value(record, "per_cash_div"),
+                _finite_corporate_action_value(record, "forward_adj_factorA"),
+                _finite_corporate_action_value(record, "forward_adj_factorB"),
+                _finite_corporate_action_value(record, "backward_adj_factorA"),
+                _finite_corporate_action_value(record, "backward_adj_factorB"),
+            )
+        )
+    if len({action.ex_dividend_date for action in actions}) != len(actions):
+        raise ValueError("Moomoo corporate-action dates must be unique")
+    return tuple(sorted(actions, key=lambda action: action.ex_dividend_date))
+
+
+def _finite_corporate_action_value(record: Mapping[object, object], field: str) -> float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"Moomoo corporate-action record has invalid {field}")
+    return float(value)
+
+
+@dataclass(frozen=True)
 class OpenDEndpointProbe:
     status: OpenDEndpointStatus
     code: str

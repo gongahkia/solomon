@@ -13,6 +13,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooAccount,
     MoomooAccountBalance,
     MoomooCashFlow,
+    MoomooCorporateAction,
     MoomooHistoricalCandle,
     MoomooHistoricalOrder,
     MoomooInstrument,
@@ -38,6 +39,7 @@ from stonks_cli.vnext.moomoo import (
     MoomooUSQuote,
     OpenDEndpointStatus,
     check_moomoo_sdk_compatibility,
+    normalize_moomoo_corporate_actions,
     normalize_moomoo_instruments,
     probe_local_opend,
     read_moomoo_trade_unlock_state_without_secrets,
@@ -797,3 +799,15 @@ def test_resolve_moomoo_sgx_equity_symbol_requires_canonical_moomoo_sg_code():
     assert resolve_moomoo_sgx_equity_symbol("SG.D05") == "SG.D05"
     with pytest.raises(VNextExternalDataError, match="unresolved"):
         resolve_moomoo_sgx_equity_symbol("D05")
+
+
+def test_normalize_moomoo_corporate_actions_models_documented_adjustment_fields():
+    assert normalize_moomoo_corporate_actions(
+        "US.AAPL",
+        [{"ex_div_date": "2026-02-01", "split_ratio": 1, "per_cash_div": 0.25, "forward_adj_factorA": 1, "forward_adj_factorB": -0.25, "backward_adj_factorA": 1, "backward_adj_factorB": 0.25}],
+    ) == (MoomooCorporateAction("US.AAPL", "2026-02-01", 1.0, 0.25, 1.0, -0.25, 1.0, 0.25),)
+
+
+def test_normalize_moomoo_corporate_actions_rejects_missing_or_nonfinite_fields():
+    with pytest.raises(ValueError):
+        normalize_moomoo_corporate_actions("US.AAPL", [{"ex_div_date": "2026-02-01", "split_ratio": float("nan")}])

@@ -1063,6 +1063,13 @@ def _validate_moomoo_sg_symbol(symbol: object) -> str:
     return symbol
 
 
+def resolve_moomoo_sgx_equity_symbol(symbol: object) -> str:
+    try:
+        return _validate_moomoo_sg_symbol(symbol)
+    except ValueError as error:
+        raise VNextExternalDataError("Moomoo SGX equity symbol is unresolved") from error
+
+
 def _finite_quote_value(record: Mapping[object, object], field: str) -> float:
     value = record.get(field)
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):

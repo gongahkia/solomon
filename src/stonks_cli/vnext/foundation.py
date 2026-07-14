@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,10 +11,31 @@ from uuid import UUID, uuid4
 
 UTCDateTime = NewType("UTCDateTime", datetime)
 RUN_IDENTITY_VERSION = 1
+_ENVIRONMENT_VARIABLE_PATTERN = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 
 
 class Clock(Protocol):
     def now(self) -> UTCDateTime: ...
+
+
+@dataclass(frozen=True)
+class SecretReference:
+    environment_variable: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.environment_variable, str) or not _ENVIRONMENT_VARIABLE_PATTERN.fullmatch(self.environment_variable):
+            raise ValueError("invalid secret environment variable")
+
+    @classmethod
+    def parse(cls, value: object) -> SecretReference:
+        if not isinstance(value, str):
+            raise TypeError("secret reference must be a string")
+        if not value.startswith("env:"):
+            raise ValueError("secret reference must use env: prefix")
+        return cls(value.removeprefix("env:"))
+
+    def __str__(self) -> str:
+        return f"env:{self.environment_variable}"
 
 
 def as_utc(value: object) -> UTCDateTime:

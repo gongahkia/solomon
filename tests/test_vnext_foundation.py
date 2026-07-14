@@ -8,6 +8,7 @@ import pytest
 from stonks_cli.vnext.foundation import (
     RUN_IDENTITY_VERSION,
     FrozenUTCClock,
+    SecretReference,
     SystemUTCClock,
     as_utc,
     create_run_identity,
@@ -21,6 +22,20 @@ def test_system_utc_clock_returns_aware_utc_time():
 
     assert timestamp.tzinfo is UTC
     assert timestamp.utcoffset() == timedelta(0)
+
+
+def test_secret_reference_holds_only_valid_environment_variable_name():
+    reference = SecretReference.parse("env:STONKS_CLI_MOOMOO_TOKEN")
+
+    assert reference.environment_variable == "STONKS_CLI_MOOMOO_TOKEN"
+    assert str(reference) == "env:STONKS_CLI_MOOMOO_TOKEN"
+    assert "token-value" not in repr(reference)
+
+
+@pytest.mark.parametrize("value", [None, "STONKS_CLI_TOKEN", "env:", "env:token", "env:INVALID-NAME"])
+def test_secret_reference_rejects_malformed_values(value):
+    with pytest.raises((TypeError, ValueError)):
+        SecretReference.parse(value)
 
 
 def test_frozen_utc_clock_normalizes_time_and_is_deterministic():

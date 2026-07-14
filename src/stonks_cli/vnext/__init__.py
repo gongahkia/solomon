@@ -12,6 +12,7 @@ from stonks_cli.vnext.foundation import (
     as_utc,
     create_run_identity,
     load_run_identity,
+    resolve_environment_secret,
     save_run_identity,
 )
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
@@ -33,6 +34,7 @@ __all__ = [
     "as_utc",
     "create_run_identity",
     "load_run_identity",
+    "resolve_environment_secret",
     "save_run_identity",
     "runtime_directories",
     "validate_package_boundaries",

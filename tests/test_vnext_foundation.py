@@ -13,6 +13,7 @@ from stonks_cli.vnext.foundation import (
     as_utc,
     create_run_identity,
     load_run_identity,
+    resolve_environment_secret,
     save_run_identity,
 )
 
@@ -36,6 +37,27 @@ def test_secret_reference_holds_only_valid_environment_variable_name():
 def test_secret_reference_rejects_malformed_values(value):
     with pytest.raises((TypeError, ValueError)):
         SecretReference.parse(value)
+
+
+def test_environment_secret_resolver_returns_present_value_without_logging_it():
+    reference = SecretReference.parse("env:STONKS_CLI_MOOMOO_TOKEN")
+
+    assert resolve_environment_secret(reference, {"STONKS_CLI_MOOMOO_TOKEN": "token-value"}) == "token-value"
+
+
+@pytest.mark.parametrize("environment", [{}, {"STONKS_CLI_MOOMOO_TOKEN": ""}, {"STONKS_CLI_MOOMOO_TOKEN": 1}])
+def test_environment_secret_resolver_fails_closed_without_secret_value(environment):
+    reference = SecretReference.parse("env:STONKS_CLI_MOOMOO_TOKEN")
+
+    with pytest.raises(ValueError, match="secret unavailable:STONKS_CLI_MOOMOO_TOKEN") as error:
+        resolve_environment_secret(reference, environment)
+
+    assert "token-value" not in str(error.value)
+
+
+def test_environment_secret_resolver_rejects_non_reference_input():
+    with pytest.raises(TypeError, match="secret reference is required"):
+        resolve_environment_secret("env:STONKS_CLI_MOOMOO_TOKEN", {})
 
 
 def test_frozen_utc_clock_normalizes_time_and_is_deterministic():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +37,15 @@ class SecretReference:
 
     def __str__(self) -> str:
         return f"env:{self.environment_variable}"
+
+
+def resolve_environment_secret(reference: SecretReference, environment: Mapping[str, str] | None = None) -> str:
+    if not isinstance(reference, SecretReference):
+        raise TypeError("secret reference is required")
+    value = (os.environ if environment is None else environment).get(reference.environment_variable)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"secret unavailable:{reference.environment_variable}")
+    return value
 
 
 def as_utc(value: object) -> UTCDateTime:

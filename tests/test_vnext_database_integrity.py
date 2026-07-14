@@ -37,3 +37,23 @@ def test_database_integrity_check_fails_closed_for_foreign_key_violations(tmp_pa
     assert report.integrity_messages == ("ok",)
     assert report.foreign_key_violations[0].table == "children"
     assert report.foreign_key_violations[0].parent_table == "parents"
+
+
+def test_database_integrity_check_reports_healthy_after_foreign_key_recovery(tmp_path):
+    path = tmp_path / "vnext.sqlite3"
+    factory = SQLiteConnectionFactory(path)
+    with factory.connect() as connection:
+        connection.execute("CREATE TABLE parents (id INTEGER PRIMARY KEY)")
+        connection.execute("CREATE TABLE children (parent_id INTEGER REFERENCES parents(id))")
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("INSERT INTO children(parent_id) VALUES (99)")
+
+    assert check_database_integrity(factory).healthy is False
+    with factory.connect() as connection:
+        connection.execute("DELETE FROM children WHERE parent_id = 99")
+
+    report = check_database_integrity(factory)
+
+    assert report.healthy is True
+    assert report.foreign_key_violations == ()

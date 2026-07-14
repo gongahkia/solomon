@@ -195,6 +195,7 @@ from stonks_cli.vnext.rolling_drawdown import DailyDrawdown, RollingDrawdownSeri
 from stonks_cli.vnext.runtime import RUNTIME_ROOT_ENV, RuntimeDirectories, RuntimeDirectory, runtime_directories
 from stonks_cli.vnext.score_components import ScoreComponent
 from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV, calculate_sgd_portfolio_nav
+from stonks_cli.vnext.single_asset_limits import SingleAssetExposureLimit, enforce_single_asset_limits
 from stonks_cli.vnext.snapshot_cache import IdempotentSnapshotCache
 from stonks_cli.vnext.source_citations import SOURCE_CITATION_SCHEMA_VERSION, SourceCitation
 from stonks_cli.vnext.stablecoins import (
@@ -349,6 +350,7 @@ __all__ = [
     "SGMarketSessionStatus",
     "SecretReference",
     "ServiceContainer",
+    "SingleAssetExposureLimit",
     "SOURCE_CITATION_SCHEMA_VERSION",
     "SourceCitation",
     "SQLiteConnectionFactory",
@@ -414,6 +416,7 @@ __all__ = [
     "deserialize_structured_event",
     "enforce_private_file",
     "enforce_asset_class_exposure_limits",
+    "enforce_single_asset_limits",
     "ensure_private_directory",
     "load_run_identity",
     "load_crypto_universe_history",

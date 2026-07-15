@@ -29,14 +29,14 @@ while [ "$SECONDS" -lt "$end_at" ]; do
     if [ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; fi
   } > "$soak_dir/host-$run_id.txt"
 
-  "${STONKS_CLI_BIN[@]}" carry health \
+  "${STONKS_CLI_BIN[@]}" health-carry \
     --state-dir "$STONKS_CLI_CARRY_STATE_DIR" \
     --ledger "$STONKS_CLI_CARRY_STATE_DIR/latest-ledger.md" \
     --stream-heartbeat "$STONKS_CLI_CARRY_STATE_DIR/carry-stream-heartbeat.json" \
     --reconciliation "$STONKS_CLI_CARRY_STATE_DIR/latest-reconciliation.md" \
     --json > "$soak_dir/health-$run_id.json"
 
-  "${STONKS_CLI_BIN[@]}" carry scan \
+  "${STONKS_CLI_BIN[@]}" scan-carry \
     --asset BTC \
     --asset ETH \
     --json > "$soak_dir/scan-$run_id.json"

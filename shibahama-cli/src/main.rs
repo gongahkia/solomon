@@ -10,9 +10,10 @@ mod mcp_tools;
 mod oidc;
 
 use axum::body::Bytes;
-use axum::extract::{Path as AxumPath, Query, State};
+use axum::extract::{MatchedPath, Path as AxumPath, Query, Request, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderName, ORIGIN, RETRY_AFTER};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -53,6 +54,7 @@ use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
@@ -71,6 +73,19 @@ const ADMIN_BOOTSTRAP_SECRET_DOMAIN: &[u8] = b"shibahama:admin:bootstrap-secret:
 const ADMIN_RECOVERY_SECRET_DOMAIN: &[u8] = b"shibahama:admin:recovery-secret:v1";
 const SERVICE_TOKEN_SECRET_DOMAIN: &[u8] = b"shibahama:service-token:bearer:v1";
 const SERVICE_TOKEN_PREFIX: &str = "shb_at_";
+const OPERATIONAL_LOG_SCHEMA_VERSION: u32 = 1;
+const OPERATIONAL_LOG_SCOPE_DOMAIN: &[u8] = b"shibahama:operational-log:scope:v1";
+
+#[derive(Clone)]
+struct ServerRequestLogContext {
+    started_at: Instant,
+    emitted: Arc<AtomicBool>,
+    scope_hash_key: [u8; 32],
+}
+
+tokio::task_local! {
+    static SERVER_REQUEST_LOG_CONTEXT: ServerRequestLogContext;
+}
 
 #[derive(Parser)]
 #[command(author, version, about = "Shibahama memory engine CLI")]
@@ -744,6 +759,7 @@ struct ServerState {
     rate_limiter: Arc<Mutex<ServerRateLimiter>>,
     mcp_scope: MemoryScope,
     max_memories_per_namespace: usize,
+    operational_log_key: [u8; 32],
 }
 
 struct ServerRequestContext {
@@ -1619,6 +1635,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         rate_limiter: Arc::new(Mutex::new(ServerRateLimiter::new(rate_limit))),
         mcp_scope,
         max_memories_per_namespace: command.max_memories_per_namespace,
+        operational_log_key: operational_log_key(),
     };
     let app = Router::new()
         .route("/healthz", get(server_health))
@@ -1693,6 +1710,10 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         .route("/tideline/recording", get(server_tideline_recording))
         .route("/tideline/live", get(server_tideline_live))
         .layer(cors.layer())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            server_operational_log_middleware,
+        ))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(command.bind).await?;
     let local_addr = listener.local_addr()?;
@@ -3390,6 +3411,47 @@ fn memory_label(content: &str) -> String {
     }
 }
 
+async fn server_operational_log_middleware(
+    State(state): State<ServerState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().to_string();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| "unmatched".to_owned(), |path| path.as_str().to_owned());
+    let namespace = request_namespace(request.headers(), &state).ok();
+    let context = ServerRequestLogContext {
+        started_at: Instant::now(),
+        emitted: Arc::new(AtomicBool::new(false)),
+        scope_hash_key: state.operational_log_key,
+    };
+
+    SERVER_REQUEST_LOG_CONTEXT
+        .scope(context.clone(), async move {
+            let response = next.run(request).await;
+            if !context.emitted.swap(true, Ordering::Relaxed) {
+                emit_server_operational_log(
+                    &method,
+                    &route,
+                    namespace.as_deref(),
+                    "unknown",
+                    response.status(),
+                    &json!({}),
+                    context
+                        .started_at
+                        .elapsed()
+                        .as_millis()
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                );
+            }
+            response
+        })
+        .await
+}
+
 fn log_server_request(
     method: &str,
     route: &str,
@@ -3398,19 +3460,123 @@ fn log_server_request(
     status: StatusCode,
     cost: serde_json::Value,
 ) {
-    let record = json!({
-        "event": "shibahama_http_request",
-        "at_unix": OffsetDateTime::now_utc().unix_timestamp(),
-        "method": method,
-        "route": route,
-        "namespace": namespace.unwrap_or("unknown"),
-        "principal": principal.as_ref(),
-        "principal_class": service_principal_class(principal.as_ref()),
-        "status": status.as_u16(),
-        "cost": cost,
-    });
+    let elapsed_ms = SERVER_REQUEST_LOG_CONTEXT
+        .try_with(|context| {
+            context.emitted.store(true, Ordering::Relaxed);
+            context
+                .started_at
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX)
+        })
+        .unwrap_or(0);
+    emit_server_operational_log(
+        method,
+        route,
+        namespace,
+        principal.as_ref(),
+        status,
+        &cost,
+        elapsed_ms,
+    );
+}
+
+fn emit_server_operational_log(
+    method: &str,
+    route: &str,
+    namespace: Option<&str>,
+    principal: &str,
+    status: StatusCode,
+    cost: &serde_json::Value,
+    duration_ms: u64,
+) {
+    let record = server_operational_log_record(
+        method,
+        route,
+        namespace,
+        principal,
+        status,
+        cost,
+        duration_ms,
+    );
 
     eprintln!("{record}");
+}
+
+fn server_operational_log_record(
+    method: &str,
+    route: &str,
+    namespace: Option<&str>,
+    principal: &str,
+    status: StatusCode,
+    cost: &serde_json::Value,
+    duration_ms: u64,
+) -> serde_json::Value {
+    let scope_hash_key = SERVER_REQUEST_LOG_CONTEXT
+        .try_with(|context| context.scope_hash_key)
+        .unwrap_or([0; 32]);
+    let error_code = cost
+        .get("error_code")
+        .and_then(serde_json::Value::as_str)
+        .filter(|code| code.starts_with("SHIBA_"))
+        .map(ToOwned::to_owned)
+        .or_else(|| (!status.is_success()).then(|| format!("SHIBA_HTTP_{}", status.as_u16())));
+
+    json!({
+        "schema_version": OPERATIONAL_LOG_SCHEMA_VERSION,
+        "event": "shibahama.operational",
+        "timestamp_unix": OffsetDateTime::now_utc().unix_timestamp(),
+        "component": "embedded_server",
+        "operation": format!("{method} {route}"),
+        "scope_id": operational_log_scope_id(namespace.unwrap_or("unknown"), &scope_hash_key),
+        "principal_class": service_principal_class(principal),
+        "duration_ms": duration_ms,
+        "status": status.as_u16(),
+        "error_code": error_code,
+        "metrics": operational_log_metrics(cost),
+    })
+}
+
+fn operational_log_key() -> [u8; 32] {
+    *blake3::hash(Uuid::new_v4().as_bytes()).as_bytes()
+}
+
+fn operational_log_scope_id(scope: &str, key: &[u8; 32]) -> String {
+    let mut hasher = blake3::Hasher::new_keyed(key);
+
+    hasher.update(OPERATIONAL_LOG_SCOPE_DOMAIN);
+    hasher.update(&[0]);
+    hasher.update(scope.as_bytes());
+    format!("scope_{}", &hasher.finalize().to_hex()[..16])
+}
+
+fn operational_log_metrics(cost: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    let Some(cost) = cost.as_object() else {
+        return serde_json::Map::new();
+    };
+
+    cost.iter()
+        .filter(|(key, value)| operational_log_metric_key_is_safe(key) && value.is_number())
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn operational_log_metric_key_is_safe(key: &str) -> bool {
+    key.bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        && ![
+            "content",
+            "vector",
+            "ref",
+            "credential",
+            "claim",
+            "secret",
+            "token",
+            "principal",
+        ]
+        .iter()
+        .any(|forbidden| key.contains(forbidden))
 }
 
 fn service_principal_class(principal: &str) -> &'static str {
@@ -6397,9 +6563,10 @@ mod tests {
         ServerRateLimitPolicy, ServerRateLimiter, ServerRbacPolicy, ServerRequestContext,
         ServerState, ServiceStoreMode, authorize_server_rbac, parse_cors_headers,
         parse_cors_methods, parse_cors_origins, parse_hex_encryption_key, parse_vector,
-        service_forgetting_mode, service_store_mode_from_options,
+        server_operational_log_record, service_forgetting_mode, service_store_mode_from_options,
     };
     use axum::http::StatusCode;
+    use serde_json::json;
     use shibahama_core::api::Shibahama;
     use shibahama_core::model::MemoryScope;
     use shibahama_core::policy::PolicyActorClass;
@@ -6429,6 +6596,52 @@ mod tests {
         assert_eq!(error.severity, "fatal");
         assert!(!error.retryable);
         assert_eq!(error.detail, "vector index operation failed");
+    }
+
+    #[test]
+    fn operational_logs_are_versioned_complete_and_redacted() {
+        let namespace = "private-namespace";
+        let claim = "oidc:alice@example.test";
+        let record = server_operational_log_record(
+            "POST",
+            "/write",
+            Some(namespace),
+            claim,
+            StatusCode::BAD_REQUEST,
+            &json!({
+                "request_units": 1,
+                "content": "private-content",
+                "vector": [0.1, 0.2],
+                "source_ref": "private-ref",
+                "credential": "private-credential",
+                "claim": claim,
+                "error_code": "SHIBA_INVALID_REQUEST",
+            }),
+            7,
+        );
+        let encoded = serde_json::to_string(&record).expect("log record should serialize");
+
+        assert_eq!(record["schema_version"], 1);
+        assert_eq!(record["component"], "embedded_server");
+        assert_eq!(record["operation"], "POST /write");
+        assert_eq!(record["duration_ms"], 7);
+        assert_eq!(record["status"], 400);
+        assert_eq!(record["error_code"], "SHIBA_INVALID_REQUEST");
+        assert_eq!(record["metrics"]["request_units"], 1);
+        for forbidden in [
+            namespace,
+            claim,
+            "private-content",
+            "private-ref",
+            "private-credential",
+            "content",
+            "vector",
+            "source_ref",
+            "credential",
+            "claim",
+        ] {
+            assert!(!encoded.contains(forbidden), "log contained {forbidden}");
+        }
     }
 
     #[test]
@@ -6601,6 +6814,7 @@ mod tests {
             }))),
             mcp_scope: scope.clone(),
             max_memories_per_namespace: 1,
+            operational_log_key: [0; 32],
         };
         let context = ServerRequestContext {
             namespace: "default".to_owned(),

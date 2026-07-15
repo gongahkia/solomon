@@ -142,21 +142,18 @@ terminates TLS and controls network access.
 
 ## Metadata-Only Request Logging
 
-Server request logs are emitted as JSON to stderr through `log_server_request`.
-They include metadata such as:
+Server request logs are emitted as schema-versioned JSON to stderr. Each record
+includes:
 
-- event name;
-- timestamp;
-- method and route;
-- namespace;
+- schema version, event name, timestamp, component, and operation;
+- a keyed, non-reversible scope ID rather than the namespace;
 - principal class;
-- HTTP status;
-- request-unit and cost counters;
-- vector/query dimensions;
-- requested and returned counts.
+- duration and HTTP status;
+- stable error code when unsuccessful;
+- numeric request-unit, count, and dimension metrics only.
 
-They do not log memory content, raw query context, embeddings, source refs, or
-full recall results.
+They do not log memory content, raw query context, embeddings, source refs,
+credentials, or raw identity claims.
 
 Tideline endpoints return memory/event content to authorized callers by design,
 but their request log entries still record only metadata and counts.
@@ -195,7 +192,7 @@ The current public security-relevant surfaces are:
 - `shibahama_core::encryption::Aes256GcmEncryption`, the optional AES-256-GCM
   provider for encrypted redb payloads;
 - server request logs from `shibahama serve`, emitted through
-  `log_server_request` as metadata and cost counters only;
+  `log_server_request` as versioned, scope-safe operational records only;
 - `ShibahamaConfig::ingest_credence`, which swaps source-kind default credence
   assignments without changing the stored `CredenceTier` ordering invariant;
 - `ShibahamaConfig::forgetting`, which can route invalidation requests to

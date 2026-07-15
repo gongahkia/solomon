@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -223,6 +224,10 @@ def run_http_lane(fixture: dict[str, Any]) -> dict[str, Any]:
                 f"127.0.0.1:{port}",
             ],
             cwd=ROOT,
+            env={
+                **os.environ,
+                "SHIBAHAMA_ENCRYPTION_KEY": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            },
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

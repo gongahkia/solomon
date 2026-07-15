@@ -357,7 +357,12 @@ fn forgetting_mode(value: ForgettingMode) -> &'static str {
 
 fn core_error(error: ShibahamaError) -> McpToolError {
     let metadata = error.metadata();
-    McpToolError::new(metadata.code, metadata.detail, metadata.retryable)
+    McpToolError::with_severity(
+        metadata.code,
+        metadata.detail,
+        metadata.severity.as_str(),
+        metadata.retryable,
+    )
 }
 
 fn invalid_request() -> McpToolError {
@@ -566,6 +571,8 @@ mod tests {
         );
         assert_eq!(response["error"]["code"], -32000);
         assert_eq!(response["error"]["data"]["code"], "SHIBA_INVALID_REQUEST");
+        assert_eq!(response["error"]["data"]["severity"], "fatal");
+        assert_eq!(response["error"]["data"]["retryable"], false);
         assert!(!response.to_string().contains("after=secret"));
     }
 

@@ -127,13 +127,11 @@ if [[ "$invalid_write_status" != "400" ]]; then
 fi
 python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
-assert payload == {
-    "error": "vector index operation failed",
-    "code": "SHIBA_VECTOR",
-    "severity": "fatal",
-    "retryable": False,
-    "detail": "vector index operation failed",
-}' "$tmpdir/invalid-write.json"
+assert payload["error"] == "vector index operation failed"
+assert payload["code"] == "SHIBA_VECTOR"
+assert payload["severity"] == "fatal"
+assert payload["retryable"] is False
+assert payload["detail"] == "vector index operation failed"' "$tmpdir/invalid-write.json"
 
 invalidated_json="$(request POST /write '{"content":"Invalidated server smoke memory","vector":[0,1],"source_kind":"file","source_ref":"server-smoke-invalidated","valid_from_unix":0,"ingested_at_unix":0}')"
 invalidated_id="$(json_field id <<<"$invalidated_json")"
@@ -268,6 +266,8 @@ python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 assert payload["result"]["isError"] is True
 assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_UNAUTHORIZED"
+assert payload["result"]["structuredContent"]["error"]["severity"] == "fatal"
+assert payload["result"]["structuredContent"]["error"]["retryable"] is False
 assert "actor class must not be forgeable" not in json.dumps(payload)' "$mcp_spoofed_actor"
 mcp_write="$tmpdir/mcp-write.json"
 curl -fsS -o "$mcp_write" -X POST "${mcp_headers[@]}" --data '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"shibahama_memory_write_v1","arguments":{"schemaVersion":1,"scope":{"repository":"smoke","team":null,"visibility":"repository"},"actor":"service","actorId":"api_key","content":"MCP server smoke memory","vector":[1,0],"sourceKind":"user","validFromUnix":0,"ingestedAtUnix":0}}}' "${base}/mcp"
@@ -288,7 +288,9 @@ curl -fsS -o "$mcp_missing_confirmation" -X POST "${mcp_headers[@]}" --data "{\"
 python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 assert payload["result"]["isError"] is True
-assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_REQUIRED"' "$mcp_missing_confirmation"
+assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_REQUIRED"
+assert payload["result"]["structuredContent"]["error"]["severity"] == "fatal"
+assert payload["result"]["structuredContent"]["error"]["retryable"] is False' "$mcp_missing_confirmation"
 mcp_erase="$tmpdir/mcp-erase.json"
 curl -fsS -o "$mcp_erase" -X POST "${mcp_headers[@]}" --data "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"shibahama_memory_erase_v1\",\"arguments\":{\"schemaVersion\":1,\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"actor\":\"service\",\"actorId\":\"api_key\",\"memoryId\":\"${mcp_memory_id}\",\"validToUnix\":2,\"confirmation\":{\"schemaVersion\":1,\"intent\":\"erasure\",\"token\":\"server-erase-confirm-0001\",\"actorId\":\"api_key\",\"scope\":{\"repository\":\"smoke\",\"team\":null,\"visibility\":\"repository\"},\"targetId\":\"${mcp_memory_id}\",\"validToUnix\":2}}}}" "${base}/mcp"
 python3 -c 'import json,sys
@@ -300,7 +302,9 @@ curl -fsS -o "$mcp_erase_retry" -X POST "${mcp_headers[@]}" --data "{\"jsonrpc\"
 python3 -c 'import json,sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 assert payload["result"]["isError"] is True
-assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_CONSUMED"' "$mcp_erase_retry"
+assert payload["result"]["structuredContent"]["error"]["code"] == "SHIBA_CONFIRMATION_CONSUMED"
+assert payload["result"]["structuredContent"]["error"]["severity"] == "fatal"
+assert payload["result"]["structuredContent"]["error"]["retryable"] is False' "$mcp_erase_retry"
 if [[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'accept: application/json, text/event-stream' -H 'content-type: application/json' -H "x-api-key: ${api_key}" -H "x-shibahama-namespace: ${namespace}" -H 'x-shibahama-scope-visibility: team' -H 'x-shibahama-scope-team: team-smoke' -H "mcp-session-id: ${mcp_session}" -H 'mcp-protocol-version: 2025-11-25' --data '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' "${base}/mcp")" != "403" ]]; then
   echo "MCP session accepted a changed scope" >&2
   exit 1

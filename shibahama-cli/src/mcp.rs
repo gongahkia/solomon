@@ -28,6 +28,7 @@ const WRITE_REQUIRED_FIELDS: &[&str] = &[
 pub struct McpToolError {
     code: String,
     detail: String,
+    severity: &'static str,
     retryable: bool,
 }
 
@@ -35,9 +36,27 @@ impl McpToolError {
     /// Creates content-safe error data for one failed tool call.
     #[must_use]
     pub fn new(code: impl Into<String>, detail: impl Into<String>, retryable: bool) -> Self {
+        let severity = if retryable { "recoverable" } else { "fatal" };
         Self {
             code: code.into(),
             detail: detail.into(),
+            severity,
+            retryable,
+        }
+    }
+
+    /// Creates content-safe error data with explicit core severity.
+    #[must_use]
+    pub fn with_severity(
+        code: impl Into<String>,
+        detail: impl Into<String>,
+        severity: &'static str,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            detail: detail.into(),
+            severity,
             retryable,
         }
     }
@@ -418,6 +437,7 @@ impl McpSession {
                         "error": {
                             "code": "SHIBA_CONFIRMATION_CONSUMED",
                             "detail": "confirmation token was already consumed",
+                            "severity": "fatal",
                             "retryable": false,
                         }
                     }),
@@ -440,6 +460,7 @@ impl McpSession {
                         "error": {
                             "code": error.code,
                             "detail": error.detail,
+                            "severity": error.severity,
                             "retryable": error.retryable,
                         }
                     }),
@@ -791,6 +812,7 @@ fn resource_error(id: Value, error: McpToolError) -> Value {
         Some(json!({
             "code": error.code,
             "detail": error.detail,
+            "severity": error.severity,
             "retryable": error.retryable,
         })),
     )

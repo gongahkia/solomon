@@ -674,7 +674,12 @@ fn output(result: Value) -> Value {
 
 fn core_error(error: ShibahamaError) -> McpToolError {
     let metadata = error.metadata();
-    McpToolError::new(metadata.code, metadata.detail, metadata.retryable)
+    McpToolError::with_severity(
+        metadata.code,
+        metadata.detail,
+        metadata.severity.as_str(),
+        metadata.retryable,
+    )
 }
 
 fn invalid_arguments() -> McpToolError {
@@ -1026,6 +1031,8 @@ mod tests {
         assert_eq!(forged_principal["result"]["isError"], true);
         let error = &forged_principal["result"]["structuredContent"]["error"];
         assert_eq!(error["code"], "SHIBA_UNAUTHORIZED");
+        assert_eq!(error["severity"], "fatal");
+        assert_eq!(error["retryable"], false);
         assert!(!error.to_string().contains("secret must not appear"));
 
         let forged_actor = call(
@@ -1104,6 +1111,8 @@ mod tests {
         assert_eq!(rejected["result"]["isError"], true);
         let error = &rejected["result"]["structuredContent"]["error"];
         assert_eq!(error["code"], "SHIBA_POLICY");
+        assert_eq!(error["severity"], "fatal");
+        assert_eq!(error["retryable"], false);
         assert!(
             !error
                 .to_string()

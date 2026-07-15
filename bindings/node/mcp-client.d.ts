@@ -46,6 +46,7 @@ export type McpRequestTransport = { request(message: unknown): Promise<unknown>;
 export class ShibahamaMcpError extends Error {
   code: string;
   detail: string;
+  severity: "recoverable" | "fatal";
   retryable: boolean;
 }
 

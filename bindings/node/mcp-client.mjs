@@ -22,11 +22,12 @@ export const MCP_RESOURCE_URIS = Object.freeze([
 ]);
 
 export class ShibahamaMcpError extends Error {
-  constructor({ code = "SHIBA_TRANSPORT", detail = "MCP transport failed", retryable = true }) {
+  constructor({ code = "SHIBA_TRANSPORT", detail = "MCP transport failed", severity, retryable = true }) {
     super(detail);
     this.name = "ShibahamaMcpError";
     this.code = code;
     this.detail = detail;
+    this.severity = severity ?? (retryable ? "recoverable" : "fatal");
     this.retryable = retryable;
   }
 }
@@ -203,18 +204,19 @@ export class ShibahamaMcpClient {
 
 function toolError(content) {
   const error = content?.error ?? {};
-  return new ShibahamaMcpError({ code: error.code, detail: error.detail, retryable: error.retryable });
+  return new ShibahamaMcpError({ code: error.code, detail: error.detail, severity: error.severity, retryable: error.retryable });
 }
 
 function rpcError(error) {
   const metadata = error?.data ?? {};
-  return new ShibahamaMcpError({ code: metadata.code ?? "SHIBA_RPC", detail: metadata.detail ?? error?.message, retryable: metadata.retryable ?? false });
+  return new ShibahamaMcpError({ code: metadata.code ?? "SHIBA_RPC", detail: metadata.detail ?? error?.message, severity: metadata.severity, retryable: metadata.retryable ?? false });
 }
 
 function httpError(payload, status) {
   return new ShibahamaMcpError({
     code: payload?.code ?? "SHIBA_HTTP",
     detail: payload?.detail ?? `HTTP MCP request failed with status ${status}`,
+    severity: payload?.severity,
     retryable: payload?.retryable ?? status >= 500,
   });
 }

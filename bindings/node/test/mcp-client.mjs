@@ -22,7 +22,7 @@ class FixtureTransport {
       return { jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "shibahama_memory_recall_v1" }] } };
     }
     if (message.method === "tools/call") {
-      return { jsonrpc: "2.0", id: message.id, result: { isError: true, structuredContent: { error: { code: "SHIBA_POLICY", detail: "policy denied", retryable: false } } } };
+      return { jsonrpc: "2.0", id: message.id, result: { isError: true, structuredContent: { error: { code: "SHIBA_POLICY", detail: "policy denied", severity: "fatal", retryable: false } } } };
     }
     return undefined;
   }
@@ -38,6 +38,7 @@ await assert.rejects(
   client.recall({ schemaVersion: 1, scope: { repository: "repo", team: null, visibility: "repository" } }),
   (error) => error instanceof ShibahamaMcpError
     && error.code === "SHIBA_POLICY"
+    && error.severity === "fatal"
     && error.retryable === false,
 );
 

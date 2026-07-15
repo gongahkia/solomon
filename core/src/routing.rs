@@ -2,9 +2,9 @@
 
 //! Versioned repository-to-shard placement contracts.
 
-use crate::model::ScopeId;
+use crate::model::{MemoryScope, ScopeId};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Current shard-placement schema version.
@@ -132,6 +132,81 @@ pub enum RoutingError {
     /// No shard owns the repository.
     #[error("repository has no active shard")]
     UnassignedRepository,
+    /// No healthy shard is available for selection.
+    #[error("no shard is available")]
+    NoAvailableShard,
+    /// The selected shard cannot serve the request.
+    #[error("selected shard is unavailable")]
+    UnavailableShard,
+}
+
+/// Context forwarded unchanged to the selected shard.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoutedRequest {
+    /// Selected healthy shard.
+    pub shard: ScopeId,
+    /// Exact original repository/team scope.
+    pub scope: MemoryScope,
+    /// Exact authenticated principal supplied by the transport.
+    pub principal: String,
+}
+
+/// Deterministic rendezvous-hash router over healthy shard identifiers.
+#[derive(Default)]
+pub struct RendezvousRouter {
+    healthy_shards: BTreeSet<ScopeId>,
+}
+
+impl RendezvousRouter {
+    /// Creates a router from healthy shard identifiers.
+    #[must_use]
+    pub fn new(healthy_shards: impl IntoIterator<Item = ScopeId>) -> Self {
+        Self {
+            healthy_shards: healthy_shards.into_iter().collect(),
+        }
+    }
+
+    /// Selects one healthy shard while preserving transport authorization context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::NoAvailableShard`] when no shard can safely serve the request.
+    pub fn route(
+        &self,
+        scope: MemoryScope,
+        principal: String,
+    ) -> Result<RoutedRequest, RoutingError> {
+        let shard = self
+            .healthy_shards
+            .iter()
+            .max_by_key(|shard| {
+                let mut hasher = blake3::Hasher::new();
+                hasher.update(scope.repository.as_str().as_bytes());
+                hasher.update(&[0]);
+                hasher.update(shard.as_str().as_bytes());
+                *hasher.finalize().as_bytes()
+            })
+            .cloned()
+            .ok_or(RoutingError::NoAvailableShard)?;
+        Ok(RoutedRequest {
+            shard,
+            scope,
+            principal,
+        })
+    }
+
+    /// Rejects a failed selected shard instead of silently rerouting a request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::UnavailableShard`] when the selected shard is unhealthy.
+    pub fn require_available(&self, shard: &ScopeId) -> Result<(), RoutingError> {
+        if self.healthy_shards.contains(shard) {
+            Ok(())
+        } else {
+            Err(RoutingError::UnavailableShard)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +244,34 @@ mod tests {
         placement.schema_version = SHARD_PLACEMENT_SCHEMA_VERSION;
         placement.migration_state = ShardMigrationState::Preparing;
         assert_eq!(placement.validate(), Err(RoutingError::InvalidMigration));
+    }
+
+    #[test]
+    fn rendezvous_routing_is_deterministic_moves_only_to_added_shard_and_preserves_context() {
+        let scopes = (0..128)
+            .map(|index| id(&format!("repo-{index}")))
+            .collect::<Vec<_>>();
+        let first = RendezvousRouter::new([id("shard-a"), id("shard-b")]);
+        let second = RendezvousRouter::new([id("shard-a"), id("shard-b"), id("shard-c")]);
+        for repository in scopes {
+            let scope = MemoryScope::repository(repository);
+            let first_route = first
+                .route(scope.clone(), "oidc:opaque".to_owned())
+                .expect("route");
+            let second_route = second
+                .route(scope.clone(), "oidc:opaque".to_owned())
+                .expect("route");
+            assert_eq!(first_route.scope, scope);
+            assert_eq!(first_route.principal, "oidc:opaque");
+            assert!(first_route.shard == second_route.shard || second_route.shard == id("shard-c"));
+        }
+        assert_eq!(
+            RendezvousRouter::default().route(MemoryScope::default(), "anonymous".to_owned()),
+            Err(RoutingError::NoAvailableShard)
+        );
+        assert_eq!(
+            first.require_available(&id("shard-c")),
+            Err(RoutingError::UnavailableShard)
+        );
     }
 }

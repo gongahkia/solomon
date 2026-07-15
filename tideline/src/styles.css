@@ -542,6 +542,31 @@ input[type="range"] {
   min-height: 290px;
 }
 
+.governance-list {
+  display: grid;
+  gap: 8px;
+}
+
+.governance-row {
+  display: grid;
+  grid-template-columns: 64px repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #d8d0c1;
+  background: #fffdf8;
+}
+
+.governance-row > span,
+.governance-row p,
+.governance-row em {
+  color: #5a564f;
+  font-size: 0.76rem;
+}
+
+.governance-row p {
+  margin: 4px 0;
+}
+
 .moment-lanes,
 .time-table,
 .consolidation-list {

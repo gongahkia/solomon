@@ -32,7 +32,10 @@ use shibahama_core::model::{
     HumanSignal, HumanSignalAction, MemoryId, MemoryItem, MemoryKind, MemoryScope, Provenance,
     Relation, RelationId, ScopeId, ScopeVisibility, SourceKind, TemporalBounds, Tier,
 };
-use shibahama_core::policy::{CaptureIntent, CapturePolicyRequest, PolicyActorClass};
+use shibahama_core::policy::{
+    CaptureIntent, CapturePolicyRequest, PolicyActorClass, PolicyAuditDisposition,
+    PolicyAuditOperation, PolicyAuditRecord,
+};
 use shibahama_core::retrieval::{
     RecallCandidate, RecallCandidateCurrency, RecallCandidateSource, RecallRequest,
     RecallUnavailableStage,
@@ -662,6 +665,34 @@ struct TidelineEventDto {
     human_signal_action: Option<String>,
     human_signal_actor: Option<String>,
     human_signal_reason: Option<String>,
+    permitted_scope: Option<MemoryScopeDto>,
+    policy_outcome: Option<TidelinePolicyOutcomeDto>,
+    promotion_lineage: Option<TidelinePromotionLineageDto>,
+    erasure_tombstone: Option<TidelineErasureTombstoneDto>,
+}
+
+#[derive(Serialize)]
+struct TidelinePolicyOutcomeDto {
+    operation: String,
+    disposition: String,
+    policy_version: u16,
+}
+
+#[derive(Serialize)]
+struct TidelinePromotionLineageDto {
+    source_id: Option<String>,
+    promoted_id: Option<String>,
+    actor: String,
+}
+
+#[derive(Serialize)]
+struct TidelineErasureTombstoneDto {
+    schema_version: u8,
+    memory_id: String,
+    scope: MemoryScopeDto,
+    erased_at_unix: i64,
+    destroyed_record_key_count: u32,
+    integrity_hash: String,
 }
 
 #[derive(Serialize)]
@@ -2882,6 +2913,10 @@ fn tideline_snapshot_for_scope(
         .collect::<Vec<_>>();
     let last_sequence = event_records.last().map(|record| record.sequence);
     let graph = tideline_graph(&scoped_memories, &event_records);
+    let scoped_memory_ids = scoped_memories
+        .iter()
+        .map(|item| item.id)
+        .collect::<BTreeSet<_>>();
     let event_count = event_records.len();
     let memories = scoped_memories
         .into_iter()
@@ -2889,7 +2924,7 @@ fn tideline_snapshot_for_scope(
         .collect::<Vec<_>>();
     let events = event_records
         .into_iter()
-        .map(tideline_event_from_record)
+        .map(|record| tideline_event_from_record(record, &scoped_memory_ids))
         .collect::<Vec<_>>();
 
     Ok(TidelineSnapshotDto {
@@ -2957,7 +2992,10 @@ fn event_touches_memory(record: &EventRecord, id: MemoryId) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
+fn tideline_event_from_record(
+    record: EventRecord,
+    scoped_memory_ids: &BTreeSet<MemoryId>,
+) -> TidelineEventDto {
     let sequence = record.sequence;
     let recorded_at = record.recorded_at;
 
@@ -2978,12 +3016,13 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
             promoted_id,
             actor,
             rationale,
+            scoped_memory_ids,
         ),
         MemoryEvent::ScopeAuthorizationDenied { principal, .. } => {
             tideline_scope_authorization_denied_event(sequence, recorded_at, principal)
         }
-        MemoryEvent::PolicyDecisionRecorded { .. } => {
-            base_tideline_event(sequence, recorded_at, "policy_decision", Vec::new())
+        MemoryEvent::PolicyDecisionRecorded { record } => {
+            tideline_policy_decision_event(sequence, recorded_at, record)
         }
         MemoryEvent::ReviewCandidateQueued { .. } => {
             base_tideline_event(sequence, recorded_at, "review_candidate_queued", Vec::new())
@@ -3015,12 +3054,9 @@ fn tideline_event_from_record(record: EventRecord) -> TidelineEventDto {
             "memory_record_key_destroyed",
             vec![id],
         ),
-        MemoryEvent::MemorySemanticallyErased { tombstone } => base_tideline_event(
-            sequence,
-            recorded_at,
-            "memory_semantically_erased",
-            vec![tombstone.memory_id],
-        ),
+        MemoryEvent::MemorySemanticallyErased { tombstone } => {
+            tideline_semantic_erasure_event(sequence, recorded_at, tombstone)
+        }
         MemoryEvent::ReverificationFlagged { id, flagged_at, .. } => {
             let mut event =
                 base_tideline_event(sequence, recorded_at, "reverification_flagged", vec![id]);
@@ -3112,15 +3148,62 @@ fn tideline_scope_promotion_event(
     promoted_id: MemoryId,
     actor: String,
     rationale: String,
+    scoped_memory_ids: &BTreeSet<MemoryId>,
+) -> TidelineEventDto {
+    let source_visible = scoped_memory_ids.contains(&source_id);
+    let promoted_visible = scoped_memory_ids.contains(&promoted_id);
+    let memory_ids = [
+        source_visible.then_some(source_id),
+        promoted_visible.then_some(promoted_id),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut event = base_tideline_event(sequence, recorded_at, "memory_scope_promoted", memory_ids);
+    event.human_signal_actor = Some(actor.clone());
+    event.human_signal_reason = Some(rationale);
+    event.promotion_lineage = Some(TidelinePromotionLineageDto {
+        source_id: source_visible.then(|| source_id.to_string()),
+        promoted_id: promoted_visible.then(|| promoted_id.to_string()),
+        actor,
+    });
+    event
+}
+
+fn tideline_policy_decision_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    record: PolicyAuditRecord,
+) -> TidelineEventDto {
+    let mut event = base_tideline_event(sequence, recorded_at, "policy_decision", Vec::new());
+    event.permitted_scope = record.scope.map(MemoryScopeDto::from);
+    event.policy_outcome = Some(TidelinePolicyOutcomeDto {
+        operation: tideline_policy_operation_str(record.operation).to_owned(),
+        disposition: tideline_policy_disposition_str(record.disposition).to_owned(),
+        policy_version: record.policy_version,
+    });
+    event
+}
+
+fn tideline_semantic_erasure_event(
+    sequence: u64,
+    recorded_at: OffsetDateTime,
+    tombstone: shibahama_core::storage::SemanticErasureTombstone,
 ) -> TidelineEventDto {
     let mut event = base_tideline_event(
         sequence,
         recorded_at,
-        "memory_scope_promoted",
-        vec![source_id, promoted_id],
+        "memory_semantically_erased",
+        vec![tombstone.memory_id],
     );
-    event.human_signal_actor = Some(actor);
-    event.human_signal_reason = Some(rationale);
+    event.erasure_tombstone = Some(TidelineErasureTombstoneDto {
+        schema_version: tombstone.schema_version,
+        memory_id: tombstone.memory_id.to_string(),
+        scope: MemoryScopeDto::from(tombstone.scope),
+        erased_at_unix: tombstone.erased_at.unix_timestamp(),
+        destroyed_record_key_count: tombstone.destroyed_record_key_count,
+        integrity_hash: tombstone.integrity_hash,
+    });
     event
 }
 
@@ -3160,6 +3243,25 @@ fn base_tideline_event(
         human_signal_action: None,
         human_signal_actor: None,
         human_signal_reason: None,
+        permitted_scope: None,
+        policy_outcome: None,
+        promotion_lineage: None,
+        erasure_tombstone: None,
+    }
+}
+
+fn tideline_policy_operation_str(operation: PolicyAuditOperation) -> &'static str {
+    match operation {
+        PolicyAuditOperation::Capture => "capture",
+        PolicyAuditOperation::Recall => "recall",
+    }
+}
+
+fn tideline_policy_disposition_str(disposition: PolicyAuditDisposition) -> &'static str {
+    match disposition {
+        PolicyAuditDisposition::Allowed => "allowed",
+        PolicyAuditDisposition::RequiresApproval => "requires_approval",
+        PolicyAuditDisposition::Denied => "denied",
     }
 }
 
@@ -6656,12 +6758,15 @@ mod tests {
         ServerState, ServiceStoreMode, authorize_server_rbac, parse_cors_headers,
         parse_cors_methods, parse_cors_origins, parse_hex_encryption_key, parse_vector,
         server_operational_log_record, service_forgetting_mode, service_store_mode_from_options,
+        tideline_policy_decision_event,
     };
     use axum::http::StatusCode;
-    use serde_json::json;
+    use serde_json::{json, to_value};
     use shibahama_core::api::Shibahama;
     use shibahama_core::model::MemoryScope;
-    use shibahama_core::policy::PolicyActorClass;
+    use shibahama_core::policy::{
+        PolicyActorClass, PolicyAuditDisposition, PolicyAuditOperation, PolicyAuditRecord,
+    };
     use shibahama_core::storage::{AuthorizationAction, AuthorizationPrincipalClass, RbacRole};
     use shibahama_core::vector::HnswVectorIndex;
     use std::collections::BTreeMap;
@@ -6688,6 +6793,43 @@ mod tests {
         assert_eq!(error.severity, "fatal");
         assert!(!error.retryable);
         assert_eq!(error.detail, "vector index operation failed");
+    }
+
+    #[test]
+    fn tideline_policy_projection_excludes_recall_counts() {
+        let event = tideline_policy_decision_event(
+            7,
+            OffsetDateTime::UNIX_EPOCH,
+            PolicyAuditRecord {
+                operation: PolicyAuditOperation::Recall,
+                policy_version: 2,
+                disposition: PolicyAuditDisposition::Allowed,
+                capture_reason: None,
+                actor: None,
+                source_kind: None,
+                scope: Some(MemoryScope::default()),
+                requested_candidates: Some(99),
+                effective_candidates: Some(1),
+                context_token_budget: Some(4096),
+                context_tokens_used: Some(128),
+            },
+        );
+        let json = to_value(event).expect("Tideline policy event should serialize");
+
+        assert_eq!(json["policy_outcome"]["operation"], "recall");
+        assert_eq!(json["policy_outcome"]["disposition"], "allowed");
+        assert_eq!(json["permitted_scope"]["repository"], "default");
+        for forbidden in [
+            "requested_candidates",
+            "effective_candidates",
+            "context_token_budget",
+            "context_tokens_used",
+        ] {
+            assert!(
+                json.get(forbidden).is_none(),
+                "projection exposed {forbidden}"
+            );
+        }
     }
 
     #[test]

@@ -12,6 +12,7 @@ import {
   SquareMousePointer,
   Waypoints,
 } from "lucide-react";
+import { GovernanceView, type GovernanceEvent } from "./governance";
 import "./styles.css";
 
 type Tier = "hot" | "warm" | "cold" | string;
@@ -34,7 +35,7 @@ type MemoryItem = {
   ingested_at_unix: number;
 };
 
-type TidelineEvent = {
+type TidelineEvent = GovernanceEvent & {
   sequence: number;
   recorded_at_unix: number;
   kind: string;
@@ -144,7 +145,7 @@ type AuditDetail = {
   events: EventRecordDetail[];
 };
 
-type ViewName = "moment" | "staleness" | "consolidation" | "poisoning" | "bitemporal" | "graph" | "diff";
+type ViewName = "moment" | "staleness" | "consolidation" | "poisoning" | "bitemporal" | "governance" | "graph" | "diff";
 type ChallengeNote = { actor: string; reason: string };
 type StalenessDecision = {
   event: TidelineEvent;
@@ -532,6 +533,9 @@ function App() {
           <button className={activeView === "bitemporal" ? "active" : ""} onClick={() => setActiveView("bitemporal")}>
             <RefreshCcw size={16} /> Bi-temporal
           </button>
+          <button className={activeView === "governance" ? "active" : ""} onClick={() => setActiveView("governance")}>
+            <ShieldCheck size={16} /> Governance
+          </button>
           <button className={activeView === "graph" ? "active" : ""} onClick={() => setActiveView("graph")}>
             <Waypoints size={16} /> Graph
           </button>
@@ -553,6 +557,7 @@ function App() {
         )}
         {activeView === "poisoning" && <PoisoningView memories={visibleMemories} lowCredence={lowCredence} />}
         {activeView === "bitemporal" && <BiTemporalView memories={visibleMemories} asOf={asOf} />}
+        {activeView === "governance" && <GovernanceView events={visibleEvents} />}
         {activeView === "graph" && <GraphView snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} />}
         {activeView === "diff" && (
           <DiffView

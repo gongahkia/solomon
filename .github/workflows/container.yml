@@ -32,6 +32,9 @@ jobs:
       - name: Run OIDC team Compose smoke test
         run: bash scripts/ci/team-compose-smoke.sh
 
+      - name: Run encrypted disaster-recovery smoke test
+        run: bash scripts/ci/disaster-recovery-smoke.sh
+
       - name: Render and lint Helm chart
         run: bash scripts/ci/helm-lint.sh
 

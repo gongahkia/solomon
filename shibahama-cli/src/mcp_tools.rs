@@ -702,9 +702,13 @@ fn confirmation_required() -> McpToolError {
 mod tests {
     use super::*;
     use crate::mcp::{McpSession, PROTOCOL_VERSION};
+    use proptest::prelude::*;
     use serde_json::json;
-    use shibahama_core::api::AllowScopePromotionPolicy;
+    use shibahama_core::api::{AllowScopePromotionPolicy, ScopeMode, ShibahamaConfig};
     use shibahama_core::model::{ScopeId, ScopeVisibility};
+    use shibahama_core::policy::{
+        ActorClassPolicy, CaptureMode, CapturePolicy, ScopePolicy, SourceKindPolicy,
+    };
     use shibahama_core::storage::MemoryEvent;
     use tempfile::NamedTempFile;
 
@@ -722,6 +726,71 @@ mod tests {
 
     fn scope() -> Value {
         json!({ "repository": "repo", "team": null, "visibility": "repository" })
+    }
+
+    fn property_actor(index: u8) -> (PolicyActorClass, &'static str) {
+        match index % 4 {
+            0 => (PolicyActorClass::Human, "human"),
+            1 => (PolicyActorClass::Agent, "agent"),
+            2 => (PolicyActorClass::Automation, "automation"),
+            _ => (PolicyActorClass::Service, "service"),
+        }
+    }
+
+    fn property_source(index: u8) -> (SourceKind, &'static str) {
+        match index % 5 {
+            0 => (SourceKind::User, "user"),
+            1 => (SourceKind::Agent, "agent"),
+            2 => (SourceKind::File, "file"),
+            3 => (SourceKind::Web, "web"),
+            _ => (SourceKind::Tool, "tool"),
+        }
+    }
+
+    fn property_scope(team: bool) -> MemoryScope {
+        let repository = ScopeId::new("property-repo").expect("constant scope");
+        if team {
+            MemoryScope::team(
+                repository,
+                ScopeId::new("property-team").expect("constant scope"),
+            )
+        } else {
+            MemoryScope::repository(repository)
+        }
+    }
+
+    fn property_actor_policy(actor: PolicyActorClass, allowed: bool) -> ActorClassPolicy {
+        let mut policy = ActorClassPolicy {
+            human: false,
+            agent: false,
+            automation: false,
+            service: false,
+        };
+        match actor {
+            PolicyActorClass::Human => policy.human = allowed,
+            PolicyActorClass::Agent => policy.agent = allowed,
+            PolicyActorClass::Automation => policy.automation = allowed,
+            PolicyActorClass::Service => policy.service = allowed,
+        }
+        policy
+    }
+
+    fn property_source_policy(source: SourceKind, allowed: bool) -> SourceKindPolicy {
+        let mut policy = SourceKindPolicy {
+            user: false,
+            agent: false,
+            file: false,
+            web: false,
+            tool: false,
+        };
+        match source {
+            SourceKind::User => policy.user = allowed,
+            SourceKind::Agent => policy.agent = allowed,
+            SourceKind::File => policy.file = allowed,
+            SourceKind::Web => policy.web = allowed,
+            SourceKind::Tool => policy.tool = allowed,
+        }
+        policy
     }
 
     fn initialize(session: &mut McpSession, backend: &mut McpEngineBackend<'_>) {
@@ -1118,6 +1187,95 @@ mod tests {
                 .to_string()
                 .contains("suggested capture must not persist")
         );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn automatic_mcp_capture_never_bypasses_policy_boundary(
+            actor_index in 0_u8..4,
+            source_index in 0_u8..5,
+            team_scope in any::<bool>(),
+            allow_actor in any::<bool>(),
+            allow_source in any::<bool>(),
+            allow_scope in any::<bool>(),
+            minimum_confidence in 0_u8..=100,
+            confidence in 0_u8..=100,
+        ) {
+            let (actor, actor_name) = property_actor(actor_index);
+            let (source, source_name) = property_source(source_index);
+            let scope = property_scope(team_scope);
+            let capture_policy = CapturePolicy {
+                mode: CaptureMode::Automatic,
+                actors: property_actor_policy(actor, allow_actor),
+                sources: property_source_policy(source, allow_source),
+                scopes: ScopePolicy {
+                    repository: !team_scope && allow_scope,
+                    team: team_scope && allow_scope,
+                },
+                minimum_confidence_percent: minimum_confidence,
+                ..CapturePolicy::default()
+            };
+            let config = ShibahamaConfig {
+                scope_mode: ScopeMode::RequireExplicit,
+                capture_policy,
+                ..ShibahamaConfig::default()
+            };
+            let file = NamedTempFile::new().expect("temporary store should open");
+            let mut engine = Shibahama::open_with_config(
+                file.path(),
+                HnswVectorIndex::with_capacity(2, 8),
+                config,
+            ).expect("engine should open");
+            let context = McpServerContext::new(scope.clone(), "property-agent".to_owned(), actor);
+            let arguments = json!({
+                "schemaVersion": 1,
+                "scope": scope.clone(),
+                "actor": actor_name,
+                "actorId": "property-agent",
+                "content": "policy property fixture",
+                "vector": [1.0, 0.0],
+                "sourceKind": source_name,
+                "validFromUnix": 0,
+                "ingestedAtUnix": 0,
+                "captureIntent": "automatic",
+                "confidencePercent": confidence,
+            });
+            let response = {
+                let mut backend = McpEngineBackend::new(&mut engine);
+                let mut session = McpSession::new(context);
+                initialize(&mut session, &mut backend);
+                call(
+                    &mut session,
+                    &mut backend,
+                    2,
+                    "shibahama_memory_write_v1",
+                    arguments,
+                )
+            };
+            let denied = !allow_actor || !allow_source || !allow_scope || confidence < minimum_confidence;
+
+            prop_assert_eq!(response["result"]["isError"].as_bool(), Some(denied));
+            if denied {
+                prop_assert_eq!(
+                    response["result"]["structuredContent"]["error"]["code"].as_str(),
+                    Some("SHIBA_POLICY")
+                );
+            } else {
+                prop_assert_eq!(
+                    response["result"]["structuredContent"]["result"]["policyOutcome"].as_str(),
+                    Some("allowed")
+                );
+            }
+            let count = engine
+                .scoped(scope)
+                .expect("scope should be valid")
+                .memory_items()
+                .expect("memory items should read")
+                .len();
+            prop_assert_eq!(count, usize::from(!denied));
+        }
     }
 
     #[test]

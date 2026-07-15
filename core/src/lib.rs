@@ -23,6 +23,7 @@ pub mod read_safety;
 pub mod reconstruction;
 pub mod retrieval;
 pub mod review;
+pub mod routing;
 pub mod significance;
 pub mod storage;
 pub mod telemetry;

@@ -25,6 +25,7 @@ pub mod retrieval;
 pub mod review;
 pub mod significance;
 pub mod storage;
+pub mod telemetry;
 pub mod vector;
 
 /// Current crate version, kept available to bindings and smoke tests.

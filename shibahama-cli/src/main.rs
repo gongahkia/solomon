@@ -3431,6 +3431,15 @@ async fn server_operational_log_middleware(
     SERVER_REQUEST_LOG_CONTEXT
         .scope(context.clone(), async move {
             let response = next.run(request).await;
+            shibahama_core::telemetry::record_boundary(
+                shibahama_core::telemetry::TelemetryBoundary::Http,
+                shibahama_core::telemetry::TelemetryOperation::Request,
+                if response.status().is_success() {
+                    shibahama_core::telemetry::TelemetryStatus::Ok
+                } else {
+                    shibahama_core::telemetry::TelemetryStatus::Error
+                },
+            );
             if !context.emitted.swap(true, Ordering::Relaxed) {
                 emit_server_operational_log(
                     &method,

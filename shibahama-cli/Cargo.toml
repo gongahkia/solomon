@@ -18,6 +18,10 @@ categories.workspace = true
 name = "shibahama"
 path = "src/main.rs"
 
+[features]
+default = []
+opentelemetry = ["shibahama-core/opentelemetry"]
+
 [dependencies]
 axum = "0.8.9"
 blake3 = "1.8.3"

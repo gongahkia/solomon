@@ -1426,6 +1426,11 @@ impl<V: VectorIndex> Shibahama<V> {
             .write_event_with_policy(event, self.config.ingest_credence)?;
         self.store.record_policy_decision(audit)?;
 
+        crate::telemetry::record_boundary(
+            crate::telemetry::TelemetryBoundary::Core,
+            crate::telemetry::TelemetryOperation::Write,
+            crate::telemetry::TelemetryStatus::Ok,
+        );
         Ok(item)
     }
 
@@ -1691,8 +1696,20 @@ impl<V: VectorIndex> Shibahama<V> {
             ));
         }
         let vector = match provider.embed(&event.content, EmbeddingPurpose::Document) {
-            Ok(vector) => vector,
+            Ok(vector) => {
+                crate::telemetry::record_boundary(
+                    crate::telemetry::TelemetryBoundary::Provider,
+                    crate::telemetry::TelemetryOperation::Embed,
+                    crate::telemetry::TelemetryStatus::Ok,
+                );
+                vector
+            }
             Err(error) => {
+                crate::telemetry::record_boundary(
+                    crate::telemetry::TelemetryBoundary::Provider,
+                    crate::telemetry::TelemetryOperation::Embed,
+                    crate::telemetry::TelemetryStatus::Error,
+                );
                 self.store
                     .record_observability(ObservabilityRecord::failure(
                         ObservabilityOperation::ProviderCapture,
@@ -2332,6 +2349,11 @@ impl<V: VectorIndex> Shibahama<V> {
         let candidates = recall(&self.store, &self.vector_index, &request)?;
         self.record_recall_policy(&decision, &request, &candidates)?;
 
+        crate::telemetry::record_boundary(
+            crate::telemetry::TelemetryBoundary::Core,
+            crate::telemetry::TelemetryOperation::Recall,
+            crate::telemetry::TelemetryStatus::Ok,
+        );
         Ok(candidates)
     }
 
@@ -2389,8 +2411,20 @@ impl<V: VectorIndex> Shibahama<V> {
             ));
         }
         let vector = match provider.embed(query, EmbeddingPurpose::Query) {
-            Ok(vector) => vector,
+            Ok(vector) => {
+                crate::telemetry::record_boundary(
+                    crate::telemetry::TelemetryBoundary::Provider,
+                    crate::telemetry::TelemetryOperation::Embed,
+                    crate::telemetry::TelemetryStatus::Ok,
+                );
+                vector
+            }
             Err(error) => {
+                crate::telemetry::record_boundary(
+                    crate::telemetry::TelemetryBoundary::Provider,
+                    crate::telemetry::TelemetryOperation::Embed,
+                    crate::telemetry::TelemetryStatus::Error,
+                );
                 self.store
                     .record_observability(ObservabilityRecord::failure(
                         ObservabilityOperation::ProviderRecall,

@@ -2192,7 +2192,7 @@ impl RedbMemoryStore {
         model: impl Into<String>,
         model_version: impl Into<String>,
     ) -> Result<EventRecord, StorageError> {
-        self.write_embedded_with_fault_injector(
+        let result = self.write_embedded_with_fault_injector(
             item,
             vector_index,
             vector,
@@ -2200,7 +2200,17 @@ impl RedbMemoryStore {
             model,
             model_version,
             None,
-        )
+        );
+        crate::telemetry::record_boundary(
+            crate::telemetry::TelemetryBoundary::Storage,
+            crate::telemetry::TelemetryOperation::StoreWrite,
+            if result.is_ok() {
+                crate::telemetry::TelemetryStatus::Ok
+            } else {
+                crate::telemetry::TelemetryStatus::Error
+            },
+        );
+        result
     }
 
     /// Writes an item and embedding while optionally injecting a deterministic storage fault.

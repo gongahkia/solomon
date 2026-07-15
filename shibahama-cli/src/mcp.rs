@@ -275,6 +275,11 @@ impl McpSession {
         message: Value,
         backend: &mut dyn McpToolBackend,
     ) -> Option<Value> {
+        shibahama_core::telemetry::record_boundary(
+            shibahama_core::telemetry::TelemetryBoundary::Mcp,
+            shibahama_core::telemetry::TelemetryOperation::Message,
+            shibahama_core::telemetry::TelemetryStatus::Ok,
+        );
         let Some(object) = message.as_object() else {
             return Some(protocol_error(Value::Null, -32600, "Invalid Request", None));
         };

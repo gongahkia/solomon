@@ -155,6 +155,14 @@ includes:
 They do not log memory content, raw query context, embeddings, source refs,
 credentials, or raw identity claims.
 
+## OpenTelemetry Boundaries
+
+Build the core or CLI with the `opentelemetry` feature to emit standard spans
+and the `shibahama.operation.count` counter through the host-installed global
+OpenTelemetry provider. The feature is disabled by default. Instrumentation has
+only fixed component, operation, and outcome attributes; it never receives
+memory content, scope IDs, source refs, credentials, or identity claims.
+
 Tideline endpoints return memory/event content to authorized callers by design,
 but their request log entries still record only metadata and counts.
 

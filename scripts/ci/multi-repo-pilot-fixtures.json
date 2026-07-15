@@ -1,0 +1,23 @@
+{
+  "repositories": ["pilot-alpha", "pilot-beta"],
+  "team": "pilot-team",
+  "embedded": {
+    "content": "feature-parser moved from src/parser.rs to src/syntax/parser.rs",
+    "sourceRef": "refs/heads/feature-parser:src/parser.rs->src/syntax/parser.rs",
+    "rejectionReason": "superseded parser approach",
+    "expectedAuditKinds": ["memory_written", "access_recorded", "reverification_flagged", "human_signal"]
+  },
+  "service": {
+    "sessions": [
+      {"repository": "pilot-alpha", "agent": "agent-alpha-1", "content": "alpha branch chose parser move", "sourceRef": "refs/heads/feature-parser"},
+      {"repository": "pilot-alpha", "agent": "agent-alpha-2", "content": "alpha rejected legacy parser plan", "sourceRef": "reviews/parser-rejection"},
+      {"repository": "pilot-beta", "agent": "agent-beta-1", "content": "beta keeps independent formatter", "sourceRef": "refs/heads/formatter"}
+    ],
+    "expectedAuditKinds": ["memory_written"]
+  },
+  "mcp": {
+    "principal": "maintainer-alice",
+    "content": "share approved parser migration decision",
+    "expectedAuditKinds": ["memory_written", "memory_scope_promoted"]
+  }
+}

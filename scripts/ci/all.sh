@@ -15,6 +15,7 @@ bash scripts/ci/service-token-smoke.sh
 bash scripts/ci/cors-smoke.sh
 bash scripts/ci/rate-limit-smoke.sh
 bash scripts/ci/semantic-erasure-smoke.sh
+node scripts/ci/multi-repo-pilot-harness.mjs
 scripts/ci/binding-parity.sh
 node scripts/ci/mcp-compatibility.mjs
 scripts/ci/golden-parity.sh

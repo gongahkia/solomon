@@ -75,6 +75,9 @@ jobs:
       - name: Semantic-erasure service smoke test
         run: bash scripts/ci/semantic-erasure-smoke.sh
 
+      - name: Multi-repository coding-agent pilot harness
+        run: node scripts/ci/multi-repo-pilot-harness.mjs
+
       - name: Upload MCP conformance artifact
         if: always()
         uses: actions/upload-artifact@v6

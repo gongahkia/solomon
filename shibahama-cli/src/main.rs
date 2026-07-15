@@ -22,9 +22,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use shibahama_core::api::{
-    ConsolidationPassReport, ForgettingConfig, ForgettingMode, HumanCorrectionOutcome,
-    HumanSignalOutcome, HumanSignalRequest, SemanticErasureRequest, Shibahama, ShibahamaConfig,
-    ShibahamaErrorMetadata, WhyTrace, WriteEmbedding,
+    AllowScopePromotionPolicy, ConsolidationPassReport, ForgettingConfig, ForgettingMode,
+    HumanCorrectionOutcome, HumanSignalOutcome, HumanSignalRequest, SemanticErasureRequest,
+    Shibahama, ShibahamaConfig, ShibahamaErrorMetadata, WhyTrace, WriteEmbedding,
 };
 use shibahama_core::encryption::{EnvelopeEncryption, LocalKeyProvider};
 use shibahama_core::model::{
@@ -437,6 +437,9 @@ struct McpCommand {
     /// Authenticated actor class fixed for this MCP server process.
     #[arg(long, default_value = "human")]
     actor: String,
+    /// Permit repository-to-team promotion for this local MCP process.
+    #[arg(long)]
+    allow_scope_promotion: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -1627,6 +1630,9 @@ fn serve_mcp(command: McpCommand) -> CliResult<()> {
     let principal = mcp_principal(&command.principal)?;
     let actor = mcp_actor(&command.actor)?;
     let mut engine = open_engine(&command.store, None)?;
+    if command.allow_scope_promotion {
+        engine.set_scope_authorization_policy(AllowScopePromotionPolicy);
+    }
     let mut backend = mcp_tools::McpEngineBackend::new(&mut engine);
 
     Ok(mcp::serve_stdio_with_backend(

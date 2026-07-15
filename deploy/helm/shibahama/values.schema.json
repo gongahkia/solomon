@@ -3,8 +3,8 @@
   "type": "object",
   "properties": {
     "replicaCount": {"type": "integer", "minimum": 1, "maximum": 1},
-    "secrets": {"type": "object", "properties": {"existingSecret": {"type": "string", "minLength": 1}}},
+    "secrets": {"type": "object", "properties": {"existingSecret": {"type": "string", "minLength": 1}, "adminBootstrapKey": {"type": "string"}, "adminRecoveryKey": {"type": "string"}}},
     "storage": {"type": "object", "properties": {"size": {"type": "string", "minLength": 1}}},
-    "policy": {"type": "object", "properties": {"rbacEnforce": {"const": true}}}
+    "policy": {"type": "object", "properties": {"fullSemanticErasure": {"type": "boolean"}, "rbacEnforce": {"const": true}}}
   }
 }

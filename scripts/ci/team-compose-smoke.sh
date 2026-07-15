@@ -99,6 +99,7 @@ PY
   printf 'SHIBAHAMA_ADMIN_RECOVERY_SECRET=%s\n' "$recovery_secret"
   printf 'SHIBAHAMA_DIMENSIONS=2\n'
   printf 'SHIBAHAMA_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)"
+  printf 'SHIBAHAMA_FULL_SEMANTIC_ERASURE=true\n'
   printf 'SHIBAHAMA_NAMESPACE=%s\n' "$namespace"
   printf 'SHIBAHAMA_PORT=0\n'
 } >"$env_file"
@@ -155,6 +156,27 @@ python3 -c 'import json,sys
 record = json.loads(sys.argv[1])
 assert record["status"] == "ready"
 assert record["namespace"] == "team-compose"' "$ready"
+
+headers=(-H "Authorization: Bearer $access_token" -H "x-shibahama-namespace: $namespace" -H 'x-shibahama-scope-visibility: repository')
+memory_id="$(curl_in_network -fsS -X POST "${headers[@]}" -H 'content-type: application/json' --data '{"content":"compose lifecycle erased memory","vector":[1,0],"source_kind":"user"}' http://shibahama:8765/write | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+curl_in_network -fsS -X POST "${headers[@]}" -H 'content-type: application/json' --data "{\"memory_id\":\"$memory_id\",\"authorization_id\":\"compose-lifecycle-erase-0001\"}" http://shibahama:8765/erase >/dev/null
+compose stop shibahama
+data_volume="${project}_shibahama-data"
+backup_file="$tmpdir/shibahama.redb.backup"
+docker run --rm --volume "$data_volume:/source:ro" --volume "$tmpdir:/backup" busybox:1.37.0-musl cp /source/shibahama.redb /backup/shibahama.redb.backup
+if strings "$backup_file" | rg -q 'compose lifecycle erased memory'; then
+  echo 'encrypted backup exposed memory content' >&2
+  exit 1
+fi
+docker run --rm --volume "$data_volume:/data" busybox:1.37.0-musl sh -c ': > /data/shibahama.redb'
+if compose up --detach --wait --wait-timeout 30 shibahama; then
+  echo 'service recovered after simulated storage corruption without restore' >&2
+  exit 1
+fi
+compose stop shibahama >/dev/null 2>&1 || true
+docker run --rm --volume "$data_volume:/data" --volume "$tmpdir:/backup:ro" busybox:1.37.0-musl cp /backup/shibahama.redb.backup /data/shibahama.redb
+compose up --detach --wait --wait-timeout 180 shibahama
+curl_in_network -fsS "${headers[@]}" http://shibahama:8765/events | python3 -c 'import json,sys; assert "memory_semantically_erased" in {event["kind"] for event in json.load(sys.stdin)["events"]}'
 
 mcp="$(curl_in_network -fsS -X POST \
   -H 'accept: application/json, text/event-stream' \

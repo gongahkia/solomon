@@ -9,6 +9,8 @@ metadata:
     {{- include "shibahama.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "shibahama.name" . }}
@@ -40,6 +42,18 @@ spec:
             - name: SHIBAHAMA_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef: { name: {{ $secret }}, key: {{ .Values.secrets.encryptionKeyKey }} }
+            {{- if .Values.secrets.adminBootstrapKey }}
+            - name: SHIBAHAMA_ADMIN_BOOTSTRAP_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: {{ .Values.secrets.adminBootstrapKey }} }
+            {{- end }}
+            {{- if .Values.secrets.adminRecoveryKey }}
+            - name: SHIBAHAMA_ADMIN_RECOVERY_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: {{ .Values.secrets.adminRecoveryKey }} }
+            {{- end }}
+            - name: SHIBAHAMA_FULL_SEMANTIC_ERASURE
+              value: {{ .Values.policy.fullSemanticErasure | quote }}
             - name: SHIBAHAMA_NAMESPACE
               value: {{ .Values.policy.namespace | quote }}
             - name: SHIBAHAMA_RBAC_ENFORCE

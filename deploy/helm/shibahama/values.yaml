@@ -17,6 +17,8 @@ storage:
 
 secrets:
   existingSecret: ""
+  adminBootstrapKey: ""
+  adminRecoveryKey: ""
   encryptionKeyKey: encryption-key
   apiKeyKey: api-key
 
@@ -39,6 +41,7 @@ oidc:
   caKey: ca.crt
 
 policy:
+  fullSemanticErasure: false
   namespace: default
   rbacEnforce: true
   rbacErasureMinRole: maintainer

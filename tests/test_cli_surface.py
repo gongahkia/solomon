@@ -36,9 +36,9 @@ def test_retired_grouped_commands_are_unknown():
         assert result.exit_code == 2
 
 
-def test_stock_provider_extras_and_mcp_example_are_removed():
+def test_stock_provider_extras_are_removed_and_mcp_entrypoint_exists():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
 
     assert set(extras) == {"dev"}
-    assert not (ROOT / "mcp-config.example.json").exists()
+    assert pyproject["project"]["scripts"]["stonks-mcp"] == "stonks_cli.mcp_server:main"

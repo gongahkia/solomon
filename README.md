@@ -37,6 +37,10 @@ Run `stonks-cli onboard` from an interactive terminal. It creates or updates loc
 
 `clean` removes only app-owned per-user cache and generated state after confirmation. `uninstall` also removes app-owned local config/data, then prints package-manager guidance; it does not remove the package itself. Neither command removes Linux carry-gate evidence or paths outside the managed per-user directories.
 
+## MCP
+
+`stonks-mcp` exposes the paper-first CLI through local stdio or authenticated loopback Streamable HTTP for MCP clients. It has structured outputs, explicit file roots, and two-step confirmation for every mutation. See [MCP setup](docs/mcp.md).
+
 ## Validation
 
 - [Capture validation](docs/validation-gates.md) documents the historical Hyperliquid connector gate.

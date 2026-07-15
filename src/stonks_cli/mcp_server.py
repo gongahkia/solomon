@@ -15,19 +15,13 @@ from uuid import uuid4
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
-<<<<<<< HEAD
 from typer.testing import CliRunner
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
 
 from stonks_cli.carry.carry_health import build_carry_health_report
 from stonks_cli.carry.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
 from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry_for_duration, write_paper_carry_artifacts
 from stonks_cli.carry.carry_scanner import CarryCostAssumptions, load_carry_inputs_fixture, scan_hyperliquid_carry
-<<<<<<< HEAD
 from stonks_cli.cli import app as cli_app
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
 from stonks_cli.cli_experience import inspect_home, removable_paths, remove_managed_paths
 from stonks_cli.commands import do_config_validate, do_doctor
 from stonks_cli.config import config_path, load_config, redacted_config_data, save_config
@@ -63,7 +57,6 @@ _SAFE_CONFIG_FIELDS = {
     "vnext.research.cadence",
     "vnext.research.enabled",
 }
-<<<<<<< HEAD
 _READONLY_CLI_COMMANDS = {
     "doctor",
     "health-carry",
@@ -100,8 +93,6 @@ _CLI_PATH_FLAGS = {
     "--state-dir",
     "--stream-heartbeat",
 }
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
 
 
 def _now() -> datetime:
@@ -158,7 +149,6 @@ def _checked_path(value: str | Path, *, write: bool = False) -> Path:
     return resolved
 
 
-<<<<<<< HEAD
 def _validate_readonly_cli_args(command: str, args: list[str]) -> None:
     if command not in _READONLY_CLI_COMMANDS:
         raise ValueError("command is not available through the read-only MCP bridge")
@@ -169,8 +159,6 @@ def _validate_readonly_cli_args(command: str, args: list[str]) -> None:
         raise ValueError("write and live-mode CLI options are unavailable through the MCP bridge")
 
 
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
 def _read_confirmations() -> dict[str, dict[str, Any]]:
     data = _load_json(_confirmations_path(), {})
     now = _now()
@@ -415,7 +403,6 @@ def create_server() -> FastMCP:
         """Validate the effective configuration."""
         return do_config_validate()
 
-<<<<<<< HEAD
     @mcp.tool(name="cli_readonly", annotations=_read_annotations())
     def cli_readonly(command: str, args: list[str] | None = None) -> dict[str, Any]:
         """Run an allowlisted non-mutating stonks-cli command without shell access."""
@@ -424,8 +411,6 @@ def create_server() -> FastMCP:
         result = CliRunner().invoke(cli_app, [command, *supplied])
         return {"command": command, "exit_code": result.exit_code, "output": result.output}
 
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
     @mcp.tool(name="carry_scan", annotations=_read_annotations())
     def carry_scan(fixture: str | None = None, assets: list[str] | None = None) -> dict[str, Any]:
         """Scan paper carry opportunities; fixture input avoids network access."""

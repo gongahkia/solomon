@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -67,6 +68,39 @@ def do_doctor() -> dict[str, str]:
     else:
         out["next_steps"] = "No blocking issues detected."
     return out
+
+
+def do_smoke_doctor() -> dict[str, object]:
+    """Run local, synthetic-only dependency and filesystem checks."""
+    from stonks_cli.paths import default_cache_dir, default_state_dir
+
+    fixture_root = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "research"
+    checks: dict[str, dict[str, str]] = {}
+    for name, path in {"state_dir": default_state_dir(), "cache_dir": default_cache_dir()}.items():
+        marker = path / ".smoke-write-check"
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            marker.write_text("ok", encoding="utf-8")
+            marker.unlink()
+            checks[name] = {"status": "ok", "detail": str(path)}
+        except OSError as error:
+            checks[name] = {"status": "fail", "detail": str(error)}
+    for name in ("hyperliquid-ws.jsonl", "wallet-attribution.jsonl", "paper-mirror.jsonl", "paper-decisions.jsonl"):
+        path = fixture_root / name
+        try:
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+            if not lines:
+                raise ValueError("empty fixture")
+            for line in lines:
+                json.loads(line)
+            checks[f"fixture:{name}"] = {"status": "ok", "detail": f"{len(lines)} JSONL line(s)"}
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            checks[f"fixture:{name}"] = {"status": "fail", "detail": str(error)}
+    checks["mcp_dependency"] = {
+        "status": "ok" if importlib.util.find_spec("mcp") else "fail",
+        "detail": "mcp package importable" if importlib.util.find_spec("mcp") else "install the mcp runtime dependency",
+    }
+    return {"synthetic": True, "not_validation_evidence": True, "ok": all(item["status"] == "ok" for item in checks.values()), "checks": checks}
 
 
 def do_config_where() -> Path:

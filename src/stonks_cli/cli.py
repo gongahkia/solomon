@@ -909,7 +909,7 @@ def research_ledger_demo(
     """Generate the fixture-backed public ledger and tearsheet."""
     try:
         result = write_fixture_artifacts(fixture_path=fixture, ledger_path=ledger, tearsheet_path=tearsheet)
-        Console().print(json.dumps(result, indent=2, sort_keys=True))
+        typer.echo(json.dumps(result, sort_keys=True))
     except Exception as e:
         raise _exit_for_error(e)
 

@@ -22,6 +22,23 @@ def test_home_json_reports_paper_safety(monkeypatch, tmp_path):
     assert payload["safety"]["live_execution"] == "blocked"
     assert payload["safety"]["carry_live_armed"] is False
     assert "stonks-cli onboard" in payload["actions"]
+    assert payload["readiness"]["moomoo_connection"]["status"] == "not configured"
+
+
+def test_home_reports_configured_moomoo_and_missing_alert_credentials(monkeypatch, tmp_path):
+    cfg = tmp_path / "config.json"
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg))
+    monkeypatch.setattr(experience.socket, "create_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("refused")))
+    config = cli.load_config(cfg)
+    config.vnext.enabled = True
+    config.vnext.moomoo.enabled = True
+    config.carry.alert_sink = "telegram"
+    cli.save_config(config, cfg)
+
+    payload = experience.inspect_home()
+
+    assert payload["readiness"]["moomoo_connection"]["status"] == "configured; unreachable"
+    assert payload["readiness"]["carry_alerts"]["status"] == "configured; credentials missing"
 
 
 def test_bare_cli_prints_help_when_not_interactive():

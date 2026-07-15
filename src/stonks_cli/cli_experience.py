@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import socket
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -56,6 +58,7 @@ def inspect_home() -> dict[str, Any]:
         return status
     status["config"]["valid"] = True
     status["integrations"] = _integration_status(cfg)
+    status["readiness"] = _readiness_status(cfg)
     status["safety"] = {
         "carry_live_armed": cfg.carry.live_armed,
         "execution_mode": cfg.vnext.operator.execution_mode,
@@ -83,6 +86,9 @@ def render_home(status: dict[str, Any], *, console: Console | None = None) -> No
     if "integrations" in status:
         for name, value in status["integrations"].items():
             table.add_row(name.replace("_", " ").title(), value)
+    if "readiness" in status:
+        for name, value in status["readiness"].items():
+            table.add_row(name.replace("_", " ").title(), value["status"])
     gate = status.get("carry_gate", {})
     table.add_row("30-day carry gate", gate.get("status", "not started"))
     console.print(table)
@@ -143,6 +149,47 @@ def _integration_status(cfg: AppConfig) -> dict[str, str]:
         "moomoo": "read-only enabled" if cfg.vnext.moomoo.enabled else "not configured",
         "operator_reports": "enabled" if cfg.vnext.operator.telegram.enabled else "not configured",
     }
+
+
+def _readiness_status(cfg: AppConfig) -> dict[str, dict[str, str]]:
+    return {
+        "moomoo_connection": _moomoo_readiness(cfg),
+        "carry_alerts": _carry_alert_readiness(cfg),
+        "operator_telegram": _operator_telegram_readiness(cfg),
+    }
+
+
+def _moomoo_readiness(cfg: AppConfig) -> dict[str, str]:
+    moomoo = cfg.vnext.moomoo
+    if not moomoo.enabled:
+        return {"status": "not configured", "detail": "read-only OpenD integration is disabled"}
+    try:
+        with socket.create_connection((moomoo.host, moomoo.port), timeout=min(moomoo.connection_timeout_seconds, 0.5)):
+            pass
+    except OSError as error:
+        return {"status": "configured; unreachable", "detail": f"{moomoo.host}:{moomoo.port}: {error}"}
+    return {"status": "read-only reachable", "detail": f"{moomoo.host}:{moomoo.port}"}
+
+
+def _carry_alert_readiness(cfg: AppConfig) -> dict[str, str]:
+    carry = cfg.carry
+    if carry.alert_sink == "disabled":
+        return {"status": "disabled", "detail": "no carry alert delivery configured"}
+    names = (carry.telegram_bot_token_env, carry.telegram_chat_id_env) if carry.alert_sink == "telegram" else (carry.email_smtp_url_env, carry.email_to_env)
+    missing = [name for name in names if not os.getenv(name)]
+    if missing:
+        return {"status": "configured; credentials missing", "detail": ", ".join(missing)}
+    return {"status": f"{carry.alert_sink} credentials ready", "detail": "delivery is not attempted by this check"}
+
+
+def _operator_telegram_readiness(cfg: AppConfig) -> dict[str, str]:
+    telegram = cfg.vnext.operator.telegram
+    if not telegram.enabled:
+        return {"status": "not configured", "detail": "operator Telegram reports are disabled"}
+    missing = [name for name in (telegram.bot_token_env, telegram.chat_id_env) if not os.getenv(name)]
+    if missing:
+        return {"status": "configured; credentials missing", "detail": ", ".join(missing)}
+    return {"status": "credentials ready", "detail": "delivery is not attempted by this check"}
 
 
 def _carry_gate_status(state_dir: Path) -> dict[str, str]:

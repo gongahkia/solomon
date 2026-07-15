@@ -69,7 +69,6 @@ def test_fixture_scan_respects_configured_roots(monkeypatch, tmp_path):
         _tool("carry_scan")("/tmp/not-allowed.json")
 
 
-<<<<<<< HEAD
 def test_readonly_cli_bridge_rejects_mutating_commands():
     result = _tool("cli_readonly")("version")
 
@@ -78,8 +77,6 @@ def test_readonly_cli_bridge_rejects_mutating_commands():
         _tool("cli_readonly")("clean")
 
 
-=======
->>>>>>> e181ba5e114ca4956b07dab58f74326f08a9bb01
 def test_http_wrapper_requires_bearer_token():
     events: list[dict] = []
 

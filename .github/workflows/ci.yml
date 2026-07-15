@@ -81,6 +81,9 @@ jobs:
       - name: Pilot avoided-regression evaluator
         run: python3 benchmarks/test_pilot_evaluator.py
 
+      - name: Bounded hostile-condition acceptance suite
+        run: bash scripts/ci/acceptance-suite.sh smoke
+
       - name: Upload MCP conformance artifact
         if: always()
         uses: actions/upload-artifact@v6

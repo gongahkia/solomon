@@ -12,6 +12,12 @@
 
 ```console
 $ stonks-cli --help
+$ stonks-cli                         # interactive local status home
+$ stonks-cli onboard                 # guided paper-first configuration
+$ stonks-cli settings                # guided safe settings editor
+$ stonks-cli home --json             # machine-readable local readiness
+$ stonks-cli clean --dry-run         # inspect removable cache/state paths
+$ stonks-cli uninstall --dry-run     # inspect app-data removal and package guidance
 $ stonks-cli init-config
 $ stonks-cli replay-ingest --fixture tests/fixtures/research/hyperliquid-ws.jsonl
 $ stonks-cli rank-wallet --fixture tests/fixtures/research/wallet-attribution.jsonl
@@ -22,6 +28,14 @@ $ stonks-cli preflight-carry-live
 ```
 
 Old grouped command paths are intentionally unsupported.
+
+## First run
+
+Run `stonks-cli onboard` from an interactive terminal. It creates or updates local configuration, preserves a timestamped backup of an existing config, and can enable paper carry, crypto research, read-only Moomoo support, and operator-report settings. It never asks for secret values, enables execution, or arms live trading.
+
+`stonks-cli` without a command shows the local readiness home in an interactive terminal; in scripts it prints compact help. Use `stonks-cli home --json` for automation.
+
+`clean` removes only app-owned per-user cache and generated state after confirmation. `uninstall` also removes app-owned local config/data, then prints package-manager guidance; it does not remove the package itself. Neither command removes Linux carry-gate evidence or paths outside the managed per-user directories.
 
 ## Validation
 

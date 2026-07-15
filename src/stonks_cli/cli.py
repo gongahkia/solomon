@@ -21,6 +21,15 @@ from stonks_cli.carry.carry_scanner import (
     load_carry_inputs_fixture,
     scan_hyperliquid_carry,
 )
+from stonks_cli.cli_experience import (
+    backup_config,
+    inspect_home,
+    is_interactive_terminal,
+    package_uninstall_guidance,
+    removable_paths,
+    remove_managed_paths,
+    render_home,
+)
 from stonks_cli.commands import (
     do_config_init,
     do_config_migrate,
@@ -31,7 +40,7 @@ from stonks_cli.commands import (
     do_doctor,
     do_version,
 )
-from stonks_cli.config import load_config
+from stonks_cli.config import config_path, load_config, save_config, update_config_field
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
@@ -91,16 +100,22 @@ from stonks_cli.vnext.sgd_portfolio_nav import SGDPortfolioNAV
 from stonks_cli.vnext.usd_portfolio_nav import USDPortfolioNAV
 from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
 
-app = typer.Typer(add_completion=True, help="Stonks CLI paper-carry tools.")
+app = typer.Typer(add_completion=True, help="Stonks CLI paper-carry tools.", invoke_without_command=True, no_args_is_help=False)
 
 
 @app.callback()
 def _global_options(
+    ctx: typer.Context,
     verbose: int = typer.Option(0, "--verbose", "-v", count=True, help="Increase logging verbosity"),
     quiet: bool = typer.Option(False, "--quiet", help="Only show errors"),
     structured_logs: bool = typer.Option(False, "--structured-logs", help="Emit JSON lines logs to stderr"),
 ) -> None:
     configure_logging(LoggingConfig(verbose=verbose, quiet=quiet, structured=structured_logs))
+    if ctx.invoked_subcommand is None:
+        if is_interactive_terminal():
+            render_home(inspect_home())
+        else:
+            typer.echo(ctx.get_help())
 
 
 @app.command("universe-crypto")
@@ -231,6 +246,31 @@ def _exit_for_error(e: Exception) -> typer.Exit:
     return typer.Exit(code=ExitCodes.UNKNOWN_ERROR)
 
 
+def _require_interactive(command: str) -> None:
+    if not is_interactive_terminal():
+        raise ValueError(f"{command} requires an interactive terminal")
+
+
+def _unsafe_settings_field(field: str) -> bool:
+    normalized = field.strip().lower()
+    return not normalized or any(token in normalized for token in ("execution", "live_armed", "max_total_live", "live_secrets"))
+
+
+def _cleanup(*, include_config: bool, dry_run: bool, action: str) -> None:
+    paths = removable_paths(include_config=include_config)
+    Console().print(f"Managed paths for {action}:")
+    for path in paths:
+        Console().print(f"- {path}")
+    if dry_run:
+        return
+    _require_interactive(action)
+    if not typer.confirm(f"Remove these {action} paths?", default=False):
+        Console().print("No paths removed.")
+        return
+    removed = remove_managed_paths(paths)
+    Console().print(f"Removed {len(removed)} path(s).")
+
+
 @app.command()
 def version() -> None:
     """Print version."""
@@ -326,6 +366,124 @@ def config_validate(
     Console().print_json(json.dumps(result))
     if not result["valid"]:
         raise typer.Exit(code=ExitCodes.BAD_CONFIG)
+
+
+@app.command("home")
+def cli_home(
+    json_output: bool = typer.Option(False, "--json", help="Emit local readiness as JSON"),
+) -> None:
+    """Show local readiness, safety posture, and useful next actions."""
+    try:
+        status = inspect_home()
+        if json_output:
+            Console().print_json(json.dumps(status))
+        else:
+            render_home(status)
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@app.command("onboard")
+def cli_onboard(
+    path: Path | None = typer.Option(None, "--path", help="Config path; defaults to stonks-cli's managed path"),
+) -> None:
+    """Create or safely update paper-first local configuration."""
+    try:
+        _require_interactive("onboard")
+        target = path or config_path()
+        cfg = load_config(target)
+        backup = backup_config(target)
+        research_enabled = typer.confirm("Enable crypto research?", default=cfg.vnext.research.enabled)
+        moomoo_enabled = typer.confirm("Enable local read-only Moomoo support?", default=cfg.vnext.moomoo.enabled)
+        reports_enabled = typer.confirm("Enable operator-report alert settings?", default=cfg.vnext.operator.telegram.enabled)
+        alert_sink = typer.prompt("Carry alert sink (disabled, telegram, email)", default=cfg.carry.alert_sink).strip().lower()
+        if alert_sink not in {"disabled", "telegram", "email"}:
+            raise ValueError("alert sink must be disabled, telegram, or email")
+        cfg.vnext.research.enabled = research_enabled
+        cfg.vnext.features.crypto_research = research_enabled
+        cfg.vnext.moomoo.enabled = moomoo_enabled
+        cfg.vnext.features.broker_data = moomoo_enabled
+        cfg.vnext.operator.telegram.enabled = reports_enabled
+        cfg.vnext.features.operator_reports = reports_enabled
+        cfg.vnext.enabled = research_enabled or moomoo_enabled or reports_enabled
+        cfg.carry.paper = True
+        cfg.carry.live_armed = False
+        cfg.vnext.features.execution = False
+        cfg.carry.alert_sink = alert_sink
+        save_config(cfg, target)
+        Console().print(f"Config ready: {target}")
+        if backup:
+            Console().print(f"Backup: {backup}")
+        Console().print("Live execution remains blocked. Run `stonks-cli home` for next actions.")
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@app.command("settings")
+def cli_settings(
+    path: Path | None = typer.Option(None, "--path", help="Config path; defaults to stonks-cli's managed path"),
+) -> None:
+    """Edit safe local settings through a guided prompt."""
+    try:
+        _require_interactive("settings")
+        target = path or config_path()
+        cfg = load_config(target)
+        section = typer.prompt("Section (paper, research, moomoo, alerts, advanced)", default="paper").strip().lower()
+        if section == "paper":
+            cfg.carry.min_net_apr = float(typer.prompt("Minimum net APR", default=str(cfg.carry.min_net_apr)))
+        elif section == "research":
+            enabled = typer.confirm("Enable crypto research?", default=cfg.vnext.research.enabled)
+            cfg.vnext.research.enabled = enabled
+            cfg.vnext.features.crypto_research = enabled
+            cfg.vnext.enabled = enabled or cfg.vnext.moomoo.enabled or cfg.vnext.operator.telegram.enabled
+        elif section == "moomoo":
+            enabled = typer.confirm("Enable local read-only Moomoo support?", default=cfg.vnext.moomoo.enabled)
+            cfg.vnext.moomoo.enabled = enabled
+            cfg.vnext.features.broker_data = enabled
+            cfg.vnext.moomoo.port = int(typer.prompt("Local OpenD port", default=str(cfg.vnext.moomoo.port)))
+            cfg.vnext.enabled = enabled or cfg.vnext.research.enabled or cfg.vnext.operator.telegram.enabled
+        elif section == "alerts":
+            sink = typer.prompt("Carry alert sink (disabled, telegram, email)", default=cfg.carry.alert_sink).strip().lower()
+            if sink not in {"disabled", "telegram", "email"}:
+                raise ValueError("alert sink must be disabled, telegram, or email")
+            cfg.carry.alert_sink = sink
+        elif section == "advanced":
+            field = typer.prompt("Safe dotted config path")
+            if _unsafe_settings_field(field):
+                raise ValueError("settings cannot enable execution or live trading")
+            cfg = update_config_field(cfg, field, typer.prompt("Value"))
+        else:
+            raise ValueError("section must be paper, research, moomoo, alerts, or advanced")
+        cfg.carry.paper = True
+        cfg.carry.live_armed = False
+        cfg.vnext.features.execution = False
+        save_config(cfg, target)
+        Console().print(f"Settings saved: {target}")
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@app.command("clean")
+def cli_clean(
+    dry_run: bool = typer.Option(False, "--dry-run", help="List managed cache/state paths without deleting them"),
+) -> None:
+    """Remove app-owned per-user cache and generated state."""
+    try:
+        _cleanup(include_config=False, dry_run=dry_run, action="clean")
+    except Exception as error:
+        raise _exit_for_error(error)
+
+
+@app.command("uninstall")
+def cli_uninstall(
+    dry_run: bool = typer.Option(False, "--dry-run", help="List managed paths without deleting them"),
+) -> None:
+    """Remove app-owned per-user data and show package-removal guidance."""
+    try:
+        _cleanup(include_config=True, dry_run=dry_run, action="uninstall")
+        Console().print(package_uninstall_guidance())
+    except Exception as error:
+        raise _exit_for_error(error)
 
 
 @app.command("import-account")

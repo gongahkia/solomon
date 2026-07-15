@@ -41,6 +41,7 @@ and final registry publication are still pending release credentials.
 - [Benchmark Snapshot](#benchmark-snapshot)
 - [Security Posture](#security-posture)
 - [Container Image](./docs/container.md)
+- [Kubernetes deployment](./docs/kubernetes.md)
 - [Documentation](#documentation)
 - [Development & Evaluation](#development--evaluation)
 - [Repository Layout](#repository-layout)

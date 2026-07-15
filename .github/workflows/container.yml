@@ -32,6 +32,17 @@ jobs:
       - name: Run OIDC team Compose smoke test
         run: bash scripts/ci/team-compose-smoke.sh
 
+      - name: Render and lint Helm chart
+        run: bash scripts/ci/helm-lint.sh
+
+      - name: Run Helm chart kind smoke test
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: shibahama-helm-${{ github.run_id }}
+
+      - name: Deploy Helm chart to kind
+        run: bash scripts/ci/helm-kind-smoke.sh
+
       - name: Upload container attestations
         if: always()
         uses: actions/upload-artifact@v6

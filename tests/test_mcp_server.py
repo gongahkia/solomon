@@ -69,14 +69,6 @@ def test_fixture_scan_respects_configured_roots(monkeypatch, tmp_path):
         _tool("carry_scan")("/tmp/not-allowed.json")
 
 
-def test_readonly_cli_bridge_rejects_mutating_commands():
-    result = _tool("cli_readonly")("version")
-
-    assert result["exit_code"] == 0
-    with pytest.raises(ValueError, match="not available"):
-        _tool("cli_readonly")("clean")
-
-
 def test_http_wrapper_requires_bearer_token():
     events: list[dict] = []
 

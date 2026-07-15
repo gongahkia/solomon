@@ -75,8 +75,7 @@ Restart Hermes and inspect its discovered `mcp_stonks_*` tools.
 
 ## Tool groups
 
-- Read-only: `status`, `doctor`, `config_get`, `config_validate`, `carry_scan`, `carry_health`, `capture_gate_status`, `research_rank_wallets`, `research_replay_paper`, `carry_preflight`, `job_status`, `job_list`.
-- `cli_readonly` safely bridges the remaining allowlisted non-mutating CLI commands, including the read-only Moomoo and vNext operations; it does not grant shell access or permit write/live-mode options.
+- Read-only: `status`, `doctor`, `config_get`, `config_validate`, `carry_scan`, `research_rank_wallets`, `research_replay_paper`, `carry_preflight`, `job_status`, `job_list`.
 - Confirmation-gated: `prepare_mutation`, `confirm_mutation` for onboarding/settings, fixture artifacts, capture samples, paper jobs, cancellation, cleanup, and uninstall.
 
 All results are structured JSON. Sensitive config values are redacted.

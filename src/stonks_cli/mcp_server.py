@@ -15,13 +15,11 @@ from uuid import uuid4
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
-from typer.testing import CliRunner
 
 from stonks_cli.carry.carry_health import build_carry_health_report
 from stonks_cli.carry.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
 from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry_for_duration, write_paper_carry_artifacts
 from stonks_cli.carry.carry_scanner import CarryCostAssumptions, load_carry_inputs_fixture, scan_hyperliquid_carry
-from stonks_cli.cli import app as cli_app
 from stonks_cli.cli_experience import inspect_home, removable_paths, remove_managed_paths
 from stonks_cli.commands import do_config_validate, do_doctor
 from stonks_cli.config import config_path, load_config, redacted_config_data, save_config
@@ -56,42 +54,6 @@ _SAFE_CONFIG_FIELDS = {
     "vnext.operator.telegram.enabled",
     "vnext.research.cadence",
     "vnext.research.enabled",
-}
-_READONLY_CLI_COMMANDS = {
-    "doctor",
-    "health-carry",
-    "home",
-    "import-account",
-    "preflight-carry-live",
-    "rank",
-    "rank-wallet",
-    "refresh-market",
-    "refresh-market-data",
-    "replay-paper",
-    "report-daily",
-    "scan-carry",
-    "show-config",
-    "show-portfolio",
-    "status-gate",
-    "ticket-order",
-    "universe-crypto",
-    "validate-config",
-    "version",
-    "where-config",
-}
-_CLI_PATH_FLAGS = {
-    "--capture-dir",
-    "--components",
-    "--fixture",
-    "--health",
-    "--input",
-    "--ledger",
-    "--normalized",
-    "--raw",
-    "--reconciliation",
-    "--snapshot",
-    "--state-dir",
-    "--stream-heartbeat",
 }
 
 
@@ -147,16 +109,6 @@ def _checked_path(value: str | Path, *, write: bool = False) -> Path:
     if write and any(parent.is_symlink() for parent in (resolved, *resolved.parents) if parent.exists()):
         raise ValueError("refusing a path with symlinked parents")
     return resolved
-
-
-def _validate_readonly_cli_args(command: str, args: list[str]) -> None:
-    if command not in _READONLY_CLI_COMMANDS:
-        raise ValueError("command is not available through the read-only MCP bridge")
-    for index, argument in enumerate(args[:-1]):
-        if argument in _CLI_PATH_FLAGS:
-            _checked_path(args[index + 1])
-    if any(argument in {"--out", "--report", "--tearsheet", "--no-paper"} for argument in args):
-        raise ValueError("write and live-mode CLI options are unavailable through the MCP bridge")
 
 
 def _read_confirmations() -> dict[str, dict[str, Any]]:
@@ -402,14 +354,6 @@ def create_server() -> FastMCP:
     def config_validate() -> dict[str, object]:
         """Validate the effective configuration."""
         return do_config_validate()
-
-    @mcp.tool(name="cli_readonly", annotations=_read_annotations())
-    def cli_readonly(command: str, args: list[str] | None = None) -> dict[str, Any]:
-        """Run an allowlisted non-mutating stonks-cli command without shell access."""
-        supplied = list(args or [])
-        _validate_readonly_cli_args(command, supplied)
-        result = CliRunner().invoke(cli_app, [command, *supplied])
-        return {"command": command, "exit_code": result.exit_code, "output": result.output}
 
     @mcp.tool(name="carry_scan", annotations=_read_annotations())
     def carry_scan(fixture: str | None = None, assets: list[str] | None = None) -> dict[str, Any]:

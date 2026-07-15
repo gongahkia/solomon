@@ -57,6 +57,22 @@ evidence-quality, and stable-recall controls. The dataset is committed under
 `benchmarks/continuity/dataset/`; metrics and result artifacts are tracked by
 the remaining Phase B TODO items.
 
+## Pilot Avoided-Regression Evaluator
+
+Evaluate auditable pilot cases with explicit baselines, token costs, policy
+modes, explanation traces, and replay artifacts for observed failures:
+
+```bash
+python3 benchmarks/pilot_evaluator.py \
+  --input benchmarks/pilot-fixture.json \
+  --output target/pilot-report.json \
+  --markdown target/pilot-report.md \
+  --replay-dir target/pilot-replays
+```
+
+The fixture is synthetic. Unsupported inference is reported separately and is
+excluded from the observed-avoidance rate.
+
 ## Feature Ablations
 
 Run the local feature-isolation suite:

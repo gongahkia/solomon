@@ -78,6 +78,9 @@ jobs:
       - name: Multi-repository coding-agent pilot harness
         run: node scripts/ci/multi-repo-pilot-harness.mjs
 
+      - name: Pilot avoided-regression evaluator
+        run: python3 benchmarks/test_pilot_evaluator.py
+
       - name: Upload MCP conformance artifact
         if: always()
         uses: actions/upload-artifact@v6

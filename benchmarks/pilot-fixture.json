@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "baseline": {"name": "flat-context", "version": "fixture"},
+  "policy_mode": "scoped-audit",
+  "cases": [
+    {
+      "case_id": "stale-citation-avoided",
+      "category": "stale_citation",
+      "baseline_outcome": "cited stale parser owner",
+      "observed_outcome": "avoided",
+      "observed_evidence": true,
+      "token_cost": 12,
+      "explanation_trace": [{"kind": "memory_invalidated", "sequence": 4}],
+      "replay": {"surface": "service", "steps": [{"method": "POST", "path": "/write", "payload": {"content": "legacy parser owner"}}, {"method": "POST", "path": "/invalidate", "payload": {"memory_id": "legacy-parser-owner", "valid_to_unix": 2}}, {"method": "POST", "path": "/recall", "payload": {"query_vector": [1, 0]}}]}
+    },
+    {
+      "case_id": "rejected-decision-repeated",
+      "category": "rejected_decision",
+      "baseline_outcome": "repeated rejected migration",
+      "observed_outcome": "not_avoided",
+      "observed_evidence": true,
+      "token_cost": 18,
+      "explanation_trace": [{"kind": "human_signal", "sequence": 7}],
+      "replay": {"surface": "mcp", "steps": [{"method": "tools/call", "tool": "shibahama_memory_write_v1", "arguments": {"content": "rejected migration"}}, {"method": "tools/call", "tool": "shibahama_memory_review_v1", "arguments": {"action": "reject"}}, {"method": "tools/call", "tool": "shibahama_memory_recall_v1", "arguments": {"queryVector": [1, 0]}}]}
+    },
+    {
+      "case_id": "stale-citation-unsupported",
+      "category": "stale_citation",
+      "baseline_outcome": "cited stale formatter owner",
+      "observed_outcome": "unsupported_inference",
+      "observed_evidence": false,
+      "token_cost": 9,
+      "explanation_trace": [{"kind": "memory_written", "sequence": 1}],
+      "replay": {"surface": "embedded", "steps": [{"command": "write", "arguments": ["--content", "old formatter owner"]}, {"command": "recall", "arguments": ["--query-vector", "1,0"]}]}
+    }
+  ]
+}

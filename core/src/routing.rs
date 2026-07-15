@@ -138,6 +138,90 @@ pub enum RoutingError {
     /// The selected shard cannot serve the request.
     #[error("selected shard is unavailable")]
     UnavailableShard,
+    /// Requested migration transition is invalid.
+    #[error("invalid shard migration transition")]
+    InvalidTransition,
+}
+
+/// Explicit traffic behavior during a repository move.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationConsistency {
+    /// Shard that is authoritative for reads and writes.
+    pub authoritative_shard: ScopeId,
+    /// Whether new writes are accepted.
+    pub writes_accepted: bool,
+}
+
+impl ShardPlacement {
+    /// Returns the sole authoritative shard and write behavior for this lifecycle state.
+    #[must_use]
+    pub fn consistency(&self) -> MigrationConsistency {
+        MigrationConsistency {
+            authoritative_shard: self.active_shard.clone(),
+            writes_accepted: !matches!(self.migration_state, ShardMigrationState::Verifying),
+        }
+    }
+
+    /// Starts copy/replay while the source remains authoritative.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::InvalidTransition`] unless the placement is stable.
+    pub fn prepare_move(&mut self, target: ScopeId) -> Result<(), RoutingError> {
+        if self.migration_state != ShardMigrationState::Stable || target == self.active_shard {
+            return Err(RoutingError::InvalidTransition);
+        }
+        self.migration_shard = Some(target);
+        self.migration_state = ShardMigrationState::Preparing;
+        Ok(())
+    }
+
+    /// Freezes writes for deterministic replay verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::InvalidTransition`] unless preparation completed.
+    pub fn begin_verification(&mut self) -> Result<(), RoutingError> {
+        if self.migration_state != ShardMigrationState::Preparing {
+            return Err(RoutingError::InvalidTransition);
+        }
+        self.migration_state = ShardMigrationState::Verifying;
+        Ok(())
+    }
+
+    /// Makes the verified target the sole owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::InvalidTransition`] unless verification completed.
+    pub fn cut_over(&mut self) -> Result<(), RoutingError> {
+        if self.migration_state != ShardMigrationState::Verifying {
+            return Err(RoutingError::InvalidTransition);
+        }
+        self.active_shard = self
+            .migration_shard
+            .take()
+            .ok_or(RoutingError::InvalidTransition)?;
+        self.migration_state = ShardMigrationState::Cutover;
+        Ok(())
+    }
+
+    /// Abandons a pre-cutover move without changing ownership.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RoutingError::InvalidTransition`] after cutover or rollback.
+    pub fn roll_back(&mut self) -> Result<(), RoutingError> {
+        if !matches!(
+            self.migration_state,
+            ShardMigrationState::Preparing | ShardMigrationState::Verifying
+        ) {
+            return Err(RoutingError::InvalidTransition);
+        }
+        self.migration_shard = None;
+        self.migration_state = ShardMigrationState::RolledBack;
+        Ok(())
+    }
 }
 
 /// Context forwarded unchanged to the selected shard.
@@ -244,6 +328,25 @@ mod tests {
         placement.schema_version = SHARD_PLACEMENT_SCHEMA_VERSION;
         placement.migration_state = ShardMigrationState::Preparing;
         assert_eq!(placement.validate(), Err(RoutingError::InvalidMigration));
+    }
+
+    #[test]
+    fn move_workflow_has_one_owner_and_a_verification_write_freeze() {
+        let mut placement = ShardPlacement::stable(id("repo"), id("source"));
+        placement.prepare_move(id("target")).expect("prepare");
+        assert_eq!(placement.consistency().authoritative_shard, id("source"));
+        assert!(placement.consistency().writes_accepted);
+        placement.begin_verification().expect("verify");
+        assert!(!placement.consistency().writes_accepted);
+        placement.cut_over().expect("cutover");
+        assert_eq!(placement.consistency().authoritative_shard, id("target"));
+        assert!(placement.consistency().writes_accepted);
+
+        let mut rollback = ShardPlacement::stable(id("repo-b"), id("source"));
+        rollback.prepare_move(id("target")).expect("prepare");
+        rollback.roll_back().expect("rollback");
+        assert_eq!(rollback.active_shard, id("source"));
+        assert_eq!(rollback.migration_state, ShardMigrationState::RolledBack);
     }
 
     #[test]

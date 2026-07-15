@@ -41,7 +41,7 @@ kubectl -n "$NAMESPACE" rollout status deployment/shibahama-shibahama --timeout=
 kubectl -n "$NAMESPACE" port-forward service/shibahama-shibahama "$PORT":8765 >/dev/null 2>&1 &
 FORWARD_PID=$!
 for _ in {1..40}; do
-  if curl -fsS -H "x-api-key: $API_KEY" -H 'x-shibahama-namespace: default' "http://127.0.0.1:$PORT/readyz" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null; then
     exit 0
   fi
   sleep 0.25

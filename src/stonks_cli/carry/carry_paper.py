@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from stonks_cli.carry.carry_audit import write_carry_ledger
+from stonks_cli.carry.carry_audit import reconcile_carry_state, render_carry_reconciliation_report, write_carry_ledger
 from stonks_cli.carry.carry_risk import CarryRiskLimits, CarryRiskState, evaluate_carry_risk
 from stonks_cli.carry.carry_scanner import CarryCostAssumptions, calculate_carry_scan_row
 from stonks_cli.research.hyperliquid import HyperliquidCarryInput
@@ -272,24 +276,88 @@ def run_paper_carry(
     return PaperCarryRunResult(state=engine.state, report=render_paper_carry_report(engine.state))
 
 
+def run_paper_carry_for_duration(
+    *,
+    fetch_inputs: Callable[[], list[HyperliquidCarryInput]],
+    min_net_apr: float,
+    duration_seconds: float,
+    interval_seconds: float,
+    config: PaperCarryConfig | None = None,
+    scan_costs: CarryCostAssumptions | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    on_cycle: Callable[[PaperCarryRunResult], None] | None = None,
+) -> PaperCarryRunResult:
+    if duration_seconds < 0:
+        raise ValueError("duration_seconds must be >= 0")
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be > 0")
+    engine = PaperCarryEngine(min_net_apr=min_net_apr, config=config, scan_costs=scan_costs)
+    started_at = monotonic()
+    while True:
+        for row in fetch_inputs():
+            engine.process_input(row)
+        result = PaperCarryRunResult(state=engine.state, report=render_paper_carry_report(engine.state))
+        if on_cycle:
+            on_cycle(result)
+        remaining = duration_seconds - (monotonic() - started_at)
+        if remaining <= 0:
+            return result
+        sleep(min(interval_seconds, remaining))
+
+
 def write_paper_carry_artifacts(
     *,
     result: PaperCarryRunResult,
     state_dir: Path | str,
     report_path: Path | str,
     ledger_path: Path | str,
+    heartbeat_path: Path | str | None = None,
+    reconciliation_path: Path | str | None = None,
 ) -> dict[str, str]:
     state_dir = Path(state_dir)
     report_path = Path(report_path)
     ledger_path = Path(ledger_path)
+    heartbeat_path = Path(heartbeat_path) if heartbeat_path else state_dir / "carry-stream-heartbeat.json"
+    reconciliation_path = Path(reconciliation_path) if reconciliation_path else state_dir / "carry-reconciliation.md"
     state_dir.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    reconciliation_path.parent.mkdir(parents=True, exist_ok=True)
     state_path = state_dir / "carry-paper-state.json"
-    state_path.write_text(json.dumps(result.state.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
-    report_path.write_text(result.report, encoding="utf-8")
+    _atomic_write(state_path, json.dumps(result.state.to_dict(), indent=2, sort_keys=True))
+    _atomic_write(report_path, result.report)
     write_carry_ledger(result.state.decisions, ledger_path)
-    return {"ledger_path": str(ledger_path), "report_path": str(report_path), "state_path": str(state_path)}
+    report = reconcile_carry_state(
+        state=result.state,
+        ledger_decisions=result.state.decisions,
+        venue_positions={asset: position for asset, position in result.state.positions.items()},
+    )
+    _atomic_write(
+        reconciliation_path,
+        "# Carry Paper Reconciliation Report\n\n"
+        "- Scope: simulated paper positions; not a live-venue account reconciliation.\n"
+        + render_carry_reconciliation_report(report).removeprefix("# Carry Reconciliation Report\n\n"),
+    )
+    source_timestamps = [decision.timestamp for decision in result.state.decisions]
+    _atomic_write(
+        heartbeat_path,
+        json.dumps(
+            {
+                "source_timestamp": max(source_timestamps) if source_timestamps else None,
+                "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            },
+            sort_keys=True,
+        ),
+    )
+    return {
+        "heartbeat_path": str(heartbeat_path),
+        "ledger_path": str(ledger_path),
+        "reconciliation_path": str(reconciliation_path),
+        "report_path": str(report_path),
+        "state_path": str(state_path),
+    }
 
 
 def render_paper_carry_report(state: PaperCarryState) -> str:
@@ -365,3 +433,10 @@ def _exit_reason(
 
 def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(content)
+        temporary = Path(handle.name)
+    os.replace(temporary, path)

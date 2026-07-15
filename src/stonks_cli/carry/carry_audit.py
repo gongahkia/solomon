@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -62,7 +64,10 @@ def render_carry_ledger(decisions: list[CarryDecision]) -> str:
 def write_carry_ledger(decisions: list[CarryDecision], path: Path | str) -> Path:
     use_path = Path(path)
     use_path.parent.mkdir(parents=True, exist_ok=True)
-    use_path.write_text(render_carry_ledger(decisions), encoding="utf-8")
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=use_path.parent, delete=False) as handle:
+        handle.write(render_carry_ledger(decisions))
+        temporary = Path(handle.name)
+    os.replace(temporary, use_path)
     return use_path
 
 

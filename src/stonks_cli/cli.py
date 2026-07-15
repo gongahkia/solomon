@@ -14,7 +14,7 @@ from rich.table import Table
 
 from stonks_cli.carry.carry_health import build_carry_health_report, render_carry_health_report
 from stonks_cli.carry.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
-from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry, write_paper_carry_artifacts
+from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry_for_duration, write_paper_carry_artifacts
 from stonks_cli.carry.carry_scanner import (
     CarryCostAssumptions,
     CarryScanRow,
@@ -662,10 +662,13 @@ def carry_paper_run(
     paper: bool = typer.Option(True, "--paper/--no-paper", help="Paper mode; live execution is blocked"),
     assets: list[str] = typer.Option(None, "--asset", help="Repeatable asset; defaults to BTC and ETH"),
     fixture: Path | None = typer.Option(None, "--fixture", exists=True, readable=True),
-    duration_hours: float = typer.Option(24.0, "--duration-hours", min=0.0),
+    duration_hours: float = typer.Option(0.0, "--duration-hours", min=0.0),
+    interval_seconds: float = typer.Option(300.0, "--interval-seconds", min=1.0),
     state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
     report: Path = typer.Option(Path(".cache/carry-paper/report.md"), "--report"),
     ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
+    heartbeat: Path | None = typer.Option(None, "--heartbeat"),
+    reconciliation: Path | None = typer.Option(None, "--reconciliation"),
     bankroll_usd: float = typer.Option(1000.0, "--bankroll-usd", min=0.0),
     position_notional_usd: float = typer.Option(100.0, "--position-notional-usd", min=0.0),
     maker_fee_bps: float = typer.Option(2.0, "--maker-fee-bps", min=0.0),
@@ -681,14 +684,33 @@ def carry_paper_run(
             raise ValueError("carry paper currently supports --venue hyperliquid only")
         if not paper:
             raise ValueError("carry paper is paper-only; --no-paper is not supported")
-        source_inputs = (
-            load_carry_inputs_fixture(fixture)
-            if fixture
-            else HyperliquidOrderClient().fetch_carry_inputs(assets=tuple(assets or ("BTC", "ETH")))
-        )
-        result = run_paper_carry(
-            inputs=source_inputs,
+        if fixture:
+            def fetch_inputs():
+                return load_carry_inputs_fixture(fixture)
+        else:
+            client = HyperliquidOrderClient()
+
+            def fetch_inputs():
+                return client.fetch_carry_inputs(assets=tuple(assets or ("BTC", "ETH")))
+
+        paths: dict[str, str] = {}
+
+        def persist(result) -> None:
+            nonlocal paths
+            paths = write_paper_carry_artifacts(
+                result=result,
+                state_dir=state_dir,
+                report_path=report,
+                ledger_path=ledger,
+                heartbeat_path=heartbeat,
+                reconciliation_path=reconciliation,
+            )
+
+        result = run_paper_carry_for_duration(
+            fetch_inputs=fetch_inputs,
             min_net_apr=cfg.carry.min_net_apr,
+            duration_seconds=duration_hours * 3600,
+            interval_seconds=interval_seconds,
             config=PaperCarryConfig(
                 bankroll_usd=bankroll_usd,
                 position_notional_usd=position_notional_usd,
@@ -697,8 +719,8 @@ def carry_paper_run(
                 slippage_bps=slippage_bps,
                 missed_fill_probability=missed_fill_probability,
             ),
+            on_cycle=persist,
         )
-        paths = write_paper_carry_artifacts(result=result, state_dir=state_dir, report_path=report, ledger_path=ledger)
         Console().print_json(
             json.dumps(
                 {

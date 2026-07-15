@@ -4,7 +4,12 @@ import json
 
 from typer.testing import CliRunner
 
-from stonks_cli.carry.carry_paper import PaperCarryConfig, PaperCarryEngine
+from stonks_cli.carry.carry_paper import (
+    PaperCarryConfig,
+    PaperCarryEngine,
+    run_paper_carry_for_duration,
+    write_paper_carry_artifacts,
+)
 from stonks_cli.cli import app
 from stonks_cli.research.hyperliquid import HyperliquidCarryInput
 from stonks_cli.research.models import BasisSnapshot, CarryQuote, FundingSnapshot, Venue
@@ -85,6 +90,47 @@ def test_carry_paper_run_cli_writes_state_report_and_ledger(tmp_path, monkeypatc
     assert report.read_text(encoding="utf-8").startswith("# Carry Paper Run")
     assert "paper_open" in ledger.read_text(encoding="utf-8")
     assert (state_dir / "carry-paper-state.json").exists()
+
+
+def test_duration_runner_accumulates_cycles_and_writes_health_artifacts(tmp_path):
+    clock = [0.0]
+    calls = [0]
+
+    def fetch_inputs():
+        timestamp = f"2026-07-02T00:{calls[0] * 5:02d}:00Z"
+        calls[0] += 1
+        return [_carry_input(annualized_rate=0.22, timestamp=timestamp)]
+
+    def monotonic():
+        return clock[0]
+
+    def sleep(seconds):
+        clock[0] += seconds
+
+    result = run_paper_carry_for_duration(
+        fetch_inputs=fetch_inputs,
+        min_net_apr=0.15,
+        duration_seconds=600.0,
+        interval_seconds=300.0,
+        monotonic=monotonic,
+        sleep=sleep,
+    )
+    paths = write_paper_carry_artifacts(
+        result=result,
+        state_dir=tmp_path / "state",
+        report_path=tmp_path / "report.md",
+        ledger_path=tmp_path / "ledger.md",
+        heartbeat_path=tmp_path / "heartbeat.json",
+        reconciliation_path=tmp_path / "reconciliation.md",
+    )
+
+    assert calls[0] == 3
+    assert [decision.action for decision in result.state.decisions] == ["paper_open", "paper_hold", "paper_hold"]
+    assert json.loads((tmp_path / "heartbeat.json").read_text(encoding="utf-8"))["source_timestamp"] == "2026-07-02T00:10:00Z"
+    reconciliation = (tmp_path / "reconciliation.md").read_text(encoding="utf-8")
+    assert "Scope: simulated paper positions" in reconciliation
+    assert "Blocks live progression: false" in reconciliation
+    assert paths["reconciliation_path"] == str(tmp_path / "reconciliation.md")
 
 
 def _carry_input(*, annualized_rate: float, timestamp: str = "2026-07-02T00:00:00Z") -> HyperliquidCarryInput:

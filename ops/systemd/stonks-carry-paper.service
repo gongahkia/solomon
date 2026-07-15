@@ -13,8 +13,6 @@ Environment=PATH=/opt/stonks-cli/.venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/stonks-cli/scripts/carry_pi_paper_runner.sh
 Restart=always
 RestartSec=30
-RuntimeMaxSec=86400
-WatchdogSec=300
 StandardOutput=append:/var/log/stonks-cli/carry-paper.log
 StandardError=append:/var/log/stonks-cli/carry-paper.log
 NoNewPrivileges=true

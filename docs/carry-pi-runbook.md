@@ -49,10 +49,10 @@ Set `carry.alert_sink` to `telegram` or `email` in config. Required events are `
 
 ## Runtime
 
-- Service restart policy: `Restart=always`, `RestartSec=30`, `RuntimeMaxSec=86400`.
-- Watchdog setting: `WatchdogSec=300`.
+- Service restart policy: `Restart=always`, `RestartSec=30`; each 24-hour paper session completes before the next begins.
+- Restart evidence: `runner-events.jsonl` records every session start and completion; an unmatched start is an interrupted run.
 - Bounded logs: `/var/log/stonks-cli/carry-paper.log` with `ops/logrotate/stonks-carry-paper`.
-- State: `/var/lib/stonks-cli/carry-paper`, with timestamped runs under `runs/` and `latest-*` symlinks.
+- State: `/var/lib/stonks-cli/carry-paper`, with timestamped runs under `runs/`, `latest-*` symlinks, a current heartbeat, and reconciliation report.
 - Backup: copy state dir, config, env file, logs, ledger, and reports daily.
 - Cooling: use a case fan or active cooler; record CPU throttling during soak reports.
 

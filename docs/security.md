@@ -163,6 +163,10 @@ OpenTelemetry provider. The feature is disabled by default. Instrumentation has
 only fixed component, operation, and outcome attributes; it never receives
 memory content, scope IDs, source refs, credentials, or identity claims.
 
+Vendor integrations can install `shibahama_core::telemetry::TelemetryExporter`.
+They receive only normalized component, operation, status, duration, and item
+count fields. Export failures are ignored and never affect memory operations.
+
 ## Prometheus Metrics
 
 `GET /metrics` exposes unauthenticated, global service counters and gauges for

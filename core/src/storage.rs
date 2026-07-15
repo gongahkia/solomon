@@ -2122,11 +2122,16 @@ impl RedbMemoryStore {
     /// # Errors
     ///
     /// Returns an error when durable event append fails.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn record_observability(
         &self,
         record: ObservabilityRecord,
     ) -> Result<EventRecord, StorageError> {
-        self.append_event(MemoryEvent::ObservabilityRecorded { record })
+        let event = self.append_event(MemoryEvent::ObservabilityRecorded {
+            record: record.clone(),
+        })?;
+        crate::telemetry::export_observability(&record);
+        Ok(event)
     }
 
     /// Returns idempotency keys with a terminal automatic-capture outcome.

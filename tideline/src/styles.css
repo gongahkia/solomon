@@ -567,6 +567,31 @@ input[type="range"] {
   margin: 4px 0;
 }
 
+.comparison-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.comparison-history {
+  padding: 10px;
+  border: 1px solid #d8d0c1;
+  background: #fffdf8;
+}
+
+.comparison-history h3,
+.comparison-history p {
+  margin: 0 0 6px;
+}
+
+.comparison-event {
+  display: grid;
+  gap: 3px;
+  padding: 7px 0;
+  border-top: 1px solid #ece4d7;
+  font-size: 0.78rem;
+}
+
 .moment-lanes,
 .time-table,
 .consolidation-list {

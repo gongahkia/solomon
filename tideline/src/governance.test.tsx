@@ -29,4 +29,22 @@ describe("GovernanceView", () => {
     expect(html).toContain("No policy, sharing, or erasure records in this scope");
     expect(html).not.toContain("other scope");
   });
+
+  it("renders only the scope-projected side of promotion lineage", () => {
+    const html = renderToStaticMarkup(
+      <GovernanceView
+        events={[
+          {
+            ...event,
+            policy_outcome: null,
+            promotion_lineage: { source_id: null, promoted_id: "local-promoted-id", actor: "maintainer" },
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Promotion lineage");
+    expect(html).toContain("local-pr…d-id");
+    expect(html).not.toContain("foreign-source-id");
+  });
 });

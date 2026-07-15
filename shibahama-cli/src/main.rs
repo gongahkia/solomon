@@ -696,6 +696,38 @@ struct TidelineErasureTombstoneDto {
 }
 
 #[derive(Serialize)]
+struct TidelineComparisonDto {
+    schema_version: u8,
+    generated_at_unix: i64,
+    team: String,
+    histories: Vec<TidelineAuditExportDto>,
+}
+
+#[derive(Serialize)]
+struct TidelineAuditExportDto {
+    scope: MemoryScopeDto,
+    events: Vec<TidelineAuditEventDto>,
+}
+
+#[derive(Serialize)]
+struct TidelineAuditEventDto {
+    sequence: u64,
+    recorded_at_unix: i64,
+    kind: String,
+    memory_ids: Vec<String>,
+    permitted_scope: Option<MemoryScopeDto>,
+    policy_outcome: Option<TidelinePolicyOutcomeDto>,
+    promotion_lineage: Option<TidelineAuditPromotionLineageDto>,
+    erasure_tombstone: Option<TidelineErasureTombstoneDto>,
+}
+
+#[derive(Serialize)]
+struct TidelineAuditPromotionLineageDto {
+    source_id: Option<String>,
+    promoted_id: Option<String>,
+}
+
+#[derive(Serialize)]
 struct TidelineConsolidationEvidenceDto {
     memory_id: String,
     significance: f64,
@@ -1107,6 +1139,12 @@ struct WhyQuery {
 
 #[derive(Deserialize)]
 struct TidelineQuery {
+    as_of_unix: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct TidelineComparisonRequest {
+    scopes: Vec<ServerScopeRequest>,
     as_of_unix: Option<i64>,
 }
 
@@ -1797,6 +1835,7 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         )
         .route("/graph/traverse", post(server_graph_traverse))
         .route("/tideline/snapshot", get(server_tideline_snapshot))
+        .route("/tideline/compare", post(server_tideline_compare))
         .route("/tideline/recording", get(server_tideline_recording))
         .route("/tideline/live", get(server_tideline_live))
         .layer(cors.layer())
@@ -4903,6 +4942,81 @@ fn authorize_server_rbac_or_log(
     }
 }
 
+fn tideline_comparison_scopes(
+    request: &TidelineComparisonRequest,
+    current_scope: &MemoryScope,
+) -> Result<Vec<MemoryScope>, ServerError> {
+    if !(2..=8).contains(&request.scopes.len()) {
+        return Err(ServerError::bad_request(
+            "Tideline comparison requires 2-8 scopes",
+        ));
+    }
+    let scopes = request
+        .scopes
+        .iter()
+        .map(|scope| server_memory_scope(Some(scope), &scope.repository))
+        .collect::<Result<Vec<_>, _>>()?;
+    let team = scopes[0]
+        .team
+        .as_ref()
+        .ok_or_else(|| ServerError::bad_request("Tideline comparison requires team scopes"))?;
+
+    if scopes
+        .iter()
+        .any(|scope| scope.visibility != ScopeVisibility::Team || scope.team.as_ref() != Some(team))
+    {
+        return Err(ServerError::bad_request(
+            "Tideline comparison scopes must share one team",
+        ));
+    }
+    if !scopes.contains(current_scope) {
+        return Err(ServerError::forbidden(
+            "Tideline comparison must include the authenticated scope",
+        ));
+    }
+    if scopes
+        .iter()
+        .enumerate()
+        .any(|(index, scope)| scopes[..index].contains(scope))
+    {
+        return Err(ServerError::bad_request(
+            "Tideline comparison scopes must be distinct",
+        ));
+    }
+
+    Ok(scopes)
+}
+
+fn authorize_tideline_comparison_scope(
+    state: &ServerState,
+    context: &ServerRequestContext,
+    scope: MemoryScope,
+) -> Result<(), ServerError> {
+    if context.principal_class == AuthorizationPrincipalClass::ServiceToken {
+        return Err(ServerError::forbidden(
+            "scope-bound service tokens cannot compare repositories",
+        ));
+    }
+    let scoped_context = ServerRequestContext {
+        namespace: scope.repository.to_string(),
+        scope,
+        principal: context.principal.clone(),
+        principal_class: context.principal_class,
+        actor_class: context.actor_class,
+        credential_role: context.credential_role,
+    };
+
+    authorize_server_rbac(
+        state,
+        &scoped_context,
+        RbacRequirement {
+            action: AuthorizationAction::Maintain,
+            role: RbacRole::Maintainer,
+        },
+        true,
+    )
+}
+
 fn rbac_request_scope(
     request: Option<&ServerScopeRequest>,
     context: &ServerRequestContext,
@@ -5883,6 +5997,74 @@ async fn server_tideline_snapshot(
     }
 }
 
+async fn server_tideline_compare(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(request): Json<TidelineComparisonRequest>,
+) -> Result<Json<TidelineComparisonDto>, ServerError> {
+    let context = server_context_or_log(&headers, &state, "POST", "/tideline/compare")?;
+    let result: Result<(Json<TidelineComparisonDto>, serde_json::Value), ServerError> = (|| {
+        let scopes = tideline_comparison_scopes(&request, &context.scope)?;
+        for scope in &scopes {
+            authorize_tideline_comparison_scope(&state, &context, scope.clone())?;
+        }
+        let as_of = optional_time_from_unix(request.as_of_unix)?;
+        let team = scopes
+            .first()
+            .and_then(|scope| scope.team.as_ref())
+            .ok_or_else(|| ServerError::internal("validated comparison scopes lost their team"))?
+            .to_string();
+        let histories = scopes
+            .into_iter()
+            .map(|scope| {
+                let namespace = scope.repository.to_string();
+                tideline_snapshot_for_scope(&state, &namespace, &scope, as_of).map(|snapshot| {
+                    TidelineAuditExportDto {
+                        scope: MemoryScopeDto::from(scope),
+                        events: snapshot
+                            .events
+                            .into_iter()
+                            .map(TidelineAuditEventDto::from)
+                            .collect(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok((
+            Json(TidelineComparisonDto {
+                schema_version: 1,
+                generated_at_unix: OffsetDateTime::now_utc().unix_timestamp(),
+                team,
+                histories,
+            }),
+            json!({ "request_units": 1 }),
+        ))
+    })();
+
+    server_json_result("POST", "/tideline/compare", &context, result)
+}
+
+impl From<TidelineEventDto> for TidelineAuditEventDto {
+    fn from(value: TidelineEventDto) -> Self {
+        Self {
+            sequence: value.sequence,
+            recorded_at_unix: value.recorded_at_unix,
+            kind: value.kind,
+            memory_ids: value.memory_ids,
+            permitted_scope: value.permitted_scope,
+            policy_outcome: value.policy_outcome,
+            promotion_lineage: value.promotion_lineage.map(|lineage| {
+                TidelineAuditPromotionLineageDto {
+                    source_id: lineage.source_id,
+                    promoted_id: lineage.promoted_id,
+                }
+            }),
+            erasure_tombstone: value.erasure_tombstone,
+        }
+    }
+}
+
 async fn server_tideline_recording(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -6755,21 +6937,22 @@ mod tests {
     use super::{
         RbacRequirement, ServerAdministration, ServerAuthentication, ServerError, ServerMetrics,
         ServerRateLimitPolicy, ServerRateLimiter, ServerRbacPolicy, ServerRequestContext,
-        ServerState, ServiceStoreMode, authorize_server_rbac, parse_cors_headers,
-        parse_cors_methods, parse_cors_origins, parse_hex_encryption_key, parse_vector,
-        server_operational_log_record, service_forgetting_mode, service_store_mode_from_options,
-        tideline_policy_decision_event,
+        ServerScopeRequest, ServerState, ServiceStoreMode, TidelineAuditEventDto,
+        TidelineComparisonRequest, authorize_server_rbac, parse_cors_headers, parse_cors_methods,
+        parse_cors_origins, parse_hex_encryption_key, parse_vector, server_operational_log_record,
+        service_forgetting_mode, service_store_mode_from_options, tideline_comparison_scopes,
+        tideline_policy_decision_event, tideline_scope_promotion_event,
     };
     use axum::http::StatusCode;
     use serde_json::{json, to_value};
     use shibahama_core::api::Shibahama;
-    use shibahama_core::model::MemoryScope;
+    use shibahama_core::model::{MemoryId, MemoryScope, ScopeId};
     use shibahama_core::policy::{
         PolicyActorClass, PolicyAuditDisposition, PolicyAuditOperation, PolicyAuditRecord,
     };
     use shibahama_core::storage::{AuthorizationAction, AuthorizationPrincipalClass, RbacRole};
     use shibahama_core::vector::HnswVectorIndex;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
     use time::OffsetDateTime;
@@ -6830,6 +7013,83 @@ mod tests {
                 "projection exposed {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn tideline_comparison_denies_unrelated_scopes() {
+        let team = ScopeId::new("team-a").expect("team should validate");
+        let current_scope = MemoryScope::team(
+            ScopeId::new("repo-a").expect("repository should validate"),
+            team.clone(),
+        );
+        let allowed = TidelineComparisonRequest {
+            scopes: vec![
+                ServerScopeRequest {
+                    repository: "repo-a".to_owned(),
+                    team: Some("team-a".to_owned()),
+                    visibility: "team".to_owned(),
+                },
+                ServerScopeRequest {
+                    repository: "repo-b".to_owned(),
+                    team: Some("team-a".to_owned()),
+                    visibility: "team".to_owned(),
+                },
+            ],
+            as_of_unix: None,
+        };
+        assert_eq!(
+            tideline_comparison_scopes(&allowed, &current_scope)
+                .expect("same-team scope request should validate")
+                .len(),
+            2
+        );
+
+        let denied = TidelineComparisonRequest {
+            scopes: vec![
+                ServerScopeRequest {
+                    repository: "repo-b".to_owned(),
+                    team: Some("team-a".to_owned()),
+                    visibility: "team".to_owned(),
+                },
+                ServerScopeRequest {
+                    repository: "repo-c".to_owned(),
+                    team: Some("team-a".to_owned()),
+                    visibility: "team".to_owned(),
+                },
+            ],
+            as_of_unix: None,
+        };
+        assert_eq!(
+            tideline_comparison_scopes(&denied, &current_scope)
+                .expect_err("current scope omission must deny comparison")
+                .status,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn tideline_audit_export_redacts_promotion_actor_and_rationale() {
+        let source_id = MemoryId::new_v7();
+        let promoted_id = MemoryId::new_v7();
+        let scoped_memory_ids = [source_id, promoted_id]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let event = tideline_scope_promotion_event(
+            1,
+            OffsetDateTime::UNIX_EPOCH,
+            source_id,
+            promoted_id,
+            "alice@example.test".to_owned(),
+            "private rationale".to_owned(),
+            &scoped_memory_ids,
+        );
+        let encoded = serde_json::to_string(&TidelineAuditEventDto::from(event))
+            .expect("audit export should serialize");
+
+        assert!(encoded.contains(&source_id.to_string()));
+        assert!(encoded.contains(&promoted_id.to_string()));
+        assert!(!encoded.contains("alice@example.test"));
+        assert!(!encoded.contains("private rationale"));
     }
 
     #[test]

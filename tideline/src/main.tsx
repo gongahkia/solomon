@@ -12,7 +12,7 @@ import {
   SquareMousePointer,
   Waypoints,
 } from "lucide-react";
-import { GovernanceView, type GovernanceEvent } from "./governance";
+import { GovernanceView, type GovernanceEvent, type Scope } from "./governance";
 import "./styles.css";
 
 type Tier = "hot" | "warm" | "cold" | string;
@@ -100,6 +100,19 @@ type TidelineSnapshot = {
   };
 };
 
+type TidelineComparison = {
+  schema_version: number;
+  generated_at_unix: number;
+  team: string;
+  histories: {
+    scope: Scope;
+    events: Pick<
+      TidelineEvent,
+      "sequence" | "recorded_at_unix" | "kind" | "memory_ids" | "policy_outcome" | "promotion_lineage" | "erasure_tombstone"
+    >[];
+  }[];
+};
+
 type EventRecordDetail = {
   sequence: number;
   recorded_at_unix?: number;
@@ -145,7 +158,7 @@ type AuditDetail = {
   events: EventRecordDetail[];
 };
 
-type ViewName = "moment" | "staleness" | "consolidation" | "poisoning" | "bitemporal" | "governance" | "graph" | "diff";
+type ViewName = "moment" | "staleness" | "consolidation" | "poisoning" | "bitemporal" | "governance" | "comparison" | "graph" | "diff";
 type ChallengeNote = { actor: string; reason: string };
 type StalenessDecision = {
   event: TidelineEvent;
@@ -162,6 +175,9 @@ function App() {
   const [baseUrl, setBaseUrl] = useState(API_BASE);
   const [apiKey, setApiKey] = useState("");
   const [namespace, setNamespace] = useState("default");
+  const [team, setTeam] = useState("");
+  const [comparisonRepositories, setComparisonRepositories] = useState("");
+  const [comparison, setComparison] = useState<TidelineComparison | null>(null);
   const [snapshot, setSnapshot] = useState<TidelineSnapshot | null>(null);
   const [eventLog, setEventLog] = useState<EventLog | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -185,9 +201,13 @@ function App() {
     if (apiKey) {
       headers["x-api-key"] = apiKey;
     }
+    if (team) {
+      headers["x-shibahama-scope-team"] = team;
+      headers["x-shibahama-scope-visibility"] = "team";
+    }
 
     return headers;
-  }, [apiKey, namespace]);
+  }, [apiKey, namespace, team]);
 
   const loadSnapshot = useCallback(async () => {
     setStatus("loading");
@@ -401,6 +421,47 @@ function App() {
     }
   }
 
+  async function compareScopes() {
+    const repositories = [...new Set([namespace, ...comparisonRepositories.split(",").map((value) => value.trim())].filter(Boolean))];
+
+    if (!team || repositories.length < 2) {
+      setStatus("comparison needs a team and one other repository");
+      return;
+    }
+
+    setStatus("comparing");
+    const response = await fetch(`${baseUrl}/tideline/compare`, {
+      method: "POST",
+      headers: { ...requestHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        scopes: repositories.map((repository) => ({ repository, team, visibility: "team" })),
+        as_of_unix: asOf ? Math.floor(new Date(asOf).getTime() / 1000) : undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`comparison ${response.status}`);
+    }
+
+    setComparison((await response.json()) as TidelineComparison);
+    setActiveView("comparison");
+    setStatus("comparison ready");
+  }
+
+  function downloadComparison() {
+    if (!comparison) {
+      return;
+    }
+
+    const blob = new Blob([JSON.stringify(comparison, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `tideline-${comparison.team}-audit.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -423,6 +484,10 @@ function App() {
         <label>
           Namespace
           <input value={namespace} onChange={(event) => setNamespace(event.target.value)} />
+        </label>
+        <label>
+          Team
+          <input value={team} onChange={(event) => setTeam(event.target.value)} />
         </label>
         <label>
           Key
@@ -450,6 +515,20 @@ function App() {
         <button type="button" className="icon-button" title="Download recording" onClick={downloadRecording}>
           <Download size={18} />
         </button>
+        <button type="button" onClick={() => compareScopes().catch((error) => setStatus(error.message))}>
+          Compare scopes
+        </button>
+        <button type="button" disabled={!comparison} onClick={downloadComparison}>
+          Export audit
+        </button>
+        <label>
+          Other repositories
+          <input
+            value={comparisonRepositories}
+            placeholder="repo-b, repo-c"
+            onChange={(event) => setComparisonRepositories(event.target.value)}
+          />
+        </label>
         <button
           type="button"
           className="icon-button"
@@ -536,6 +615,9 @@ function App() {
           <button className={activeView === "governance" ? "active" : ""} onClick={() => setActiveView("governance")}>
             <ShieldCheck size={16} /> Governance
           </button>
+          <button className={activeView === "comparison" ? "active" : ""} onClick={() => setActiveView("comparison")}>
+            <GitCompareArrows size={16} /> Compare
+          </button>
           <button className={activeView === "graph" ? "active" : ""} onClick={() => setActiveView("graph")}>
             <Waypoints size={16} /> Graph
           </button>
@@ -558,6 +640,7 @@ function App() {
         {activeView === "poisoning" && <PoisoningView memories={visibleMemories} lowCredence={lowCredence} />}
         {activeView === "bitemporal" && <BiTemporalView memories={visibleMemories} asOf={asOf} />}
         {activeView === "governance" && <GovernanceView events={visibleEvents} />}
+        {activeView === "comparison" && <ComparisonView comparison={comparison} />}
         {activeView === "graph" && <GraphView snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} />}
         {activeView === "diff" && (
           <DiffView
@@ -571,6 +654,38 @@ function App() {
         )}
       </section>
     </main>
+  );
+}
+
+function ComparisonView({ comparison }: { comparison: TidelineComparison | null }) {
+  return (
+    <section className="panel wide-panel comparison-panel">
+      <div className="panel-title">
+        <h2>Authorized Scope Comparison</h2>
+        <span>{comparison?.team ?? "none"}</span>
+      </div>
+      {comparison ? (
+        <div className="comparison-list">
+          {comparison.histories.map((history) => (
+            <article key={`${history.scope.repository}-${history.scope.team}`} className="comparison-history">
+              <h3>{history.scope.repository}</h3>
+              <p>{history.scope.team} ({history.scope.visibility})</p>
+              {history.events.length === 0 ? <p className="empty">No authorized audit records</p> : null}
+              {history.events.map((event) => (
+                <div key={event.sequence} className="comparison-event">
+                  <strong>#{event.sequence} {event.kind}</strong>
+                  {event.policy_outcome ? <span>{event.policy_outcome.operation} {event.policy_outcome.disposition}</span> : null}
+                  {event.promotion_lineage ? <span>promotion lineage</span> : null}
+                  {event.erasure_tombstone ? <span>erasure tombstone</span> : null}
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty">No authorized comparison loaded</p>
+      )}
+    </section>
   );
 }
 

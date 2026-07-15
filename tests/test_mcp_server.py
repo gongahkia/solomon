@@ -3,11 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
+import subprocess
 import sys
+import time
 
+import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 import stonks_cli.mcp_server as mcp_server
 
@@ -22,7 +27,17 @@ def test_tools_advertise_safe_annotations():
 
     assert tools["status"].annotations.readOnlyHint is True
     assert tools["prepare_mutation"].annotations.destructiveHint is True
-    assert {"carry_scan", "research_replay_paper", "confirm_mutation"} <= set(tools)
+    assert {
+        "alert_preview",
+        "carry_scan",
+        "crypto_rank",
+        "moomoo_quotes",
+        "portfolio_snapshot",
+        "research_replay_paper",
+        "reviewed_order_ticket",
+        "confirm_mutation",
+    } <= set(tools)
+    assert tools["moomoo_quotes"].annotations.readOnlyHint is True
 
 
 def test_status_and_redacted_config(monkeypatch, tmp_path):
@@ -77,6 +92,29 @@ def test_readonly_cli_bridge_rejects_mutating_commands():
         _tool("cli_readonly")("clean")
 
 
+def test_first_class_alert_and_reviewed_ticket_never_execute(monkeypatch, tmp_path):
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(tmp_path / "config.json"))
+
+    alert = _tool("alert_preview")("stale_data")
+    ticket = _tool("reviewed_order_ticket")(
+        "ticket-1",
+        "account-1",
+        "US.AAPL",
+        "buy",
+        1.0,
+        100.0,
+        "USD",
+        "synthetic review",
+        "2026-01-01T00:00:00+00:00",
+        "reviewer",
+        "2026-01-01T00:01:00+00:00",
+    )
+
+    assert alert["delivery"] == "not_attempted"
+    assert alert["synthetic"] is True
+    assert ticket["execution"] == "manual broker-app entry required"
+
+
 def test_http_wrapper_requires_bearer_token():
     events: list[dict] = []
 
@@ -112,3 +150,49 @@ def test_stdio_protocol_discovers_and_calls_status(monkeypatch, tmp_path):
                 assert result.structuredContent["safety"]["live_execution"] == "blocked"
 
     asyncio.run(run())
+
+
+def test_streamable_http_protocol_requires_token_and_discovers_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(tmp_path / "config.json"))
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    env = dict(os.environ)
+    env.update(
+        {
+            "STONKS_CLI_CONFIG": str(tmp_path / "config.json"),
+            "STONKS_CLI_MCP_ROOTS": str(tmp_path),
+            "STONKS_CLI_MCP_TOKEN": "test-token",
+        }
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-m", "stonks_cli.mcp_server", "--transport", "streamable-http", "--port", str(port)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+
+        async def run() -> None:
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    async with httpx.AsyncClient(headers={"Authorization": "Bearer test-token"}) as client:
+                        async with streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=client) as (read, write, _):
+                            async with ClientSession(read, write) as session:
+                                await session.initialize()
+                                tools = await session.list_tools()
+                                result = await session.call_tool("status", {})
+                                assert any(tool.name == "status" for tool in tools.tools)
+                                assert result.structuredContent["safety"]["live_execution"] == "blocked"
+                                return
+                except Exception:
+                    if time.monotonic() >= deadline:
+                        raise
+                    await asyncio.sleep(0.05)
+
+        asyncio.run(run())
+    finally:
+        process.terminate()
+        process.wait(timeout=5)

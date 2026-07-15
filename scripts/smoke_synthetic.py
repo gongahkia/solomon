@@ -86,31 +86,42 @@ def _run_cli(env: dict[str, str], *args: str, expect_json: bool = True) -> Any:
 
 async def _run_mcp(env: dict[str, str], fixture: Path, output: Path) -> dict[str, Any]:
     parameters = StdioServerParameters(command=sys.executable, args=["-m", "stonks_cli.mcp_server"], env=env, cwd=ROOT)
-    async with stdio_client(parameters) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            names = {tool.name for tool in tools.tools}
-            required = {"status", "carry_scan", "research_rank_wallets", "prepare_mutation", "confirm_mutation"}
-            if not required <= names:
-                raise RuntimeError(f"MCP tools missing: {sorted(required - names)}")
-            status = await session.call_tool("status", {})
-            scan = await session.call_tool("carry_scan", {"fixture": str(fixture)})
-            prepared = await session.call_tool(
-                "prepare_mutation",
-                {
-                    "kind": "fixture_ingest",
-                    "params": {"fixture": str(ROOT / "tests/fixtures/research/hyperliquid-ws.jsonl"), "out": str(output)},
-                },
-            )
-            confirmation_id = prepared.structuredContent["confirmation_id"]
-            confirmed = await session.call_tool("confirm_mutation", {"confirmation_id": confirmation_id})
-            return {
-                "tool_count": len(names),
-                "status": status.structuredContent,
-                "scan": scan.structuredContent,
-                "ingest": confirmed.structuredContent,
-            }
+    with open(os.devnull, "w", encoding="utf-8") as errlog:
+        async with stdio_client(parameters, errlog=errlog) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                names = {tool.name for tool in tools.tools}
+                required = {
+                    "alert_preview",
+                    "status",
+                    "carry_scan",
+                    "research_rank_wallets",
+                    "prepare_mutation",
+                    "confirm_mutation",
+                }
+                if not required <= names:
+                    raise RuntimeError(f"MCP tools missing: {sorted(required - names)}")
+                status = await session.call_tool("status", {})
+                scan = await session.call_tool("carry_scan", {"fixture": str(fixture)})
+                prepared = await session.call_tool(
+                    "prepare_mutation",
+                    {
+                        "kind": "fixture_ingest",
+                        "params": {
+                            "fixture": str(ROOT / "tests/fixtures/research/hyperliquid-ws.jsonl"),
+                            "out": str(output),
+                        },
+                    },
+                )
+                confirmation_id = prepared.structuredContent["confirmation_id"]
+                confirmed = await session.call_tool("confirm_mutation", {"confirmation_id": confirmation_id})
+                return {
+                    "tool_count": len(names),
+                    "status": status.structuredContent,
+                    "scan": scan.structuredContent,
+                    "ingest": confirmed.structuredContent,
+                }
 
 
 def main() -> None:
@@ -131,16 +142,55 @@ def main() -> None:
     _run_cli(env, "init-config", "--path", env["STONKS_CLI_CONFIG"], expect_json=False)
     home = _run_cli(env, "home", "--json")
     validation = _run_cli(env, "validate-config")
-    ingest = _run_cli(env, "replay-ingest", "--fixture", "tests/fixtures/research/hyperliquid-ws.jsonl", "--out", str(artifacts / "normalized.jsonl"))
+    ingest = _run_cli(
+        env,
+        "replay-ingest",
+        "--fixture",
+        "tests/fixtures/research/hyperliquid-ws.jsonl",
+        "--out",
+        str(artifacts / "normalized.jsonl"),
+    )
     wallets = _run_cli(env, "rank-wallet", "--fixture", "tests/fixtures/research/wallet-attribution.jsonl")
-    paper = _run_cli(env, "replay-paper", "--fixture", "tests/fixtures/research/paper-mirror.jsonl", "--rankings-fixture", "tests/fixtures/research/wallet-attribution.jsonl")
-    ledger = _run_cli(env, "demo-ledger", "--ledger", str(artifacts / "ledger.md"), "--tearsheet", str(artifacts / "tearsheet.md"))
-    carry = _run_cli(env, "run-carry-paper", "--fixture", str(fixture), "--duration-hours", "0", "--state-dir", str(artifacts / "carry"), "--report", str(artifacts / "carry/report.md"), "--ledger", str(artifacts / "carry/ledger.md"))
+    paper = _run_cli(
+        env,
+        "replay-paper",
+        "--fixture",
+        "tests/fixtures/research/paper-mirror.jsonl",
+        "--rankings-fixture",
+        "tests/fixtures/research/wallet-attribution.jsonl",
+    )
+    ledger = _run_cli(
+        env, "demo-ledger", "--ledger", str(artifacts / "ledger.md"), "--tearsheet", str(artifacts / "tearsheet.md")
+    )
+    carry = _run_cli(
+        env,
+        "run-carry-paper",
+        "--fixture",
+        str(fixture),
+        "--duration-hours",
+        "0",
+        "--state-dir",
+        str(artifacts / "carry"),
+        "--report",
+        str(artifacts / "carry/report.md"),
+        "--ledger",
+        str(artifacts / "carry/ledger.md"),
+    )
     if home["safety"]["live_execution"] != "blocked" or not validation["valid"]:
         raise RuntimeError("paper-first safety invariant failed")
-    if ingest["health"]["dropped_messages"] != 1 or len(wallets["rankings"]) != 3 or paper["tearsheet"]["closed_trades"] != 2:
+    if (
+        ingest["health"]["dropped_messages"] != 1
+        or len(wallets["rankings"]) != 3
+        or paper["tearsheet"]["closed_trades"] != 2
+    ):
         raise RuntimeError("synthetic research fixture expectations changed")
-    for output in (artifacts / "normalized.jsonl", artifacts / "ledger.md", artifacts / "tearsheet.md", artifacts / "carry/report.md", artifacts / "carry/ledger.md"):
+    for output in (
+        artifacts / "normalized.jsonl",
+        artifacts / "ledger.md",
+        artifacts / "tearsheet.md",
+        artifacts / "carry/report.md",
+        artifacts / "carry/ledger.md",
+    ):
         if not output.exists():
             raise RuntimeError(f"missing smoke artifact: {output}")
     mcp = asyncio.run(_run_mcp(env, fixture, artifacts / "mcp-normalized.jsonl"))
@@ -158,13 +208,19 @@ def main() -> None:
             "wallet_attribution": _sha256(ROOT / "tests/fixtures/research/wallet-attribution.jsonl"),
         },
         "config_sha256": _sha256(Path(env["STONKS_CLI_CONFIG"])),
-        "artifacts": {path.relative_to(smoke_root).as_posix(): _sha256(path) for path in sorted(artifacts.rglob("*")) if path.is_file()},
+        "artifacts": {
+            path.relative_to(smoke_root).as_posix(): _sha256(path)
+            for path in sorted(artifacts.rglob("*"))
+            if path.is_file()
+        },
         "cli": {"home": home, "validation": validation, "carry": carry, "ledger": ledger},
         "mcp": {"tool_count": mcp["tool_count"], "ingest": mcp["ingest"]},
     }
     manifest_path = smoke_root / "smoke-provenance.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"smoke_root": str(smoke_root), "provenance": str(manifest_path), "synthetic": True}, sort_keys=True))
+    print(
+        json.dumps({"smoke_root": str(smoke_root), "provenance": str(manifest_path), "synthetic": True}, sort_keys=True)
+    )
 
 
 if __name__ == "__main__":

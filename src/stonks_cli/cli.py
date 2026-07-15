@@ -38,12 +38,14 @@ from stonks_cli.commands import (
     do_config_validate,
     do_config_where,
     do_doctor,
+    do_smoke_doctor,
     do_version,
 )
 from stonks_cli.config import config_path, load_config, save_config, update_config_field
 from stonks_cli.errors import ExitCodes, StonksError
 from stonks_cli.legal_policy import enforce_legal_policy
 from stonks_cli.logging_utils import LoggingConfig, configure_logging
+from stonks_cli.paths import default_state_dir
 from stonks_cli.research.attribution import (
     DEFAULT_ATTRIBUTION_FIXTURE,
     rank_wallets_from_fixture,
@@ -281,9 +283,12 @@ def version() -> None:
 
 
 @app.command()
-def doctor() -> None:
+def doctor(smoke: bool = typer.Option(False, "--smoke", help="Run isolated synthetic smoke prerequisites")) -> None:
     """Diagnose the local stonks-cli environment."""
     try:
+        if smoke:
+            typer.echo(json.dumps(do_smoke_doctor(), sort_keys=True))
+            return
         results = do_doctor()
         console = Console()
         score_raw = results.get("health_score")
@@ -298,6 +303,33 @@ def doctor() -> None:
             if k == "health_score":
                 continue
             console.print(f"{k}: {results[k]}")
+    except Exception as e:
+        raise _exit_for_error(e)
+
+
+@app.command("alert-preview")
+def alert_preview(
+    event: str = typer.Option("service_restart", "--event", help="Synthetic carry alert event"),
+) -> None:
+    """Render a synthetic carry alert without delivering it."""
+    try:
+        if event not in {"kill_switch", "stale_data", "ledger_mismatch", "service_restart"}:
+            raise ValueError("event must be kill_switch, stale_data, ledger_mismatch, or service_restart")
+        cfg = load_config()
+        readiness = inspect_home()["readiness"]["carry_alerts"]
+        typer.echo(
+            json.dumps(
+                {
+                    "delivery": "not_attempted",
+                    "event": event,
+                    "message": f"[synthetic] stonks-cli carry alert: {event}",
+                    "readiness": readiness,
+                    "sink": cfg.carry.alert_sink,
+                    "synthetic": True,
+                },
+                sort_keys=True,
+            )
+        )
     except Exception as e:
         raise _exit_for_error(e)
 
@@ -669,8 +701,8 @@ def _load_portfolio_snapshot(path: Path) -> PortfolioSnapshot:
 
 @app.command("health-carry")
 def carry_health(
-    state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
-    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
+    state_dir: Path | None = typer.Option(None, "--state-dir"),
+    ledger: Path | None = typer.Option(None, "--ledger"),
     stream_heartbeat: Path | None = typer.Option(None, "--stream-heartbeat"),
     reconciliation: Path | None = typer.Option(None, "--reconciliation"),
     json_output: bool = typer.Option(False, "--json/--table"),
@@ -679,6 +711,8 @@ def carry_health(
 ) -> None:
     """Check Carry Pi paper-run host and artifact health."""
     try:
+        state_dir = state_dir or default_state_dir() / "carry-paper"
+        ledger = ledger or state_dir / "ledger.md"
         report = build_carry_health_report(
             cfg=load_config(),
             state_dir=state_dir,
@@ -822,9 +856,9 @@ def carry_paper_run(
     fixture: Path | None = typer.Option(None, "--fixture", exists=True, readable=True),
     duration_hours: float = typer.Option(0.0, "--duration-hours", min=0.0),
     interval_seconds: float = typer.Option(300.0, "--interval-seconds", min=1.0),
-    state_dir: Path = typer.Option(Path(".cache/carry-paper"), "--state-dir"),
-    report: Path = typer.Option(Path(".cache/carry-paper/report.md"), "--report"),
-    ledger: Path = typer.Option(Path(".cache/carry-paper/ledger.md"), "--ledger"),
+    state_dir: Path | None = typer.Option(None, "--state-dir"),
+    report: Path | None = typer.Option(None, "--report"),
+    ledger: Path | None = typer.Option(None, "--ledger"),
     heartbeat: Path | None = typer.Option(None, "--heartbeat"),
     reconciliation: Path | None = typer.Option(None, "--reconciliation"),
     bankroll_usd: float = typer.Option(1000.0, "--bankroll-usd", min=0.0),
@@ -842,6 +876,9 @@ def carry_paper_run(
             raise ValueError("carry paper currently supports --venue hyperliquid only")
         if not paper:
             raise ValueError("carry paper is paper-only; --no-paper is not supported")
+        state_dir = state_dir or default_state_dir() / "carry-paper"
+        report = report or state_dir / "report.md"
+        ledger = ledger or state_dir / "ledger.md"
         if fixture:
             def fetch_inputs():
                 return load_carry_inputs_fixture(fixture)

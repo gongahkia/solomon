@@ -7,6 +7,7 @@ import secrets
 import signal
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -21,9 +22,17 @@ from stonks_cli.carry.carry_health import build_carry_health_report
 from stonks_cli.carry.carry_live import CarryLivePreflightEvidence, evaluate_carry_live_preflight
 from stonks_cli.carry.carry_paper import PaperCarryConfig, run_paper_carry_for_duration, write_paper_carry_artifacts
 from stonks_cli.carry.carry_scanner import CarryCostAssumptions, load_carry_inputs_fixture, scan_hyperliquid_carry
-from stonks_cli.cli import app as cli_app
+from stonks_cli.cli import (
+    _load_daily_report_inputs,
+    _load_portfolio_snapshot,
+    _load_score_components,
+    _portfolio_snapshot_to_data,
+)
+from stonks_cli.cli import (
+    app as cli_app,
+)
 from stonks_cli.cli_experience import inspect_home, removable_paths, remove_managed_paths
-from stonks_cli.commands import do_config_validate, do_doctor
+from stonks_cli.commands import do_config_validate, do_doctor, do_smoke_doctor
 from stonks_cli.config import config_path, load_config, redacted_config_data, save_config
 from stonks_cli.paths import default_cache_dir, default_state_dir
 from stonks_cli.research.attribution import DEFAULT_ATTRIBUTION_FIXTURE, rank_wallets_from_fixture
@@ -42,6 +51,15 @@ from stonks_cli.research.validation_gates import (
     record_capture_probe,
     write_gate_report,
 )
+from stonks_cli.vnext.account_import import import_moomoo_accounts
+from stonks_cli.vnext.broker_app_order_ticket import render_broker_app_order_ticket
+from stonks_cli.vnext.crypto_universe_snapshot import load_crypto_universe_snapshot
+from stonks_cli.vnext.holdings_import import import_moomoo_holdings
+from stonks_cli.vnext.market_data_refresh import refresh_moomoo_market_data
+from stonks_cli.vnext.moomoo import MoomooAccount
+from stonks_cli.vnext.portfolio_risk_report import render_portfolio_risk_report
+from stonks_cli.vnext.reviewed_order_ticket import OrderTicketSide, OrderTicketType, ReviewedOrderTicket
+from stonks_cli.vnext.weighted_ranker import rank_weighted_assets
 
 SERVER_NAME = "stonks-cli"
 CONFIRMATION_TTL_SECONDS = 300
@@ -163,9 +181,7 @@ def _read_confirmations() -> dict[str, dict[str, Any]]:
     data = _load_json(_confirmations_path(), {})
     now = _now()
     active = {
-        key: value
-        for key, value in data.items()
-        if datetime.fromisoformat(value["expires_at"]).astimezone(UTC) > now
+        key: value for key, value in data.items() if datetime.fromisoformat(value["expires_at"]).astimezone(UTC) > now
     }
     if active != data:
         _atomic_json(_confirmations_path(), active)
@@ -181,7 +197,12 @@ def _prepare(kind: str, params: dict[str, Any]) -> dict[str, Any]:
         "expires_at": (_now() + timedelta(seconds=CONFIRMATION_TTL_SECONDS)).isoformat(),
     }
     _atomic_json(_confirmations_path(), confirmations)
-    return {"confirmation_id": confirmation_id, "expires_in_seconds": CONFIRMATION_TTL_SECONDS, "kind": kind, "preview": _preview(kind, params)}
+    return {
+        "confirmation_id": confirmation_id,
+        "expires_in_seconds": CONFIRMATION_TTL_SECONDS,
+        "kind": kind,
+        "preview": _preview(kind, params),
+    }
 
 
 def _confirm(confirmation_id: str) -> dict[str, Any]:
@@ -224,7 +245,9 @@ def _apply_safe_updates(updates: dict[str, Any]) -> dict[str, Any]:
     payload["vnext"]["features"]["broker_data"] = bool(payload["vnext"]["moomoo"]["enabled"])
     payload["vnext"]["features"]["crypto_research"] = bool(payload["vnext"]["research"]["enabled"])
     payload["vnext"]["features"]["operator_reports"] = bool(payload["vnext"]["operator"]["telegram"]["enabled"])
-    payload["vnext"]["enabled"] = any(payload["vnext"]["features"][key] for key in ("broker_data", "crypto_research", "operator_reports"))
+    payload["vnext"]["enabled"] = any(
+        payload["vnext"]["features"][key] for key in ("broker_data", "crypto_research", "operator_reports")
+    )
     updated = type(cfg).model_validate(payload)
     save_config(updated)
     return {"config": redacted_config_data(updated), "live_execution": "blocked"}
@@ -245,7 +268,10 @@ def _execute_mutation(kind: str, params: dict[str, Any]) -> dict[str, Any]:
     if kind == "clean":
         return {"removed": [str(path) for path in remove_managed_paths(removable_paths(include_config=False))]}
     if kind == "uninstall":
-        return {"removed": [str(path) for path in remove_managed_paths(removable_paths(include_config=True))], "package_removal": "Use your installer, for example: uv tool uninstall stonks-cli"}
+        return {
+            "removed": [str(path) for path in remove_managed_paths(removable_paths(include_config=True))],
+            "package_removal": "Use your installer, for example: uv tool uninstall stonks-cli",
+        }
     if kind == "fixture_ledger":
         fixture = _checked_path(params.get("fixture", str(DEFAULT_REPLAY_FIXTURE)))
         ledger = _checked_path(params["ledger"], write=True)
@@ -262,9 +288,18 @@ def _execute_mutation(kind: str, params: dict[str, Any]) -> dict[str, Any]:
         state_dir = _checked_path(params["state_dir"], write=True)
         capture_out_dir = _checked_path(params["capture_out_dir"], write=True)
         report = _checked_path(params["report"], write=True)
-        state = record_capture_probe(state_dir=state_dir, fixture_path=fixture, capture_out_dir=capture_out_dir, reset=bool(params.get("reset", False)))
+        state = record_capture_probe(
+            state_dir=state_dir,
+            fixture_path=fixture,
+            capture_out_dir=capture_out_dir,
+            reset=bool(params.get("reset", False)),
+        )
         write_gate_report(state, report_path=report)
-        return {"state_path": str(gate_state_path(state_dir=state_dir)), "report_path": str(report), "assessment": assess_gate(state).to_dict()}
+        return {
+            "state_path": str(gate_state_path(state_dir=state_dir)),
+            "report_path": str(report),
+            "assessment": assess_gate(state).to_dict(),
+        }
     if kind in {"carry_paper_job", "ingest_job"}:
         return _start_job(kind, params)
     if kind == "cancel_job":
@@ -282,10 +317,22 @@ def _start_job(kind: str, params: dict[str, Any]) -> dict[str, Any]:
     job_id = uuid4().hex
     path = _job_path(job_id)
     log_path = _jobs_root() / f"{job_id}.log"
-    record = {"job_id": job_id, "kind": kind, "status": "starting", "created_at": _now().isoformat(), "params": params, "log_path": str(log_path)}
+    record = {
+        "job_id": job_id,
+        "kind": kind,
+        "status": "starting",
+        "created_at": _now().isoformat(),
+        "params": params,
+        "log_path": str(log_path),
+    }
     _atomic_json(path, record)
     with log_path.open("w", encoding="utf-8") as log:
-        process = subprocess.Popen([sys.executable, "-m", "stonks_cli.mcp_server", "--worker", job_id], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        process = subprocess.Popen(
+            [sys.executable, "-m", "stonks_cli.mcp_server", "--worker", job_id],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
     record["pid"] = process.pid
     record["status"] = "running"
     _atomic_json(path, record)
@@ -324,12 +371,29 @@ def _run_worker(job_id: str) -> None:
             report = _checked_path(params["report"], write=True)
             ledger = _checked_path(params["ledger"], write=True)
             cfg = load_config()
-            fetch = (lambda: load_carry_inputs_fixture(fixture)) if fixture else (lambda: HyperliquidOrderClient().fetch_carry_inputs(tuple(params.get("assets") or ("BTC", "ETH"))))
+            fetch = (
+                (lambda: load_carry_inputs_fixture(fixture))
+                if fixture
+                else (
+                    lambda: HyperliquidOrderClient().fetch_carry_inputs(tuple(params.get("assets") or ("BTC", "ETH")))
+                )
+            )
             paths: dict[str, str] = {}
+
             def persist(result: Any) -> None:
                 nonlocal paths
-                paths = write_paper_carry_artifacts(result=result, state_dir=state_dir, report_path=report, ledger_path=ledger)
-            result = run_paper_carry_for_duration(fetch_inputs=fetch, min_net_apr=cfg.carry.min_net_apr, duration_seconds=float(params.get("duration_hours", 0.0)) * 3600, interval_seconds=float(params.get("interval_seconds", 300.0)), config=PaperCarryConfig(), on_cycle=persist)
+                paths = write_paper_carry_artifacts(
+                    result=result, state_dir=state_dir, report_path=report, ledger_path=ledger
+                )
+
+            result = run_paper_carry_for_duration(
+                fetch_inputs=fetch,
+                min_net_apr=cfg.carry.min_net_apr,
+                duration_seconds=float(params.get("duration_hours", 0.0)) * 3600,
+                interval_seconds=float(params.get("interval_seconds", 300.0)),
+                config=PaperCarryConfig(),
+                on_cycle=persist,
+            )
             record["result"] = {"paths": paths, "decisions": len(result.state.decisions)}
         elif kind == "ingest_job":
             outputs = {
@@ -356,7 +420,9 @@ def _run_worker(job_id: str) -> None:
                 command.append("--allow-non-linux")
             for coin in params.get("coins") or ():
                 command.extend(("--coin", str(coin)))
-            completed = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            completed = subprocess.run(
+                command, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
             if completed.stdout:
                 print(completed.stdout, end="")
             if completed.returncode:
@@ -381,7 +447,11 @@ def _write_annotations() -> ToolAnnotations:
 
 
 def create_server() -> FastMCP:
-    mcp = FastMCP(SERVER_NAME, instructions="Paper-first research tools. No tool can place orders or arm live trading.", json_response=True)
+    mcp = FastMCP(
+        SERVER_NAME,
+        instructions="Paper-first research tools. No tool can place orders or arm live trading.",
+        json_response=True,
+    )
 
     @mcp.tool(name="status", annotations=_read_annotations())
     def status() -> dict[str, Any]:
@@ -389,9 +459,9 @@ def create_server() -> FastMCP:
         return inspect_home()
 
     @mcp.tool(name="doctor", annotations=_read_annotations())
-    def doctor() -> dict[str, str]:
-        """Diagnose local configuration and safety guards."""
-        return do_doctor()
+    def doctor(smoke: bool = False) -> dict[str, Any]:
+        """Diagnose local configuration or run synthetic local smoke prerequisites."""
+        return do_smoke_doctor() if smoke else do_doctor()
 
     @mcp.tool(name="config_get", annotations=_read_annotations())
     def config_get() -> dict[str, Any]:
@@ -402,6 +472,111 @@ def create_server() -> FastMCP:
     def config_validate() -> dict[str, object]:
         """Validate the effective configuration."""
         return do_config_validate()
+
+    @mcp.tool(name="alert_preview", annotations=_read_annotations())
+    def alert_preview(
+        event: Literal["kill_switch", "stale_data", "ledger_mismatch", "service_restart"] = "service_restart",
+    ) -> dict[str, Any]:
+        """Render a synthetic carry alert; delivery is never attempted."""
+        cfg = load_config()
+        return {
+            "delivery": "not_attempted",
+            "event": event,
+            "message": f"[synthetic] stonks-cli carry alert: {event}",
+            "sink": cfg.carry.alert_sink,
+            "synthetic": True,
+        }
+
+    @mcp.tool(name="crypto_universe", annotations=_read_annotations())
+    def crypto_universe(snapshot: str) -> dict[str, Any]:
+        """Read a strict persisted crypto-universe snapshot."""
+        return load_crypto_universe_snapshot(_checked_path(snapshot)).to_data()
+
+    @mcp.tool(name="crypto_rank", annotations=_read_annotations())
+    def crypto_rank(components: str) -> list[dict[str, Any]]:
+        """Rank persisted local crypto score components with configured weights."""
+        cfg = load_config()
+        if not cfg.vnext.enabled or not cfg.vnext.features.crypto_research:
+            raise ValueError("vNext crypto-research ranking is not enabled")
+        return [
+            asdict(rank)
+            for rank in rank_weighted_assets(
+                _load_score_components(_checked_path(components)), cfg.vnext.research.factor_weights
+            )
+        ]
+
+    @mcp.tool(name="portfolio_snapshot", annotations=_read_annotations())
+    def portfolio_snapshot(snapshot: str) -> dict[str, object]:
+        """Read a strict persisted portfolio snapshot without broker access."""
+        return _portfolio_snapshot_to_data(_load_portfolio_snapshot(_checked_path(snapshot)))
+
+    @mcp.tool(name="portfolio_daily_report", annotations=_read_annotations())
+    def portfolio_daily_report(report_input: str) -> dict[str, str]:
+        """Render a local daily portfolio-risk report without delivery."""
+        cfg = load_config()
+        if not cfg.vnext.enabled or not cfg.vnext.features.operator_reports:
+            raise ValueError("vNext operator reports are not enabled")
+        exposure, nav, confidence = _load_daily_report_inputs(_checked_path(report_input))
+        return {"delivery": "not_attempted", "report": render_portfolio_risk_report(exposure, nav, confidence)}
+
+    @mcp.tool(name="moomoo_accounts", annotations=_read_annotations())
+    def moomoo_accounts() -> list[dict[str, Any]]:
+        """Read accounts through an operator-managed local read-only Moomoo OpenD."""
+        return [asdict(account) for account in import_moomoo_accounts(load_config())]
+
+    @mcp.tool(name="moomoo_quotes", annotations=_read_annotations())
+    def moomoo_quotes(symbols: list[str]) -> dict[str, Any]:
+        """Refresh pre-entitled local Moomoo quotes without subscriptions or orders."""
+        cfg = load_config()
+        return {
+            "broker": "moomoo",
+            "endpoint": f"{cfg.vnext.moomoo.host}:{cfg.vnext.moomoo.port}",
+            "read_only": True,
+            "quotes": [asdict(quote) for quote in refresh_moomoo_market_data(cfg, symbols)],
+        }
+
+    @mcp.tool(name="moomoo_holdings", annotations=_read_annotations())
+    def moomoo_holdings(
+        account_id: str, account_index: int, trading_environment: str, captured_at: str
+    ) -> dict[str, object]:
+        """Import one read-only Moomoo holdings snapshot."""
+        snapshot = import_moomoo_holdings(
+            load_config(),
+            MoomooAccount(account_id, account_index, trading_environment),
+            datetime.fromisoformat(captured_at),
+        )
+        return _portfolio_snapshot_to_data(snapshot)
+
+    @mcp.tool(name="reviewed_order_ticket", annotations=_read_annotations())
+    def reviewed_order_ticket(
+        ticket_id: str,
+        account_id: str,
+        symbol: str,
+        side: Literal["buy", "sell"],
+        quantity: float,
+        limit_price: float,
+        currency: str,
+        rationale: str,
+        prepared_at: str,
+        reviewed_by: str,
+        reviewed_at: str,
+    ) -> dict[str, str]:
+        """Render a reviewed manual-entry ticket; it cannot submit an order."""
+        ticket = ReviewedOrderTicket(
+            ticket_id,
+            account_id,
+            symbol,
+            OrderTicketSide(side),
+            OrderTicketType.LIMIT,
+            quantity,
+            limit_price,
+            currency,
+            rationale,
+            datetime.fromisoformat(prepared_at),
+            reviewed_by,
+            datetime.fromisoformat(reviewed_at),
+        )
+        return {"execution": "manual broker-app entry required", "ticket": render_broker_app_order_ticket(ticket)}
 
     @mcp.tool(name="cli_readonly", annotations=_read_annotations())
     def cli_readonly(command: str, args: list[str] | None = None) -> dict[str, Any]:
@@ -416,32 +591,65 @@ def create_server() -> FastMCP:
         """Scan paper carry opportunities; fixture input avoids network access."""
         cfg = load_config()
         inputs = load_carry_inputs_fixture(_checked_path(fixture)) if fixture else None
-        rows = scan_hyperliquid_carry(cfg=cfg, inputs=inputs, assets=tuple(assets or ("BTC", "ETH")), assumptions=CarryCostAssumptions())
+        rows = scan_hyperliquid_carry(
+            cfg=cfg, inputs=inputs, assets=tuple(assets or ("BTC", "ETH")), assumptions=CarryCostAssumptions()
+        )
         return {"paper": True, "rows": [row.to_dict() for row in rows]}
 
     @mcp.tool(name="research_rank_wallets", annotations=_read_annotations())
     def research_rank_wallets(fixture: str | None = None, limit: int = 100) -> dict[str, Any]:
         """Rank reproducible wallet attribution fixtures."""
         path = _checked_path(fixture or DEFAULT_ATTRIBUTION_FIXTURE)
-        return {"fixture_path": str(path), "rankings": [row.to_dict() for row in rank_wallets_from_fixture(path, limit=limit)]}
+        return {
+            "fixture_path": str(path),
+            "rankings": [row.to_dict() for row in rank_wallets_from_fixture(path, limit=limit)],
+        }
 
     @mcp.tool(name="research_replay_paper", annotations=_read_annotations())
-    def research_replay_paper(fixture: str | None = None, rankings_fixture: str | None = None, bankroll: float = 1000.0) -> dict[str, Any]:
+    def research_replay_paper(
+        fixture: str | None = None, rankings_fixture: str | None = None, bankroll: float = 1000.0
+    ) -> dict[str, Any]:
         """Replay synthetic paper analysis without trading."""
         paper = _checked_path(fixture or DEFAULT_PAPER_MIRROR_FIXTURE)
         rankings_path = _checked_path(rankings_fixture or DEFAULT_ATTRIBUTION_FIXTURE)
-        replay = replay_paper_analysis_fixture(fixture_path=paper, rankings=rank_wallets_from_fixture(rankings_path, limit=5), config=PaperAnalysisConfig(follower_bankroll_usd=bankroll))
+        replay = replay_paper_analysis_fixture(
+            fixture_path=paper,
+            rankings=rank_wallets_from_fixture(rankings_path, limit=5),
+            config=PaperAnalysisConfig(follower_bankroll_usd=bankroll),
+        )
         return {"tearsheet": replay.tearsheet, "decisions": [item.ledger_record.to_dict() for item in replay.decisions]}
 
     @mcp.tool(name="carry_preflight", annotations=_read_annotations())
-    def carry_preflight(paper_gate_passed: bool = False, legal_review_recorded: bool = False, venue_health_ok: bool = False, manual_cap_confirmed: bool = False, requested_notional_usd: float = 0.0, cap_usd: float = 0.0) -> dict[str, Any]:
+    def carry_preflight(
+        paper_gate_passed: bool = False,
+        legal_review_recorded: bool = False,
+        venue_health_ok: bool = False,
+        manual_cap_confirmed: bool = False,
+        requested_notional_usd: float = 0.0,
+        cap_usd: float = 0.0,
+    ) -> dict[str, Any]:
         """Report live-preflight blockers without authorizing execution."""
-        return evaluate_carry_live_preflight(cfg=load_config(), evidence=CarryLivePreflightEvidence(paper_gate_passed=paper_gate_passed, legal_review_recorded=legal_review_recorded, venue_health_ok=venue_health_ok, manual_cap_confirmed=manual_cap_confirmed, requested_notional_usd=requested_notional_usd, cap_usd=cap_usd)).to_dict()
+        return evaluate_carry_live_preflight(
+            cfg=load_config(),
+            evidence=CarryLivePreflightEvidence(
+                paper_gate_passed=paper_gate_passed,
+                legal_review_recorded=legal_review_recorded,
+                venue_health_ok=venue_health_ok,
+                manual_cap_confirmed=manual_cap_confirmed,
+                requested_notional_usd=requested_notional_usd,
+                cap_usd=cap_usd,
+            ),
+        ).to_dict()
 
     @mcp.tool(name="carry_health", annotations=_read_annotations())
     def carry_health(state_dir: str, ledger: str, skip_network: bool = True) -> dict[str, Any]:
         """Check paper-carry artifacts and optionally venue network health."""
-        report = build_carry_health_report(cfg=load_config(), state_dir=_checked_path(state_dir), ledger_path=_checked_path(ledger), skip_network=skip_network)
+        report = build_carry_health_report(
+            cfg=load_config(),
+            state_dir=_checked_path(state_dir),
+            ledger_path=_checked_path(ledger),
+            skip_network=skip_network,
+        )
         return report.to_dict()
 
     @mcp.tool(name="capture_gate_status", annotations=_read_annotations())
@@ -455,7 +663,21 @@ def create_server() -> FastMCP:
         return {"state_path": str(path), "assessment": assess_gate(state).to_dict()}
 
     @mcp.tool(name="prepare_mutation", annotations=_write_annotations())
-    def prepare_mutation(kind: Literal["config_onboard", "config_update", "clean", "uninstall", "fixture_ledger", "fixture_ingest", "fixture_capture_gate", "carry_paper_job", "ingest_job", "cancel_job"], params: dict[str, Any]) -> dict[str, Any]:
+    def prepare_mutation(
+        kind: Literal[
+            "config_onboard",
+            "config_update",
+            "clean",
+            "uninstall",
+            "fixture_ledger",
+            "fixture_ingest",
+            "fixture_capture_gate",
+            "carry_paper_job",
+            "ingest_job",
+            "cancel_job",
+        ],
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         """Preview a write/delete action and return a one-time confirmation ID."""
         return _prepare(kind, params)
 
@@ -515,6 +737,7 @@ def main(argv: list[str] | None = None) -> None:
     if not token:
         raise SystemExit("STONKS_CLI_MCP_TOKEN is required for streamable HTTP")
     import uvicorn
+
     uvicorn.run(_BearerApp(server.streamable_http_app(), token), host=args.host, port=args.port, log_level="warning")
 
 

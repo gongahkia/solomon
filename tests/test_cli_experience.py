@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 import typer
@@ -28,10 +29,13 @@ def test_home_json_reports_paper_safety(monkeypatch, tmp_path):
 def test_home_reports_configured_moomoo_and_missing_alert_credentials(monkeypatch, tmp_path):
     cfg = tmp_path / "config.json"
     monkeypatch.setenv("STONKS_CLI_CONFIG", str(cfg))
-    monkeypatch.setattr(experience.socket, "create_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("refused")))
+    monkeypatch.setattr(
+        experience.socket, "create_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("refused"))
+    )
     config = cli.load_config(cfg)
     config.vnext.enabled = True
     config.vnext.moomoo.enabled = True
+    config.vnext.features.broker_data = True
     config.carry.alert_sink = "telegram"
     cli.save_config(config, cfg)
 
@@ -41,12 +45,52 @@ def test_home_reports_configured_moomoo_and_missing_alert_credentials(monkeypatc
     assert payload["readiness"]["carry_alerts"]["status"] == "configured; credentials missing"
 
 
+def test_home_labels_fixture_evidence_and_stale_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    state = tmp_path / "home" / "state"
+    gate = state / "validation-gates" / "capture-7d.json"
+    gate.parent.mkdir(parents=True)
+    gate.write_text(json.dumps({"updated_at_utc": "2026-01-01T00:00:00Z", "evidence": [{}]}), encoding="utf-8")
+    report = state / "carry-paper" / "report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("paper", encoding="utf-8")
+    os.utime(report, (0, 0))
+
+    payload = experience.inspect_home()
+
+    assert payload["evidence"]["capture_validation"]["status"] == "synthetic or incomplete"
+    assert payload["evidence"]["carry_paper_artifacts"]["status"] == "artifacts present; stale"
+
+
 def test_bare_cli_prints_help_when_not_interactive():
     result = CliRunner().invoke(app, [])
 
     assert result.exit_code == 0
     assert "Usage: root" in result.output or "Usage: stonks-cli" in result.output
     assert "onboard" in result.output
+
+
+def test_doctor_smoke_is_local_and_synthetic(monkeypatch, tmp_path):
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "isolated"))
+
+    result = CliRunner().invoke(app, ["doctor", "--smoke"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert payload["synthetic"] is True
+    assert payload["not_validation_evidence"] is True
+
+
+def test_alert_preview_never_attempts_delivery(monkeypatch, tmp_path):
+    monkeypatch.setenv("STONKS_CLI_CONFIG", str(tmp_path / "config.json"))
+
+    result = CliRunner().invoke(app, ["alert-preview", "--event", "stale_data"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["delivery"] == "not_attempted"
+    assert payload["synthetic"] is True
 
 
 def test_onboard_writes_paper_first_config(monkeypatch, tmp_path):

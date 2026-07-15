@@ -22,6 +22,8 @@ The endpoint is `http://127.0.0.1:8765/mcp`.
 
 `STONKS_CLI_MCP_ROOTS` is path-separated (`:` on macOS/Linux). Tools may use only those roots plus the managed config/state/cache directories. Do not use a broad root such as `$HOME`.
 
+For an isolated test home, set `STONKS_CLI_HOME=/absolute/temporary/stonks-home`; it redirects the default config, state, and cache paths together. `scripts/smoke_synthetic.py` does this automatically and writes a provenance manifest explicitly marked synthetic.
+
 ## Mutations
 
 Configuration, artifacts, jobs, clean, and uninstall require `prepare_mutation`, then `confirm_mutation`. Confirmation IDs expire after five minutes and work once. MCP clients must retain their own user approval prompts.
@@ -75,7 +77,8 @@ Restart Hermes and inspect its discovered `mcp_stonks_*` tools.
 
 ## Tool groups
 
-- Read-only: `status`, `doctor`, `config_get`, `config_validate`, `carry_scan`, `carry_health`, `capture_gate_status`, `research_rank_wallets`, `research_replay_paper`, `carry_preflight`, `job_status`, `job_list`.
+- Read-only: `status`, `doctor`, `config_get`, `config_validate`, `alert_preview`, `carry_scan`, `carry_health`, `capture_gate_status`, `research_rank_wallets`, `research_replay_paper`, `carry_preflight`, `job_status`, `job_list`.
+- First-class local data tools: `crypto_universe`, `crypto_rank`, `portfolio_snapshot`, `portfolio_daily_report`, `moomoo_accounts`, `moomoo_quotes`, `moomoo_holdings`, and `reviewed_order_ticket`. Moomoo tools only use operator-managed local read-only OpenD; tickets are manual-entry text and cannot submit orders.
 - `cli_readonly` safely bridges the remaining allowlisted non-mutating CLI commands, including the read-only Moomoo and vNext operations; it does not grant shell access or permit write/live-mode options.
 - Confirmation-gated: `prepare_mutation`, `confirm_mutation` for onboarding/settings, fixture artifacts, capture samples, paper jobs, cancellation, cleanup, and uninstall.
 

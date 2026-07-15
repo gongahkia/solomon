@@ -16,6 +16,8 @@ $ stonks-cli                         # interactive local status home
 $ stonks-cli onboard                 # guided paper-first configuration
 $ stonks-cli settings                # guided safe settings editor
 $ stonks-cli home --json             # machine-readable local readiness
+$ stonks-cli doctor --smoke          # local synthetic prerequisite checks
+$ stonks-cli alert-preview           # synthetic alert; never delivers
 $ stonks-cli clean --dry-run         # inspect removable cache/state paths
 $ stonks-cli uninstall --dry-run     # inspect app-data removal and package guidance
 $ stonks-cli init-config
@@ -40,6 +42,16 @@ Run `stonks-cli onboard` from an interactive terminal. It creates or updates loc
 ## MCP
 
 `stonks-mcp` exposes the paper-first CLI through local stdio or authenticated loopback Streamable HTTP for MCP clients. It has structured outputs, explicit file roots, and two-step confirmation for every mutation. See [MCP setup](docs/mcp.md).
+
+## Synthetic smoke flow
+
+Run the isolated CLI-and-MCP smoke flow from a source checkout:
+
+```console
+$ uv run python scripts/smoke_synthetic.py
+```
+
+It creates a disposable app home, config, state, cache, artifacts, and provenance manifest. Set `STONKS_CLI_SMOKE_ROOT=/absolute/empty/path` to retain a chosen run directory. The manifest labels every result as synthetic; it is not capture, performance, or 30-day gate evidence. See [synthetic smoke testing](docs/smoke-testing.md). Run `bash scripts/verify_release.sh` before release.
 
 ## Validation
 

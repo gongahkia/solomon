@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -32,21 +32,24 @@ def do_doctor() -> dict[str, str]:
         out["config_loaded"] = f"error: {e}"
     try:
         from stonks_cli.paths import default_cache_dir, default_state_dir
+
         out["cache_dir"] = str(default_cache_dir())
         out["state_dir"] = str(default_state_dir())
     except Exception as e:
         out["paths"] = f"error: {e}"
-    try: # research guard check
+    try:  # research guard check
         from stonks_cli.research.guards import evaluate_execution_guards
         from stonks_cli.research.models import ExecutionMode, Venue
+
         paper_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=ExecutionMode.PAPER)
         live_guards = evaluate_execution_guards(venue=Venue.HYPERLIQUID, mode=ExecutionMode.LIVE)
         out["research_paper_guards"] = "clear" if not paper_guards else "; ".join(paper_guards)
         out["research_live_guards"] = "clear" if not live_guards else "; ".join(live_guards)
     except Exception as e:
         out["research_guards"] = f"error: {e}"
-    try: # plugin load status
+    try:  # plugin load status
         from stonks_cli.plugins import load_plugins_best_effort
+
         specs = tuple(cfg.plugins or [])
         if not specs:
             out["plugins"] = "skipped (none configured)"
@@ -100,7 +103,12 @@ def do_smoke_doctor() -> dict[str, object]:
         "status": "ok" if importlib.util.find_spec("mcp") else "fail",
         "detail": "mcp package importable" if importlib.util.find_spec("mcp") else "install the mcp runtime dependency",
     }
-    return {"synthetic": True, "not_validation_evidence": True, "ok": all(item["status"] == "ok" for item in checks.values()), "checks": checks}
+    return {
+        "synthetic": True,
+        "not_validation_evidence": True,
+        "ok": all(item["status"] == "ok" for item in checks.values()),
+        "checks": checks,
+    }
 
 
 def do_config_where() -> Path:

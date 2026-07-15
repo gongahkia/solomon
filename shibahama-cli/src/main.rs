@@ -54,7 +54,7 @@ use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
@@ -75,6 +75,7 @@ const SERVICE_TOKEN_SECRET_DOMAIN: &[u8] = b"shibahama:service-token:bearer:v1";
 const SERVICE_TOKEN_PREFIX: &str = "shb_at_";
 const OPERATIONAL_LOG_SCHEMA_VERSION: u32 = 1;
 const OPERATIONAL_LOG_SCOPE_DOMAIN: &[u8] = b"shibahama:operational-log:scope:v1";
+const METRICS_ERROR_BUDGET_PER_THOUSAND: u64 = 100;
 
 #[derive(Clone)]
 struct ServerRequestLogContext {
@@ -760,6 +761,62 @@ struct ServerState {
     mcp_scope: MemoryScope,
     max_memories_per_namespace: usize,
     operational_log_key: [u8; 32],
+    metrics: Arc<ServerMetrics>,
+}
+
+#[derive(Default)]
+struct ServerMetrics {
+    requests: AtomicU64,
+    errors: AtomicU64,
+    policy_allowed: AtomicU64,
+    policy_denied: AtomicU64,
+    recall_duration_ms_total: AtomicU64,
+    recall_duration_count: AtomicU64,
+}
+
+impl ServerMetrics {
+    fn observe(&self, route: &str, status: StatusCode, duration_ms: u64) {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        if !status.is_success() {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+        }
+        if route == "/recall" || route == "/recall/degraded" {
+            self.recall_duration_ms_total
+                .fetch_add(duration_ms, Ordering::Relaxed);
+            self.recall_duration_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn observe_policy(&self, allowed: bool) {
+        let metric = if allowed {
+            &self.policy_allowed
+        } else {
+            &self.policy_denied
+        };
+        metric.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn exceeds_error_budget(&self, max_errors_per_thousand: u64) -> bool {
+        let requests = self.requests.load(Ordering::Relaxed);
+        requests > 0
+            && self.errors.load(Ordering::Relaxed).saturating_mul(1000)
+                > requests.saturating_mul(max_errors_per_thousand)
+    }
+
+    fn render(&self, queue_depth: usize, storage_healthy: bool) -> String {
+        format!(
+            "# TYPE shibahama_requests_total counter\nshibahama_requests_total {}\n# TYPE shibahama_errors_total counter\nshibahama_errors_total {}\n# TYPE shibahama_policy_outcomes_total counter\nshibahama_policy_outcomes_total{{outcome=\"allowed\"}} {}\nshibahama_policy_outcomes_total{{outcome=\"denied\"}} {}\n# TYPE shibahama_mcp_session_queue_depth gauge\nshibahama_mcp_session_queue_depth {}\n# TYPE shibahama_recall_duration_milliseconds_total counter\nshibahama_recall_duration_milliseconds_total {}\n# TYPE shibahama_recall_duration_milliseconds_count counter\nshibahama_recall_duration_milliseconds_count {}\n# TYPE shibahama_storage_healthy gauge\nshibahama_storage_healthy {}\n# TYPE shibahama_alert_error_budget_exceeded gauge\nshibahama_alert_error_budget_exceeded {}\n",
+            self.requests.load(Ordering::Relaxed),
+            self.errors.load(Ordering::Relaxed),
+            self.policy_allowed.load(Ordering::Relaxed),
+            self.policy_denied.load(Ordering::Relaxed),
+            queue_depth,
+            self.recall_duration_ms_total.load(Ordering::Relaxed),
+            self.recall_duration_count.load(Ordering::Relaxed),
+            u64::from(storage_healthy),
+            u64::from(self.exceeds_error_budget(METRICS_ERROR_BUDGET_PER_THOUSAND)),
+        )
+    }
 }
 
 struct ServerRequestContext {
@@ -1636,9 +1693,11 @@ async fn serve_async(command: ServeCommand) -> CliResult<()> {
         mcp_scope,
         max_memories_per_namespace: command.max_memories_per_namespace,
         operational_log_key: operational_log_key(),
+        metrics: Arc::new(ServerMetrics::default()),
     };
     let app = Router::new()
         .route("/healthz", get(server_health))
+        .route("/metrics", get(server_metrics))
         .route(
             "/mcp",
             post(server_mcp_post)
@@ -3431,6 +3490,15 @@ async fn server_operational_log_middleware(
     SERVER_REQUEST_LOG_CONTEXT
         .scope(context.clone(), async move {
             let response = next.run(request).await;
+            let duration_ms = context
+                .started_at
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
+            state
+                .metrics
+                .observe(&route, response.status(), duration_ms);
             shibahama_core::telemetry::record_boundary(
                 shibahama_core::telemetry::TelemetryBoundary::Http,
                 shibahama_core::telemetry::TelemetryOperation::Request,
@@ -3448,12 +3516,7 @@ async fn server_operational_log_middleware(
                     "unknown",
                     response.status(),
                     &json!({}),
-                    context
-                        .started_at
-                        .elapsed()
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(u64::MAX),
+                    duration_ms,
                 );
             }
             response
@@ -3829,6 +3892,22 @@ async fn server_health() -> Json<serde_json::Value> {
     }))
 }
 
+async fn server_metrics(State(state): State<ServerState>) -> Response {
+    let queue_depth = state
+        .mcp_sessions
+        .lock()
+        .map_or(0, |sessions| sessions.len());
+    let body = state
+        .metrics
+        .render(queue_depth, state.engine.lock().is_ok());
+
+    (
+        [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
+        .into_response()
+}
+
 async fn server_capabilities() -> Json<shibahama_core::CapabilityDocument> {
     Json(shibahama_core::capabilities())
 }
@@ -3970,6 +4049,9 @@ async fn server_simulate_capture_policy(
             .lock()
             .map_err(|error| ServerError::internal(format!("engine lock poisoned: {error}")))?;
         let simulation = engine.simulate_capture_policy(source_kind, &context.scope, request);
+        state
+            .metrics
+            .observe_policy(simulation.decision.require_allowed().is_ok());
         let response = serde_json::to_value(simulation).map_err(ServerError::internal)?;
 
         Ok((
@@ -3999,6 +4081,7 @@ async fn server_simulate_recall_policy(
             body.include_instructions.unwrap_or(false),
             Some(&context.scope),
         );
+        state.metrics.observe_policy(simulation.scope_allowed);
         let response = serde_json::to_value(simulation).map_err(ServerError::internal)?;
 
         Ok((
@@ -6568,7 +6651,7 @@ impl From<ConsolidationPassReport> for ConsolidationPassDto {
 #[cfg(test)]
 mod tests {
     use super::{
-        RbacRequirement, ServerAdministration, ServerAuthentication, ServerError,
+        RbacRequirement, ServerAdministration, ServerAuthentication, ServerError, ServerMetrics,
         ServerRateLimitPolicy, ServerRateLimiter, ServerRbacPolicy, ServerRequestContext,
         ServerState, ServiceStoreMode, authorize_server_rbac, parse_cors_headers,
         parse_cors_methods, parse_cors_origins, parse_hex_encryption_key, parse_vector,
@@ -6651,6 +6734,32 @@ mod tests {
         ] {
             assert!(!encoded.contains(forbidden), "log contained {forbidden}");
         }
+    }
+
+    #[test]
+    fn prometheus_scrape_is_scope_safe_and_alert_budgeted() {
+        let metrics = ServerMetrics::default();
+        metrics.observe("/recall", StatusCode::OK, 12);
+        metrics.observe("/recall", StatusCode::INTERNAL_SERVER_ERROR, 18);
+        metrics.observe_policy(true);
+        metrics.observe_policy(false);
+        let scrape = metrics.render(3, true);
+
+        for expected in [
+            "shibahama_requests_total 2",
+            "shibahama_errors_total 1",
+            "shibahama_policy_outcomes_total{outcome=\"allowed\"} 1",
+            "shibahama_policy_outcomes_total{outcome=\"denied\"} 1",
+            "shibahama_mcp_session_queue_depth 3",
+            "shibahama_recall_duration_milliseconds_total 30",
+            "shibahama_storage_healthy 1",
+        ] {
+            assert!(scrape.contains(expected), "missing {expected}");
+        }
+        assert!(metrics.exceeds_error_budget(100));
+        assert!(!metrics.exceeds_error_budget(500));
+        assert!(!scrape.contains("namespace"));
+        assert!(!scrape.contains("principal"));
     }
 
     #[test]
@@ -6824,6 +6933,7 @@ mod tests {
             mcp_scope: scope.clone(),
             max_memories_per_namespace: 1,
             operational_log_key: [0; 32],
+            metrics: Arc::new(ServerMetrics::default()),
         };
         let context = ServerRequestContext {
             namespace: "default".to_owned(),

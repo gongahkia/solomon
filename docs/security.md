@@ -163,6 +163,14 @@ OpenTelemetry provider. The feature is disabled by default. Instrumentation has
 only fixed component, operation, and outcome attributes; it never receives
 memory content, scope IDs, source refs, credentials, or identity claims.
 
+## Prometheus Metrics
+
+`GET /metrics` exposes unauthenticated, global service counters and gauges for
+scrapers. It has no namespace, scope, principal, route, memory, or credential
+labels. Metrics cover requests, errors, policy outcomes, MCP session depth,
+recall latency, storage lock health, and a fixed 10% error-budget alert gauge.
+Restrict this endpoint at the deployment network boundary.
+
 Tideline endpoints return memory/event content to authorized callers by design,
 but their request log entries still record only metadata and counts.
 

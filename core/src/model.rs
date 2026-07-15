@@ -201,7 +201,7 @@ pub enum ScopeAuthorizationAction {
 }
 
 /// Repository ownership and optional team-sharing boundary for one memory.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct MemoryScope {
     /// Canonical repository identifier that owns the memory.
     pub repository: ScopeId,

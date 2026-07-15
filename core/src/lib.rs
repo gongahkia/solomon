@@ -11,6 +11,7 @@ pub mod collector;
 pub mod config;
 pub mod consolidation;
 pub mod context_worker;
+pub mod control_plane;
 pub mod dedup;
 pub mod embedding;
 pub mod encryption;

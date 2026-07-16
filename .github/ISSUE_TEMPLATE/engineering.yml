@@ -1,0 +1,20 @@
+name: Engineering task
+description: Atomic implementation work
+title: ""
+labels: [engineering]
+body:
+  - type: textarea
+    attributes:
+      label: Implementation
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Dependencies
+    validations:
+      required: true

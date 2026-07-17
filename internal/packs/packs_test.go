@@ -2072,6 +2072,21 @@ func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	}
 }
 
+func BenchmarkLoadBundledPacks(b *testing.B) {
+	packs, err := LoadBundled()
+	if err != nil || len(packs) != 8 || packs[0].ID != "core-containers" || packs[len(packs)-1].ID != "core-rust" {
+		b.Fatalf("bundled packs = %#v, %v", packs, err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		packs, err := LoadBundled()
+		if err != nil || len(packs) != 8 {
+			b.Fatalf("bundled pack load = %#v, %v", packs, err)
+		}
+	}
+}
+
 func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source.json")

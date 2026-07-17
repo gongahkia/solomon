@@ -4,7 +4,7 @@ VERSION ?= dev
 COMMIT ?= unknown
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test vet ci benchmark-pre-execution benchmark-path-cache
+.PHONY: build test vet ci benchmark-pre-execution benchmark-path-cache benchmark-pack-loading
 
 build:
 	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/close-enough
@@ -22,3 +22,6 @@ benchmark-pre-execution:
 
 benchmark-path-cache:
 	go test -run '^$$' -bench '^BenchmarkPATHIndexCache$$' -benchmem ./internal/diagnose
+
+benchmark-pack-loading:
+	go test -run '^$$' -bench '^BenchmarkLoadBundledPacks$$' -benchmem ./internal/packs

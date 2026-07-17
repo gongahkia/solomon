@@ -146,7 +146,13 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = rewrite
-    commandline -r (echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D)
+    set -l suggestion (echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D)
+    if test "$fields[3]" != safe; or test -z "$suggestion"
+      echo "close-enough: refused unsafe rewrite" >&2
+      commandline -f repaint
+      return
+    end
+    commandline -r "$suggestion"
     return
   end
   if test "$fields[2]" = hint

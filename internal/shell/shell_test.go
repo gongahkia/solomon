@@ -506,6 +506,19 @@ func TestFishHintRenderingDoesNotSuppressExecution(t *testing.T) {
 	}
 }
 
+func TestFishRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrite := `if test "$fields[2]" = rewrite`
+	hint := `if test "$fields[2]" = hint`
+	start, end := strings.Index(script, rewrite), strings.Index(script, hint)
+	if start < 0 || end < start || !strings.Contains(script[start:end], `test "$fields[3]" != safe; or test -z "$suggestion"`) || !strings.Contains(script[start:end], "refused unsafe rewrite") || !strings.Contains(script[start:end], `commandline -r "$suggestion"`) {
+		t.Fatalf("fish rewrite path does not fail closed: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

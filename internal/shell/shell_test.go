@@ -49,6 +49,13 @@ func TestInlineDiagnostic(t *testing.T) {
 	}
 }
 
+func TestOneTimeAccept(t *testing.T) {
+	var accept OneTimeAccept
+	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {
+		t.Fatal("one-time acceptance state is incorrect")
+	}
+}
+
 func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
 	markers := map[string]string{
 		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,

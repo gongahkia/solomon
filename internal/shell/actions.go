@@ -1,6 +1,9 @@
 package shell
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 type ActionState string
 
@@ -38,4 +41,25 @@ func ResolveAction(action, risk, suggestion string) ActionResult {
 
 func InlineDiagnostic(risk, confidence, suggestion string) string {
 	return fmt.Sprintf("close-enough [%s/%s]: %s", risk, confidence, suggestion)
+}
+
+type OneTimeAccept struct {
+	mu       sync.Mutex
+	accepted map[string]struct{}
+}
+
+func (a *OneTimeAccept) Accept(key string) bool {
+	if key == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.accepted == nil {
+		a.accepted = map[string]struct{}{}
+	}
+	if _, ok := a.accepted[key]; ok {
+		return false
+	}
+	a.accepted[key] = struct{}{}
+	return true
 }

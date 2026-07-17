@@ -88,6 +88,13 @@ func TestLowConfidenceKeybindingInterruptRequiresInvocation(t *testing.T) {
 	}
 }
 
+func TestRenderCandidateSelector(t *testing.T) {
+	candidates := []string{"git status", "git add", "git status", "", "git commit", "git diff", "git log", "git show"}
+	if got := RenderCandidateSelector(candidates); got != "1. git add\n2. git commit\n3. git diff\n4. git log\n5. git show" {
+		t.Fatalf("selector = %q", got)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

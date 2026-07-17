@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -80,6 +81,31 @@ func LowConfidenceKeybindingInterrupt(confidence float64, invoked bool) ActionRe
 		return ActionResult{Render: true}
 	}
 	return ActionResult{}
+}
+
+const MaxSelectorCandidates = 5
+
+func RenderCandidateSelector(candidates []string) string {
+	unique := map[string]struct{}{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			unique[candidate] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(unique))
+	for candidate := range unique {
+		ordered = append(ordered, candidate)
+	}
+	sort.Strings(ordered)
+	if len(ordered) > MaxSelectorCandidates {
+		ordered = ordered[:MaxSelectorCandidates]
+	}
+	lines := make([]string, len(ordered))
+	for index, candidate := range ordered {
+		lines[index] = fmt.Sprintf("%d. %s", index+1, candidate)
+	}
+	return strings.Join(lines, "\n")
 }
 
 type OneTimeAccept struct {

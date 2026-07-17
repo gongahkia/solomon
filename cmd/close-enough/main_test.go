@@ -270,6 +270,17 @@ func TestConfigTraceToggleControlsPlainDiagnostic(t *testing.T) {
 	}
 }
 
+func TestCheckPlainNoSuggestionFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"check", "--format", "plain", "--command", "echo unchanged"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != "no suggestion\n" {
+		t.Fatalf("no-suggestion fallback = %q", got)
+	}
+}
+
 func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
 	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {

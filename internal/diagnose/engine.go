@@ -69,6 +69,12 @@ const (
 	MessageConsequenceGitExits       MessageKey = "diagnostic.consequence.git_exits"
 	MessageCausePathNotFound         MessageKey = "diagnostic.cause.path_not_found"
 	MessageConsequencePathMayFail    MessageKey = "diagnostic.consequence.path_may_fail"
+	MessageRiskSecret                MessageKey = "diagnostic.risk.secret"
+	MessageRiskPrivilegeEscalation   MessageKey = "diagnostic.risk.privilege_escalation"
+	MessageRiskNetworkEffect         MessageKey = "diagnostic.risk.network_effect"
+	MessageRiskFilesystemMutation    MessageKey = "diagnostic.risk.filesystem_mutation"
+	MessageRiskRecognizedSafe        MessageKey = "diagnostic.risk.recognized_safe"
+	MessageRiskUnknown               MessageKey = "diagnostic.risk.unknown"
 )
 
 var defaultMessages = map[MessageKey]string{
@@ -78,6 +84,12 @@ var defaultMessages = map[MessageKey]string{
 	MessageConsequenceGitExits:       "Git will exit before performing work",
 	MessageCausePathNotFound:         "path does not exist",
 	MessageConsequencePathMayFail:    "the command may fail or target the wrong file",
+	MessageRiskSecret:                "contains a secret-bearing argument",
+	MessageRiskPrivilegeEscalation:   "invokes privilege escalation",
+	MessageRiskNetworkEffect:         "has a network effect",
+	MessageRiskFilesystemMutation:    "may modify the filesystem",
+	MessageRiskRecognizedSafe:        "is a recognized read-only command",
+	MessageRiskUnknown:               "could not establish a safe local classification",
 }
 
 var consequenceTemplates = map[RepairClass]consequenceTemplate{
@@ -92,43 +104,47 @@ func DefaultMessage(key MessageKey) (string, bool) {
 }
 
 type Decision struct {
-	Version        int         `json:"version"`
-	Action         string      `json:"action"`
-	Cause          string      `json:"cause,omitempty"`
-	CauseKey       MessageKey  `json:"cause_key,omitempty"`
-	Consequence    string      `json:"consequence,omitempty"`
-	ConsequenceKey MessageKey  `json:"consequence_key,omitempty"`
-	Suggestion     string      `json:"suggestion,omitempty"`
-	Class          RepairClass `json:"class,omitempty"`
-	Evidence       []Evidence  `json:"evidence,omitempty"`
-	Confidence     float64     `json:"confidence"`
-	Risk           Risk        `json:"risk"`
-	Incomplete     bool        `json:"incomplete,omitempty"`
-	Trace          []string    `json:"trace,omitempty"`
-	original       string
-	replacement    string
-	occurrence     int
+	Version          int         `json:"version"`
+	Action           string      `json:"action"`
+	Cause            string      `json:"cause,omitempty"`
+	CauseKey         MessageKey  `json:"cause_key,omitempty"`
+	Consequence      string      `json:"consequence,omitempty"`
+	ConsequenceKey   MessageKey  `json:"consequence_key,omitempty"`
+	Suggestion       string      `json:"suggestion,omitempty"`
+	Class            RepairClass `json:"class,omitempty"`
+	Evidence         []Evidence  `json:"evidence,omitempty"`
+	Confidence       float64     `json:"confidence"`
+	Risk             Risk        `json:"risk"`
+	RiskRationale    string      `json:"risk_rationale,omitempty"`
+	RiskRationaleKey MessageKey  `json:"risk_rationale_key,omitempty"`
+	Incomplete       bool        `json:"incomplete,omitempty"`
+	Trace            []string    `json:"trace,omitempty"`
+	original         string
+	replacement      string
+	occurrence       int
 }
 
 type Event struct {
-	Version        int         `json:"version"`
-	Stage          string      `json:"stage"`
-	Action         string      `json:"action"`
-	Cause          string      `json:"cause,omitempty"`
-	CauseKey       MessageKey  `json:"cause_key,omitempty"`
-	Consequence    string      `json:"consequence,omitempty"`
-	ConsequenceKey MessageKey  `json:"consequence_key,omitempty"`
-	Suggestion     string      `json:"suggestion,omitempty"`
-	Class          RepairClass `json:"class,omitempty"`
-	Evidence       []Evidence  `json:"evidence,omitempty"`
-	Confidence     float64     `json:"confidence"`
-	Risk           Risk        `json:"risk"`
-	Incomplete     bool        `json:"incomplete,omitempty"`
-	Trace          []string    `json:"trace,omitempty"`
+	Version          int         `json:"version"`
+	Stage            string      `json:"stage"`
+	Action           string      `json:"action"`
+	Cause            string      `json:"cause,omitempty"`
+	CauseKey         MessageKey  `json:"cause_key,omitempty"`
+	Consequence      string      `json:"consequence,omitempty"`
+	ConsequenceKey   MessageKey  `json:"consequence_key,omitempty"`
+	Suggestion       string      `json:"suggestion,omitempty"`
+	Class            RepairClass `json:"class,omitempty"`
+	Evidence         []Evidence  `json:"evidence,omitempty"`
+	Confidence       float64     `json:"confidence"`
+	Risk             Risk        `json:"risk"`
+	RiskRationale    string      `json:"risk_rationale,omitempty"`
+	RiskRationaleKey MessageKey  `json:"risk_rationale_key,omitempty"`
+	Incomplete       bool        `json:"incomplete,omitempty"`
+	Trace            []string    `json:"trace,omitempty"`
 }
 
 func (d Decision) Event(stage string) Event {
-	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, RiskRationale: d.RiskRationale, RiskRationaleKey: d.RiskRationaleKey, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
 func (d Decision) Record() (string, error) {
@@ -324,7 +340,7 @@ func (e Engine) finish(ctx context.Context, decision Decision, stage string, sta
 }
 
 func decisionOutputSize(decision Decision) int {
-	size := len(decision.Cause) + len(decision.Consequence) + len(decision.Suggestion) + len(decision.Class) + len(decision.Risk) + 128
+	size := len(decision.Cause) + len(decision.CauseKey) + len(decision.Consequence) + len(decision.ConsequenceKey) + len(decision.Suggestion) + len(decision.Class) + len(decision.Risk) + len(decision.RiskRationale) + len(decision.RiskRationaleKey) + 128
 	for _, evidence := range decision.Evidence {
 		size += len(evidence.Kind) + len(evidence.Value)
 	}
@@ -410,7 +426,8 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassCommand)
-		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}, nil
+		assessment := assessRisk(replaced, containsSecret)
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: assessment.risk, RiskRationale: defaultMessages[assessment.rationale], RiskRationaleKey: assessment.rationale, Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}, nil
 	}
 	return Decision{}, nil
 }
@@ -436,7 +453,8 @@ func semanticDecision(ctx context.Context, words []string) (Decision, error) {
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassSemantic)
-		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
+		assessment := assessRisk(replaced, containsSecret)
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: assessment.risk, RiskRationale: defaultMessages[assessment.rationale], RiskRationaleKey: assessment.rationale, Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
 	}
 	return Decision{}, nil
 }
@@ -475,7 +493,8 @@ func (e Engine) pathDecision(ctx context.Context, words []string) (Decision, err
 		replaced[i] = replacement
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassPath)
-		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}, nil
+		assessment := assessRisk(replaced, containsSecret)
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: assessment.risk, RiskRationale: defaultMessages[assessment.rationale], RiskRationaleKey: assessment.rationale, Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}, nil
 	}
 	return Decision{}, nil
 }
@@ -1110,23 +1129,33 @@ func isShellKeyword(value string) bool {
 	_, ok := map[string]struct{}{"if": {}, "then": {}, "else": {}, "fi": {}, "for": {}, "while": {}, "do": {}, "done": {}, "case": {}, "esac": {}, "function": {}, "time": {}, "command": {}, "builtin": {}, "exec": {}, "sudo": {}}[value]
 	return ok
 }
+
+type riskAssessment struct {
+	risk      Risk
+	rationale MessageKey
+}
+
 func classify(words []string, containsSecret bool) Risk {
+	return assessRisk(words, containsSecret).risk
+}
+
+func assessRisk(words []string, containsSecret bool) riskAssessment {
 	if containsSecret || redact.ContainsSecret(words) {
-		return RiskHigh
+		return riskAssessment{risk: RiskHigh, rationale: MessageRiskSecret}
 	}
 	if escalatesPrivileges(words) {
-		return RiskHigh
+		return riskAssessment{risk: RiskHigh, rationale: MessageRiskPrivilegeEscalation}
 	}
 	if hasNetworkEffect(words) {
-		return RiskHigh
+		return riskAssessment{risk: RiskHigh, rationale: MessageRiskNetworkEffect}
 	}
 	if mutatesFilesystem(words) {
-		return RiskHigh
+		return riskAssessment{risk: RiskHigh, rationale: MessageRiskFilesystemMutation}
 	}
 	if knownSafeCommandLine(words) {
-		return RiskSafe
+		return riskAssessment{risk: RiskSafe, rationale: MessageRiskRecognizedSafe}
 	}
-	return RiskUnknown
+	return riskAssessment{risk: RiskUnknown, rationale: MessageRiskUnknown}
 }
 
 var privilegeEscalationCommands = map[string]struct{}{

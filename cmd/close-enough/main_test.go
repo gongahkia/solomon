@@ -199,6 +199,17 @@ func TestConfidencePresentation(t *testing.T) {
 	}
 }
 
+func TestRenderRiskRationale(t *testing.T) {
+	decision := diagnose.Decision{Suggestion: "rm file", Risk: diagnose.RiskHigh, RiskRationale: "may modify the filesystem"}
+	display := config.Display{Risk: true}
+	if got, want := renderPlainDiagnostic(decision, display, ""), "Risk: high\nRisk rationale: may modify the filesystem\n"; got != want {
+		t.Fatalf("risk rationale output = %q, want %q", got, want)
+	}
+	if got := renderScreenReaderDiagnostic(decision, display); !strings.Contains(got, "Risk rationale: may modify the filesystem") {
+		t.Fatalf("screen-reader rationale output = %q", got)
+	}
+}
+
 func TestRenderPlainDiagnosticColorMode(t *testing.T) {
 	decision := diagnose.Decision{Suggestion: "git status", Risk: diagnose.RiskSafe}
 	colored := renderPlainDiagnosticWithColor(decision, config.Display{Change: true, Risk: true}, "", true)

@@ -124,7 +124,7 @@ func TestRecordEncoderIsBinarySafeAndRejectsInvalidControlFields(t *testing.T) {
 }
 
 func TestJSONProtocolEncoderCompatibility(t *testing.T) {
-	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", CauseKey: MessageCauseCommandNotFound, Consequence: "shell rejects it", ConsequenceKey: MessageConsequenceCommandRejects, Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe}
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", CauseKey: MessageCauseCommandNotFound, Consequence: "shell rejects it", ConsequenceKey: MessageConsequenceCommandRejects, Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe, RiskRationale: "is a recognized read-only command", RiskRationaleKey: MessageRiskRecognizedSafe}
 	data, err := decision.JSON("pre")
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestJSONProtocolEncoderCompatibility(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.CauseKey != MessageCauseCommandNotFound || event.ConsequenceKey != MessageConsequenceCommandRejects || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
+	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.CauseKey != MessageCauseCommandNotFound || event.ConsequenceKey != MessageConsequenceCommandRejects || event.RiskRationaleKey != MessageRiskRecognizedSafe || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
 		t.Fatalf("incompatible event: %#v", event)
 	}
 	var fields map[string]json.RawMessage
@@ -610,6 +610,31 @@ func TestUnknownRiskFailsClosed(t *testing.T) {
 		}
 		if got := classify(words, false); got != RiskSafe {
 			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
+func TestRiskAssessmentRationales(t *testing.T) {
+	for _, test := range []struct {
+		line      string
+		risk      Risk
+		rationale MessageKey
+	}{
+		{"git --token top-secret", RiskHigh, MessageRiskSecret},
+		{"sudo id", RiskHigh, MessageRiskPrivilegeEscalation},
+		{"curl https://example.invalid", RiskHigh, MessageRiskNetworkEffect},
+		{"rm file", RiskHigh, MessageRiskFilesystemMutation},
+		{"git status", RiskSafe, MessageRiskRecognizedSafe},
+		{"tool inspect", RiskUnknown, MessageRiskUnknown},
+	} {
+		words, err := tokenize(test.line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assessment := assessRisk(words, false)
+		rationale, ok := DefaultMessage(assessment.rationale)
+		if assessment.risk != test.risk || assessment.rationale != test.rationale || !ok || rationale == "" || strings.Contains(rationale, "top-secret") {
+			t.Fatalf("assessRisk(%q) = %#v, rationale=%q, %t", test.line, assessment, rationale, ok)
 		}
 	}
 }

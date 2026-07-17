@@ -216,6 +216,9 @@ func renderPlainDiagnosticWithColor(decision diagnose.Decision, display config.D
 	}
 	if display.Risk {
 		lines = append(lines, diagnosticLabel("Risk: ", "33", colorEnabled)+string(decision.Risk))
+		if decision.RiskRationale != "" {
+			lines = append(lines, diagnosticLabel("Risk rationale: ", "33", colorEnabled)+sanitizeTerminalText(decision.RiskRationale))
+		}
 	}
 	if display.Trace && len(decision.Trace) > 0 {
 		trace := make([]string, len(decision.Trace))
@@ -262,6 +265,9 @@ func renderScreenReaderDiagnostic(decision diagnose.Decision, display config.Dis
 	}
 	if display.Risk {
 		lines = append(lines, "Risk level: "+string(decision.Risk))
+		if decision.RiskRationale != "" {
+			lines = append(lines, "Risk rationale: "+sanitizeTerminalText(decision.RiskRationale))
+		}
 	}
 	if display.Trace && len(decision.Trace) > 0 {
 		trace := make([]string, len(decision.Trace))

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/redact"
@@ -438,17 +439,74 @@ func isPathQualified(value, platform string) bool {
 }
 
 func nearest(value string, candidates []string) (string, int) {
-	best, bestDistance := "", 1<<30
+	best, bestDistance, bestKeyboardDistance := "", 1<<30, 1<<30
 	for _, candidate := range candidates {
 		distance := damerauLevenshtein(value, candidate)
-		if distance < bestDistance || distance == bestDistance && candidate < best {
-			best, bestDistance = candidate, distance
+		keyboardDistance := keyboardAdjacencyDistance(value, candidate)
+		if distance < bestDistance || distance == bestDistance && (keyboardDistance < bestKeyboardDistance || keyboardDistance == bestKeyboardDistance && candidate < best) {
+			best, bestDistance, bestKeyboardDistance = candidate, distance, keyboardDistance
 		}
 	}
 	if best == "" {
 		return "", 0
 	}
 	return best, bestDistance
+}
+
+var keyboardRows = [][]rune{
+	[]rune("1234567890-="),
+	[]rune("qwertyuiop[]\\"),
+	[]rune("asdfghjkl;'"),
+	[]rune("zxcvbnm,./"),
+}
+
+func keyboardAdjacencyDistance(a, b string) int {
+	aRunes, bRunes := []rune(strings.ToLower(a)), []rune(strings.ToLower(b))
+	previous := make([]int, len(bRunes)+1)
+	for index := range previous {
+		previous[index] = index * 2
+	}
+	for row, left := range aRunes {
+		current := make([]int, len(bRunes)+1)
+		current[0] = (row + 1) * 2
+		for column, right := range bRunes {
+			substitution := 2
+			if left == right {
+				substitution = 0
+			} else if keyboardAdjacent(left, right) {
+				substitution = 1
+			}
+			current[column+1] = min(current[column]+2, previous[column+1]+2, previous[column]+substitution)
+		}
+		previous = current
+	}
+	return previous[len(bRunes)]
+}
+
+func keyboardAdjacent(left, right rune) bool {
+	left, right = unicode.ToLower(left), unicode.ToLower(right)
+	for leftRow, keys := range keyboardRows {
+		for leftColumn, key := range keys {
+			if key != left {
+				continue
+			}
+			for rightRow, rightKeys := range keyboardRows {
+				for rightColumn, rightKey := range rightKeys {
+					if rightKey == right && abs(leftRow-rightRow) <= 1 && abs(leftColumn-rightColumn) <= 1 {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func levenshtein(a, b string) int {

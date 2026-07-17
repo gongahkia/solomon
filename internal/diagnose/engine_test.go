@@ -209,11 +209,23 @@ func TestDamerauLevenshteinScoresUnicodeAndTranspositions(t *testing.T) {
 }
 
 func TestNearestCandidateUsesDeterministicTieBreaker(t *testing.T) {
-	if candidate, distance := nearest("c", []string{"b", "a"}); candidate != "a" || distance != 1 {
+	if candidate, distance := nearest("c", []string{"x", "v"}); candidate != "v" || distance != 1 {
 		t.Fatalf("nearest = %q, %d", candidate, distance)
 	}
 	if candidate, distance := nearest("c", nil); candidate != "" || distance != 0 {
 		t.Fatalf("empty nearest = %q, %d", candidate, distance)
+	}
+}
+
+func TestKeyboardAdjacencyBreaksEqualEditDistance(t *testing.T) {
+	if adjacent, distant := keyboardAdjacencyDistance("gkt", "git"), keyboardAdjacencyDistance("gkt", "get"); adjacent >= distant {
+		t.Fatalf("adjacent score = %d, distant score = %d", adjacent, distant)
+	}
+	if candidate, distance := nearest("gkt", []string{"get", "git"}); candidate != "git" || distance != 1 {
+		t.Fatalf("nearest = %q, %d", candidate, distance)
+	}
+	if got := keyboardAdjacencyDistance("é", "e"); got != 2 {
+		t.Fatalf("non-keyboard score = %d", got)
 	}
 }
 

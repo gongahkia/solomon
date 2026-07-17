@@ -2450,6 +2450,95 @@ func TestRegistryRollbackAttackRegressionCorpus(t *testing.T) {
 	}
 }
 
+type registryExpiryFixture struct {
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+	Version int    `json:"version"`
+	Expires string `json:"expires"`
+	Now     string `json:"now"`
+	Accept  bool   `json:"accept"`
+}
+
+func TestRegistryExpiryAttackRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/registry_expiry_attacks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []registryExpiryFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("registry expiry corpus is empty")
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Role == "" || fixture.Version < 1 || fixture.Expires == "" || fixture.Now == "" {
+				t.Fatalf("invalid registry expiry fixture: %#v", fixture)
+			}
+			now, err := time.Parse(time.RFC3339, fixture.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			keyID := fixture.Role + "-key"
+			var key TUFKey
+			key.KeyType, key.Scheme, key.KeyVal.Public = "ed25519", "ed25519", base64.RawStdEncoding.EncodeToString(publicKey)
+			root := TUFRoot{Type: "root", Version: 1, Keys: map[string]TUFKey{keyID: key}, Roles: map[string]TUFRole{"root": {KeyIDs: []string{keyID}, Threshold: 1}, fixture.Role: {KeyIDs: []string{keyID}, Threshold: 1}}}
+			state := RegistryState{}
+			err = verifyRegistryExpiryFixture(fixture, root, privateKey, keyID, &state, now)
+			if (err == nil) != fixture.Accept {
+				t.Fatalf("%s expiry verification error = %v, want accept=%t", fixture.Role, err, fixture.Accept)
+			}
+			if fixture.Accept {
+				if state.Versions[fixture.Role] != fixture.Version {
+					t.Fatalf("versions = %#v", state.Versions)
+				}
+			} else if len(state.Versions) != 0 {
+				t.Fatalf("expired metadata mutated registry state: %#v", state.Versions)
+			}
+		})
+	}
+}
+
+func verifyRegistryExpiryFixture(fixture registryExpiryFixture, root TUFRoot, privateKey ed25519.PrivateKey, keyID string, state *RegistryState, now time.Time) error {
+	sign := func(metadata any) ([]byte, error) {
+		payload, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(TUFEnvelope{Signed: payload, Signatures: []TUFSignature{{KeyID: keyID, Sig: hex.EncodeToString(ed25519.Sign(privateKey, payload))}}})
+	}
+	switch fixture.Role {
+	case "timestamp":
+		data, err := sign(TUFTimestamp{Type: "timestamp", Version: fixture.Version, Expires: fixture.Expires, Meta: map[string]TUFMetaFile{"snapshot.json": {Version: 1}}})
+		if err != nil {
+			return err
+		}
+		_, err = VerifyTimestampAt(data, root, state, now)
+		return err
+	case "snapshot":
+		data, err := sign(TUFSnapshot{Type: "snapshot", Version: fixture.Version, Expires: fixture.Expires, Meta: map[string]TUFMetaFile{"targets.json": {Version: 1}}})
+		if err != nil {
+			return err
+		}
+		_, err = VerifySnapshotAt(data, root, TUFTimestamp{Meta: map[string]TUFMetaFile{"snapshot.json": {Version: fixture.Version}}}, state, now)
+		return err
+	case "targets":
+		data, err := sign(TUFTargets{Type: "targets", Version: fixture.Version, Expires: fixture.Expires, Targets: map[string]TUFMetaFile{"core.json": {Length: 1, Hashes: map[string]string{"sha256": "00"}}}})
+		if err != nil {
+			return err
+		}
+		_, err = VerifyTargetsAt(data, root, TUFSnapshot{Meta: map[string]TUFMetaFile{"targets.json": {Version: fixture.Version}}}, state, now)
+		return err
+	default:
+		return errors.New("unsupported expiry fixture role")
+	}
+}
+
 func TestRegistryOptInStateMachine(t *testing.T) {
 	state := RegistryDisabled
 	for _, event := range []RegistryOptInEvent{RegistryRequest, RegistryConfirm} {

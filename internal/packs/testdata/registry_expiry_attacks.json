@@ -1,0 +1,6 @@
+[
+  {"name":"timestamp-at-expiry","role":"timestamp","version":2,"expires":"2030-01-01T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":false},
+  {"name":"snapshot-expired","role":"snapshot","version":3,"expires":"2029-12-31T23:59:59Z","now":"2030-01-01T00:00:00Z","accept":false},
+  {"name":"targets-invalid-expiry","role":"targets","version":4,"expires":"not-a-time","now":"2030-01-01T00:00:00Z","accept":false},
+  {"name":"future-timestamp","role":"timestamp","version":5,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":true}
+]

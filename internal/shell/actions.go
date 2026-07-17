@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -54,6 +55,35 @@ type OneTimeAccept struct {
 type SkipOnce struct {
 	mu      sync.Mutex
 	skipped map[string]struct{}
+}
+
+type RuleSuppressions struct {
+	mu    sync.RWMutex
+	rules map[string]struct{}
+}
+
+func (s *RuleSuppressions) Suppress(rule string) bool {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rules == nil {
+		s.rules = map[string]struct{}{}
+	}
+	if _, ok := s.rules[rule]; ok {
+		return false
+	}
+	s.rules[rule] = struct{}{}
+	return true
+}
+
+func (s *RuleSuppressions) Suppressed(rule string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.rules[strings.TrimSpace(rule)]
+	return ok
 }
 
 func (s *SkipOnce) Skip(key string) bool {

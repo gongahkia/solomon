@@ -66,6 +66,13 @@ func TestSkipOnce(t *testing.T) {
 	}
 }
 
+func TestRuleSuppressions(t *testing.T) {
+	var suppressions RuleSuppressions
+	if !suppressions.Suppress(" core-git ") || suppressions.Suppress("core-git") || suppressions.Suppress("") || !suppressions.Suppressed("core-git") || suppressions.Suppressed("resolver:path") {
+		t.Fatal("rule suppression state is incorrect")
+	}
+}
+
 func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
 	markers := map[string]string{
 		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,

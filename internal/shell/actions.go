@@ -13,6 +13,7 @@ const (
 	ActionInterrupt    ActionState = "interrupt"
 	ActionRewrite      ActionState = "rewrite"
 	ActionRunUnchanged ActionState = "run-unchanged"
+	ActionEditInBuffer ActionState = "edit-in-buffer"
 )
 
 type ActionResult struct {
@@ -30,7 +31,7 @@ func ResolveAction(action, risk, suggestion string) ActionResult {
 		return ActionResult{Render: true, Submit: true}
 	case ActionInterrupt:
 		return ActionResult{Render: true}
-	case ActionRewrite:
+	case ActionRewrite, ActionEditInBuffer:
 		if risk == "safe" && suggestion != "" {
 			return ActionResult{Rewrite: true}
 		}

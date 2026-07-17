@@ -31,6 +31,7 @@ func TestResolveAction(t *testing.T) {
 		{"hint", "hint", "safe", "git status", ActionResult{Render: true, Submit: true}},
 		{"interrupt", "interrupt", "high", "rm", ActionResult{Render: true}},
 		{"rewrite", "rewrite", "safe", "git status", ActionResult{Rewrite: true}},
+		{"edit buffer", "edit-in-buffer", "safe", "git status", ActionResult{Rewrite: true}},
 		{"unsafe rewrite", "rewrite", "high", "rm", ActionResult{Render: true, Refused: true}},
 		{"empty rewrite", "rewrite", "safe", "", ActionResult{Render: true, Refused: true}},
 		{"unknown", "invalid", "safe", "", ActionResult{Submit: true}},

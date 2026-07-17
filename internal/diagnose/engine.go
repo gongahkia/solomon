@@ -674,7 +674,10 @@ func classify(words []string, containsSecret bool) Risk {
 	if mutatesFilesystem(words) {
 		return RiskHigh
 	}
-	return RiskSafe
+	if knownSafeCommandLine(words) {
+		return RiskSafe
+	}
+	return RiskUnknown
 }
 
 var privilegeEscalationCommands = map[string]struct{}{
@@ -745,6 +748,60 @@ func hasNetworkGitSubcommand(words []string) bool {
 		}
 		if !strings.HasPrefix(word, "-") {
 			return false
+		}
+	}
+	return false
+}
+
+var safeCommands = map[string]struct{}{
+	"basename": {}, "cat": {}, "dirname": {}, "echo": {}, "head": {}, "ls": {}, "printf": {}, "pwd": {}, "readlink": {}, "realpath": {}, "stat": {}, "true": {}, "uname": {}, "wc": {}, "which": {}, "whoami": {},
+}
+
+func knownSafeCommandLine(words []string) bool {
+	if hasShellRedirection(words) {
+		return false
+	}
+	positions := commandPositions(words)
+	if len(positions) == 0 {
+		return false
+	}
+	for _, position := range positions {
+		command := commandName(words[position])
+		if command == "git" {
+			if !hasSafeGitSubcommand(words[position+1:]) {
+				return false
+			}
+			continue
+		}
+		if _, ok := safeCommands[command]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasSafeGitSubcommand(words []string) bool {
+	for _, word := range words {
+		if isCompoundOperator(word) {
+			return false
+		}
+		if strings.HasPrefix(word, "-") {
+			continue
+		}
+		switch word {
+		case "diff", "log", "ls-files", "rev-parse", "show", "status":
+			return true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func hasShellRedirection(words []string) bool {
+	for _, word := range words {
+		if strings.Contains(word, ">") {
+			return true
 		}
 	}
 	return false

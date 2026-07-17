@@ -172,13 +172,20 @@ func TestFilesystemMutationClassifier(t *testing.T) {
 			t.Fatalf("classify(%q) = %s, want high", line, got)
 		}
 	}
-	for _, line := range []string{"echo rm", "sed 's/a/b/' file", "find . -name file"} {
-		words, err := tokenize(line)
+	for _, test := range []struct {
+		line string
+		risk Risk
+	}{
+		{"echo rm", RiskSafe},
+		{"sed 's/a/b/' file", RiskUnknown},
+		{"find . -name file", RiskUnknown},
+	} {
+		words, err := tokenize(test.line)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := classify(words, false); got != RiskSafe {
-			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		if got := classify(words, false); got != test.risk {
+			t.Fatalf("classify(%q) = %s, want %s", test.line, got, test.risk)
 		}
 	}
 }
@@ -210,13 +217,20 @@ func TestPrivilegeEscalationClassifier(t *testing.T) {
 			t.Fatalf("classify(%q) = %s, want high", line, got)
 		}
 	}
-	for _, line := range []string{"echo sudo", "printf doas", "sudoku"} {
-		words, err := tokenize(line)
+	for _, test := range []struct {
+		line string
+		risk Risk
+	}{
+		{"echo sudo", RiskSafe},
+		{"printf doas", RiskSafe},
+		{"sudoku", RiskUnknown},
+	} {
+		words, err := tokenize(test.line)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := classify(words, false); got != RiskSafe {
-			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		if got := classify(words, false); got != test.risk {
+			t.Fatalf("classify(%q) = %s, want %s", test.line, got, test.risk)
 		}
 	}
 }
@@ -248,13 +262,20 @@ func TestNetworkEffectClassifier(t *testing.T) {
 			t.Fatalf("classify(%q) = %s, want high", line, got)
 		}
 	}
-	for _, line := range []string{"echo curl", "git status", "curlish https://example.invalid"} {
-		words, err := tokenize(line)
+	for _, test := range []struct {
+		line string
+		risk Risk
+	}{
+		{"echo curl", RiskSafe},
+		{"git status", RiskSafe},
+		{"curlish https://example.invalid", RiskUnknown},
+	} {
+		words, err := tokenize(test.line)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := classify(words, false); got != RiskSafe {
-			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		if got := classify(words, false); got != test.risk {
+			t.Fatalf("classify(%q) = %s, want %s", test.line, got, test.risk)
 		}
 	}
 }
@@ -293,6 +314,38 @@ func TestSecretBearingArgumentsAreHighRisk(t *testing.T) {
 		if got := classify(words, false); got != RiskSafe {
 			t.Fatalf("classify(%q) = %s, want safe", line, got)
 		}
+	}
+}
+
+func TestUnknownRiskFailsClosed(t *testing.T) {
+	for _, line := range []string{"tool inspect", "git commit -m message", "cat source > target"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskUnknown {
+			t.Fatalf("classify(%q) = %s, want unknown", line, got)
+		}
+	}
+	for _, line := range []string{"git status", "echo ready && git diff", "cat source"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskSafe {
+			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
+func TestUnknownRiskRepairNeverRewrites(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "danger")
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("denger target", "pre")
+	if err != nil || decision.Risk != RiskUnknown || decision.Action == "rewrite" {
+		t.Fatalf("unknown-risk decision: %#v, %v", decision, err)
 	}
 }
 

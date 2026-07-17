@@ -88,6 +88,33 @@ func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 	}
 }
 
+func TestDecodeMigratesVersionlessConfiguration(t *testing.T) {
+	cfg, err := decode([]byte(`{"mode":"rewrite"}`), Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != "rewrite" {
+		t.Fatalf("unexpected migrated config: %#v", cfg)
+	}
+}
+
+func TestDecodeAcceptsCurrentConfigurationSchema(t *testing.T) {
+	cfg, err := decode([]byte(`{"schema_version":1,"mode":"off"}`), Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != "off" {
+		t.Fatalf("unexpected decoded config: %#v", cfg)
+	}
+}
+
+func TestDecodeRejectsUnsupportedConfigurationSchema(t *testing.T) {
+	_, err := decode([]byte(`{"schema_version":2}`), Default())
+	if err == nil || !strings.Contains(err.Error(), "unsupported configuration schema version") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestWriteAtomicallyReplacesConfigWithRestrictivePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"mode":"off"}`), 0o644); err != nil {

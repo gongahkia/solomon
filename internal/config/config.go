@@ -9,7 +9,10 @@ import (
 	"strconv"
 )
 
+const CurrentSchemaVersion = 1
+
 type Config struct {
+	SchemaVersion       int     `json:"schema_version"`
 	Mode                string  `json:"mode"`
 	Display             Display `json:"display"`
 	AutoApplySafe       bool    `json:"auto_apply_safe"`
@@ -33,7 +36,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{Mode: "hint", Display: Display{Cause: true, Change: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Risk: true, Consequence: true}}
 }
 
 func GlobalPath(home func() (string, error)) (string, error) {
@@ -122,13 +125,44 @@ func merge(base Config, path string) (Config, error) {
 }
 
 func decode(data []byte, base Config) (Config, error) {
+	var envelope struct {
+		SchemaVersion *int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
 	if err := json.Unmarshal(data, &base); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
+	version := 0
+	if envelope.SchemaVersion != nil {
+		version = *envelope.SchemaVersion
+	}
+	migrated, err := migrate(base, version)
+	if err != nil {
+		return Config{}, err
+	}
+	base = migrated
 	if !validMode(base.Mode) {
 		return Config{}, fmt.Errorf("invalid mode %q", base.Mode)
 	}
 	return base, nil
+}
+
+func migrate(cfg Config, version int) (Config, error) {
+	if version > CurrentSchemaVersion {
+		return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
+	}
+	for version < CurrentSchemaVersion {
+		switch version {
+		case 0:
+			cfg.SchemaVersion = 1
+			version = 1
+		default:
+			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
+		}
+	}
+	return cfg, nil
 }
 
 func validMode(value string) bool {

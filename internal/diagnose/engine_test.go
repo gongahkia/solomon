@@ -709,6 +709,44 @@ func TestExecutableIndexCachesAndInvalidates(t *testing.T) {
 	}
 }
 
+func TestEngineCacheLifecycleAndIsolation(t *testing.T) {
+	directory := t.TempDir()
+	writeExecutable(t, directory, "git")
+	defaults := Options{Config: config.Default(), Path: directory, CWD: directory}
+	if first, second := New(defaults), New(defaults); first.cache == second.cache {
+		t.Fatal("default engine caches are shared")
+	}
+	firstCache, secondCache := NewCache(), NewCache()
+	first := New(Options{Config: config.Default(), Path: directory, CWD: directory, Cache: firstCache})
+	second := New(Options{Config: config.Default(), Path: directory, CWD: directory, Cache: secondCache})
+	for _, engine := range []Engine{first, second} {
+		if _, err := engine.Check("gti status", "pre"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cacheEntryCount(firstCache) == 0 || cacheEntryCount(secondCache) == 0 {
+		t.Fatalf("unpopulated caches: %d, %d", cacheEntryCount(firstCache), cacheEntryCount(secondCache))
+	}
+	first.InvalidateCache()
+	if cacheEntryCount(firstCache) != 0 || cacheEntryCount(secondCache) == 0 {
+		t.Fatalf("cache invalidation leaked across engines: %d, %d", cacheEntryCount(firstCache), cacheEntryCount(secondCache))
+	}
+	if _, err := first.Check("gti status", "pre"); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	first.Close()
+	if cacheEntryCount(firstCache) != 0 {
+		t.Fatalf("cache retained entries after close: %d", cacheEntryCount(firstCache))
+	}
+}
+
+func cacheEntryCount(cache *Cache) int {
+	cache.RLock()
+	defer cache.RUnlock()
+	return len(cache.entries)
+}
+
 func TestExecutableCandidateNormalizationAcrossPlatforms(t *testing.T) {
 	InvalidateExecutableIndex()
 	directory := t.TempDir()

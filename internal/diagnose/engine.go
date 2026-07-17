@@ -166,6 +166,7 @@ type Options struct {
 	CWD    string
 	Limits Limits
 	Clock  func() time.Time
+	Cache  *Cache
 }
 
 type Limits struct {
@@ -174,19 +175,42 @@ type Limits struct {
 	AnalysisTime time.Duration
 }
 
-type Engine struct{ options Options }
+type Engine struct {
+	options Options
+	cache   *Cache
+}
 
 type executableCacheEntry struct {
 	signature string
 	names     []string
 }
 
-var executableCache = struct {
+type Cache struct {
 	sync.RWMutex
 	entries map[string]executableCacheEntry
-}{entries: map[string]executableCacheEntry{}}
+}
 
-func New(options Options) Engine { return Engine{options: options} }
+var defaultExecutableCache = NewCache()
+
+func NewCache() *Cache { return &Cache{entries: map[string]executableCacheEntry{}} }
+
+func New(options Options) Engine {
+	cache := options.Cache
+	if cache == nil {
+		cache = NewCache()
+	}
+	return Engine{options: options, cache: cache}
+}
+
+func (e Engine) InvalidateCache() { e.cache.Invalidate() }
+
+func (e Engine) Close() { e.InvalidateCache() }
+
+func (c *Cache) Invalidate() {
+	c.Lock()
+	c.entries = map[string]executableCacheEntry{}
+	c.Unlock()
+}
 
 func (e Engine) Check(line, stage string) (Decision, error) {
 	return e.CheckContext(context.Background(), line, stage)
@@ -334,7 +358,7 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 	if err := ctx.Err(); err != nil {
 		return Decision{}, err
 	}
-	candidates := executableNames(e.options.Path)
+	candidates := e.cache.executableNamesFor(e.options.Path, runtime.GOOS, os.Getenv("PATHEXT"))
 	if err := ctx.Err(); err != nil {
 		return Decision{}, err
 	}
@@ -343,7 +367,7 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 			return Decision{}, err
 		}
 		word := words[position]
-		if isPathQualified(word, runtime.GOOS) || commandExists(word, e.options.Path) {
+		if isPathQualified(word, runtime.GOOS) || e.cache.commandExistsFor(word, e.options.Path, runtime.GOOS, os.Getenv("PATHEXT")) {
 			continue
 		}
 		best, distance := nearest(word, candidates)
@@ -669,15 +693,19 @@ func assignmentWord(value string) bool {
 }
 
 func executableNames(pathValue string) []string {
-	return executableNamesFor(pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
+	return defaultExecutableCache.executableNamesFor(pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
 }
 
 func executableNamesFor(pathValue, platform, pathExt string) []string {
+	return defaultExecutableCache.executableNamesFor(pathValue, platform, pathExt)
+}
+
+func (c *Cache) executableNamesFor(pathValue, platform, pathExt string) []string {
 	cacheKey := platform + "\x00" + pathExt + "\x00" + pathValue
 	signature := pathSignature(pathValue)
-	executableCache.RLock()
-	entry, ok := executableCache.entries[cacheKey]
-	executableCache.RUnlock()
+	c.RLock()
+	entry, ok := c.entries[cacheKey]
+	c.RUnlock()
 	if ok && entry.signature == signature {
 		return append([]string(nil), entry.names...)
 	}
@@ -705,9 +733,9 @@ func executableNamesFor(pathValue, platform, pathExt string) []string {
 		result = append(result, name)
 	}
 	sort.Strings(result)
-	executableCache.Lock()
-	executableCache.entries[cacheKey] = executableCacheEntry{signature: signature, names: append([]string(nil), result...)}
-	executableCache.Unlock()
+	c.Lock()
+	c.entries[cacheKey] = executableCacheEntry{signature: signature, names: append([]string(nil), result...)}
+	c.Unlock()
 	return result
 }
 
@@ -725,10 +753,14 @@ func limitedReadDir(path string) ([]os.DirEntry, error) {
 }
 
 func commandExists(name, pathValue string) bool {
-	return commandExistsFor(name, pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
+	return defaultExecutableCache.commandExistsFor(name, pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
 }
 
 func commandExistsFor(name, pathValue, platform, pathExt string) bool {
+	return defaultExecutableCache.commandExistsFor(name, pathValue, platform, pathExt)
+}
+
+func (c *Cache) commandExistsFor(name, pathValue, platform, pathExt string) bool {
 	if platform != "windows" {
 		for index, dir := range filepath.SplitList(pathValue) {
 			if index >= maxPathDirectories {
@@ -741,16 +773,14 @@ func commandExistsFor(name, pathValue, platform, pathExt string) bool {
 		}
 		return false
 	}
-	names := executableNamesFor(pathValue, platform, pathExt)
+	names := c.executableNamesFor(pathValue, platform, pathExt)
 	name = normalizeExecutableName(name, platform, pathExt)
 	index := sort.SearchStrings(names, name)
 	return index < len(names) && names[index] == name
 }
 
 func InvalidateExecutableIndex() {
-	executableCache.Lock()
-	executableCache.entries = map[string]executableCacheEntry{}
-	executableCache.Unlock()
+	defaultExecutableCache.Invalidate()
 }
 
 func pathSignature(pathValue string) string {

@@ -1,6 +1,8 @@
 package packs
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
@@ -361,5 +363,34 @@ func TestPackStateRejectsInvalidOrUnknownData(t *testing.T) {
 		if _, err := LoadState(path); err == nil {
 			t.Fatalf("accepted invalid state %s", data)
 		}
+	}
+}
+
+func TestVerifyDetachedPackSignature(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"id":"core-git"}`)
+	signature := ed25519.Sign(privateKey, payload)
+	if err := VerifyDetachedSignature(payload, signature, publicKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDetachedSignature([]byte(`{"id":"other"}`), signature, publicKey); err == nil {
+		t.Fatal("accepted tampered payload")
+	}
+	if err := VerifyDetachedSignature(payload, signature[:len(signature)-1], publicKey); err == nil {
+		t.Fatal("accepted malformed signature")
+	}
+	path := filepath.Join(t.TempDir(), "pack.json")
+	signaturePath := path + ".sig"
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(signaturePath, signature, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDetachedFiles(path, signaturePath, publicKey); err != nil {
+		t.Fatal(err)
 	}
 }

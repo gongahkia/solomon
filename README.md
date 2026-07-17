@@ -62,6 +62,8 @@ Use `close-enough pack install <path>` to validate and atomically install a loca
 
 Use `close-enough pack uninstall <id> <version>` to remove that exact managed pack file.
 
+Pack signature verification uses detached Ed25519 signatures over exact pack bytes.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

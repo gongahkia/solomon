@@ -151,6 +151,8 @@ function _close_enough_accept_line
   end
   if test "$fields[2]" = hint
     echo "close-enough [$fields[3]/$fields[4]]: "(echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D) >&2
+    commandline -f execute
+    return
   end
   if test "$fields[2]" = interrupt
     echo "close-enough [$fields[3]/$fields[4]]: "(echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D) >&2

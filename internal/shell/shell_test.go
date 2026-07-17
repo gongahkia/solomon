@@ -62,8 +62,12 @@ func TestFishInterruptPreventsExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	interrupt := strings.Index(script, `if test "$fields[2]" = interrupt`)
-	execute := strings.Index(script, "commandline -f execute")
-	if interrupt < 0 || execute < 0 || interrupt > execute {
+	if interrupt < 0 {
+		t.Fatalf("fish interrupt branch is missing: %q", script)
+	}
+	branch := script[interrupt:]
+	execute := strings.Index(branch, "commandline -f execute")
+	if execute < 0 || !strings.Contains(branch[:execute], "return") {
 		t.Fatalf("fish interrupt does not precede execution: %q", script)
 	}
 }
@@ -486,6 +490,19 @@ func TestFishPreExecutionUsesCapturedBuffer(t *testing.T) {
 	check := `--stage pre --format record --command "$command"`
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
 		t.Fatalf("fish pre-execution check does not use a captured buffer: %q", script)
+	}
+}
+
+func TestFishHintRenderingDoesNotSuppressExecution(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint := `if test "$fields[2]" = hint`
+	interrupt := `if test "$fields[2]" = interrupt`
+	start, end := strings.Index(script, hint), strings.Index(script, interrupt)
+	if start < 0 || end < start || !strings.Contains(script[start:end], "echo ") || !strings.Contains(script[start:end], "commandline -f execute\n    return") {
+		t.Fatalf("fish hint path is not non-blocking: %q", script)
 	}
 }
 

@@ -803,6 +803,34 @@ func TestExtractPackageManagerFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractJavaScriptFailureEvidence(t *testing.T) {
+	output := "Error [ERR_MODULE_NOT_FOUND]: Cannot find module './src/inde.js'\nerror: Module not found \"./main.tss\"\nerror: Could not resolve: \"left-pad\"\nnode: bad option: --verison\nnode: bad option: --verison\n"
+	evidence, err := ExtractJavaScriptFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "bun-unresolved-module", Value: "left-pad"},
+		{Kind: "deno-module-not-found", Value: "./main.tss"},
+		{Kind: "node-module-not-found", Value: "./src/inde.js"},
+		{Kind: "node-unknown-option", Value: "--verison"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractJavaScriptFailureEvidence("node: bad option: --verison\nerror: Could not resolve: \"left-pad\"\nerror: Module not found \"./main.tss\"\nError [ERR_MODULE_NOT_FOUND]: Cannot find module './src/inde.js'\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractJavaScriptFailureEvidence("Error: Cannot find module 'https://user:password@example.invalid/app.js'\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/app.js" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if _, err := ExtractJavaScriptFailureEvidence(strings.Repeat("x", maxJavaScriptFailureOutputBytes+1)); !errors.Is(err, ErrJavaScriptFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

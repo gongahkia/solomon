@@ -173,6 +173,9 @@ func renderPlainDiagnostic(decision diagnose.Decision, display config.Display) s
 	if display.Risk {
 		lines = append(lines, "Risk: "+string(decision.Risk))
 	}
+	if display.Trace && len(decision.Trace) > 0 {
+		lines = append(lines, "Trace: "+strings.Join(decision.Trace, ", "))
+	}
 	if len(lines) == 0 {
 		return ""
 	}

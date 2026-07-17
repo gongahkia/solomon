@@ -158,7 +158,7 @@ func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
 }
 
 func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
-	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Risk: diagnose.RiskSafe}
+	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Risk: diagnose.RiskSafe, Trace: []string{"resolver:path", "distance:1"}}
 	if got := renderPlainDiagnostic(decision, config.Default().Display); got != "unknown command: the shell will reject it\nDid you mean: git status\nRisk: safe\n" {
 		t.Fatalf("default display = %q", got)
 	}
@@ -168,6 +168,12 @@ func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
 	}
 	if got := renderPlainDiagnostic(decision, config.Display{}); got != "" {
 		t.Fatalf("empty display = %q", got)
+	}
+	if got := renderPlainDiagnostic(decision, config.Display{Trace: true}); got != "Trace: resolver:path, distance:1\n" {
+		t.Fatalf("trace display = %q", got)
+	}
+	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}); got != "" {
+		t.Fatalf("empty trace display = %q", got)
 	}
 }
 

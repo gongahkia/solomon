@@ -272,9 +272,9 @@ function _close_enough_restore_enter
 end
 _close_enough_bind_enter
 function _close_enough_post_failure --on-event fish_postexec
-  set -l status $status
+  set -l command_status $status
   set -l command $argv[1]
-  if test $status -ne 0; and test -n "$command"
+  if test $command_status -ne 0; and test -n "$command"
     set -l output (command close-enough check --stage post --format plain --command "$command" 2>/dev/null | string collect)
     if test -n "$output"; and test "$output" != "no suggestion"; and _close_enough_allow_diagnostic
       printf '%s\n' "$output"

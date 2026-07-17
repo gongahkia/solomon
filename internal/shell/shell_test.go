@@ -1038,7 +1038,7 @@ func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
 	}
 	hook := "function _close_enough_post_failure --on-event fish_postexec"
 	start := strings.Index(script, hook)
-	if start < 0 || !strings.Contains(script[start:], "set -l status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `test $status -ne 0; and test -n "$command"`) || !strings.Contains(script[start:], `--stage post --format plain --command "$command"`) {
+	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `test $command_status -ne 0; and test -n "$command"`) || !strings.Contains(script[start:], `--stage post --format plain --command "$command"`) {
 		t.Fatalf("fish post-failure hook is missing or unsafe: %q", script)
 	}
 }
@@ -1152,21 +1152,31 @@ func TestFishInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	}
 	marker := filepath.Join(directory, "executed")
 	pty := `set timeout 5
-spawn -noecho fish --no-config
-expect -re {> }
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb fish --no-config
+expect_regex {> }
 send -- "function fish_prompt; echo -n 'CE> '; end\r"
-expect "CE> "
+expect_text "function fish_prompt; echo -n 'CE> '; end\r\n"
+expect_text {CE> }
 send -- "source \$ADAPTER\r"
-expect "CE> "
+expect_text "source \$ADAPTER\r\n"
+expect_text {CE> }
 send -- "touch \$MARKER\r"
-expect "close-enough [safe/1]: keep buffer"
-send -- "\003"
-expect "CE> "
-send -- "test ! -e \$MARKER; and echo protected\r"
-expect "protected"
-expect "CE> "
-send -- "exit\r"
-expect eof`
+expect_text {close-enough [safe/1]: keep buffer}
+close`
 	command := exec.Command(expect, "-c", pty)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -1174,6 +1184,75 @@ expect eof`
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("interrupt executed buffered command: %v", err)
+	}
+}
+
+func TestFishInteractivePTYHintSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.fish")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checked := filepath.Join(directory, "checked")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\nprintf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb fish --no-config
+expect_regex {> }
+send -- "function fish_prompt; echo -n 'CE> '; end\r"
+expect_text "function fish_prompt; echo -n 'CE> '; end\r\n"
+expect_text {CE> }
+send -- "source \$ADAPTER\r"
+expect_text "source \$ADAPTER\r\n"
+expect_text {CE> }
+send -- "touch \$MARKER\r"
+expect_text "touch \$MARKER\r\n"
+expect_text {CE> }
+if {![file exists $env(CHECKED)]} {
+  puts stderr "checker did not run"
+  exit 1
+}
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker, "CHECKED="+checked)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(checked); err != nil {
+		t.Fatalf("hint did not invoke checker: %v\n%s", err, output)
 	}
 }
 

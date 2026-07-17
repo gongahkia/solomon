@@ -11,13 +11,23 @@ import (
 )
 
 func TestReleaseArchiveScript(t *testing.T) {
+	testReleaseArchive(t, "linux-amd64")
+}
+
+func TestReleaseArchiveScriptLinuxARM64(t *testing.T) {
+	testReleaseArchive(t, "linux-arm64")
+}
+
+func testReleaseArchive(t *testing.T, target string) {
+	t.Helper()
 	directory := t.TempDir()
 	binary := filepath.Join(directory, "close-enough")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	archive := filepath.Join(directory, "close-enough-linux-amd64.tar.gz")
-	command := exec.Command("sh", "../../scripts/release-archive.sh", binary, archive, "close-enough-linux-amd64")
+	root := "close-enough-" + target
+	archive := filepath.Join(directory, root+".tar.gz")
+	command := exec.Command("sh", "../../scripts/release-archive.sh", binary, archive, root)
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("create release archive: %v\n%s", err, data)
 	}
@@ -40,7 +50,7 @@ func TestReleaseArchiveScript(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Name != "close-enough-linux-amd64/close-enough" {
+		if header.Name != root+"/close-enough" {
 			continue
 		}
 		data, err := io.ReadAll(reader)

@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidatePack(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestLoadRejectsNestedUnknownFieldsAndTrailingJSON(t *testing.T) {
 }
 
 func TestRejectInvalidPattern(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.Validate(); err == nil {
 		t.Fatal("expected error")
 	}
@@ -84,7 +84,7 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 			t.Fatalf("accepted invalid semantic version %q", value)
 		}
 	}
-	base := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	base := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	for _, mutate := range []func(*Pack){
 		func(pack *Pack) { pack.ID = "Core" },
 		func(pack *Pack) { pack.Version = "1" },
@@ -100,7 +100,7 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 }
 
 func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	compiled, err := Compile(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
 		t.Fatal("matcher ignored declared command")
 	}
 	marker := t.TempDir() + "/marker"
-	injection := Pack{SchemaVersion: SchemaVersionV1, ID: "literal", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "literal-text", Command: "git", Pattern: `^\$\(touch .+\)$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	injection := Pack{SchemaVersion: SchemaVersionV1, ID: "literal", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "literal-text", Command: "git", Pattern: `^\$\(touch .+\)$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "literal input match"}}}
 	compiled, err = Compile(injection)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestTransformationTemplateValidation(t *testing.T) {
 		{`^sttaus$`, `$(touch marker)`, false},
 		{`^sttaus$`, `status$`, false},
 	} {
-		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: test.pattern, Replacement: test.replacement, Cause: "typo", Risk: diagnose.RiskSafe}}}
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: test.pattern, Replacement: test.replacement, Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 		if got := pack.Validate() == nil; got != test.valid {
 			t.Fatalf("template %q with %q valid = %t, want %t", test.pattern, test.replacement, got, test.valid)
 		}
@@ -155,9 +155,29 @@ func TestExplanationTemplateValidation(t *testing.T) {
 		{"$(touch marker)", false},
 		{string(make([]byte, 513)), false},
 	} {
-		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^(sttaus)$`, Replacement: "status", Cause: test.cause, Risk: diagnose.RiskSafe}}}
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^(sttaus)$`, Replacement: "status", Cause: test.cause, Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 		if got := pack.Validate() == nil; got != test.valid {
 			t.Fatalf("explanation %q valid = %t, want %t", test.cause, got, test.valid)
+		}
+	}
+}
+
+func TestRiskMetadataValidation(t *testing.T) {
+	for _, test := range []struct {
+		risk      diagnose.Risk
+		rationale string
+		valid     bool
+	}{
+		{diagnose.RiskSafe, "read-only status query", true},
+		{diagnose.RiskHigh, "may modify remote state", true},
+		{diagnose.RiskUnknown, "cannot classify operation", true},
+		{diagnose.RiskSafe, "", false},
+		{diagnose.Risk("invalid"), "unknown", false},
+		{diagnose.RiskHigh, "unsafe\nreason", false},
+	} {
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: test.risk, RiskRationale: test.rationale}}}
+		if got := pack.Validate() == nil; got != test.valid {
+			t.Fatalf("risk metadata %#v valid = %t, want %t", test, got, test.valid)
 		}
 	}
 }

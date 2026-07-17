@@ -23,12 +23,13 @@ type Pack struct {
 }
 
 type Rule struct {
-	ID          string        `json:"id"`
-	Command     string        `json:"command"`
-	Pattern     string        `json:"pattern"`
-	Replacement string        `json:"replacement"`
-	Cause       string        `json:"cause"`
-	Risk        diagnose.Risk `json:"risk"`
+	ID            string        `json:"id"`
+	Command       string        `json:"command"`
+	Pattern       string        `json:"pattern"`
+	Replacement   string        `json:"replacement"`
+	Cause         string        `json:"cause"`
+	Risk          diagnose.Risk `json:"risk"`
+	RiskRationale string        `json:"risk_rationale"`
 }
 
 func Load(path string) (Pack, error) {
@@ -83,6 +84,9 @@ func (p Pack) Validate() error {
 		if rule.Risk != diagnose.RiskSafe && rule.Risk != diagnose.RiskHigh && rule.Risk != diagnose.RiskUnknown {
 			return fmt.Errorf("rule %q has invalid risk", rule.ID)
 		}
+		if err := validateRiskMetadata(rule); err != nil {
+			return fmt.Errorf("rule %q: %w", rule.ID, err)
+		}
 	}
 	return nil
 }
@@ -131,4 +135,11 @@ func validateExplanationTemplate(template string, captures int) error {
 		}
 	}
 	return validateTransformationTemplate(template, captures)
+}
+
+func validateRiskMetadata(rule Rule) error {
+	if rule.RiskRationale == "" {
+		return errors.New("risk rationale is required")
+	}
+	return validateExplanationTemplate(rule.RiskRationale, 0)
 }

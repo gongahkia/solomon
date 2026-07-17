@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"go-regression","version":"1.0.0","publisher":"close-enough","rules":[{"id":"go-test-tes","command":"go","pattern":"^tes$","replacement":"test","cause":"Go subcommand typo","risk":"high","risk_rationale":"may compile and execute test code"}]}

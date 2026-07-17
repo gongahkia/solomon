@@ -377,6 +377,21 @@ func TestRustCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestGoCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "go-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"goo": "go", "ggo": "go", "gol": "go", "gofm": "gofmt", "gofmtt": "gofmt"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "goo")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err == nil {
+		t.Fatal("accepted incomplete Go candidates")
+	}
+}
+
 func TestRustSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "rust.json"))
 	if err != nil {

@@ -1,0 +1,1 @@
+{"schema_version":1,"candidates":[{"id":"go-command-goo","command":"goo","replacement":"go"},{"id":"go-command-ggo","command":"ggo","replacement":"go"},{"id":"go-command-gol","command":"gol","replacement":"go"},{"id":"go-command-gofm","command":"gofm","replacement":"gofmt"},{"id":"go-command-gofmtt","command":"gofmtt","replacement":"gofmt"}]}

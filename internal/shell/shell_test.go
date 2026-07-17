@@ -147,6 +147,29 @@ func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	}
 }
 
+func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preexec := `function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }`
+	precmd := "function _close_enough_precmd {"
+	preexecStart, precmdStart := strings.Index(script, preexec), strings.Index(script, precmd)
+	if preexecStart < 0 || precmdStart < preexecStart {
+		t.Fatalf("zsh post-failure hooks are missing: %q", script)
+	}
+	end := strings.Index(script[precmdStart:], "autoload -Uz add-zsh-hook")
+	if end < 0 {
+		t.Fatalf("zsh precmd hook is unterminated: %q", script)
+	}
+	branch := script[precmdStart : precmdStart+end]
+	consume := "_CLOSE_ENOUGH_LAST_COMMAND=''"
+	trigger := `--stage post --format plain --command "$command"`
+	if !strings.Contains(branch, `local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ $status -eq 0 || -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+		t.Fatalf("zsh post-failure trigger does not consume command safely: %q", branch)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

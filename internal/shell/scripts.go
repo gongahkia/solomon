@@ -42,9 +42,10 @@ bindkey '^M' _close_enough_accept_line
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
 function _close_enough_precmd {
-  local status=$?
-  [[ $status -eq 0 || -z "$_CLOSE_ENOUGH_LAST_COMMAND" ]] && return
-  command close-enough check --stage post --format plain --command "$_CLOSE_ENOUGH_LAST_COMMAND" 2>/dev/null
+  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"
+  _CLOSE_ENOUGH_LAST_COMMAND=''
+  [[ $status -eq 0 || -z "$command" ]] && return
+  command close-enough check --stage post --format plain --command "$command" 2>/dev/null
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec _close_enough_preexec

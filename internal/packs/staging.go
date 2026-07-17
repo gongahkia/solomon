@@ -1,6 +1,7 @@
 package packs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,10 @@ func (s *StagedDownload) Commit(destination string) error { return s.temporary.C
 func (s *StagedDownload) Discard() error { return s.temporary.Cleanup() }
 
 func ActivateStagedPack(staged *StagedDownload, directory string) (string, error) {
+	return activateStagedPack(staged, directory, verifyActivatedPack)
+}
+
+func activateStagedPack(staged *StagedDownload, directory string, verify func(string, []byte) error) (string, error) {
 	if staged == nil {
 		return "", errors.New("missing staged pack")
 	}
@@ -50,13 +55,83 @@ func ActivateStagedPack(staged *StagedDownload, directory string) (string, error
 		return "", err
 	}
 	target := filepath.Join(directory, pack.ID+"-"+pack.Version+".json")
-	if info, err := os.Lstat(target); err == nil && !info.Mode().IsRegular() {
-		return "", fmt.Errorf("activation target %q is not a regular file", target)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	backup, err := stageActivationBackup(directory, target)
+	if err != nil {
 		return "", err
+	}
+	if backup != nil {
+		defer backup.Cleanup()
 	}
 	if err := staged.Commit(target); err != nil {
 		return "", err
 	}
+	if err := verify(target, data); err != nil {
+		if rollbackErr := rollbackActivation(target, backup); rollbackErr != nil {
+			return "", fmt.Errorf("activation verification failed: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return "", fmt.Errorf("activation verification failed: %w", err)
+	}
 	return target, nil
+}
+
+func stageActivationBackup(directory, target string) (*securetemp.File, error) {
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("activation target %q is not a regular file", target)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, err
+	}
+	backup, err := securetemp.Create(directory, ".pack-rollback-*")
+	if err != nil {
+		return nil, err
+	}
+	if written, err := backup.Write(data); err != nil || written != len(data) {
+		_ = backup.Cleanup()
+		if err != nil {
+			return nil, err
+		}
+		return nil, io.ErrShortWrite
+	}
+	return backup, nil
+}
+
+func verifyActivatedPack(target string, expected []byte) error {
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, expected) {
+		return errors.New("activated pack differs from staged pack")
+	}
+	pack, err := decodePack(data)
+	if err != nil {
+		return err
+	}
+	_, err = Compile(pack)
+	return err
+}
+
+func rollbackActivation(target string, backup *securetemp.File) error {
+	if backup != nil {
+		return backup.Commit(target)
+	}
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("activation target %q is not a regular file", target)
+	}
+	return os.Remove(target)
 }

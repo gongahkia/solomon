@@ -717,3 +717,27 @@ func TestAtomicVerifiedPackActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPackUpdateRollsBackOnActivationFailure(t *testing.T) {
+	directory := t.TempDir()
+	previous := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"old","risk":"safe","risk_rationale":"read-only status query"}]}`
+	updated := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"new","risk":"safe","risk_rationale":"read-only status query"}]}`
+	target := filepath.Join(directory, "core-git-1.0.0.json")
+	if err := os.WriteFile(target, []byte(previous), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := StageDownload(directory, strings.NewReader(updated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := activateStagedPack(staged, directory, func(string, []byte) error { return errors.New("activation failed") }); err == nil {
+		t.Fatal("accepted failed activation")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != previous {
+		t.Fatalf("rollback = %q, want %q", data, previous)
+	}
+}

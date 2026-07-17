@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/config"
@@ -21,9 +22,28 @@ var commit = "unknown"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "close-enough:", err)
+		fmt.Fprint(os.Stderr, renderError(err))
 		os.Exit(clierr.Code(err))
 	}
+}
+
+func renderError(err error) string {
+	return "close-enough: " + sanitizeTerminalText(err.Error()) + "\n"
+}
+
+func sanitizeTerminalText(value string) string {
+	var output strings.Builder
+	for _, character := range value {
+		switch {
+		case character <= 0x1f || character == 0x7f:
+			fmt.Fprintf(&output, "\\x%02X", character)
+		case unicode.IsControl(character):
+			fmt.Fprintf(&output, "\\u%04X", character)
+		default:
+			output.WriteRune(character)
+		}
+	}
+	return output.String()
 }
 
 func run(args []string, stdout, stderr io.Writer) error {

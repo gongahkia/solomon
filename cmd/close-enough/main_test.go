@@ -130,3 +130,16 @@ func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
 		t.Fatalf("versionString() = %q", got)
 	}
 }
+
+func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
+	err := errors.New("invalid\x1b[31m\nnext\u0085")
+	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {
+		t.Fatalf("renderError() = %q", got)
+	}
+}
+
+func TestRenderErrorPreservesSafeText(t *testing.T) {
+	if got := renderError(errors.New("missing --command")); got != "close-enough: missing --command\n" {
+		t.Fatalf("renderError() = %q", got)
+	}
+}

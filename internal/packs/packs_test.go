@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -653,5 +654,40 @@ func TestAutoUpdateOptInRequiresRegistryOptIn(t *testing.T) {
 	state, err = TransitionAutoUpdateOptIn(state, AutoUpdateRevoke, RegistryEnabled)
 	if err != nil || state != AutoUpdateDisabled {
 		t.Fatalf("auto-update revoke = %s, %v", state, err)
+	}
+}
+
+type failingReader struct{ reads int }
+
+func (r *failingReader) Read(buffer []byte) (int, error) {
+	if r.reads > 0 {
+		return 0, errors.New("download failed")
+	}
+	r.reads++
+	copy(buffer, "partial")
+	return len("partial"), nil
+}
+
+func TestTransactionalPackDownloadStaging(t *testing.T) {
+	directory := t.TempDir()
+	staged, err := StageDownload(directory, strings.NewReader("pack"))
+	if err != nil || staged.Size != 4 {
+		t.Fatalf("staged download = %#v, %v", staged, err)
+	}
+	if _, err := os.Stat(staged.Path()); err != nil {
+		t.Fatal(err)
+	}
+	if err := staged.Discard(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staged.Path()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging file remains: %v", err)
+	}
+	if _, err := StageDownload(directory, &failingReader{}); err == nil {
+		t.Fatal("accepted failed download")
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("staging residue = %#v, %v", entries, err)
 	}
 }

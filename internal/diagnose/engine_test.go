@@ -194,6 +194,44 @@ func TestFilesystemMutationRepairNeverRewrites(t *testing.T) {
 	}
 }
 
+func TestPrivilegeEscalationClassifier(t *testing.T) {
+	for _, line := range []string{
+		"sudo -u root id",
+		"doas id",
+		"pkexec systemctl status service",
+		"/usr/bin/SU -c id",
+		"echo ready && runas /user:Administrator cmd",
+	} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskHigh {
+			t.Fatalf("classify(%q) = %s, want high", line, got)
+		}
+	}
+	for _, line := range []string{"echo sudo", "printf doas", "sudoku"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskSafe {
+			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
+func TestPrivilegeEscalationRepairNeverRewrites(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "sudo")
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("sudoo id", "pre")
+	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
+		t.Fatalf("unsafe privilege decision: %#v, %v", decision, err)
+	}
+}
+
 func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
 	if err != nil {

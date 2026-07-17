@@ -665,15 +665,55 @@ func classify(words []string, containsSecret bool) Risk {
 	if containsSecret {
 		return RiskHigh
 	}
+	if escalatesPrivileges(words) {
+		return RiskHigh
+	}
 	if mutatesFilesystem(words) {
 		return RiskHigh
 	}
 	for _, word := range words {
-		if word == "sudo" || word == "curl" || word == "wget" || word == "ssh" {
+		if word == "curl" || word == "wget" || word == "ssh" {
 			return RiskHigh
 		}
 	}
 	return RiskSafe
+}
+
+var privilegeEscalationCommands = map[string]struct{}{
+	"doas": {}, "pkexec": {}, "runas": {}, "su": {}, "sudo": {}, "sudoedit": {},
+}
+
+func escalatesPrivileges(words []string) bool {
+	for position, word := range words {
+		if !commandStartAt(words, position) {
+			continue
+		}
+		if _, ok := privilegeEscalationCommands[commandName(word)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func commandStartAt(words []string, target int) bool {
+	expectCommand := true
+	for position, word := range words {
+		if isCompoundOperator(word) {
+			expectCommand = word != ")"
+			continue
+		}
+		if !expectCommand {
+			continue
+		}
+		if position == target {
+			return true
+		}
+		if isShellKeyword(word) || assignmentWord(word) {
+			continue
+		}
+		expectCommand = false
+	}
+	return false
 }
 
 var filesystemMutationCommands = map[string]struct{}{

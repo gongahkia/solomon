@@ -212,6 +212,36 @@ func TestLoadSkipsUntrustedProjectConfiguration(t *testing.T) {
 	}
 }
 
+func TestApprovedProjectConfigurationOverridesOnlySpecifiedFields(t *testing.T) {
+	directory := t.TempDir()
+	writeProjectConfig(t, directory, "hint", true)
+	path := filepath.Join(directory, ".close-enough", "config.json")
+	if err := os.WriteFile(path, []byte(`{"mode":"rewrite","display":{"trace":true},"auto_apply_safe":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := Default()
+	base.Mode, base.AutoApplySafe, base.Display.Trace = "interrupt", true, false
+	merged, err := mergeApprovedProject(base, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Mode != "rewrite" || merged.AutoApplySafe || !merged.Display.Trace || !merged.Display.Cause {
+		t.Fatalf("merged configuration = %#v", merged)
+	}
+}
+
+func TestUnapprovedProjectConfigurationCannotOverrideGlobalConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	writeProjectConfig(t, directory, "rewrite", false)
+	path := filepath.Join(directory, ".close-enough", "config.json")
+	base := Default()
+	base.Mode = "interrupt"
+	merged, err := mergeApprovedProject(base, path)
+	if err != nil || merged != base {
+		t.Fatalf("unapproved merge = %#v, %v", merged, err)
+	}
+}
+
 func TestProjectPathRejectsNonRegularConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	configPath := filepath.Join(directory, ".close-enough", "config.json")

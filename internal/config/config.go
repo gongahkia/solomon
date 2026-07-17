@@ -89,7 +89,7 @@ func Load(paths Paths) (Config, error) {
 	cwd, err := paths.CWD()
 	if err == nil {
 		if project, ok := projectPath(cwd); ok {
-			cfg, err = merge(cfg, project)
+			cfg, err = mergeApprovedProject(cfg, project)
 			if err != nil {
 				return Config{}, err
 			}
@@ -205,7 +205,17 @@ func trustedProject(path string) bool {
 	return ownedByCurrentUser(marker, markerInfo) && ownedByCurrentUser(directory, directoryInfo)
 }
 
-func merge(base Config, path string) (Config, error) {
+func mergeApprovedProject(base Config, path string) (Config, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return base, nil
+	}
+	if err != nil {
+		return Config{}, err
+	}
+	if !info.Mode().IsRegular() || !trustedProject(path) {
+		return base, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err

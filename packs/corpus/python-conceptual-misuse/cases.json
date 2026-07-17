@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"python-inline-code","command":"python","input":"-c","rule_id":"python-inline-code"},{"id":"pip-install-break-system-packages","command":"pip","input":"install --break-system-packages","rule_id":"pip-install-break-system-packages"}]}

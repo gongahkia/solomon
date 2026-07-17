@@ -40,6 +40,8 @@ jobs:
         run: sh scripts/release-archive.sh dist/close-enough dist/close-enough-darwin-arm64.tar.gz close-enough-darwin-arm64
       - if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
         run: sh scripts/release-archive.sh dist/close-enough dist/close-enough-darwin-amd64.tar.gz close-enough-darwin-amd64
+      - if: matrix.goos == 'windows' && matrix.goarch == 'amd64'
+        run: sh scripts/release-zip.sh dist/close-enough dist/close-enough-windows-amd64.zip close-enough-windows-amd64
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}

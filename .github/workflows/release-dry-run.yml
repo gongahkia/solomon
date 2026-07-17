@@ -1,0 +1,164 @@
+name: release dry run
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'scripts/release-*.sh'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: v0.0.0-dryrun.${{ github.run_number }}
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - id: matrix
+        run: |
+          targets=$(go run ./cmd/release-compatibility)
+          printf 'targets=%s\n' "$targets" >> "$GITHUB_OUTPUT"
+  build:
+    needs: compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - id: archive
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=$RELEASE_VERSION -X main.commit=$GITHUB_SHA" -o dist/close-enough ./cmd/close-enough
+          extension=tar.gz
+          if [ "${{ matrix.goos }}" = windows ]; then extension=zip; fi
+          archive=$(sh scripts/release-name.sh "$RELEASE_VERSION" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$extension")
+          if [ "$extension" = zip ]; then
+            sh scripts/release-zip.sh dist/close-enough "dist/$archive" "${archive%.zip}"
+          else
+            sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+          fi
+          printf 'path=%s\n' "dist/$archive" >> "$GITHUB_OUTPUT"
+      - run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+      - run: |
+          archive='${{ steps.archive.outputs.path }}'
+          case "$archive" in
+            *.tar.gz) sbom="${archive%.tar.gz}.cdx.json" ;;
+            *.zip) sbom="${archive%.zip}.cdx.json" ;;
+            *) exit 2 ;;
+          esac
+          sh scripts/release-sbom.sh "$(go env GOPATH)/bin/cyclonedx-gomod" . "$sbom" "${{ matrix.goos }}" "${{ matrix.goarch }}"
+      - run: go install github.com/google/go-licenses/v2@v2.0.1
+      - run: |
+          archive='${{ steps.archive.outputs.path }}'
+          case "$archive" in
+            *.tar.gz) audit="${archive%.tar.gz}.licenses.csv" ;;
+            *.zip) audit="${archive%.zip}.licenses.csv" ;;
+            *) exit 2 ;;
+          esac
+          sh scripts/release-license-audit.sh "$(go env GOPATH)/bin/go-licenses" . "$audit" "${{ matrix.goos }}" "${{ matrix.goarch }}"
+      - run: |
+          archive='${{ steps.archive.outputs.path }}'
+          printf '{"dry_run":true}\n' > "$archive.sigstore.json"
+          test -s "$archive.sigstore.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+          if-no-files-found: error
+  smoke:
+    needs: [build, compatibility]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release
+      - shell: bash
+        run: |
+          archive=$(find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
+          test -n "$archive"
+          sh scripts/release-smoke-test.sh "$archive" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$RELEASE_VERSION"
+  bundled-packs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: mkdir -p dist && go build -trimpath -buildvcs=false -mod=readonly -o dist/close-enough ./cmd/close-enough
+      - run: |
+          archive=$(sh scripts/release-pack-name.sh "$RELEASE_VERSION")
+          sh scripts/release-pack-bundle.sh dist/close-enough internal/packs/bundled "dist/$archive" "${archive%.tar.gz}"
+          printf '{"dry_run":true}\n' > "dist/$archive.sigstore.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-packs-dry-run
+          path: dist/*.tar.gz
+          if-no-files-found: error
+  update-manifest:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-linux-amd64
+          path: dist/releases/linux-amd64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-linux-arm64
+          path: dist/releases/linux-arm64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-darwin-amd64
+          path: dist/releases/darwin-amd64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-darwin-arm64
+          path: dist/releases/darwin-arm64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dry-run-windows-amd64
+          path: dist/releases/windows-amd64
+      - run: |
+          set -- dist/releases/linux-amd64/*.tar.gz dist/releases/linux-arm64/*.tar.gz dist/releases/darwin-amd64/*.tar.gz dist/releases/darwin-arm64/*.tar.gz dist/releases/windows-amd64/*.zip
+          for artifact in "$@"; do test -f "$artifact"; done
+          go run ./cmd/update-manifest --channel stable --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" --output dist/update/stable.json --artifact "$1" --artifact "$2" --artifact "$3" --artifact "$4" --artifact "$5"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-manifest-dry-run
+          path: dist/update/stable.json
+          if-no-files-found: error
+  metadata:
+    needs: [bundled-packs, update-manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/tufpublish -run '^TestGenerateProducesVerifiableTUFMetadata$' -count=1

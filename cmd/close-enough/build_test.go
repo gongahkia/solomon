@@ -299,6 +299,33 @@ func TestReleaseWorkflowValidatesCompatibilityMatrix(t *testing.T) {
 	}
 }
 
+func TestReleaseDryRunWorkflow(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release-dry-run.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"workflow_dispatch:",
+		"pull_request:",
+		"RELEASE_VERSION: v0.0.0-dryrun.",
+		"cmd/release-compatibility",
+		"release-dry-run-",
+		"scripts/release-sbom.sh",
+		"scripts/release-license-audit.sh",
+		"scripts/release-smoke-test.sh",
+		"scripts/release-pack-bundle.sh",
+		"cmd/update-manifest",
+		"TestGenerateProducesVerifiableTUFMetadata",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release dry-run workflow lacks marker %q", marker)
+		}
+	}
+	if strings.Contains(string(workflow), "cosign sign-blob") || strings.Contains(string(workflow), "TUF_ROOT_PRIVATE_KEY") {
+		t.Fatal("release dry-run workflow performs production signing")
+	}
+}
+
 func TestReleaseRevocationWorkflowRequiresConfirmation(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release-revocation.yml"))
 	if err != nil {

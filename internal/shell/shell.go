@@ -15,20 +15,29 @@ const (
 	Rewrite      Capability = "rewrite"
 )
 
+type Configuration string
+
+const (
+	ModeConfiguration    Configuration = "mode"
+	DisplayConfiguration Configuration = "display"
+)
+
 type Contract struct {
-	Shell        string       `json:"shell"`
-	Tier         string       `json:"tier"`
-	Capabilities []Capability `json:"capabilities"`
-	Limitations  []string     `json:"limitations,omitempty"`
+	Shell         string          `json:"shell"`
+	Tier          string          `json:"tier"`
+	Capabilities  []Capability    `json:"capabilities"`
+	Configuration []Configuration `json:"configuration"`
+	Limitations   []string        `json:"limitations,omitempty"`
 }
 
 type DoctorResult struct {
-	Shell       string   `json:"shell"`
-	OS          string   `json:"os"`
-	Supported   bool     `json:"supported"`
-	Tier        string   `json:"tier,omitempty"`
-	Features    []string `json:"features,omitempty"`
-	Limitations []string `json:"limitations,omitempty"`
+	Shell         string   `json:"shell"`
+	OS            string   `json:"os"`
+	Supported     bool     `json:"supported"`
+	Tier          string   `json:"tier,omitempty"`
+	Features      []string `json:"features,omitempty"`
+	Configuration []string `json:"configuration,omitempty"`
+	Limitations   []string `json:"limitations,omitempty"`
 }
 
 func Script(name string) (string, error) {
@@ -57,6 +66,7 @@ func Doctor(shellPath, osName string) DoctorResult {
 	}
 	result.Supported, result.Tier = true, contract.Tier
 	result.Features = capabilityStrings(contract.Capabilities)
+	result.Configuration = configurationStrings(contract.Configuration)
 	result.Limitations = append([]string(nil), contract.Limitations...)
 	return result
 }
@@ -77,21 +87,22 @@ type adapter struct {
 
 func (a adapter) contract() Contract {
 	return Contract{
-		Shell:        a.Shell,
-		Tier:         a.Tier,
-		Capabilities: append([]Capability(nil), a.Capabilities...),
-		Limitations:  append([]string(nil), a.Limitations...),
+		Shell:         a.Shell,
+		Tier:          a.Tier,
+		Capabilities:  append([]Capability(nil), a.Capabilities...),
+		Configuration: append([]Configuration(nil), a.Configuration...),
+		Limitations:   append([]string(nil), a.Limitations...),
 	}
 }
 
 var adapters = map[string]adapter{
-	"zsh":            {Contract: Contract{Shell: "zsh", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}}, script: zshScript},
-	"bash":           {Contract: Contract{Shell: "bash", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}}, script: bashScript},
-	"fish":           {Contract: Contract{Shell: "fish", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"adapter replaces enter binding", "no post-failure diagnostics"}}, script: fishScript},
-	"powershell":     {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
-	"powershell.exe": {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
-	"pwsh":           {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
-	"pwsh.exe":       {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"zsh":            {Contract: Contract{Shell: "zsh", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}}, script: zshScript},
+	"bash":           {Contract: Contract{Shell: "bash", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}}, script: bashScript},
+	"fish":           {Contract: Contract{Shell: "fish", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration}, Limitations: []string{"adapter replaces enter binding", "no post-failure diagnostics"}}, script: fishScript},
+	"powershell":     {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"powershell.exe": {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"pwsh":           {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"pwsh.exe":       {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
 }
 
 func adapterFor(name string) (adapter, bool) {
@@ -103,6 +114,14 @@ func capabilityStrings(capabilities []Capability) []string {
 	result := make([]string, len(capabilities))
 	for i, capability := range capabilities {
 		result[i] = string(capability)
+	}
+	return result
+}
+
+func configurationStrings(configuration []Configuration) []string {
+	result := make([]string, len(configuration))
+	for i, setting := range configuration {
+		result[i] = string(setting)
 	}
 	return result
 }

@@ -9,12 +9,13 @@ import (
 )
 
 type compatibilityFixture struct {
-	Name         string       `json:"name"`
-	Shell        string       `json:"shell"`
-	Tier         string       `json:"tier"`
-	Capabilities []Capability `json:"capabilities"`
-	Limitations  []string     `json:"limitations"`
-	Markers      []string     `json:"markers"`
+	Name          string          `json:"name"`
+	Shell         string          `json:"shell"`
+	Tier          string          `json:"tier"`
+	Capabilities  []Capability    `json:"capabilities"`
+	Configuration []Configuration `json:"configuration"`
+	Limitations   []string        `json:"limitations"`
+	Markers       []string        `json:"markers"`
 }
 
 func TestAdapterCompatibilityFixtures(t *testing.T) {
@@ -32,7 +33,7 @@ func TestAdapterCompatibilityFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if contract.Shell != fixture.Shell || contract.Tier != fixture.Tier || !slices.Equal(contract.Capabilities, fixture.Capabilities) || !slices.Equal(contract.Limitations, fixture.Limitations) {
+			if contract.Shell != fixture.Shell || contract.Tier != fixture.Tier || !slices.Equal(contract.Capabilities, fixture.Capabilities) || !slices.Equal(contract.Configuration, fixture.Configuration) || !slices.Equal(contract.Limitations, fixture.Limitations) {
 				t.Fatalf("contract = %#v, fixture = %#v", contract, fixture)
 			}
 			script, err := Script(fixture.Name)
@@ -45,7 +46,7 @@ func TestAdapterCompatibilityFixtures(t *testing.T) {
 				}
 			}
 			doctor := Doctor("/bin/"+fixture.Name, "test")
-			if !doctor.Supported || doctor.Tier != fixture.Tier || !slices.Equal(doctor.Features, capabilityStrings(fixture.Capabilities)) || !slices.Equal(doctor.Limitations, fixture.Limitations) {
+			if !doctor.Supported || doctor.Tier != fixture.Tier || !slices.Equal(doctor.Features, capabilityStrings(fixture.Capabilities)) || !slices.Equal(doctor.Configuration, configurationStrings(fixture.Configuration)) || !slices.Equal(doctor.Limitations, fixture.Limitations) {
 				t.Fatalf("doctor = %#v, fixture = %#v", doctor, fixture)
 			}
 		})
@@ -170,17 +171,35 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 }
 
+func TestZshPropagatesModeAndDisplayConfiguration(t *testing.T) {
+	contract, err := ContractFor("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(contract.Configuration, []Configuration{ModeConfiguration, DisplayConfiguration}) {
+		t.Fatalf("zsh configuration contract = %#v", contract.Configuration)
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
+		t.Fatalf("zsh script does not delegate mode and display configuration: %q", script)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	first.Capabilities[0] = "mutated"
+	first.Configuration[0] = "mutated"
 	second, err := ContractFor("zsh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Capabilities[0] != PreExecution {
+	if second.Capabilities[0] != PreExecution || second.Configuration[0] != ModeConfiguration {
 		t.Fatalf("contract mutation leaked: %#v", second)
 	}
 }

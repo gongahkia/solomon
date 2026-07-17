@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"node-version-verison","command":"node","input":"--verison","rule_id":"node-version-verison"}]}

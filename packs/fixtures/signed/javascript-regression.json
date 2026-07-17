@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "javascript-regression",
+  "version": "1.0.0",
+  "publisher": "close-enough",
+  "rules": [
+    {
+      "id": "node-version-verison",
+      "command": "node",
+      "pattern": "^--verison$",
+      "replacement": "--version",
+      "cause": "Node.js flag spelling typo",
+      "risk": "safe",
+      "risk_rationale": "read-only version query"
+    }
+  ]
+}

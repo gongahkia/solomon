@@ -52,6 +52,12 @@ jobs:
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" windows amd64 zip)
           sh scripts/release-zip.sh dist/close-enough "dist/$archive" "${archive%.zip}"
+      - uses: sigstore/cosign-installer@v4.1.0
+      - run: |
+          archive=$(find dist -maxdepth 1 -type f ! -name close-enough -print -quit)
+          test -n "$archive"
+          cosign sign-blob --yes --bundle "$archive.sigstore.json" "$archive"
+          test -s "$archive.sigstore.json"
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}

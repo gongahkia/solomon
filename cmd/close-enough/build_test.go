@@ -119,6 +119,24 @@ func TestReleaseBuildMatrixRejectsUnsupportedTarget(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowConfiguresKeylessSigning(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"id-token: write",
+		"sigstore/cosign-installer@v4.1.0",
+		"cosign sign-blob --yes --bundle",
+		`test -n "$archive"`,
+		`test -s "$archive.sigstore.json"`,
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks keyless signing marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/redact"
 )
 
 type Risk string
@@ -84,7 +85,8 @@ func (e Engine) commandDecision(words []string) Decision {
 		return Decision{}
 	}
 	replaced := append([]string{best}, words[1:]...)
-	return Decision{Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: strings.Join(replaced, " "), Confidence: confidence(words[0], best), Risk: classify(replaced), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
+	suggestion, containsSecret := redact.Command(replaced)
+	return Decision{Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(words[0], best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
 }
 
 func semanticDecision(words []string) Decision {
@@ -97,7 +99,8 @@ func semanticDecision(words []string) Decision {
 		return Decision{}
 	}
 	replaced := append([]string{"git", best}, words[2:]...)
-	return Decision{Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: strings.Join(replaced, " "), Confidence: confidence(words[1], best), Risk: classify(replaced), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
+	suggestion, containsSecret := redact.Command(replaced)
+	return Decision{Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
 }
 
 func (e Engine) pathDecision(words []string) Decision {
@@ -124,7 +127,8 @@ func (e Engine) pathDecision(words []string) Decision {
 		}
 		replaced := append([]string{}, words...)
 		replaced[i] = filepath.Join(dir, best)
-		return Decision{Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: strings.Join(replaced, " "), Confidence: confidence(base, best), Risk: classify(replaced), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
+		suggestion, containsSecret := redact.Command(replaced)
+		return Decision{Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Confidence: confidence(base, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
 	}
 	return Decision{}
 }
@@ -293,7 +297,10 @@ func isShellKeyword(value string) bool {
 	_, ok := map[string]struct{}{"if": {}, "then": {}, "else": {}, "fi": {}, "for": {}, "while": {}, "do": {}, "done": {}, "case": {}, "esac": {}, "function": {}, "time": {}, "command": {}, "builtin": {}, "exec": {}, "sudo": {}}[value]
 	return ok
 }
-func classify(words []string) Risk {
+func classify(words []string, containsSecret bool) Risk {
+	if containsSecret {
+		return RiskHigh
+	}
 	for _, word := range words {
 		if word == "sudo" || word == "rm" || word == "dd" || word == "mkfs" || word == "curl" || word == "wget" || word == "ssh" {
 			return RiskHigh

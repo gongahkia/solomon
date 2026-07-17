@@ -5,8 +5,9 @@ if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then
 typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
 function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
 function _close_enough_check {
-  local record version action risk confidence cause consequence suggestion
-  record="$(command close-enough check --stage pre --format record --command "$BUFFER" 2>/dev/null)" || return 0
+  local command record version action risk confidence cause consequence suggestion
+  command="$BUFFER"
+  record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return 0
   IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record"
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0

@@ -81,6 +81,21 @@ func TestZshInitializationIsGuardedAndRetainsInterrupt(t *testing.T) {
 	}
 }
 
+func TestZshPreExecutionUsesCapturedBuffer(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := `command="$BUFFER"`
+	check := `--stage pre --format record --command "$command"`
+	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$BUFFER"`) {
+		t.Fatalf("zsh pre-execution check does not use a captured buffer: %q", script)
+	}
+	if !strings.Contains(script, `2>/dev/null)" || return 0`) {
+		t.Fatalf("zsh check failure does not preserve normal submission: %q", script)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

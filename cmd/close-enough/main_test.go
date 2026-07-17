@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -8,12 +9,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
+
+type terminalEscapeFixture struct {
+	Name    string `json:"name"`
+	Payload string `json:"payload"`
+	Want    string `json:"want"`
+}
 
 func TestRunExitCodes(t *testing.T) {
 	tests := []struct {
@@ -428,6 +436,35 @@ func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
 	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {
 		t.Fatalf("renderError() = %q", got)
+	}
+}
+
+func TestTerminalEscapeInjectionRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/terminal_escape_injection.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []terminalEscapeFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("terminal escape corpus is empty")
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Payload == "" || fixture.Want == "" {
+				t.Fatalf("invalid terminal escape fixture: %#v", fixture)
+			}
+			if got := sanitizeTerminalText(fixture.Payload); got != fixture.Want {
+				t.Fatalf("sanitizeTerminalText(%q) = %q, want %q", fixture.Payload, got, fixture.Want)
+			}
+			for _, character := range fixture.Want {
+				if unicode.IsControl(character) || unicode.Is(unicode.Bidi_Control, character) {
+					t.Fatalf("sanitized output retains terminal control %U", character)
+				}
+			}
+		})
 	}
 }
 

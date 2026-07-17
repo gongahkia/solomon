@@ -57,7 +57,7 @@ func sanitizeTerminalText(value string) string {
 		switch {
 		case character <= 0x1f || character == 0x7f:
 			fmt.Fprintf(&output, "\\x%02X", character)
-		case unicode.IsControl(character):
+		case unicode.IsControl(character) || unicode.Is(unicode.Bidi_Control, character):
 			fmt.Fprintf(&output, "\\u%04X", character)
 		default:
 			output.WriteRune(character)

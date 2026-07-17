@@ -1,0 +1,9 @@
+[
+  {"name":"plain-text","payload":"git status","want":"git status"},
+  {"name":"csi-color","payload":"\u001b[31mred\u001b[0m","want":"\\x1B[31mred\\x1B[0m"},
+  {"name":"osc-hyperlink","payload":"\u001b]8;;https://example.invalid\u001b\\click\u001b]8;;\u001b\\","want":"\\x1B]8;;https://example.invalid\\x1B\\click\\x1B]8;;\\x1B\\"},
+  {"name":"osc-clipboard","payload":"\u001b]52;c;SGVsbG8=\u0007","want":"\\x1B]52;c;SGVsbG8=\\x07"},
+  {"name":"c1-csi","payload":"\u009b2J","want":"\\u009B2J"},
+  {"name":"carriage-return","payload":"first\rsecond","want":"first\\x0Dsecond"},
+  {"name":"bidi-override","payload":"report\u202egnp.exe","want":"report\\u202Egnp.exe"}
+]

@@ -34,6 +34,8 @@ Session overrides affect only the invoking process and never modify configuratio
 
 Use `close-enough rule list|add|update|remove` to manage global exact-command exceptions; matching exceptions suppress diagnostics and never alter command execution.
 
+Use `close-enough inspect-decision --command '<command>'` for full structured diagnostics and redaction-safe command diffs.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

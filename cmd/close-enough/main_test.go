@@ -360,6 +360,26 @@ func TestRuleCommandRejectsInvalidMutations(t *testing.T) {
 	}
 }
 
+func TestInspectDecisionCommand(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"inspect-decision", "--command", "git sttaus"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	value := output.String()
+	if !strings.Contains(value, `"stage":"pre"`) || !strings.Contains(value, `"suggestion":"git status"`) || !strings.Contains(value, `"diff":"- git sttaus\n+ git status"`) || strings.Contains(value, `"command":`) {
+		t.Fatalf("inspection output = %s", value)
+	}
+	for _, args := range [][]string{
+		{"inspect-decision", "--command", "git sttaus", "--stage", "invalid"},
+		{"inspect-decision"},
+	} {
+		if err := run(args, io.Discard, io.Discard); err == nil {
+			t.Fatalf("accepted invalid inspect command %q", args)
+		}
+	}
+}
+
 func TestConfigCauseToggleControlsPlainDiagnostic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := run([]string{"config", "set", "display.cause", "false"}, io.Discard, io.Discard); err != nil {

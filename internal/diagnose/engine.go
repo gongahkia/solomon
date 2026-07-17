@@ -143,8 +143,24 @@ type Event struct {
 	Trace            []string    `json:"trace,omitempty"`
 }
 
+type Inspection struct {
+	Event
+	Diff           string `json:"diff,omitempty"`
+	EmphasizedDiff string `json:"emphasized_diff,omitempty"`
+}
+
 func (d Decision) Event(stage string) Event {
 	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, RiskRationale: d.RiskRationale, RiskRationaleKey: d.RiskRationaleKey, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
+}
+
+func (d Decision) Inspect(stage, command string) (Inspection, error) {
+	if stage != "pre" && stage != "post" {
+		return Inspection{}, fmt.Errorf("invalid inspection stage %q", stage)
+	}
+	if err := d.validateProtocol(); err != nil {
+		return Inspection{}, err
+	}
+	return Inspection{Event: d.Event(stage), Diff: d.CommandDiff(command), EmphasizedDiff: d.CommandDiffEmphasis(command)}, nil
 }
 
 func (d Decision) Record() (string, error) {

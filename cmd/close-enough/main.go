@@ -78,6 +78,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return initCommand(args[1:], stdout)
 	case "check":
 		return checkCommand(args[1:], stdout)
+	case "inspect-decision":
+		return inspectDecisionCommand(args[1:], stdout)
 	case "config":
 		return configCommand(args[1:], stdout)
 	case "rule":
@@ -99,7 +101,7 @@ func versionString() string {
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|config|rule|pack|doctor|version>"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|pack|doctor|version>"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
@@ -186,6 +188,35 @@ func checkCommand(args []string, stdout io.Writer) error {
 	default:
 		return clierr.New(clierr.Usage, "--format must be json, plain, or record")
 	}
+}
+
+func inspectDecisionCommand(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("inspect-decision", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	command := fs.String("command", "", "command line")
+	stage := fs.String("stage", "pre", "pre or post")
+	if err := fs.Parse(args); err != nil {
+		return clierr.Wrap(clierr.Usage, err)
+	}
+	if *command == "" {
+		return clierr.New(clierr.Usage, "--command is required")
+	}
+	if *stage != "pre" && *stage != "post" {
+		return clierr.New(clierr.Usage, "--stage must be pre or post")
+	}
+	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	decision, err := diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd()}).Check(*command, *stage)
+	if err != nil {
+		return clierr.Wrap(clierr.Input, err)
+	}
+	inspection, err := decision.Inspect(*stage, *command)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(inspection))
 }
 
 func renderPlainDiagnostic(decision diagnose.Decision, display config.Display, command string) string {

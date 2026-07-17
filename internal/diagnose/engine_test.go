@@ -151,6 +151,22 @@ func TestJSONProtocolEncoderCompatibility(t *testing.T) {
 	}
 }
 
+func TestInspectionIncludesSafeDiffs(t *testing.T) {
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Suggestion: "git status", Risk: RiskSafe, original: "sttaus", replacement: "status", occurrence: 1}
+	inspection, err := decision.Inspect("pre", "git sttaus")
+	if err != nil || inspection.Stage != "pre" || inspection.Diff != "- git sttaus\n+ git status" || inspection.EmphasizedDiff != "git [-sttaus-]{+status+}" {
+		t.Fatalf("inspection = %#v, %v", inspection, err)
+	}
+	unsafe := Decision{Version: AdapterProtocolVersion, Action: "hint", Suggestion: "git --token=[REDACTED]", Risk: RiskHigh, original: "gti", replacement: "git", occurrence: 1}
+	inspection, err = unsafe.Inspect("pre", "gti --token=secret")
+	if err != nil || inspection.Diff != "" || inspection.EmphasizedDiff != "" {
+		t.Fatalf("unsafe inspection = %#v, %v", inspection, err)
+	}
+	if _, err := decision.Inspect("invalid", "git sttaus"); err == nil {
+		t.Fatal("expected invalid inspection stage")
+	}
+}
+
 func TestGitSubcommandTypo(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git sttaus", "pre")
 	if err != nil {

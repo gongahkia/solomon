@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-git",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [{
@@ -172,5 +172,29 @@
     "cause": "GitHub workflow directory typo",
     "risk": "safe",
     "risk_rationale": "read-only file comparison"
+  }, {
+    "id": "git-push-force",
+    "command": "git",
+    "pattern": "^push --force$",
+    "replacement": "push --force-with-lease",
+    "cause": "Force push can overwrite remote commits; a lease checks for unexpected remote updates",
+    "risk": "high",
+    "risk_rationale": "may overwrite remote commit history"
+  }, {
+    "id": "git-reset-hard",
+    "command": "git",
+    "pattern": "^reset --hard$",
+    "replacement": "status",
+    "cause": "A hard reset discards tracked changes; inspect status before choosing a destructive reset",
+    "risk": "high",
+    "risk_rationale": "may discard tracked changes"
+  }, {
+    "id": "git-clean-force",
+    "command": "git",
+    "pattern": "^clean -f$",
+    "replacement": "clean -n",
+    "cause": "Forced clean deletes untracked files; dry-run first to inspect the deletion set",
+    "risk": "high",
+    "risk_rationale": "may delete untracked files"
   }]
 }

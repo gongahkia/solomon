@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "git-push-force", "command": "git", "input": "push --force", "rule_id": "git-push-force"},
+    {"id": "git-reset-hard", "command": "git", "input": "reset --hard", "rule_id": "git-reset-hard"},
+    {"id": "git-clean-force", "command": "git", "input": "clean -f", "rule_id": "git-clean-force"}
+  ]
+}

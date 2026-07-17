@@ -384,6 +384,33 @@ func TestGitPathRepairRules(t *testing.T) {
 	}
 }
 
+func TestGitConceptualMisuseRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "core-git.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "git-conceptual-misuse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	rules := map[string]Rule{}
+	for _, rule := range pack.Rules {
+		rules[rule.ID] = rule
+	}
+	for _, id := range []string{"git-push-force", "git-reset-hard", "git-clean-force"} {
+		if rules[id].Risk != diagnose.RiskHigh || rules[id].Cause == "" {
+			t.Fatalf("conceptual rule %s = %#v", id, rules[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched conceptual Git corpus")
+	}
+}
+
 func TestExtractGitFailureEvidence(t *testing.T) {
 	output := "fatal: pathspec '.gitingore' did not match any file(s) known to git\nerror: unknown option '--shortt'\ngit: 'statsu' is not a git command. See 'git --help'.\nerror: unknown option '--shortt'\n"
 	evidence, err := ExtractGitFailureEvidence(output)

@@ -4,7 +4,7 @@ VERSION ?= dev
 COMMIT ?= unknown
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test vet ci
+.PHONY: build test vet ci benchmark-pre-execution
 
 build:
 	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/close-enough
@@ -16,3 +16,6 @@ vet:
 	go vet ./...
 
 ci: vet test build
+
+benchmark-pre-execution:
+	go test -run '^$$' -bench '^BenchmarkPreExecutionLatency$$' -benchmem ./internal/diagnose

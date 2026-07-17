@@ -1047,7 +1047,33 @@ func contains(value, substring string) bool {
 	return false
 }
 
-func writeExecutable(t *testing.T, dir, name string) {
+func BenchmarkPreExecutionLatency(b *testing.B) {
+	directory := b.TempDir()
+	writeExecutable(b, directory, "git")
+	engine := New(Options{Config: config.Default(), Path: directory, CWD: directory, Cache: NewCache()})
+	for _, test := range []struct {
+		name, command, action string
+	}{
+		{name: "no_action", command: "echo ok", action: "none"},
+		{name: "safe_repair", command: "gti status", action: "hint"},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			decision, err := engine.Check(test.command, "pre")
+			if err != nil || decision.Action != test.action {
+				b.Fatalf("pre-execution setup = %#v, %v", decision, err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				if _, err := engine.Check(test.command, "pre"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func writeExecutable(t testing.TB, dir, name string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700); err != nil {

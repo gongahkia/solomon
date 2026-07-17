@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -83,5 +85,56 @@ func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 	}
 	if cfg.Mode != "off" {
 		t.Fatalf("mode = %q, want off", cfg.Mode)
+	}
+}
+
+func TestWriteAtomicallyReplacesConfigWithRestrictivePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"mode":"off"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Mode = "rewrite"
+	if err := Write(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Mode != "rewrite" {
+		t.Fatalf("mode = %q, want rewrite", loaded.Mode)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("permissions = %o, want 600", info.Mode().Perm())
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".config.json.tmp-") {
+			t.Fatalf("temporary file remains: %s", entry.Name())
+		}
+	}
+}
+
+func TestWriteRemovesTemporaryFileAfterRenameFailure(t *testing.T) {
+	directory := t.TempDir()
+	if err := Write(directory, Default()); err == nil {
+		t.Fatal("expected rename failure")
+	}
+	entries, err := os.ReadDir(filepath.Dir(directory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "."+filepath.Base(directory)+".tmp-") {
+			t.Fatalf("temporary file remains: %s", entry.Name())
+		}
 	}
 }

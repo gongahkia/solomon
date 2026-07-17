@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gongahkia/close-enough/internal/config"
 )
@@ -716,6 +719,52 @@ func TestTokenizeSeparatesUnquotedCompoundOperators(t *testing.T) {
 	if !slices.Equal(words, want) {
 		t.Fatalf("words = %#v, want %#v", words, want)
 	}
+}
+
+func TestTokenizeQuotedRoundTripProperty(t *testing.T) {
+	config := &quick.Config{MaxCount: 512, Rand: rand.New(rand.NewSource(1))}
+	if err := quick.Check(func(first, second string) bool {
+		if !utf8.ValidString(first) || !utf8.ValidString(second) {
+			return true
+		}
+		words, err := tokenize(shellQuote(first) + " \t" + shellQuote(second))
+		return err == nil && slices.Equal(words, []string{first, second})
+	}, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTokenizeCompoundOperatorProperty(t *testing.T) {
+	config := &quick.Config{MaxCount: 512, Rand: rand.New(rand.NewSource(2))}
+	if err := quick.Check(func(left, right string) bool {
+		if !utf8.ValidString(left) || !utf8.ValidString(right) {
+			return true
+		}
+		words, err := tokenize(shellQuote(left) + "&&" + shellQuote(right) + ";" + shellQuote(left) + "||" + shellQuote(right))
+		want := []string{left, "&&", right, ";", left, "||", right}
+		return err == nil && slices.Equal(words, want)
+	}, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTokenizeIncompleteInputProperty(t *testing.T) {
+	config := &quick.Config{MaxCount: 512, Rand: rand.New(rand.NewSource(3))}
+	if err := quick.Check(func(value string) bool {
+		if !utf8.ValidString(value) {
+			return true
+		}
+		line := shellQuote(value)
+		_, quoteErr := tokenize(line + "'")
+		_, escapeErr := tokenize(line + "\\")
+		return quoteErr != nil && escapeErr != nil
+	}, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func shellQuote(value string) string {
+	return `"` + strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`).Replace(value) + `"`
 }
 
 func TestCommandPositionsResolveCompoundCommandStarts(t *testing.T) {

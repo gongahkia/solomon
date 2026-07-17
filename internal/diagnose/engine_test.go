@@ -191,6 +191,32 @@ func TestExecutableCandidateNormalizationAcrossPlatforms(t *testing.T) {
 	}
 }
 
+func TestDamerauLevenshteinScoresUnicodeAndTranspositions(t *testing.T) {
+	for _, test := range []struct {
+		a    string
+		b    string
+		want int
+	}{
+		{a: "gti", b: "git", want: 1},
+		{a: "café", b: "cafe", want: 1},
+		{a: "åb", b: "bå", want: 1},
+		{a: "", b: "git", want: 3},
+	} {
+		if got := damerauLevenshtein(test.a, test.b); got != test.want {
+			t.Fatalf("distance(%q, %q) = %d, want %d", test.a, test.b, got, test.want)
+		}
+	}
+}
+
+func TestNearestCandidateUsesDeterministicTieBreaker(t *testing.T) {
+	if candidate, distance := nearest("c", []string{"b", "a"}); candidate != "a" || distance != 1 {
+		t.Fatalf("nearest = %q, %d", candidate, distance)
+	}
+	if candidate, distance := nearest("c", nil); candidate != "" || distance != 0 {
+		t.Fatalf("empty nearest = %q, %d", candidate, distance)
+	}
+}
+
 func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")

@@ -452,14 +452,15 @@ func nearest(value string, candidates []string) (string, int) {
 }
 
 func levenshtein(a, b string) int {
-	previous := make([]int, len(b)+1)
+	aRunes, bRunes := []rune(a), []rune(b)
+	previous := make([]int, len(bRunes)+1)
 	for j := range previous {
 		previous[j] = j
 	}
-	for i, ra := range a {
-		current := make([]int, len(b)+1)
+	for i, ra := range aRunes {
+		current := make([]int, len(bRunes)+1)
 		current[0] = i + 1
-		for j, rb := range b {
+		for j, rb := range bRunes {
 			cost := 0
 			if ra != rb {
 				cost = 1
@@ -468,31 +469,32 @@ func levenshtein(a, b string) int {
 		}
 		previous = current
 	}
-	return previous[len(b)]
+	return previous[len(bRunes)]
 }
 
 func damerauLevenshtein(a, b string) int {
-	previousPrevious := make([]int, len(b)+1)
-	previous := make([]int, len(b)+1)
+	aRunes, bRunes := []rune(a), []rune(b)
+	previousPrevious := make([]int, len(bRunes)+1)
+	previous := make([]int, len(bRunes)+1)
 	for j := range previous {
 		previous[j] = j
 	}
-	for i, ra := range a {
-		current := make([]int, len(b)+1)
+	for i, ra := range aRunes {
+		current := make([]int, len(bRunes)+1)
 		current[0] = i + 1
-		for j, rb := range b {
+		for j, rb := range bRunes {
 			cost := 0
 			if ra != rb {
 				cost = 1
 			}
 			current[j+1] = min(current[j]+1, previous[j+1]+1, previous[j]+cost)
-			if i > 0 && j > 0 && ra == rune(b[j-1]) && rune(a[i-1]) == rb {
+			if i > 0 && j > 0 && ra == bRunes[j-1] && aRunes[i-1] == rb {
 				current[j+1] = min(current[j+1], previousPrevious[j-1]+1)
 			}
 		}
 		previousPrevious, previous = previous, current
 	}
-	return previous[len(b)]
+	return previous[len(bRunes)]
 }
 
 func min(values ...int) int {
@@ -505,16 +507,17 @@ func min(values ...int) int {
 	return result
 }
 func maxDistance(value string) int {
-	if len(value) <= 4 {
+	length := len([]rune(value))
+	if length <= 4 {
 		return 1
 	}
-	if len(value) <= 8 {
+	if length <= 8 {
 		return 2
 	}
 	return 3
 }
 func confidence(a, b string) float64 {
-	return 1 - float64(damerauLevenshtein(a, b))/float64(max(len(a), len(b)))
+	return 1 - float64(damerauLevenshtein(a, b))/float64(max(len([]rune(a)), len([]rune(b))))
 }
 func isShellKeyword(value string) bool {
 	_, ok := map[string]struct{}{"if": {}, "then": {}, "else": {}, "fi": {}, "for": {}, "while": {}, "do": {}, "done": {}, "case": {}, "esac": {}, "function": {}, "time": {}, "command": {}, "builtin": {}, "exec": {}, "sudo": {}}[value]

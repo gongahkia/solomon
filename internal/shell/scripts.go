@@ -1,6 +1,8 @@
 package shell
 
 const zshScript = `# close-enough zsh integration
+if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then
+typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
 function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
 function _close_enough_check {
   local record version action risk confidence cause consequence suggestion
@@ -27,6 +29,7 @@ function _close_enough_precmd {
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec _close_enough_preexec
 add-zsh-hook precmd _close_enough_precmd
+fi
 `
 
 const bashScript = `# close-enough bash integration

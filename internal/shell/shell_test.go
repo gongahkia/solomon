@@ -64,6 +64,23 @@ func TestFishInterruptPreventsExecution(t *testing.T) {
 	}
 }
 
+func TestZshInitializationIsGuardedAndRetainsInterrupt(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := "if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then"
+	marker := "typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1"
+	interrupt := `[[ "$action" == interrupt ]] && return 1`
+	accept := "zle .accept-line"
+	if !strings.HasPrefix(script, "# close-enough zsh integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") {
+		t.Fatalf("zsh script lacks an enclosing idempotence guard: %q", script)
+	}
+	if strings.Count(script, marker) != 1 || strings.Index(script, interrupt) < 0 || strings.Index(script, interrupt) > strings.Index(script, accept) {
+		t.Fatalf("zsh script does not preserve one guarded interrupt path: %q", script)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

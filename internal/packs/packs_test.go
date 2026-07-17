@@ -217,3 +217,21 @@ func TestFixtureRejectsUnknownAndInvalidSchemas(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
+	pack := func(id, ruleID, pattern string) Pack {
+		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	}
+	resolved, err := Resolve([]Pack{pack("zeta", "zeta-rule", "zeta"), pack("alpha", "alpha-rule", "alpha")})
+	if err != nil || len(resolved) != 2 || resolved[0].Pack.ID != "alpha" || resolved[1].Pack.ID != "zeta" {
+		t.Fatalf("resolved packs = %#v, %v", resolved, err)
+	}
+	for _, packs := range [][]Pack{
+		{pack("alpha", "one", "one"), pack("alpha", "two", "two")},
+		{pack("alpha", "one", "same"), pack("beta", "two", "same")},
+	} {
+		if _, err := Resolve(packs); err == nil {
+			t.Fatalf("accepted conflicting packs %#v", packs)
+		}
+	}
+}

@@ -10,22 +10,25 @@ permissions:
   attestations: write
 
 jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - id: matrix
+        run: |
+          targets=$(go run ./cmd/release-compatibility)
+          printf 'targets=%s\n' "$targets" >> "$GITHUB_OUTPUT"
   build:
+    needs: compatibility
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -104,26 +107,10 @@ jobs:
         with:
           subject-path: ${{ steps.release-archive.outputs.path }}
   smoke:
-    needs: build
+    needs: [build, compatibility]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: linux
-            goarch: arm64
-            runner: ubuntu-24.04-arm
-          - goos: darwin
-            goarch: amd64
-            runner: macos-15-intel
-          - goos: darwin
-            goarch: arm64
-            runner: macos-latest
-          - goos: windows
-            goarch: amd64
-            runner: windows-latest
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

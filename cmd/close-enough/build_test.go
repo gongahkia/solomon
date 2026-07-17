@@ -199,12 +199,8 @@ func TestReleaseWorkflowSmokeTestsEveryArchive(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"smoke:",
-		"needs: build",
-		"runner: ubuntu-latest",
-		"runner: ubuntu-24.04-arm",
-		"runner: macos-15-intel",
-		"runner: macos-latest",
-		"runner: windows-latest",
+		"needs: [build, compatibility]",
+		"matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}",
 		"actions/download-artifact@v5",
 		"scripts/release-smoke-test.sh",
 	} {
@@ -279,6 +275,26 @@ func TestReleaseWorkflowPublishesUpdateManifest(t *testing.T) {
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release workflow lacks update manifest marker %q", marker)
+		}
+	}
+}
+
+func TestReleaseWorkflowValidatesCompatibilityMatrix(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"compatibility:",
+		"cmd/release-compatibility",
+		"outputs:",
+		"targets: ${{ steps.matrix.outputs.targets }}",
+		"needs: compatibility",
+		"matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}",
+		"needs: [build, compatibility]",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks compatibility matrix marker %q", marker)
 		}
 	}
 }

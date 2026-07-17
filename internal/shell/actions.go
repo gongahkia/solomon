@@ -8,10 +8,11 @@ import (
 type ActionState string
 
 const (
-	ActionNone      ActionState = "none"
-	ActionHint      ActionState = "hint"
-	ActionInterrupt ActionState = "interrupt"
-	ActionRewrite   ActionState = "rewrite"
+	ActionNone         ActionState = "none"
+	ActionHint         ActionState = "hint"
+	ActionInterrupt    ActionState = "interrupt"
+	ActionRewrite      ActionState = "rewrite"
+	ActionRunUnchanged ActionState = "run-unchanged"
 )
 
 type ActionResult struct {
@@ -23,7 +24,7 @@ type ActionResult struct {
 
 func ResolveAction(action, risk, suggestion string) ActionResult {
 	switch ActionState(action) {
-	case ActionNone:
+	case ActionNone, ActionRunUnchanged:
 		return ActionResult{Submit: true}
 	case ActionHint:
 		return ActionResult{Render: true, Submit: true}

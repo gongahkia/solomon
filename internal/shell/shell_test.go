@@ -27,6 +27,7 @@ func TestResolveAction(t *testing.T) {
 		want                           ActionResult
 	}{
 		{"none", "none", "safe", "", ActionResult{Submit: true}},
+		{"run unchanged", "run-unchanged", "high", "rm", ActionResult{Submit: true}},
 		{"hint", "hint", "safe", "git status", ActionResult{Render: true, Submit: true}},
 		{"interrupt", "interrupt", "high", "rm", ActionResult{Render: true}},
 		{"rewrite", "rewrite", "safe", "git status", ActionResult{Rewrite: true}},

@@ -235,6 +235,32 @@ func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesTUFRegistryMetadata(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"tuf-registry:",
+		"needs: bundled-packs",
+		"TUF_ROOT_PRIVATE_KEY",
+		"TUF_TARGETS_PRIVATE_KEY",
+		"TUF_SNAPSHOT_PRIVATE_KEY",
+		"TUF_TIMESTAMP_PRIVATE_KEY",
+		"test -n \"$TUF_ROOT_PRIVATE_KEY\"",
+		"go run ./cmd/tuf-metadata",
+		"--targets-expires",
+		"--snapshot-expires",
+		"--timestamp-expires",
+		"name: tuf-registry-",
+		"path: dist/tuf/*.json",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks TUF registry marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-package-managers",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
@@ -119,6 +119,51 @@
       "pattern": "^install --forc$",
       "replacement": "install --force",
       "cause": "Homebrew flag spelling typo",
+      "risk": "high",
+      "risk_rationale": "may download and modify installed packages"
+    },
+    {
+      "id": "npm-install-package-path",
+      "command": "npm",
+      "pattern": "^install \\./pakcage$",
+      "replacement": "install ./package",
+      "cause": "Local package directory path typo",
+      "risk": "high",
+      "risk_rationale": "may modify dependencies and run install scripts"
+    },
+    {
+      "id": "npm-install-package-manifest",
+      "command": "npm",
+      "pattern": "^install \\./pakcage\\.json$",
+      "replacement": "install ./package.json",
+      "cause": "Local package manifest path typo",
+      "risk": "high",
+      "risk_rationale": "may modify dependencies and run install scripts"
+    },
+    {
+      "id": "yarn-install-cwd-package",
+      "command": "yarn",
+      "pattern": "^install --cwd \\./pakcage$",
+      "replacement": "install --cwd ./package",
+      "cause": "Project directory path typo",
+      "risk": "high",
+      "risk_rationale": "may modify dependencies and run install scripts"
+    },
+    {
+      "id": "pnpm-install-dir-package",
+      "command": "pnpm",
+      "pattern": "^install --dir \\./pakcage$",
+      "replacement": "install --dir ./package",
+      "cause": "Project directory path typo",
+      "risk": "high",
+      "risk_rationale": "may modify dependencies and run install scripts"
+    },
+    {
+      "id": "brew-install-formual",
+      "command": "brew",
+      "pattern": "^install \\./Formual$",
+      "replacement": "install ./Formula",
+      "cause": "Local Homebrew formula path typo",
       "risk": "high",
       "risk_rationale": "may download and modify installed packages"
     }

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "npm-install-package-path", "command": "npm", "input": "install ./pakcage", "rule_id": "npm-install-package-path"},
+    {"id": "npm-install-package-manifest", "command": "npm", "input": "install ./pakcage.json", "rule_id": "npm-install-package-manifest"},
+    {"id": "yarn-install-cwd-package", "command": "yarn", "input": "install --cwd ./pakcage", "rule_id": "yarn-install-cwd-package"},
+    {"id": "pnpm-install-dir-package", "command": "pnpm", "input": "install --dir ./pakcage", "rule_id": "pnpm-install-dir-package"},
+    {"id": "brew-install-formual", "command": "brew", "input": "install ./Formual", "rule_id": "brew-install-formual"}
+  ]
+}

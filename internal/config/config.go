@@ -95,15 +95,19 @@ func Load(paths Paths) (Config, error) {
 			}
 		}
 	}
-	values, err := sessionValues(paths)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg, err = ApplySessionOverrides(cfg, values)
+	cfg, err = applySessionPrecedence(cfg, paths)
 	if err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func applySessionPrecedence(base Config, paths Paths) (Config, error) {
+	values, err := sessionValues(paths)
+	if err != nil {
+		return Config{}, err
+	}
+	return ApplySessionOverrides(base, values)
 }
 
 var sessionOverrideKeys = map[string]string{

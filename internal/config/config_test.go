@@ -176,6 +176,41 @@ func TestLoadAppliesSessionOverrides(t *testing.T) {
 	}
 }
 
+func TestSessionOverridesTakePrecedenceOverApprovedProjectAndGlobalConfig(t *testing.T) {
+	root := t.TempDir()
+	configHome := filepath.Join(root, "config")
+	globalPath := filepath.Join(configHome, "close-enough", "config.json")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalPath, []byte(`{"mode":"hint","auto_apply_safe":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(root, "project")
+	writeProjectConfig(t, project, "rewrite", true)
+	projectPath := filepath.Join(project, ".close-enough", "config.json")
+	if err := os.WriteFile(projectPath, []byte(`{"mode":"rewrite","auto_apply_safe":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(Paths{
+		Home: func() (string, error) { return root, nil },
+		CWD:  func() (string, error) { return project, nil },
+		Env: func(key string) string {
+			if key == "XDG_CONFIG_HOME" {
+				return configHome
+			}
+			return ""
+		},
+		Environ: func() []string { return []string{"CLOSE_ENOUGH_MODE=interrupt", "CLOSE_ENOUGH_AUTO_APPLY_SAFE=false"} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != "interrupt" || cfg.AutoApplySafe {
+		t.Fatalf("session precedence configuration = %#v", cfg)
+	}
+}
+
 func TestLoadDiscoversNearestTrustedProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, "parent")

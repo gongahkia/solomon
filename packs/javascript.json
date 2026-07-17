@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-javascript",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
@@ -85,6 +85,42 @@
       "cause": "Legacy Node.js flag name",
       "risk": "unknown",
       "risk_rationale": "changes ECMAScript module loading behavior"
+    },
+    {
+      "id": "node-entrypoint-inde",
+      "command": "node",
+      "pattern": "^\\./src/inde\\.js$",
+      "replacement": "./src/index.js",
+      "cause": "JavaScript entrypoint path typo",
+      "risk": "high",
+      "risk_rationale": "may execute project code"
+    },
+    {
+      "id": "bun-run-entrypoint-inde",
+      "command": "bun",
+      "pattern": "^run \\./src/inde\\.ts$",
+      "replacement": "run ./src/index.ts",
+      "cause": "TypeScript entrypoint path typo",
+      "risk": "high",
+      "risk_rationale": "may execute project code"
+    },
+    {
+      "id": "deno-run-entrypoint-tss",
+      "command": "deno",
+      "pattern": "^run \\./main\\.tss$",
+      "replacement": "run ./main.ts",
+      "cause": "TypeScript entrypoint extension typo",
+      "risk": "high",
+      "risk_rationale": "may execute local or remote code"
+    },
+    {
+      "id": "deno-task-config-josn",
+      "command": "deno",
+      "pattern": "^task --config deno\\.josn$",
+      "replacement": "task --config deno.json",
+      "cause": "Deno project configuration path typo",
+      "risk": "high",
+      "risk_rationale": "may execute project task code"
     }
   ]
 }

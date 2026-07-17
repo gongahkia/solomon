@@ -406,6 +406,33 @@ func TestJavaScriptFlagRepairRules(t *testing.T) {
 	}
 }
 
+func TestJavaScriptPathRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "javascript.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "javascript-path-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"node-entrypoint-inde", "bun-run-entrypoint-inde", "deno-run-entrypoint-tss", "deno-task-config-josn"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched JavaScript path corpus")
+	}
+}
+
 func TestPackageManagerSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "package-managers.json"))
 	if err != nil {

@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"rust-regression","version":"1.0.0","publisher":"close-enough","rules":[{"id":"cargo-build-buid","command":"cargo","pattern":"^buid$","replacement":"build","cause":"Cargo subcommand typo","risk":"high","risk_rationale":"may compile code and run build scripts"}]}

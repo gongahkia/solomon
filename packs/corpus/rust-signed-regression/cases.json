@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"cargo-build-buid","command":"cargo","input":"buid","rule_id":"cargo-build-buid"}]}

@@ -1,0 +1,5 @@
+[
+  {"name":"current","version":1,"record":true},
+  {"name":"legacy","version":0,"record":false},
+  {"name":"future","version":2,"record":false}
+]

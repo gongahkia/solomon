@@ -7,8 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/gongahkia/close-enough/internal/diagnose"
 )
 
 type compatibilityFixture struct {
@@ -24,6 +27,12 @@ type compatibilityFixture struct {
 type commandInjectionFixture struct {
 	Name    string `json:"name"`
 	Payload string `json:"payload"`
+}
+
+type adapterProtocolFixture struct {
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+	Record  bool   `json:"record"`
 }
 
 func TestResolveAction(t *testing.T) {
@@ -320,6 +329,58 @@ func TestCommandInjectionRegressionCorpus(t *testing.T) {
 				runCommandInjectionFixture(t, shellName, shellPath, fixture)
 			})
 		}
+	}
+}
+
+func TestAdapterProtocolCrossVersionContracts(t *testing.T) {
+	data, err := os.ReadFile("testdata/adapter_protocol_versions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []adapterProtocolFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("adapter protocol version corpus is empty")
+	}
+	version := strconv.Itoa(diagnose.AdapterProtocolVersion)
+	guards := map[string]string{
+		"zsh":        `[[ "$version" == "` + version + `" ]] || return 0`,
+		"bash":       `[ "$version" = ` + version + ` ] || return`,
+		"fish":       `if test "$fields[1]" != ` + version,
+		"powershell": `$decision.version -ne ` + version,
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Version < 0 {
+				t.Fatalf("invalid adapter protocol fixture: %#v", fixture)
+			}
+			decision := diagnose.Decision{Version: fixture.Version, Action: "hint", Suggestion: "git status", Confidence: 0.90, Risk: diagnose.RiskSafe}
+			record, err := decision.Record()
+			if (err == nil) != fixture.Record {
+				t.Fatalf("Record(version=%d) error = %v, want record=%t", fixture.Version, err, fixture.Record)
+			}
+			if fixture.Record && !strings.HasPrefix(record, version+"\t") {
+				t.Fatalf("record = %q, want protocol version %q", record, version)
+			}
+			data, err := decision.JSON("pre")
+			if (err == nil) != fixture.Record {
+				t.Fatalf("JSON(version=%d) error = %v, want record=%t", fixture.Version, err, fixture.Record)
+			}
+			if fixture.Record && !strings.Contains(string(data), `"version":`+version) {
+				t.Fatalf("JSON = %q, want protocol version %q", data, version)
+			}
+			for shellName, guard := range guards {
+				script, err := Script(shellName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(script, guard) {
+					t.Fatalf("%s adapter lacks protocol guard %q", shellName, guard)
+				}
+			}
+		})
 	}
 }
 

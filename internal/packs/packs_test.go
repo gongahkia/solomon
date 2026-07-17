@@ -1,6 +1,7 @@
 package packs
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -392,5 +393,47 @@ func TestVerifyDetachedPackSignature(t *testing.T) {
 	}
 	if err := VerifyDetachedFiles(path, signaturePath, publicKey); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPublisherKeyringLifecycle(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keyring Keyring
+	if err := keyring.Add("close-enough", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyring.Add("close-enough", publicKey); err == nil {
+		t.Fatal("accepted duplicate publisher")
+	}
+	path := filepath.Join(t.TempDir(), "keyring.json")
+	if err := WriteKeyring(path, keyring); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadKeyring(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, ok := loaded.PublicKey("close-enough")
+	if !ok || !bytes.Equal(key, publicKey) || !loaded.Remove("close-enough") || loaded.Remove("close-enough") {
+		t.Fatalf("keyring state = %#v", loaded)
+	}
+}
+
+func TestKeyringRejectsMalformedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keyring.json")
+	for _, data := range [][]byte{
+		[]byte(`{"publishers":[{"id":"close-enough","public_key":"not-base64"}]}`),
+		[]byte(`{"publishers":[{"id":"Close","public_key":""}]}`),
+		[]byte(`{"publishers":[],"unknown":true}`),
+	} {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadKeyring(path); err == nil {
+			t.Fatalf("accepted invalid keyring %s", data)
+		}
 	}
 }

@@ -586,6 +586,45 @@ func TestSignedGitPackFixtureAndRegressionCorpus(t *testing.T) {
 	}
 }
 
+func TestSignedPackageManagerPackFixtureAndRegressionCorpus(t *testing.T) {
+	directory := filepath.Join("..", "..", "packs", "fixtures", "signed")
+	keyring, err := LoadKeyring(filepath.Join(directory, "keyring.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(filepath.Join(directory, "package-manager-regression.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(mustReadFile(t, filepath.Join(directory, "package-manager-regression.sig")))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := Load(filepath.Join(directory, "package-manager-regression.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "package-manager-signed-regression"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+		t.Fatal("accepted tampered signed package manager fixture")
+	}
+	if !keyring.Revoke("close-enough") {
+		t.Fatal("did not revoke fixture publisher")
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+		t.Fatal("accepted revoked signed package manager fixture")
+	}
+}
+
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

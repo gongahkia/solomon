@@ -68,3 +68,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
           & .\close-enough.exe check
           if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }
+
+  race-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -race -count=1 -timeout=2m ./...

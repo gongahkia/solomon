@@ -1,0 +1,9 @@
+[
+  {"name":"secure-project","config":"file","config_mode":"0600","marker":"file","marker_mode":"0600","directory_mode":"0700","trusted":true,"mode":"rewrite"},
+  {"name":"world-readable-config","config":"file","config_mode":"0644","marker":"file","marker_mode":"0600","directory_mode":"0700","trusted":false,"mode":"hint"},
+  {"name":"world-readable-marker","config":"file","config_mode":"0600","marker":"file","marker_mode":"0644","directory_mode":"0700","trusted":false,"mode":"hint"},
+  {"name":"group-writable-directory","config":"file","config_mode":"0600","marker":"file","marker_mode":"0600","directory_mode":"0770","trusted":false,"mode":"hint"},
+  {"name":"missing-marker","config":"file","config_mode":"0600","marker":"missing","directory_mode":"0700","trusted":false,"mode":"hint"},
+  {"name":"symlink-marker","config":"file","config_mode":"0600","marker":"symlink","directory_mode":"0700","trusted":false,"mode":"hint"},
+  {"name":"symlink-config","config":"symlink","marker":"file","marker_mode":"0600","directory_mode":"0700","trusted":false,"mode":"hint"}
+]

@@ -305,6 +305,10 @@ func trustedProject(path string) bool {
 	if !capabilities.Supports(filesystem.RestrictivePermissions) || !capabilities.Supports(filesystem.OwnerVerification) {
 		return false
 	}
+	configInfo, err := os.Lstat(path)
+	if err != nil || !configInfo.Mode().IsRegular() || !hasSecurePermissions(path, configInfo, false) {
+		return false
+	}
 	marker := filepath.Join(filepath.Dir(path), "trusted")
 	markerInfo, err := os.Lstat(marker)
 	if err != nil || !markerInfo.Mode().IsRegular() || !hasSecurePermissions(marker, markerInfo, false) {
@@ -315,7 +319,7 @@ func trustedProject(path string) bool {
 	if err != nil || !directoryInfo.IsDir() || !hasSecurePermissions(directory, directoryInfo, true) {
 		return false
 	}
-	return ownedByCurrentUser(marker, markerInfo) && ownedByCurrentUser(directory, directoryInfo)
+	return ownedByCurrentUser(path, configInfo) && ownedByCurrentUser(marker, markerInfo) && ownedByCurrentUser(directory, directoryInfo)
 }
 
 func mergeApprovedProject(base Config, path string) (Config, error) {

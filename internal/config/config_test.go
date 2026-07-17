@@ -2,11 +2,13 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,6 +16,17 @@ import (
 	"github.com/gongahkia/close-enough/internal/featuregate"
 	"github.com/gongahkia/close-enough/internal/history"
 )
+
+type trustedProjectFixture struct {
+	Name          string `json:"name"`
+	Config        string `json:"config"`
+	ConfigMode    string `json:"config_mode"`
+	Marker        string `json:"marker"`
+	MarkerMode    string `json:"marker_mode"`
+	DirectoryMode string `json:"directory_mode"`
+	Trusted       bool   `json:"trusted"`
+	Mode          string `json:"mode"`
+}
 
 func TestSetValidatesMode(t *testing.T) {
 	cfg := Default()
@@ -418,6 +431,96 @@ func TestTrustedProjectRejectsSymlinkMarker(t *testing.T) {
 	if trustedProject(configPath) {
 		t.Fatal("expected symlink marker to be rejected")
 	}
+}
+
+func TestTrustedProjectPermissionRegressionCorpus(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission mutation uses POSIX mode bits")
+	}
+	data, err := os.ReadFile("testdata/trusted_project_permissions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []trustedProjectFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("trusted project corpus is empty")
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Config == "" || fixture.Marker == "" || fixture.DirectoryMode == "" || fixture.Mode == "" {
+				t.Fatalf("invalid trusted project fixture: %#v", fixture)
+			}
+			directory := t.TempDir()
+			configDirectory := filepath.Join(directory, ".close-enough")
+			if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(configDirectory, "config.json")
+			target := filepath.Join(directory, "target")
+			if fixture.Config == "file" {
+				mode := projectPermission(t, fixture.ConfigMode)
+				if err := os.WriteFile(configPath, []byte(`{"mode":"rewrite"}`), mode); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(configPath, mode); err != nil {
+					t.Fatal(err)
+				}
+			} else if fixture.Config == "symlink" {
+				if err := os.WriteFile(target, []byte(`{"mode":"rewrite"}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, configPath); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Fatalf("unknown config type %q", fixture.Config)
+			}
+			marker := filepath.Join(configDirectory, "trusted")
+			switch fixture.Marker {
+			case "file":
+				mode := projectPermission(t, fixture.MarkerMode)
+				if err := os.WriteFile(marker, nil, mode); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(marker, mode); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				if err := os.WriteFile(target, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, marker); err != nil {
+					t.Fatal(err)
+				}
+			case "missing":
+			default:
+				t.Fatalf("unknown marker type %q", fixture.Marker)
+			}
+			if err := os.Chmod(configDirectory, projectPermission(t, fixture.DirectoryMode)); err != nil {
+				t.Fatal(err)
+			}
+			if got := trustedProject(configPath); got != fixture.Trusted {
+				t.Fatalf("trustedProject(%q) = %t, want %t", configPath, got, fixture.Trusted)
+			}
+			base := Default()
+			merged, err := mergeApprovedProject(base, configPath)
+			if err != nil || merged.Mode != fixture.Mode {
+				t.Fatalf("mergeApprovedProject() = %#v, %v; want mode %q", merged, err, fixture.Mode)
+			}
+		})
+	}
+}
+
+func projectPermission(t *testing.T, value string) os.FileMode {
+	t.Helper()
+	parsed, err := strconv.ParseUint(value, 8, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return os.FileMode(parsed)
 }
 
 func loadFromDirectory(t *testing.T, directory string) (Config, error) {

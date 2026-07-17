@@ -108,8 +108,9 @@ _close_enough_last_command=''
 _close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }
 trap _close_enough_debug DEBUG
 _close_enough_prompt() {
-  local status=$?
-  [ "$status" -ne 0 ] && [ -n "$_close_enough_last_command" ] && command close-enough check --stage post --format plain --command "$_close_enough_last_command" 2>/dev/null
+  local status=$? command="$_close_enough_last_command"
+  _close_enough_last_command=''
+  [ "$status" -ne 0 ] && [ -n "$command" ] && command close-enough check --stage post --format plain --command "$command" 2>/dev/null
 }
 PROMPT_COMMAND="_close_enough_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 fi

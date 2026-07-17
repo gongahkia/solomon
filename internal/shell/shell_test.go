@@ -314,6 +314,24 @@ func TestBashRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	}
 }
 
+func TestBashPostFailureConsumesCapturedCommand(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := "_close_enough_prompt() {"
+	start := strings.Index(script, prompt)
+	if start < 0 {
+		t.Fatalf("bash post-failure prompt hook is missing: %q", script)
+	}
+	branch := script[start:]
+	consume := "_close_enough_last_command=''"
+	trigger := `--stage post --format plain --command "$command"`
+	if !strings.Contains(script, "_close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+		t.Fatalf("bash post-failure hook does not consume command safely: %q", branch)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

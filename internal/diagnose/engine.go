@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -121,7 +122,7 @@ func (e Engine) commandDecision(words []string) Decision {
 	candidates := executableNames(e.options.Path)
 	for _, position := range commandPositions(words) {
 		word := words[position]
-		if strings.Contains(word, "/") || commandExists(word, e.options.Path) {
+		if isPathQualified(word, runtime.GOOS) || commandExists(word, e.options.Path) {
 			continue
 		}
 		best, distance := nearest(word, candidates)
@@ -308,9 +309,14 @@ func assignmentWord(value string) bool {
 }
 
 func executableNames(pathValue string) []string {
+	return executableNamesFor(pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
+}
+
+func executableNamesFor(pathValue, platform, pathExt string) []string {
+	cacheKey := platform + "\x00" + pathExt + "\x00" + pathValue
 	signature := pathSignature(pathValue)
 	executableCache.RLock()
-	entry, ok := executableCache.entries[pathValue]
+	entry, ok := executableCache.entries[cacheKey]
 	executableCache.RUnlock()
 	if ok && entry.signature == signature {
 		return append([]string(nil), entry.names...)
@@ -326,8 +332,8 @@ func executableNames(pathValue string) []string {
 				continue
 			}
 			info, err := entry.Info()
-			if err == nil && info.Mode()&0o111 != 0 {
-				seen[entry.Name()] = struct{}{}
+			if err == nil && isExecutableCandidate(entry.Name(), info.Mode(), platform, pathExt) {
+				seen[normalizeExecutableName(entry.Name(), platform, pathExt)] = struct{}{}
 			}
 		}
 	}
@@ -337,13 +343,18 @@ func executableNames(pathValue string) []string {
 	}
 	sort.Strings(result)
 	executableCache.Lock()
-	executableCache.entries[pathValue] = executableCacheEntry{signature: signature, names: append([]string(nil), result...)}
+	executableCache.entries[cacheKey] = executableCacheEntry{signature: signature, names: append([]string(nil), result...)}
 	executableCache.Unlock()
 	return result
 }
 
 func commandExists(name, pathValue string) bool {
-	names := executableNames(pathValue)
+	return commandExistsFor(name, pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
+}
+
+func commandExistsFor(name, pathValue, platform, pathExt string) bool {
+	names := executableNamesFor(pathValue, platform, pathExt)
+	name = normalizeExecutableName(name, platform, pathExt)
 	index := sort.SearchStrings(names, name)
 	return index < len(names) && names[index] == name
 }
@@ -371,6 +382,59 @@ func pathSignature(pathValue string) string {
 		signature.WriteByte('\x00')
 	}
 	return signature.String()
+}
+
+func isExecutableCandidate(name string, mode os.FileMode, platform, pathExt string) bool {
+	if platform != "windows" {
+		return mode&0o111 != 0
+	}
+	_, ok := executableExtension(name, pathExt)
+	return ok
+}
+
+func normalizeExecutableName(name, platform, pathExt string) string {
+	if platform != "windows" {
+		return name
+	}
+	if extension, ok := executableExtension(name, pathExt); ok {
+		name = name[:len(name)-len(extension)]
+	}
+	return strings.ToLower(name)
+}
+
+func executableExtension(name, pathExt string) (string, bool) {
+	lowerName := strings.ToLower(name)
+	for _, extension := range executableExtensions(pathExt) {
+		if strings.HasSuffix(lowerName, extension) {
+			return extension, true
+		}
+	}
+	return "", false
+}
+
+func executableExtensions(pathExt string) []string {
+	if pathExt == "" {
+		pathExt = ".COM;.EXE;.BAT;.CMD"
+	}
+	extensions := []string{}
+	for _, extension := range strings.Split(pathExt, ";") {
+		extension = strings.TrimSpace(extension)
+		if extension == "" {
+			continue
+		}
+		if !strings.HasPrefix(extension, ".") {
+			extension = "." + extension
+		}
+		extensions = append(extensions, strings.ToLower(extension))
+	}
+	return extensions
+}
+
+func isPathQualified(value, platform string) bool {
+	if platform == "windows" {
+		return strings.ContainsAny(value, "/\\")
+	}
+	return strings.Contains(value, "/")
 }
 
 func nearest(value string, candidates []string) (string, int) {

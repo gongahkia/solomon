@@ -168,6 +168,29 @@ func TestExecutableIndexCachesAndInvalidates(t *testing.T) {
 	}
 }
 
+func TestExecutableCandidateNormalizationAcrossPlatforms(t *testing.T) {
+	InvalidateExecutableIndex()
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "Git.EXE"), []byte("binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "tool.cmd"), []byte("script"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "README.txt"), []byte("text"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := executableNamesFor(directory, "windows", ".EXE;.CMD"); !slices.Equal(got, []string{"git", "tool"}) {
+		t.Fatalf("windows candidates = %#v", got)
+	}
+	if !commandExistsFor("GIT.EXE", directory, "windows", ".EXE;.CMD") || !commandExistsFor("git", directory, "windows", ".EXE;.CMD") || commandExistsFor("README.txt", directory, "windows", ".EXE;.CMD") {
+		t.Fatal("unexpected Windows candidate matching")
+	}
+	if got := executableNamesFor(directory, "linux", ""); !slices.Equal(got, []string{"README.txt"}) {
+		t.Fatalf("unix candidates = %#v", got)
+	}
+}
+
 func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")

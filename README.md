@@ -50,6 +50,8 @@ Explanation templates use the same capture syntax and reject control characters.
 
 Every pack rule must declare a risk class and static risk rationale.
 
+Pack fixture schema v1 runs declarative command/input cases against expected rule IDs without executing manifest content.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

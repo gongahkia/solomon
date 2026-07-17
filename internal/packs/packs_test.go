@@ -181,3 +181,39 @@ func TestRiskMetadataValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestFixtureLoadAndRun(t *testing.T) {
+	path := t.TempDir() + "/fixture.json"
+	data := []byte(`{"schema_version":1,"cases":[{"id":"typo","command":"git","input":"sttaus","rule_id":"git-status"},{"id":"no-match","command":"git","input":"log"}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := LoadFixture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	if err := RunFixture(pack, fixture); err != nil {
+		t.Fatal(err)
+	}
+	fixture.Cases[0].RuleID = "missing"
+	if err := RunFixture(pack, fixture); err == nil {
+		t.Fatal("expected fixture mismatch")
+	}
+}
+
+func TestFixtureRejectsUnknownAndInvalidSchemas(t *testing.T) {
+	path := t.TempDir() + "/fixture.json"
+	for _, data := range [][]byte{
+		[]byte(`{"schema_version":1,"cases":[{"id":"case","command":"git","input":"status","unknown":true}]}`),
+		[]byte(`{"schema_version":2,"cases":[{"id":"case","command":"git","input":"status"}]}`),
+	} {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fixture, err := LoadFixture(path)
+		if err == nil && fixture.Validate() == nil {
+			t.Fatalf("accepted invalid fixture %s", data)
+		}
+	}
+}

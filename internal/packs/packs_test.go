@@ -427,6 +427,33 @@ func TestPythonFlagRepairRules(t *testing.T) {
 	}
 }
 
+func TestPythonPathRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "python-path-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"python-entrypoint-maine", "pytest-tests-test", "pip-install-requiremnts", "uv-run-project-projet"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Python path corpus")
+	}
+}
+
 func TestJavaScriptSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "javascript.json"))
 	if err != nil {

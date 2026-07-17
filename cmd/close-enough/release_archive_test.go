@@ -18,6 +18,10 @@ func TestReleaseArchiveScriptLinuxARM64(t *testing.T) {
 	testReleaseArchive(t, "linux-arm64")
 }
 
+func TestReleaseArchiveScriptDarwinARM64(t *testing.T) {
+	testReleaseArchive(t, "darwin-arm64")
+}
+
 func testReleaseArchive(t *testing.T, target string) {
 	t.Helper()
 	directory := t.TempDir()

@@ -366,14 +366,43 @@ func TestJavaScriptSubcommandTypoRules(t *testing.T) {
 	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
 		t.Fatalf("bundled JavaScript pack = %#v", bundledPack)
 	}
+	risk := map[string]diagnose.Risk{}
 	for _, rule := range pack.Rules {
-		if rule.Risk != diagnose.RiskHigh {
-			t.Fatalf("risk for %s = %q, want high", rule.ID, rule.Risk)
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"bun-install-instal", "bun-run-rnu", "deno-run-rn", "deno-test-tes", "npx-create-creat"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
 		}
 	}
 	corpus[0].Cases[0].RuleID = "missing"
 	if err := RunFixtureCorpus(pack, corpus); err == nil {
 		t.Fatal("accepted mismatched JavaScript corpus")
+	}
+}
+
+func TestJavaScriptFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "javascript.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "javascript-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["node-version-verison"] != diagnose.RiskSafe || risk["bun-version-verison"] != diagnose.RiskSafe || risk["deno-version-verison"] != diagnose.RiskSafe || risk["node-no-experimental-require-module"] != diagnose.RiskUnknown {
+		t.Fatalf("JavaScript flag risks = %#v", risk)
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched JavaScript flag corpus")
 	}
 }
 

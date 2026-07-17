@@ -229,6 +229,40 @@ func TestFixtureRejectsUnknownAndInvalidSchemas(t *testing.T) {
 	}
 }
 
+func TestFixtureCorpusLoadAndRun(t *testing.T) {
+	directory := t.TempDir()
+	fixtures := map[string]string{
+		"zeta.json":  `{"schema_version":1,"cases":[{"id":"zeta","command":"git","input":"log"}]}`,
+		"alpha.json": `{"schema_version":1,"cases":[{"id":"alpha","command":"git","input":"sttaus","rule_id":"git-status"}]}`,
+	}
+	for name, data := range fixtures {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	corpus, err := LoadFixtureCorpus(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(corpus) != 2 || corpus[0].Cases[0].ID != "alpha" {
+		t.Fatalf("corpus = %#v", corpus)
+	}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched fixture corpus")
+	}
+	if err := os.WriteFile(filepath.Join(directory, "invalid.json"), []byte(`{"schema_version":1,"cases":[{"id":"bad","command":"git","unknown":true}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFixtureCorpus(directory); err == nil {
+		t.Fatal("accepted invalid fixture corpus")
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

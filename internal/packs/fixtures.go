@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 const FixtureSchemaVersionV1 = 1
@@ -40,6 +41,45 @@ func LoadFixture(path string) (Fixture, error) {
 	return fixture, nil
 }
 
+func LoadFixtureCorpus(directory string) ([]Fixture, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	fixtures := make([]Fixture, 0, len(entries))
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("fixture corpus entry %q is not a regular file", entry.Name())
+		}
+		fixture, err := LoadFixture(filepath.Join(directory, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("load fixture %q: %w", entry.Name(), err)
+		}
+		if err := fixture.Validate(); err != nil {
+			return nil, fmt.Errorf("validate fixture %q: %w", entry.Name(), err)
+		}
+		for _, test := range fixture.Cases {
+			if _, exists := seen[test.ID]; exists {
+				return nil, fmt.Errorf("duplicate fixture case %q", test.ID)
+			}
+			seen[test.ID] = struct{}{}
+		}
+		fixtures = append(fixtures, fixture)
+	}
+	if len(fixtures) == 0 {
+		return nil, errors.New("fixture corpus must contain at least one JSON fixture")
+	}
+	return fixtures, nil
+}
+
 func (f Fixture) Validate() error {
 	if f.SchemaVersion != FixtureSchemaVersionV1 {
 		return fmt.Errorf("unsupported fixture schema version %d", f.SchemaVersion)
@@ -61,21 +101,35 @@ func (f Fixture) Validate() error {
 }
 
 func RunFixture(pack Pack, fixture Fixture) error {
-	if err := fixture.Validate(); err != nil {
-		return err
+	return RunFixtureCorpus(pack, []Fixture{fixture})
+}
+
+func RunFixtureCorpus(pack Pack, fixtures []Fixture) error {
+	if len(fixtures) == 0 {
+		return errors.New("fixture corpus must contain at least one fixture")
 	}
 	compiled, err := Compile(pack)
 	if err != nil {
 		return err
 	}
-	for _, fixture := range fixture.Cases {
-		rule, matched := compiled.Match(fixture.Command, fixture.Input)
-		actual := ""
-		if matched {
-			actual = rule.ID
+	seen := map[string]struct{}{}
+	for _, fixture := range fixtures {
+		if err := fixture.Validate(); err != nil {
+			return err
 		}
-		if actual != fixture.RuleID {
-			return fmt.Errorf("fixture case %q matched %q, want %q", fixture.ID, actual, fixture.RuleID)
+		for _, test := range fixture.Cases {
+			if _, exists := seen[test.ID]; exists {
+				return fmt.Errorf("duplicate fixture case %q", test.ID)
+			}
+			seen[test.ID] = struct{}{}
+			rule, matched := compiled.Match(test.Command, test.Input)
+			actual := ""
+			if matched {
+				actual = rule.ID
+			}
+			if actual != test.RuleID {
+				return fmt.Errorf("fixture case %q matched %q, want %q", test.ID, actual, test.RuleID)
+			}
 		}
 	}
 	return nil

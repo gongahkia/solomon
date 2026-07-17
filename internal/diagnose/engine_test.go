@@ -132,12 +132,41 @@ func TestRepairClassesApplyTheirConfidenceThresholds(t *testing.T) {
 func TestRewriteNeedsVeryHighConfidence(t *testing.T) {
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg}).Check("git statsu", "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.Action != "rewrite" {
 		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestSafeAutoApplyPolicy(t *testing.T) {
+	base := Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe}
+	for _, test := range []struct {
+		name     string
+		mode     string
+		enabled  bool
+		decision Decision
+		want     bool
+	}{
+		{"safe opted in", "rewrite", true, base, true},
+		{"not opted in", "rewrite", false, base, false},
+		{"wrong mode", "hint", true, base, false},
+		{"high risk", "rewrite", true, Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskHigh}, false},
+		{"unknown risk", "rewrite", true, Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskUnknown}, false},
+		{"incomplete", "rewrite", true, Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe, Incomplete: true}, false},
+		{"below floor", "rewrite", true, Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.79, Risk: RiskSafe}, false},
+		{"unknown class", "rewrite", true, Decision{Suggestion: "git status", Class: RepairClass("unknown"), Confidence: 0.90, Risk: RiskSafe}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Mode, cfg.AutoApplySafe = test.mode, test.enabled
+			if got := New(Options{Config: cfg}).safeAutoApply(test.decision); got != test.want {
+				t.Fatalf("safeAutoApply() = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 
@@ -195,6 +224,7 @@ func TestFilesystemMutationRepairNeverRewrites(t *testing.T) {
 	writeExecutable(t, dir, "mv")
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("mvv source target", "pre")
 	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
 		t.Fatalf("unsafe filesystem decision: %#v, %v", decision, err)
@@ -240,6 +270,7 @@ func TestPrivilegeEscalationRepairNeverRewrites(t *testing.T) {
 	writeExecutable(t, dir, "sudo")
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("sudoo id", "pre")
 	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
 		t.Fatalf("unsafe privilege decision: %#v, %v", decision, err)
@@ -285,6 +316,7 @@ func TestNetworkEffectRepairNeverRewrites(t *testing.T) {
 	writeExecutable(t, dir, "curl")
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("crul https://example.invalid", "pre")
 	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
 		t.Fatalf("unsafe network decision: %#v, %v", decision, err)
@@ -343,6 +375,7 @@ func TestUnknownRiskRepairNeverRewrites(t *testing.T) {
 	writeExecutable(t, dir, "danger")
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("denger target", "pre")
 	if err != nil || decision.Risk != RiskUnknown || decision.Action == "rewrite" {
 		t.Fatalf("unknown-risk decision: %#v, %v", decision, err)
@@ -524,6 +557,7 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	writeExecutable(t, dir, "git")
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
 	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("gti --token=super-secret", "pre")
 	if err != nil {
 		t.Fatal(err)

@@ -121,7 +121,7 @@ func noDecision() Decision {
 }
 
 func (e Engine) applyMode(decision Decision) Decision {
-	if e.options.Config.Mode == "rewrite" && decision.Risk == RiskSafe && decision.Confidence >= 0.80 {
+	if e.safeAutoApply(decision) {
 		decision.Action = "rewrite"
 		return decision
 	}
@@ -131,6 +131,16 @@ func (e Engine) applyMode(decision Decision) Decision {
 	}
 	decision.Action = "hint"
 	return decision
+}
+
+func (e Engine) safeAutoApply(decision Decision) bool {
+	return e.options.Config.Mode == "rewrite" &&
+		e.options.Config.AutoApplySafe &&
+		decision.Suggestion != "" &&
+		!decision.Incomplete &&
+		decision.Risk == RiskSafe &&
+		decision.Confidence >= 0.80 &&
+		meetsConfidenceThreshold(decision.Class, decision.Confidence)
 }
 
 func (e Engine) commandDecision(words []string) Decision {

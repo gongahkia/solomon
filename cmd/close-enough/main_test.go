@@ -106,6 +106,48 @@ func TestCheckJSONIncludesStageWithoutRawCommand(t *testing.T) {
 	}
 }
 
+func TestChecksumCommandGeneratesAndVerifiesManifest(t *testing.T) {
+	artifact := filepath.Join(t.TempDir(), "close-enough_v1.2.3_linux_amd64.tar.gz")
+	if err := os.WriteFile(artifact, []byte("artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var generated strings.Builder
+	if err := run([]string{"checksum", "generate", "--file", artifact}, &generated, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(t.TempDir(), "SHA256SUMS")
+	if err := os.WriteFile(manifest, []byte(generated.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"checksum", "verify", "--file", artifact, "--manifest", manifest}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChecksumCommandRejectsTamperingAndInvalidInput(t *testing.T) {
+	artifact := filepath.Join(t.TempDir(), "release.tar.gz")
+	if err := os.WriteFile(artifact, []byte("artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var generated strings.Builder
+	if err := run([]string{"checksum", "generate", "--file", artifact}, &generated, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(t.TempDir(), "SHA256SUMS")
+	if err := os.WriteFile(manifest, []byte(generated.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"checksum", "verify", "--file", artifact, "--manifest", manifest}, io.Discard, io.Discard); clierr.Code(err) != clierr.ExitInput {
+		t.Fatalf("tampered checksum code = %d, want %d", clierr.Code(err), clierr.ExitInput)
+	}
+	if err := run([]string{"checksum", "generate", "--file", filepath.Join(t.TempDir(), "missing")}, io.Discard, io.Discard); clierr.Code(err) != clierr.ExitInput {
+		t.Fatalf("missing checksum code = %d, want %d", clierr.Code(err), clierr.ExitInput)
+	}
+}
+
 func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var output strings.Builder

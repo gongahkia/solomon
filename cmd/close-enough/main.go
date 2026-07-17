@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -88,6 +90,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return packCommand(args[1:], stdout)
 	case "doctor":
 		return doctorCommand(stdout)
+	case "checksum":
+		return checksumCommand(args[1:], stdout)
 	default:
 		return usage(stderr)
 	}
@@ -101,10 +105,111 @@ func versionString() string {
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|pack|doctor|version>"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|pack|doctor|checksum|version>"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
+}
+
+func checksumCommand(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "checksum requires generate or verify")
+	}
+	switch args[0] {
+	case "generate":
+		fs := flag.NewFlagSet("checksum generate", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		file := fs.String("file", "", "artifact file")
+		if err := fs.Parse(args[1:]); err != nil || *file == "" || fs.NArg() != 0 {
+			return clierr.New(clierr.Usage, "checksum generate requires --file")
+		}
+		digest, name, err := checksumFile(*file)
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		_, err = fmt.Fprintf(stdout, "%s  %s\n", digest, name)
+		return clierr.Wrap(clierr.Operation, err)
+	case "verify":
+		fs := flag.NewFlagSet("checksum verify", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		file := fs.String("file", "", "artifact file")
+		manifest := fs.String("manifest", "", "checksum manifest")
+		if err := fs.Parse(args[1:]); err != nil || *file == "" || *manifest == "" || fs.NArg() != 0 {
+			return clierr.New(clierr.Usage, "checksum verify requires --file and --manifest")
+		}
+		if err := verifyChecksumFile(*file, *manifest); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		return nil
+	default:
+		return clierr.New(clierr.Usage, "checksum requires generate or verify")
+	}
+}
+
+func checksumFile(path string) (string, string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("checksum file is not a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), filepath.Base(path), nil
+}
+
+func verifyChecksumFile(path, manifestPath string) error {
+	digest, name, err := checksumFile(path)
+	if err != nil {
+		return err
+	}
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	const maxManifestBytes = 1 << 20
+	if len(manifest) > maxManifestBytes {
+		return fmt.Errorf("checksum manifest exceeds size limit")
+	}
+	expected := ""
+	for index, line := range strings.Split(string(manifest), "\n") {
+		if line == "" && index == len(strings.Split(string(manifest), "\n"))-1 {
+			continue
+		}
+		if strings.ContainsRune(line, '\r') {
+			return fmt.Errorf("checksum manifest contains carriage return")
+		}
+		candidate, artifact, ok := strings.Cut(line, "  ")
+		if !ok || artifact == "" || filepath.Base(artifact) != artifact {
+			return fmt.Errorf("checksum manifest has invalid entry")
+		}
+		decoded, err := hex.DecodeString(candidate)
+		if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != candidate {
+			return fmt.Errorf("checksum manifest has invalid digest")
+		}
+		if artifact != name {
+			continue
+		}
+		if expected != "" {
+			return fmt.Errorf("checksum manifest has duplicate artifact")
+		}
+		expected = candidate
+	}
+	if expected == "" {
+		return fmt.Errorf("checksum manifest does not contain %q", name)
+	}
+	if digest != expected {
+		return fmt.Errorf("checksum mismatch for %q", name)
+	}
+	return nil
 }
 
 func initCommand(args []string, stdout io.Writer) error {

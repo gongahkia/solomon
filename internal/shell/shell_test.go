@@ -1153,7 +1153,26 @@ func TestUnsupportedAdapterFailsClosed(t *testing.T) {
 	if _, err := ContractFor("csh"); err == nil {
 		t.Fatal("unsupported contract succeeded")
 	}
-	if got := Doctor("/bin/csh", "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) {
+	if got := Doctor("/bin/csh", "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) || !slices.Equal(got.RemediationHints, []string{"use zsh, bash, fish, or powershell"}) {
 		t.Fatalf("unsupported doctor result: %#v", got)
+	}
+}
+
+func TestDoctorProvidesAdapterRemediationHints(t *testing.T) {
+	for _, test := range []struct {
+		shell string
+		want  []string
+	}{
+		{"fish", []string{"review custom Enter bindings before initializing the adapter"}},
+		{"pwsh", []string{"install or enable PSReadLine, then initialize the adapter again"}},
+	} {
+		t.Run(test.shell, func(t *testing.T) {
+			if got := Doctor("/bin/"+test.shell, "test").RemediationHints; !slices.Equal(got, test.want) {
+				t.Fatalf("remediation hints = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+	if got := remediationHints([]string{"unknown limitation"}); !slices.Equal(got, []string{"review adapter limitation: unknown limitation"}) {
+		t.Fatalf("fallback remediation hint = %#v", got)
 	}
 }

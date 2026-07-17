@@ -31,13 +31,14 @@ type Contract struct {
 }
 
 type DoctorResult struct {
-	Shell         string   `json:"shell"`
-	OS            string   `json:"os"`
-	Supported     bool     `json:"supported"`
-	Tier          string   `json:"tier,omitempty"`
-	Features      []string `json:"features,omitempty"`
-	Configuration []string `json:"configuration,omitempty"`
-	Limitations   []string `json:"limitations,omitempty"`
+	Shell            string   `json:"shell"`
+	OS               string   `json:"os"`
+	Supported        bool     `json:"supported"`
+	Tier             string   `json:"tier,omitempty"`
+	Features         []string `json:"features,omitempty"`
+	Configuration    []string `json:"configuration,omitempty"`
+	Limitations      []string `json:"limitations,omitempty"`
+	RemediationHints []string `json:"remediation_hints,omitempty"`
 }
 
 func Script(name string) (string, error) {
@@ -62,13 +63,30 @@ func Doctor(shellPath, osName string) DoctorResult {
 	contract, err := ContractFor(name)
 	if err != nil {
 		result.Limitations = []string{"unsupported shell"}
+		result.RemediationHints = []string{"use zsh, bash, fish, or powershell"}
 		return result
 	}
 	result.Supported, result.Tier = true, contract.Tier
 	result.Features = capabilityStrings(contract.Capabilities)
 	result.Configuration = configurationStrings(contract.Configuration)
 	result.Limitations = append([]string(nil), contract.Limitations...)
+	result.RemediationHints = remediationHints(contract.Limitations)
 	return result
+}
+
+func remediationHints(limitations []string) []string {
+	hints := make([]string, 0, len(limitations))
+	for _, limitation := range limitations {
+		switch limitation {
+		case "adapter replaces enter binding":
+			hints = append(hints, "review custom Enter bindings before initializing the adapter")
+		case "requires PSReadLine":
+			hints = append(hints, "install or enable PSReadLine, then initialize the adapter again")
+		default:
+			hints = append(hints, "review adapter limitation: "+limitation)
+		}
+	}
+	return hints
 }
 
 func shellName(value string) string {

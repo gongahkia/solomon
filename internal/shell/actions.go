@@ -47,6 +47,18 @@ func InlineDiagnostic(risk, confidence, suggestion string) string {
 	return fmt.Sprintf("close-enough [%s/%s]: %s", risk, confidence, suggestion)
 }
 
+type ConfirmationDialog struct {
+	Required bool
+	Message  string
+}
+
+func RiskConfirmation(risk, suggestion string) ConfirmationDialog {
+	if risk == "safe" || suggestion == "" {
+		return ConfirmationDialog{}
+	}
+	return ConfirmationDialog{Required: true, Message: fmt.Sprintf("confirm %s-risk repair: %s", risk, suggestion)}
+}
+
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}

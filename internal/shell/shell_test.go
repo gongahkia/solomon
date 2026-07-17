@@ -52,6 +52,15 @@ func TestInlineDiagnostic(t *testing.T) {
 	}
 }
 
+func TestRiskConfirmation(t *testing.T) {
+	if got := RiskConfirmation("safe", "git status"); got.Required || got.Message != "" {
+		t.Fatalf("safe confirmation = %#v", got)
+	}
+	if got := RiskConfirmation("high", "rm -rf target"); !got.Required || got.Message != "confirm high-risk repair: rm -rf target" {
+		t.Fatalf("risky confirmation = %#v", got)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

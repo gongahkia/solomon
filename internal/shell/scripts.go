@@ -35,10 +35,26 @@ function _close_enough_accept_line {
   if ! _close_enough_check; then
     return 0
   fi
-  zle .accept-line
+  zle "$_CLOSE_ENOUGH_ENTER_WIDGET"
 }
 zle -N _close_enough_accept_line
-bindkey '^M' _close_enough_accept_line
+typeset -g _CLOSE_ENOUGH_ENTER_WIDGET=''
+function _close_enough_bind_enter {
+  local binding widget
+  binding="$(bindkey -M main '^M')" || return 0
+  widget="${binding##* }"
+  [[ -z "$widget" || "$widget" == \"* ]] && return 0
+  _CLOSE_ENOUGH_ENTER_WIDGET="$widget"
+  bindkey -M main '^M' _close_enough_accept_line
+}
+function _close_enough_restore_enter {
+  local binding
+  binding="$(bindkey -M main '^M')" || return 0
+  [[ "$binding" == *" _close_enough_accept_line" ]] || return 0
+  bindkey -M main '^M' "$_CLOSE_ENOUGH_ENTER_WIDGET"
+  _CLOSE_ENOUGH_ENTER_WIDGET=''
+}
+_close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
 function _close_enough_precmd {

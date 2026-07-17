@@ -73,7 +73,7 @@ func TestZshInitializationIsGuardedAndRetainsInterrupt(t *testing.T) {
 	guard := "if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then"
 	marker := "typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1"
 	interrupt := `if [[ "$action" == interrupt ]]; then`
-	accept := "zle .accept-line"
+	accept := `zle "$_CLOSE_ENOUGH_ENTER_WIDGET"`
 	if !strings.HasPrefix(script, "# close-enough zsh integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") {
 		t.Fatalf("zsh script lacks an enclosing idempotence guard: %q", script)
 	}
@@ -109,7 +109,7 @@ func TestZshHintRenderingDoesNotSuppressSubmission(t *testing.T) {
 	if start < 0 || end < start || !strings.Contains(script[start:end], "zle -M") || !strings.Contains(script[start:end], "return 0") {
 		t.Fatalf("zsh hint path is not non-blocking: %q", script)
 	}
-	if strings.Index(script, "zle .accept-line") < end || !strings.Contains(script[end:], "return 1") {
+	if strings.Index(script, `zle "$_CLOSE_ENOUGH_ENTER_WIDGET"`) < end || !strings.Contains(script[end:], "return 1") {
 		t.Fatalf("zsh interrupt path does not retain the confirmation boundary: %q", script)
 	}
 }
@@ -126,8 +126,22 @@ func TestZshInterruptReturnsBeforeCommandExecution(t *testing.T) {
 		t.Fatalf("zsh interrupt does not suppress command submission: %q", script)
 	}
 	widgetEnd := strings.Index(script[widgetStart:], "zle -N _close_enough_accept_line")
-	if widgetEnd < 0 || !strings.Contains(script[widgetStart:widgetStart+widgetEnd], "if ! _close_enough_check; then\n    return 0\n  fi\n  zle .accept-line") {
+	if widgetEnd < 0 || !strings.Contains(script[widgetStart:widgetStart+widgetEnd], "if ! _close_enough_check; then\n    return 0\n  fi\n  zle \"$_CLOSE_ENOUGH_ENTER_WIDGET\"") {
 		t.Fatalf("zsh enter widget executes without an explicit suppression gate: %q", script)
+	}
+}
+
+func TestZshEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind := `binding="$(bindkey -M main '^M')" || return 0`
+	widget := `widget="${binding##* }"`
+	install := `bindkey -M main '^M' _close_enough_accept_line`
+	restore := `bindkey -M main '^M' "$_CLOSE_ENOUGH_ENTER_WIDGET"`
+	if !strings.Contains(script, bind) || !strings.Contains(script, widget) || !strings.Contains(script, install) || !strings.Contains(script, `[[ "$binding" == *" _close_enough_accept_line" ]] || return 0`) || !strings.Contains(script, restore) || strings.Contains(script, "bindkey '^M' _close_enough_accept_line") {
+		t.Fatalf("zsh Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
 

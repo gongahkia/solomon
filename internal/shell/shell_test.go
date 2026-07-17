@@ -113,6 +113,77 @@ func TestTruncateForWidth(t *testing.T) {
 	}
 }
 
+func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
+	for _, test := range []struct {
+		shell        string
+		count        string
+		allow        string
+		hint         string
+		interrupt    string
+		interruptEnd string
+		post         string
+	}{
+		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
+		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
+	} {
+		t.Run(test.shell, func(t *testing.T) {
+			script, err := Script(test.shell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(script, test.count) || !strings.Contains(script, test.allow) || !strings.Contains(script, test.post) {
+				t.Fatalf("%s adapter lacks session rate limiting: %q", test.shell, script)
+			}
+			hintStart, interruptStart := strings.Index(script, test.hint), strings.Index(script, test.interrupt)
+			if hintStart < 0 || interruptStart < hintStart || !strings.Contains(script[hintStart:interruptStart], test.allow) {
+				t.Fatalf("%s hint is not rate limited: %q", test.shell, script)
+			}
+			interrupt := script[interruptStart:]
+			if end := strings.Index(interrupt, test.interruptEnd); end < 0 {
+				t.Fatalf("%s interrupt does not return before execution: %q", test.shell, interrupt)
+			} else {
+				interrupt = interrupt[:end]
+			}
+			if strings.Contains(interrupt, test.allow) {
+				t.Fatalf("%s interrupt is rate limited: %q", test.shell, interrupt)
+			}
+		})
+	}
+}
+
+func TestZshRateLimitAllowsFiveHints(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	record := "1\thint\tsafe\t0.90\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
+	harness := `zle() { [[ "$1" == -M ]] && print -r -- "$2"; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; repeat 6 { BUFFER=gti; _close_enough_check; }`
+	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
+	command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "RECORD="+record)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh rate-limit harness: %v: %s", err, output)
+	}
+	if got := strings.Count(string(output), "close-enough [safe/0.90]: git status"); got != 5 {
+		t.Fatalf("rendered hints = %d, want 5: %s", got, output)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

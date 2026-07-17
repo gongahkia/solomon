@@ -22,6 +22,8 @@ Plain diagnostics present confidence as high, medium, low, or unknown; set `disp
 
 Risk output includes a static rationale and never includes raw command arguments.
 
+Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited.
+
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
 Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_REGISTRY_ENABLED`, and `CLOSE_ENOUGH_AUTO_UPDATE_ENABLED`; booleans must be `true` or `false`.

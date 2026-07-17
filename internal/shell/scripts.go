@@ -4,6 +4,12 @@ const zshScript = `# close-enough zsh integration
 if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then
 typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
 function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
+typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
+typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
+function _close_enough_allow_diagnostic {
+  (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
+  (( ++_CLOSE_ENOUGH_DIAGNOSTIC_COUNT ))
+}
 function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion
   local -a fields
@@ -25,7 +31,9 @@ function _close_enough_check {
     return 1
   fi
   if [[ "$action" == hint ]]; then
-    zle -M "close-enough [$risk/$confidence]: $suggestion"
+    if _close_enough_allow_diagnostic; then
+      zle -M "close-enough [$risk/$confidence]: $suggestion"
+    fi
     return 0
   fi
   if [[ "$action" == interrupt ]]; then
@@ -61,10 +69,13 @@ _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
 function _close_enough_precmd {
-  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"
+  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" output
   _CLOSE_ENOUGH_LAST_COMMAND=''
   [[ $status -eq 0 || -z "$command" ]] && return
-  command close-enough check --stage post --format plain --command "$command" 2>/dev/null
+  output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
+  [[ -z "$output" || "$output" == "no suggestion" ]] && return
+  _close_enough_allow_diagnostic || return
+  print -r -- "$output"
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec _close_enough_preexec
@@ -76,6 +87,12 @@ const bashScript = `# close-enough bash integration
 if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then
 _CLOSE_ENOUGH_BASH_LOADED=1
 _close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
+_close_enough_diagnostic_count=0
+_close_enough_diagnostic_limit=5
+_close_enough_allow_diagnostic() {
+  [ "$_close_enough_diagnostic_count" -lt "$_close_enough_diagnostic_limit" ] || return 1
+  _close_enough_diagnostic_count=$((_close_enough_diagnostic_count + 1))
+}
 _close_enough_accept_line() {
   local command record version action risk confidence cause consequence suggestion separator
   local -a fields
@@ -99,7 +116,9 @@ _close_enough_accept_line() {
     return 1
   fi
   if [ "$action" = hint ]; then
-    printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+    if _close_enough_allow_diagnostic; then
+      printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+    fi
     return
   fi
   if [ "$action" = interrupt ]; then
@@ -127,9 +146,13 @@ _close_enough_last_command=''
 _close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }
 trap _close_enough_debug DEBUG
 _close_enough_prompt() {
-  local status=$? command="$_close_enough_last_command"
+  local status=$? command="$_close_enough_last_command" output
   _close_enough_last_command=''
-  [ "$status" -ne 0 ] && [ -n "$command" ] && command close-enough check --stage post --format plain --command "$command" 2>/dev/null
+  [ "$status" -ne 0 ] && [ -n "$command" ] || return
+  output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
+  [ -n "$output" ] && [ "$output" != "no suggestion" ] || return
+  _close_enough_allow_diagnostic || return
+  printf '%s\n' "$output"
 }
 PROMPT_COMMAND="_close_enough_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 fi
@@ -138,6 +161,14 @@ fi
 const fishScript = `# close-enough fish integration
 if not set -q _CLOSE_ENOUGH_FISH_LOADED
   set -g _CLOSE_ENOUGH_FISH_LOADED 1
+set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0
+set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
+function _close_enough_allow_diagnostic
+  if test $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT -ge $_CLOSE_ENOUGH_DIAGNOSTIC_LIMIT
+    return 1
+  end
+  set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT (math $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT + 1)
+end
 function _close_enough_decode
   printf '%s' "$argv[1]" | base64 --decode 2>/dev/null; or printf '%s' "$argv[1]" | base64 -D
 end
@@ -165,7 +196,9 @@ function _close_enough_accept_line
   if test "$fields[2]" = hint
     set -l suggestion (_close_enough_decode "$fields[7]")
     or return
-    echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
+    if _close_enough_allow_diagnostic
+      echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
+    end
     commandline -f execute
     return
   end
@@ -200,7 +233,10 @@ function _close_enough_post_failure --on-event fish_postexec
   set -l status $status
   set -l command $argv[1]
   if test $status -ne 0; and test -n "$command"
-    command close-enough check --stage post --format plain --command "$command" 2>/dev/null
+    set -l output (command close-enough check --stage post --format plain --command "$command" 2>/dev/null | string collect)
+    if test -n "$output"; and test "$output" != "no suggestion"; and _close_enough_allow_diagnostic
+      printf '%s\n' "$output"
+    end
   end
 end
 end
@@ -210,6 +246,8 @@ const powerShellScript = `# close-enough PowerShell integration
 if (-not $global:CloseEnoughAdapterLoaded) {
 $global:CloseEnoughAdapterLoaded = $true
 $global:CloseEnoughLastHistoryId = 0
+$global:CloseEnoughDiagnosticCount = 0
+$global:CloseEnoughDiagnosticLimit = 5
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 $global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
 if ($global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
@@ -230,7 +268,7 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     return
   }
   if ($decision.action -eq 'hint') {
-    Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)"
+    if (Allow-CloseEnoughDiagnostic) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)" }
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
@@ -240,6 +278,11 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
+}
+function global:Allow-CloseEnoughDiagnostic {
+  if ($global:CloseEnoughDiagnosticCount -ge $global:CloseEnoughDiagnosticLimit) { return $false }
+  $global:CloseEnoughDiagnosticCount += 1
+  return $true
 }
 function global:Restore-CloseEnoughEnterHandler {
   if ($null -ne $global:CloseEnoughPreviousEnterHandler -and $global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
@@ -251,7 +294,8 @@ function global:prompt {
   $entry = Get-History -Count 1
   if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
     $global:CloseEnoughLastHistoryId = $entry.Id
-    & close-enough check --stage post --format plain --command $entry.CommandLine 2>$null
+    $output = (& close-enough check --stage post --format plain --command $entry.CommandLine 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($output) -and $output -ne 'no suggestion' -and (Allow-CloseEnoughDiagnostic)) { Write-Host $output }
   }
   if ($null -ne $global:CloseEnoughPreviousPrompt) { & $global:CloseEnoughPreviousPrompt }
 }

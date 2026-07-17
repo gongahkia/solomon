@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
+	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
 
@@ -152,6 +154,39 @@ func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), `"action":"none"`) || !strings.Contains(output.String(), `"incomplete":true`) || strings.Contains(output.String(), `"suggestion"`) {
 		t.Fatalf("unexpected incomplete event: %s", output.String())
+	}
+}
+
+func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
+	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Risk: diagnose.RiskSafe}
+	if got := renderPlainDiagnostic(decision, config.Default().Display); got != "unknown command: the shell will reject it\nDid you mean: git status\nRisk: safe\n" {
+		t.Fatalf("default display = %q", got)
+	}
+	display := config.Display{Change: true}
+	if got := renderPlainDiagnostic(decision, display); got != "Did you mean: git status\n" {
+		t.Fatalf("change-only display = %q", got)
+	}
+	if got := renderPlainDiagnostic(decision, config.Display{}); got != "" {
+		t.Fatalf("empty display = %q", got)
+	}
+}
+
+func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
+	configHome := t.TempDir()
+	path := filepath.Join(configHome, "close-enough", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"display":{"cause":false,"change":true,"risk":false,"consequence":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	var output strings.Builder
+	if err := run([]string{"check", "--format", "plain", "--command", "git sttaus"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != "Did you mean: git status\n" {
+		t.Fatalf("plain output = %q", got)
 	}
 }
 

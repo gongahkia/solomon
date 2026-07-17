@@ -27,6 +27,19 @@ func TestSetValidatesMode(t *testing.T) {
 	}
 }
 
+func TestSetConfiguresDisplayFields(t *testing.T) {
+	cfg := Default()
+	if err := cfg.Set("display.cause", "false"); err != nil || cfg.Display.Cause {
+		t.Fatalf("display cause = %#v, %v", cfg.Display, err)
+	}
+	if err := cfg.Set("display.trace", "true"); err != nil || !cfg.Display.Trace {
+		t.Fatalf("display trace = %#v, %v", cfg.Display, err)
+	}
+	if err := cfg.Set("display.risk", "invalid"); err == nil {
+		t.Fatal("expected display value error")
+	}
+}
+
 func TestDefaultIsNonBlocking(t *testing.T) {
 	if Default().Mode != "hint" {
 		t.Fatal("default must be hint")

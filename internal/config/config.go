@@ -287,7 +287,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled":
+	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "display.cause", "display.change", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -301,6 +301,16 @@ func (c *Config) Set(key, value string) error {
 			c.RegistryEnabled = parsed
 		case "auto_update_enabled":
 			c.AutoUpdateEnabled = parsed
+		case "display.cause":
+			c.Display.Cause = parsed
+		case "display.change":
+			c.Display.Change = parsed
+		case "display.risk":
+			c.Display.Risk = parsed
+		case "display.consequence":
+			c.Display.Consequence = parsed
+		case "display.trace":
+			c.Display.Trace = parsed
 		}
 	default:
 		return fmt.Errorf("unknown configuration key %q", key)

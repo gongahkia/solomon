@@ -145,7 +145,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 			_, err = fmt.Fprintln(stdout, "no suggestion")
 			return clierr.Wrap(clierr.Operation, err)
 		}
-		_, err = fmt.Fprintf(stdout, "%s: %s\nDid you mean: %s\nRisk: %s\n", decision.Cause, decision.Consequence, decision.Suggestion, decision.Risk)
+		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display))
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
 		_, err = fmt.Fprint(stdout, decision.Record())
@@ -153,6 +153,30 @@ func checkCommand(args []string, stdout io.Writer) error {
 	default:
 		return clierr.New(clierr.Usage, "--format must be json, plain, or record")
 	}
+}
+
+func renderPlainDiagnostic(decision diagnose.Decision, display config.Display) string {
+	lines := []string{}
+	if display.Cause && display.Consequence && decision.Cause != "" && decision.Consequence != "" {
+		lines = append(lines, decision.Cause+": "+decision.Consequence)
+	} else {
+		if display.Cause && decision.Cause != "" {
+			lines = append(lines, "Cause: "+decision.Cause)
+		}
+		if display.Consequence && decision.Consequence != "" {
+			lines = append(lines, "Consequence: "+decision.Consequence)
+		}
+	}
+	if display.Change && decision.Suggestion != "" {
+		lines = append(lines, "Did you mean: "+decision.Suggestion)
+	}
+	if display.Risk {
+		lines = append(lines, "Risk: "+string(decision.Risk))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func configCommand(args []string, stdout io.Writer) error {

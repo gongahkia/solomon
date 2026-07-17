@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-git",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
@@ -85,6 +85,60 @@
       "cause": "Git subcommand transposition",
       "risk": "high",
       "risk_rationale": "may send commits to a remote"
+    },
+    {
+      "id": "git-version-verison",
+      "command": "git",
+      "pattern": "^--verison$",
+      "replacement": "--version",
+      "cause": "Git flag spelling typo",
+      "risk": "safe",
+      "risk_rationale": "read-only version query"
+    },
+    {
+      "id": "git-status-shortt",
+      "command": "git",
+      "pattern": "^status --shortt$",
+      "replacement": "status --short",
+      "cause": "Git flag spelling typo",
+      "risk": "safe",
+      "risk_rationale": "read-only status query"
+    },
+    {
+      "id": "git-log-one-line",
+      "command": "git",
+      "pattern": "^log --one-line$",
+      "replacement": "log --oneline",
+      "cause": "Git flag spelling typo",
+      "risk": "safe",
+      "risk_rationale": "read-only history query"
+    },
+    {
+      "id": "git-diff-statss",
+      "command": "git",
+      "pattern": "^diff --statss$",
+      "replacement": "diff --stat",
+      "cause": "Git flag spelling typo",
+      "risk": "safe",
+      "risk_rationale": "read-only comparison query"
+    },
+    {
+      "id": "git-rebase-preserve-merges",
+      "command": "git",
+      "pattern": "^rebase --preserve-merges$",
+      "replacement": "rebase --rebase-merges",
+      "cause": "Deprecated Git rebase flag",
+      "risk": "high",
+      "risk_rationale": "may rewrite commit history"
+    },
+    {
+      "id": "git-pull-rebase-preserve",
+      "command": "git",
+      "pattern": "^pull --rebase=preserve$",
+      "replacement": "pull --rebase=merges",
+      "cause": "Deprecated Git pull rebase mode",
+      "risk": "high",
+      "risk_rationale": "may contact a remote and rewrite history"
     }
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "git-version-verison", "command": "git", "input": "--verison", "rule_id": "git-version-verison"},
+    {"id": "git-status-shortt", "command": "git", "input": "status --shortt", "rule_id": "git-status-shortt"},
+    {"id": "git-log-one-line", "command": "git", "input": "log --one-line", "rule_id": "git-log-one-line"},
+    {"id": "git-diff-statss", "command": "git", "input": "diff --statss", "rule_id": "git-diff-statss"},
+    {"id": "git-rebase-preserve-merges", "command": "git", "input": "rebase --preserve-merges", "rule_id": "git-rebase-preserve-merges"},
+    {"id": "git-pull-rebase-preserve", "command": "git", "input": "pull --rebase=preserve", "rule_id": "git-pull-rebase-preserve"}
+  ]
+}

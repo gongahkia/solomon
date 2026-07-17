@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gongahkia/close-enough/internal/config"
 )
@@ -139,6 +140,31 @@ func TestCompoundCommandSuggestionsAndNonCommandArguments(t *testing.T) {
 	}
 	if decision.Action != "none" {
 		t.Fatalf("argument was treated as command: %#v", decision)
+	}
+}
+
+func TestExecutableIndexCachesAndInvalidates(t *testing.T) {
+	InvalidateExecutableIndex()
+	directory := t.TempDir()
+	writeExecutable(t, directory, "git")
+	first := executableNames(directory)
+	first[0] = "mutated"
+	if got := executableNames(directory); !slices.Equal(got, []string{"git"}) {
+		t.Fatalf("cached names mutated: %#v", got)
+	}
+	writeExecutable(t, directory, "go")
+	if err := os.Chtimes(directory, time.Now(), time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if got := executableNames(directory); !slices.Equal(got, []string{"git", "go"}) {
+		t.Fatalf("directory change was not detected: %#v", got)
+	}
+	if err := os.Remove(filepath.Join(directory, "go")); err != nil {
+		t.Fatal(err)
+	}
+	InvalidateExecutableIndex()
+	if got := executableNames(directory); !slices.Equal(got, []string{"git"}) {
+		t.Fatalf("explicit invalidation failed: %#v", got)
 	}
 }
 

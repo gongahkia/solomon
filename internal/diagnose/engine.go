@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/redact"
@@ -64,6 +65,16 @@ type Options struct {
 }
 
 type Engine struct{ options Options }
+
+type executableCacheEntry struct {
+	signature string
+	names     []string
+}
+
+var executableCache = struct {
+	sync.RWMutex
+	entries map[string]executableCacheEntry
+}{entries: map[string]executableCacheEntry{}}
 
 func New(options Options) Engine { return Engine{options: options} }
 
@@ -297,6 +308,13 @@ func assignmentWord(value string) bool {
 }
 
 func executableNames(pathValue string) []string {
+	signature := pathSignature(pathValue)
+	executableCache.RLock()
+	entry, ok := executableCache.entries[pathValue]
+	executableCache.RUnlock()
+	if ok && entry.signature == signature {
+		return append([]string(nil), entry.names...)
+	}
 	seen := map[string]struct{}{}
 	for _, dir := range filepath.SplitList(pathValue) {
 		entries, err := os.ReadDir(dir)
@@ -318,17 +336,41 @@ func executableNames(pathValue string) []string {
 		result = append(result, name)
 	}
 	sort.Strings(result)
+	executableCache.Lock()
+	executableCache.entries[pathValue] = executableCacheEntry{signature: signature, names: append([]string(nil), result...)}
+	executableCache.Unlock()
 	return result
 }
 
 func commandExists(name, pathValue string) bool {
+	names := executableNames(pathValue)
+	index := sort.SearchStrings(names, name)
+	return index < len(names) && names[index] == name
+}
+
+func InvalidateExecutableIndex() {
+	executableCache.Lock()
+	executableCache.entries = map[string]executableCacheEntry{}
+	executableCache.Unlock()
+}
+
+func pathSignature(pathValue string) string {
+	var signature strings.Builder
 	for _, dir := range filepath.SplitList(pathValue) {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return true
+		info, err := os.Stat(dir)
+		if err != nil {
+			signature.WriteString(dir)
+			signature.WriteString(":missing\x00")
+			continue
 		}
+		signature.WriteString(dir)
+		signature.WriteByte(':')
+		signature.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
+		signature.WriteByte(':')
+		signature.WriteString(strconv.FormatInt(info.Size(), 10))
+		signature.WriteByte('\x00')
 	}
-	return false
+	return signature.String()
 }
 
 func nearest(value string, candidates []string) (string, int) {

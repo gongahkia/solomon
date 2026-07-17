@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,6 +72,25 @@ func TestIncompleteInputFails(t *testing.T) {
 	_, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestTokenizePlainQuotedAndEscapedWords(t *testing.T) {
+	words, err := tokenize(`git commit -m "fix bug" path\ with\ spaces ''`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"git", "commit", "-m", "fix bug", "path with spaces", ""}
+	if !slices.Equal(words, want) {
+		t.Fatalf("words = %#v, want %#v", words, want)
+	}
+}
+
+func TestTokenizeRejectsIncompleteQuotedAndEscapedInput(t *testing.T) {
+	for _, line := range []string{"git 'status", "git status\\"} {
+		if _, err := tokenize(line); err == nil {
+			t.Fatalf("expected tokenize failure for %q", line)
+		}
 	}
 }
 

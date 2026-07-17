@@ -162,20 +162,24 @@ func tokenize(line string) ([]string, error) {
 	var current strings.Builder
 	var quote rune
 	escaped := false
+	wordStarted := false
 	flush := func() {
-		if current.Len() > 0 {
+		if wordStarted {
 			result = append(result, current.String())
 			current.Reset()
+			wordStarted = false
 		}
 	}
 	for _, r := range line {
 		if escaped {
 			current.WriteRune(r)
 			escaped = false
+			wordStarted = true
 			continue
 		}
 		if r == '\\' && quote != '\'' {
 			escaped = true
+			wordStarted = true
 			continue
 		}
 		if quote != 0 {
@@ -184,10 +188,12 @@ func tokenize(line string) ([]string, error) {
 			} else {
 				current.WriteRune(r)
 			}
+			wordStarted = true
 			continue
 		}
 		if r == '\'' || r == '"' {
 			quote = r
+			wordStarted = true
 			continue
 		}
 		if r == ' ' || r == '\t' {
@@ -195,6 +201,7 @@ func tokenize(line string) ([]string, error) {
 			continue
 		}
 		current.WriteRune(r)
+		wordStarted = true
 	}
 	if escaped || quote != 0 {
 		return nil, fmt.Errorf("incomplete shell input")

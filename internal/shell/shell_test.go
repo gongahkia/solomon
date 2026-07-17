@@ -773,6 +773,24 @@ func TestPowerShellEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestPowerShellAdapterDoesNotEvaluatePayloads(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{"Invoke-Expression", "iex ", "--command $line", "Replace(0, $line.Length, (&"}
+	for _, value := range forbidden {
+		if strings.Contains(script, value) {
+			t.Fatalf("PowerShell adapter exposes injection primitive %q: %q", value, script)
+		}
+	}
+	for _, value := range []string{"--command $command", "Replace(0, $line.Length, $decision.suggestion)", "--command $entry.CommandLine"} {
+		if !strings.Contains(script, value) {
+			t.Fatalf("PowerShell adapter lacks quoted payload boundary %q: %q", value, script)
+		}
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

@@ -136,6 +136,8 @@ fi
 `
 
 const fishScript = `# close-enough fish integration
+if not set -q _CLOSE_ENOUGH_FISH_LOADED
+  set -g _CLOSE_ENOUGH_FISH_LOADED 1
 function _close_enough_accept_line
   set -l record (command close-enough check --stage pre --format record --command (commandline -b) 2>/dev/null)
   set -l fields (string split \t -- $record)
@@ -156,6 +158,7 @@ function _close_enough_accept_line
   commandline -f execute
 end
 bind \r _close_enough_accept_line
+end
 `
 
 const powerShellScript = `# close-enough PowerShell integration

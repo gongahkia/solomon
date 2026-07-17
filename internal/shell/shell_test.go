@@ -466,6 +466,17 @@ expect eof`
 	}
 }
 
+func TestFishInitializationIsGuarded(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := "if not set -q _CLOSE_ENOUGH_FISH_LOADED\n  set -g _CLOSE_ENOUGH_FISH_LOADED 1"
+	if !strings.HasPrefix(script, "# close-enough fish integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "end") || strings.Count(script, "bind \\r _close_enough_accept_line") != 1 {
+		t.Fatalf("fish script lacks an enclosing idempotence guard: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

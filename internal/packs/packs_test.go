@@ -465,6 +465,36 @@ func TestKubernetesCloudSubcommandTypoRules(t *testing.T) {
 	}
 }
 
+func TestKubernetesCloudFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "kubernetes-cloud.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "kubernetes-cloud-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["kubectl-get-all-namespacess"] != diagnose.RiskSafe {
+		t.Fatalf("Kubernetes read-only flag risk = %#v", risk)
+	}
+	for _, id := range []string{"kubectl-apply-dry-run", "terraform-plan-outt", "aws-s3-cp-recursiv", "terraform-refresh"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Kubernetes/cloud flag corpus")
+	}
+}
+
 func TestContainersSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "containers.json"))
 	if err != nil {

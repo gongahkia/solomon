@@ -146,10 +146,6 @@ func checkCommand(args []string, stdout io.Writer) error {
 		_, err = stdout.Write(append(data, '\n'))
 		return clierr.Wrap(clierr.Operation, err)
 	case "plain":
-		if decision.Suggestion == "" {
-			_, err = fmt.Fprintln(stdout, "no suggestion")
-			return clierr.Wrap(clierr.Operation, err)
-		}
 		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display))
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
@@ -165,25 +161,32 @@ func checkCommand(args []string, stdout io.Writer) error {
 }
 
 func renderPlainDiagnostic(decision diagnose.Decision, display config.Display) string {
+	if decision.Suggestion == "" {
+		return "no suggestion\n"
+	}
 	lines := []string{}
 	if display.Cause && display.Consequence && decision.Cause != "" && decision.Consequence != "" {
-		lines = append(lines, decision.Cause+": "+decision.Consequence)
+		lines = append(lines, sanitizeTerminalText(decision.Cause)+": "+sanitizeTerminalText(decision.Consequence))
 	} else {
 		if display.Cause && decision.Cause != "" {
-			lines = append(lines, "Cause: "+decision.Cause)
+			lines = append(lines, "Cause: "+sanitizeTerminalText(decision.Cause))
 		}
 		if display.Consequence && decision.Consequence != "" {
-			lines = append(lines, "Consequence: "+decision.Consequence)
+			lines = append(lines, "Consequence: "+sanitizeTerminalText(decision.Consequence))
 		}
 	}
 	if display.Change && decision.Suggestion != "" {
-		lines = append(lines, "Did you mean: "+decision.Suggestion)
+		lines = append(lines, "Did you mean: "+sanitizeTerminalText(decision.Suggestion))
 	}
 	if display.Risk {
 		lines = append(lines, "Risk: "+string(decision.Risk))
 	}
 	if display.Trace && len(decision.Trace) > 0 {
-		lines = append(lines, "Trace: "+strings.Join(decision.Trace, ", "))
+		trace := make([]string, len(decision.Trace))
+		for index, value := range decision.Trace {
+			trace[index] = sanitizeTerminalText(value)
+		}
+		lines = append(lines, "Trace: "+strings.Join(trace, ", "))
 	}
 	if len(lines) == 0 {
 		return ""

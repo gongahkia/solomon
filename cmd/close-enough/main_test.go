@@ -172,8 +172,12 @@ func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
 	if got := renderPlainDiagnostic(decision, config.Display{Trace: true}); got != "Trace: resolver:path, distance:1\n" {
 		t.Fatalf("trace display = %q", got)
 	}
-	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}); got != "" {
+	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}); got != "no suggestion\n" {
 		t.Fatalf("empty trace display = %q", got)
+	}
+	unsafe := diagnose.Decision{Cause: "bad\x1b", Consequence: "next\nline", Suggestion: "git\tstatus", Risk: diagnose.RiskSafe}
+	if got := renderPlainDiagnostic(unsafe, config.Default().Display); got != "bad\\x1B: next\\x0Aline\nDid you mean: git\\x09status\nRisk: safe\n" {
+		t.Fatalf("sanitized display = %q", got)
 	}
 }
 

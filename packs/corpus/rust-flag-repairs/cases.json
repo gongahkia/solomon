@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"cargo-version-verison","command":"cargo","input":"--verison","rule_id":"cargo-version-verison"},{"id":"cargo-build-release","command":"cargo","input":"build --relese","rule_id":"cargo-build-release"},{"id":"cargo-check-all","command":"cargo","input":"check --all","rule_id":"cargo-check-all"}]}

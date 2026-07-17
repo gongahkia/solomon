@@ -402,14 +402,43 @@ func TestRustSubcommandTypoRules(t *testing.T) {
 	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
 		t.Fatalf("bundled Rust pack = %#v", bundledPack)
 	}
+	risk := map[string]diagnose.Risk{}
 	for _, rule := range pack.Rules {
-		if rule.Risk != diagnose.RiskHigh {
-			t.Fatalf("risk for %s = %q, want high", rule.ID, rule.Risk)
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"cargo-build-buid", "cargo-test-tes", "cargo-publish-pubish", "rustup-update-updat"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
 		}
 	}
 	corpus[0].Cases[0].RuleID = "missing"
 	if err := RunFixtureCorpus(pack, corpus); err == nil {
 		t.Fatal("accepted mismatched Rust corpus")
+	}
+}
+
+func TestRustFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "rust.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "rust-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["cargo-version-verison"] != diagnose.RiskSafe || risk["cargo-build-release"] != diagnose.RiskHigh || risk["cargo-check-all"] != diagnose.RiskHigh {
+		t.Fatalf("Rust flag risks = %#v", risk)
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Rust flag corpus")
 	}
 }
 

@@ -676,6 +676,18 @@ func TestPowerShellInitializationIsGuarded(t *testing.T) {
 	}
 }
 
+func TestPowerShellPreExecutionUsesCapturedBuffer(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := "$command = $line"
+	check := "--stage pre --format json --command $command"
+	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command $line") {
+		t.Fatalf("PowerShell pre-execution check does not use a captured buffer: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

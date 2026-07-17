@@ -139,7 +139,8 @@ const fishScript = `# close-enough fish integration
 if not set -q _CLOSE_ENOUGH_FISH_LOADED
   set -g _CLOSE_ENOUGH_FISH_LOADED 1
 function _close_enough_accept_line
-  set -l record (command close-enough check --stage pre --format record --command (commandline -b) 2>/dev/null)
+  set -l command (commandline -b)
+  set -l record (command close-enough check --stage pre --format record --command "$command" 2>/dev/null)
   set -l fields (string split \t -- $record)
   if test "$fields[1]" != 1
     return

@@ -477,6 +477,18 @@ func TestFishInitializationIsGuarded(t *testing.T) {
 	}
 }
 
+func TestFishPreExecutionUsesCapturedBuffer(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := "set -l command (commandline -b)"
+	check := `--stage pre --format record --command "$command"`
+	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
+		t.Fatalf("fish pre-execution check does not use a captured buffer: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

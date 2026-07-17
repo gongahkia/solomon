@@ -424,11 +424,14 @@ func ruleCommand(args []string, stdout io.Writer) error {
 }
 
 func packCommand(args []string, stdout io.Writer) error {
-	if len(args) != 2 {
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install> <path>")
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall> ...")
 	}
 	switch args[0] {
 	case "validate":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack validate <path>")
+		}
 		pack, err := packs.Load(args[1])
 		if err != nil {
 			return clierr.Wrap(clierr.Input, err)
@@ -439,6 +442,9 @@ func packCommand(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)
 		return clierr.Wrap(clierr.Operation, err)
 	case "install":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack install <path>")
+		}
 		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
@@ -449,8 +455,22 @@ func packCommand(args []string, stdout io.Writer) error {
 		}
 		_, err = fmt.Fprintln(stdout, "installed", path)
 		return clierr.Wrap(clierr.Operation, err)
+	case "uninstall":
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack uninstall <id> <version>")
+		}
+		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
+		if err != nil {
+			return clierr.Wrap(clierr.Configuration, err)
+		}
+		path, err := packs.Uninstall(directory, args[1], args[2])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		_, err = fmt.Fprintln(stdout, "uninstalled", path)
+		return clierr.Wrap(clierr.Operation, err)
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install> <path>")
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall> ...")
 	}
 }
 

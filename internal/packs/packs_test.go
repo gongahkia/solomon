@@ -1,6 +1,7 @@
 package packs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -302,5 +303,26 @@ func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	}
 	if _, err := Install(source, targetDirectory); err == nil {
 		t.Fatal("expected no-overwrite failure")
+	}
+}
+
+func TestUninstallPackOnlyRemovesManagedRegularFile(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "core-git-1.0.0.json")
+	if err := os.WriteFile(target, []byte("pack"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := Uninstall(directory, "core-git", "1.0.0")
+	if err != nil || removed != target {
+		t.Fatalf("uninstall = %q, %v", removed, err)
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pack remains after uninstall: %v", err)
+	}
+	if _, err := Uninstall(directory, "core-git", "1.0.0"); err == nil {
+		t.Fatal("expected missing pack error")
+	}
+	if _, err := Uninstall(directory, "../core", "1.0.0"); err == nil {
+		t.Fatal("expected invalid target error")
 	}
 }

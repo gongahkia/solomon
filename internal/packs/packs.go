@@ -95,6 +95,24 @@ func Install(source, directory string) (string, error) {
 	return target, nil
 }
 
+func Uninstall(directory, id, version string) (string, error) {
+	if !identifier(id) || !semanticVersion(version) {
+		return "", errors.New("pack id and version are invalid")
+	}
+	target := filepath.Join(directory, id+"-"+version+".json")
+	info, err := os.Lstat(target)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("installed pack target is not a regular file")
+	}
+	if err := os.Remove(target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 func (p Pack) Validate() error {
 	if err := ValidateSchemaCompatibility(p.SchemaVersion); err != nil {
 		return err

@@ -791,6 +791,44 @@ func TestPowerShellAdapterDoesNotEvaluatePayloads(t *testing.T) {
 	}
 }
 
+func TestPowerShellInteractivePTYLoadsAdapter(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '{\"version\":1,\"action\":\"none\",\"risk\":\"safe\",\"confidence\":0}\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pty := `set timeout 10
+spawn -noecho pwsh -NoLogo -NoProfile
+expect -re {PS .*>
+}
+send -- ". \$env:ADAPTER\r"
+expect -re {PS .*>
+}
+send -- "Write-Output ready\r"
+expect "ready"
+expect -re {PS .*>
+}
+send -- "exit\r"
+expect eof`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

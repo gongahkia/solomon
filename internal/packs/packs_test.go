@@ -182,6 +182,59 @@ func TestTransformationTemplateValidation(t *testing.T) {
 	}
 }
 
+func FuzzValidateTransformationTemplate(f *testing.F) {
+	for _, seed := range []struct {
+		template string
+		captures uint8
+	}{
+		{"$1", 1},
+		{"$$HOME", 0},
+		{"$2", 1},
+		{"${command}", 1},
+		{"$999999999999999999999999", 1},
+	} {
+		f.Add(seed.template, seed.captures)
+	}
+	f.Fuzz(func(t *testing.T, template string, count uint8) {
+		if len(template) > 8<<10 {
+			t.Skip()
+		}
+		captures := int(count % 16)
+		if got, want := validateTransformationTemplate(template, captures) == nil, validTransformationTemplate(template, captures); got != want {
+			t.Fatalf("template %q with %d captures valid = %t, want %t", template, captures, got, want)
+		}
+	})
+}
+
+func validTransformationTemplate(template string, captures int) bool {
+	for index := 0; index < len(template); index++ {
+		if template[index] != '$' {
+			continue
+		}
+		index++
+		if index >= len(template) {
+			return false
+		}
+		if template[index] == '$' {
+			continue
+		}
+		if template[index] < '1' || template[index] > '9' {
+			return false
+		}
+		capture := 0
+		for index < len(template) && template[index] >= '0' && template[index] <= '9' {
+			digit := int(template[index] - '0')
+			if capture > captures/10 || capture == captures/10 && digit > captures%10 {
+				return false
+			}
+			capture = capture*10 + digit
+			index++
+		}
+		index--
+	}
+	return true
+}
+
 func TestExplanationTemplateValidation(t *testing.T) {
 	for _, test := range []struct {
 		cause string

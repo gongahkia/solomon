@@ -180,10 +180,11 @@ func validateTransformationTemplate(template string, captures int) error {
 		capture := 0
 		for index+1 < len(template) && template[index+1] >= '0' && template[index+1] <= '9' {
 			index++
-			capture = capture*10 + int(template[index]-'0')
-			if capture > captures {
-				return fmt.Errorf("transformation template references unavailable capture $%d", capture)
+			digit := int(template[index] - '0')
+			if capture > captures/10 || capture == captures/10 && digit > captures%10 {
+				return errors.New("transformation template references unavailable capture")
 			}
+			capture = capture*10 + digit
 		}
 	}
 	return nil

@@ -1010,6 +1010,25 @@ func TestExtractJavaScriptFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractPythonFailureEvidence(t *testing.T) {
+	output := "ModuleNotFoundError: No module named 'requsets'\nFileNotFoundError: [Errno 2] No such file or directory: './src/maine.py'\nERROR: Could not find a version that satisfies the requirement requsets\npytest: error: unrecognized arguments: --collect-onyl\n"
+	evidence, err := ExtractPythonFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "pip-package-not-found", Value: "requsets"}, {Kind: "pytest-unknown-argument", Value: "--collect-onyl"}, {Kind: "python-module-not-found", Value: "requsets"}, {Kind: "python-path-not-found", Value: "./src/maine.py"}}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	redacted, err := ExtractPythonFailureEvidence("ModuleNotFoundError: No module named 'https://user:password@example.invalid/mod'\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/mod" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if _, err := ExtractPythonFailureEvidence(strings.Repeat("x", maxPythonFailureOutputBytes+1)); !errors.Is(err, ErrPythonFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

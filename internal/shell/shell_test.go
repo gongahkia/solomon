@@ -753,6 +753,16 @@ func TestPowerShellPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	}
 }
 
+func TestPowerShellProtocolDecodingFailsOpenOnMalformedJSON(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `$record = & close-enough check --stage pre --format json --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { return }`) {
+		t.Fatalf("PowerShell protocol decoder is not binary-safe and failure-aware: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

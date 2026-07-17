@@ -215,7 +215,9 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   $command = $line
-  $decision = & close-enough check --stage pre --format json --command $command 2>$null | ConvertFrom-Json
+  $record = & close-enough check --stage pre --format json --command $command 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { return }
   if ($decision.version -ne 1) { return }
   if ($decision.action -eq 'rewrite') {
     if ($decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) {

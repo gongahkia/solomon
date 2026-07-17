@@ -138,7 +138,7 @@ _close_enough_accept_line() {
   if [ "$action" = rewrite ]; then
     if [ "$risk" != safe ] || [ -z "$suggestion" ]; then
       printf '\nclose-enough: refused unsafe rewrite\n' >&2
-      READLINE_LINE=''
+      READLINE_LINE=':'
       return 1
     fi
     READLINE_LINE="$suggestion"
@@ -152,7 +152,7 @@ _close_enough_accept_line() {
   fi
   if [ "$action" = interrupt ]; then
     printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
-    READLINE_LINE=''
+    READLINE_LINE=':'
     return 1
   fi
 }

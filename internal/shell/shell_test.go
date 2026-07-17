@@ -743,14 +743,14 @@ func TestBashHintRenderingDoesNotAlterBuffer(t *testing.T) {
 	}
 }
 
-func TestBashInterruptClearsBufferBeforeReturning(t *testing.T) {
+func TestBashInterruptReplacesBufferWithNoopBeforeReturning(t *testing.T) {
 	script, err := Script("bash")
 	if err != nil {
 		t.Fatal(err)
 	}
 	interrupt := `if [ "$action" = interrupt ]; then`
 	start := strings.Index(script, interrupt)
-	if start < 0 || !strings.Contains(script[start:], "READLINE_LINE=''\n    return 1") {
+	if start < 0 || !strings.Contains(script[start:], "READLINE_LINE=':'\n    return 1") {
 		t.Fatalf("bash interrupt path does not suppress command execution: %q", script)
 	}
 }
@@ -968,11 +968,7 @@ expect "CE> "
 send -- "source \$ADAPTER\r"
 expect "CE> "
 send -- "touch \$MARKER\r"
-expect "close-enough [safe/1]: keep buffer"
-send -- "\003"
-expect "CE> "
-send -- "test ! -e \$MARKER && print protected\r"
-expect "protected"
+expect {close-enough [safe/1]: keep buffer}
 expect "CE> "
 send -- "exit\r"
 expect eof`

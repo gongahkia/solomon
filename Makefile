@@ -4,7 +4,7 @@ VERSION ?= dev
 COMMIT ?= unknown
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test vet
+.PHONY: build test vet ci
 
 build:
 	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/close-enough
@@ -14,3 +14,5 @@ test:
 
 vet:
 	go vet ./...
+
+ci: vet test build

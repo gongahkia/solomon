@@ -3,6 +3,7 @@ package diagnose
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -69,9 +70,33 @@ func (d Decision) Event(stage string) Event {
 	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
-func (d Decision) Record() string {
-	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), base64.RawStdEncoding.EncodeToString([]byte(d.Cause)), base64.RawStdEncoding.EncodeToString([]byte(d.Consequence)), base64.RawStdEncoding.EncodeToString([]byte(d.Suggestion))}
-	return strings.Join(fields, "\t") + "\n"
+func (d Decision) Record() (string, error) {
+	if d.Version != AdapterProtocolVersion {
+		return "", fmt.Errorf("unsupported record version %d", d.Version)
+	}
+	if !validAction(d.Action) {
+		return "", fmt.Errorf("invalid record action %q", d.Action)
+	}
+	if !validRisk(d.Risk) {
+		return "", fmt.Errorf("invalid record risk %q", d.Risk)
+	}
+	if math.IsNaN(d.Confidence) || math.IsInf(d.Confidence, 0) || d.Confidence < 0 || d.Confidence > 1 {
+		return "", fmt.Errorf("invalid record confidence %v", d.Confidence)
+	}
+	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), encodeRecordText(d.Cause), encodeRecordText(d.Consequence), encodeRecordText(d.Suggestion)}
+	return strings.Join(fields, "\t") + "\n", nil
+}
+
+func encodeRecordText(value string) string {
+	return base64.RawStdEncoding.EncodeToString([]byte(value))
+}
+
+func validAction(value string) bool {
+	return value == "none" || value == "hint" || value == "interrupt" || value == "rewrite"
+}
+
+func validRisk(value Risk) bool {
+	return value == RiskSafe || value == RiskUnknown || value == RiskHigh
 }
 
 type Options struct {

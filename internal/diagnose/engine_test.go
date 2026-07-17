@@ -1,7 +1,9 @@
 package diagnose
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,9 +28,41 @@ func TestCommandTypoProducesHint(t *testing.T) {
 
 func TestRecordCarriesAdapterProtocolVersion(t *testing.T) {
 	decision := noDecision()
-	fields := strings.Split(strings.TrimSuffix(decision.Record(), "\n"), "\t")
+	record, err := decision.Record()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
 	if len(fields) != 7 || fields[0] != "1" || fields[1] != "none" {
-		t.Fatalf("unexpected record: %q", decision.Record())
+		t.Fatalf("unexpected record: %q", record)
+	}
+}
+
+func TestRecordEncoderIsBinarySafeAndRejectsInvalidControlFields(t *testing.T) {
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Risk: RiskSafe, Confidence: 0.5, Cause: "cause\t\x00", Consequence: "line\nnext", Suggestion: "\xff"}
+	record, err := decision.Record()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(record, decision.Cause) || strings.Contains(record, decision.Consequence) || strings.Contains(record, decision.Suggestion) {
+		t.Fatalf("record contains raw text: %q", record)
+	}
+	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
+	for index, want := range []string{decision.Cause, decision.Consequence, decision.Suggestion} {
+		got, err := base64.RawStdEncoding.DecodeString(fields[index+4])
+		if err != nil || string(got) != want {
+			t.Fatalf("record field %d = %q, %v", index+4, got, err)
+		}
+	}
+	for _, decision := range []Decision{
+		{Version: 2, Action: "hint", Risk: RiskSafe},
+		{Version: AdapterProtocolVersion, Action: "invalid", Risk: RiskSafe},
+		{Version: AdapterProtocolVersion, Action: "hint", Risk: Risk("invalid")},
+		{Version: AdapterProtocolVersion, Action: "hint", Risk: RiskSafe, Confidence: math.NaN()},
+	} {
+		if _, err := decision.Record(); err == nil {
+			t.Fatalf("accepted invalid record %#v", decision)
+		}
 	}
 }
 
@@ -639,7 +673,11 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == "" || contains(string(data), "super-secret") || contains(string(data), `"command":`) || contains(decision.Record(), "super-secret") {
+	record, err := decision.Record()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "" || contains(string(data), "super-secret") || contains(string(data), `"command":`) || contains(record, "super-secret") {
 		t.Fatalf("secret leaked in diagnostic: %s", data)
 	}
 }

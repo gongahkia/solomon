@@ -148,7 +148,11 @@ func checkCommand(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display))
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
-		_, err = fmt.Fprint(stdout, decision.Record())
+		record, err := decision.Record()
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		_, err = fmt.Fprint(stdout, record)
 		return clierr.Wrap(clierr.Operation, err)
 	default:
 		return clierr.New(clierr.Usage, "--format must be json, plain, or record")

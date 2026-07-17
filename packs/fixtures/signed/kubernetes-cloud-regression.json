@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"kubernetes-cloud-regression","version":"1.0.0","publisher":"close-enough","rules":[{"id":"kubectl-apply-aply","command":"kubectl","pattern":"^aply$","replacement":"apply","cause":"kubectl subcommand typo","risk":"high","risk_rationale":"may create or modify Kubernetes resources"}]}

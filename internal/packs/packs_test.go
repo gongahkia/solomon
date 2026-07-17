@@ -1651,6 +1651,45 @@ func TestSignedContainersPackFixtureAndRegressionCorpus(t *testing.T) {
 	}
 }
 
+func TestSignedKubernetesCloudPackFixtureAndRegressionCorpus(t *testing.T) {
+	directory := filepath.Join("..", "..", "packs", "fixtures", "signed")
+	keyring, err := LoadKeyring(filepath.Join(directory, "keyring.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(filepath.Join(directory, "kubernetes-cloud-regression.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(mustReadFile(t, filepath.Join(directory, "kubernetes-cloud-regression.sig")))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := Load(filepath.Join(directory, "kubernetes-cloud-regression.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "kubernetes-cloud-signed-regression"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+		t.Fatal("accepted tampered signed Kubernetes/cloud fixture")
+	}
+	if !keyring.Revoke("close-enough") {
+		t.Fatal("did not revoke fixture publisher")
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+		t.Fatal("accepted revoked signed Kubernetes/cloud fixture")
+	}
+}
+
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

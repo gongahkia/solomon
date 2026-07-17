@@ -558,6 +558,16 @@ func TestFishProtocolDecodingValidatesFixedFields(t *testing.T) {
 	}
 }
 
+func TestFishEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `set -l binding (bind \r)`) || !strings.Contains(script, `test "$binding" != "bind --preset enter execute"`) || !strings.Contains(script, `bind \r _close_enough_accept_line`) || !strings.Contains(script, `string match -q "* _close_enough_accept_line" -- (bind \r)`) || !strings.Contains(script, `bind --erase \r`) {
+		t.Fatalf("fish Enter binding is not collision-safe and restorable: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

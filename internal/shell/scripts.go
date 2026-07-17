@@ -178,7 +178,24 @@ function _close_enough_accept_line
   end
   commandline -f execute
 end
-bind \r _close_enough_accept_line
+function _close_enough_bind_enter
+  set -l binding (bind \r)
+  if test "$binding" != "bind --preset enter execute"
+    return
+  end
+  set -g _CLOSE_ENOUGH_FISH_ENTER_BOUND 1
+  bind \r _close_enough_accept_line
+end
+function _close_enough_restore_enter
+  if not set -q _CLOSE_ENOUGH_FISH_ENTER_BOUND
+    return
+  end
+  if string match -q "* _close_enough_accept_line" -- (bind \r)
+    bind --erase \r
+  end
+  set -e _CLOSE_ENOUGH_FISH_ENTER_BOUND
+end
+_close_enough_bind_enter
 function _close_enough_post_failure --on-event fish_postexec
   set -l status $status
   set -l command $argv[1]

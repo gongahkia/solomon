@@ -21,6 +21,28 @@ type compatibilityFixture struct {
 	Markers       []string        `json:"markers"`
 }
 
+func TestResolveAction(t *testing.T) {
+	tests := []struct {
+		name, action, risk, suggestion string
+		want                           ActionResult
+	}{
+		{"none", "none", "safe", "", ActionResult{Submit: true}},
+		{"hint", "hint", "safe", "git status", ActionResult{Render: true, Submit: true}},
+		{"interrupt", "interrupt", "high", "rm", ActionResult{Render: true}},
+		{"rewrite", "rewrite", "safe", "git status", ActionResult{Rewrite: true}},
+		{"unsafe rewrite", "rewrite", "high", "rm", ActionResult{Render: true, Refused: true}},
+		{"empty rewrite", "rewrite", "safe", "", ActionResult{Render: true, Refused: true}},
+		{"unknown", "invalid", "safe", "", ActionResult{Submit: true}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ResolveAction(test.action, test.risk, test.suggestion); got != test.want {
+				t.Fatalf("ResolveAction() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAdapterCompatibilityFixtures(t *testing.T) {
 	data, err := os.ReadFile("testdata/adapter_contracts.json")
 	if err != nil {

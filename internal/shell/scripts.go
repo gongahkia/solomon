@@ -6,12 +6,19 @@ typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
 function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
+typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic {
   (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
   (( ++_CLOSE_ENOUGH_DIAGNOSTIC_COUNT ))
 }
+function _close_enough_allow_suggestion {
+  [[ -n "$1" ]] || return 1
+  (( ${+_CLOSE_ENOUGH_SEEN_SUGGESTIONS[$1]} )) && return 1
+  _close_enough_allow_diagnostic || return 1
+  _CLOSE_ENOUGH_SEEN_SUGGESTIONS[$1]=1
+}
 function _close_enough_check {
-  local command record version action risk confidence cause consequence suggestion
+  local command record version action risk confidence cause consequence suggestion suggestion_key
   local -a fields
   command="$BUFFER"
   record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return 0
@@ -20,6 +27,7 @@ function _close_enough_check {
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
+  suggestion_key="$suggestion"
   suggestion="$(_close_enough_decode "$suggestion")" || return 0
   if [[ "$action" == rewrite ]]; then
     if [[ "$risk" != safe || -z "$suggestion" ]]; then
@@ -31,7 +39,7 @@ function _close_enough_check {
     return 1
   fi
   if [[ "$action" == hint ]]; then
-    if _close_enough_allow_diagnostic; then
+    if _close_enough_allow_suggestion "$suggestion_key"; then
       zle -M "close-enough [$risk/$confidence]: $suggestion"
     fi
     return 0
@@ -89,12 +97,20 @@ _CLOSE_ENOUGH_BASH_LOADED=1
 _close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
 _close_enough_diagnostic_count=0
 _close_enough_diagnostic_limit=5
+_close_enough_seen_suggestions=$'\n'
 _close_enough_allow_diagnostic() {
   [ "$_close_enough_diagnostic_count" -lt "$_close_enough_diagnostic_limit" ] || return 1
   _close_enough_diagnostic_count=$((_close_enough_diagnostic_count + 1))
 }
+_close_enough_allow_suggestion() {
+  local key=$1
+  [ -n "$key" ] || return 1
+  case "$_close_enough_seen_suggestions" in *$'\n'"$key"$'\n'*) return 1 ;; esac
+  _close_enough_allow_diagnostic || return 1
+  _close_enough_seen_suggestions+="$key"$'\n'
+}
 _close_enough_accept_line() {
-  local command record version action risk confidence cause consequence suggestion separator
+  local command record version action risk confidence cause consequence suggestion suggestion_key separator
   local -a fields
   command="$READLINE_LINE"
   record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return
@@ -105,6 +121,7 @@ _close_enough_accept_line() {
   version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" confidence="${fields[3]}" cause="${fields[4]}" consequence="${fields[5]}" suggestion="${fields[6]}"
   [ "$version" = 1 ] || return
   [ "$action" = none ] && return
+  suggestion_key="$suggestion"
   suggestion="$(_close_enough_decode "$suggestion")" || return
   if [ "$action" = rewrite ]; then
     if [ "$risk" != safe ] || [ -z "$suggestion" ]; then
@@ -116,7 +133,7 @@ _close_enough_accept_line() {
     return 1
   fi
   if [ "$action" = hint ]; then
-    if _close_enough_allow_diagnostic; then
+    if _close_enough_allow_suggestion "$suggestion_key"; then
       printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
     fi
     return
@@ -163,11 +180,19 @@ if not set -q _CLOSE_ENOUGH_FISH_LOADED
   set -g _CLOSE_ENOUGH_FISH_LOADED 1
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
+set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic
   if test $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT -ge $_CLOSE_ENOUGH_DIAGNOSTIC_LIMIT
     return 1
   end
   set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT (math $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT + 1)
+end
+function _close_enough_allow_suggestion
+  set -l key $argv[1]
+  test -n "$key"; or return 1
+  contains -- "$key" $_CLOSE_ENOUGH_SEEN_SUGGESTIONS; and return 1
+  _close_enough_allow_diagnostic; or return 1
+  set -ga _CLOSE_ENOUGH_SEEN_SUGGESTIONS "$key"
 end
 function _close_enough_decode
   printf '%s' "$argv[1]" | base64 --decode 2>/dev/null; or printf '%s' "$argv[1]" | base64 -D
@@ -194,9 +219,10 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = hint
+    set -l suggestion_key "$fields[7]"
     set -l suggestion (_close_enough_decode "$fields[7]")
     or return
-    if _close_enough_allow_diagnostic
+    if _close_enough_allow_suggestion "$suggestion_key"
       echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
     end
     commandline -f execute
@@ -248,6 +274,7 @@ $global:CloseEnoughAdapterLoaded = $true
 $global:CloseEnoughLastHistoryId = 0
 $global:CloseEnoughDiagnosticCount = 0
 $global:CloseEnoughDiagnosticLimit = 5
+$global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 $global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
 if ($global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
@@ -268,7 +295,7 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     return
   }
   if ($decision.action -eq 'hint') {
-    if (Allow-CloseEnoughDiagnostic) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)" }
+    if (Allow-CloseEnoughSuggestion $decision.suggestion) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)" }
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
@@ -282,6 +309,13 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
 function global:Allow-CloseEnoughDiagnostic {
   if ($global:CloseEnoughDiagnosticCount -ge $global:CloseEnoughDiagnosticLimit) { return $false }
   $global:CloseEnoughDiagnosticCount += 1
+  return $true
+}
+function global:Allow-CloseEnoughSuggestion {
+  param([string]$Suggestion)
+  if ([string]::IsNullOrEmpty($Suggestion) -or $global:CloseEnoughSeenSuggestions.Contains($Suggestion)) { return $false }
+  if (-not (Allow-CloseEnoughDiagnostic)) { return $false }
+  [void]$global:CloseEnoughSeenSuggestions.Add($Suggestion)
   return $true
 }
 function global:Restore-CloseEnoughEnterHandler {

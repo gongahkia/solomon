@@ -118,15 +118,16 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		shell        string
 		count        string
 		allow        string
+		hintAllow    string
 		hint         string
 		interrupt    string
 		interruptEnd string
 		post         string
 	}{
-		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
-		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
-		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
-		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
+		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
+		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
 	} {
 		t.Run(test.shell, func(t *testing.T) {
 			script, err := Script(test.shell)
@@ -137,7 +138,7 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 				t.Fatalf("%s adapter lacks session rate limiting: %q", test.shell, script)
 			}
 			hintStart, interruptStart := strings.Index(script, test.hint), strings.Index(script, test.interrupt)
-			if hintStart < 0 || interruptStart < hintStart || !strings.Contains(script[hintStart:interruptStart], test.allow) {
+			if hintStart < 0 || interruptStart < hintStart || !strings.Contains(script[hintStart:interruptStart], test.hintAllow) {
 				t.Fatalf("%s hint is not rate limited: %q", test.shell, script)
 			}
 			interrupt := script[interruptStart:]
@@ -153,7 +154,30 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 	}
 }
 
-func TestZshRateLimitAllowsFiveHints(t *testing.T) {
+func TestAdaptersSuppressRepeatedSuggestions(t *testing.T) {
+	for _, test := range []struct {
+		shell string
+		cache string
+		allow string
+	}{
+		{"zsh", "typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
+		{"bash", "_close_enough_seen_suggestions=$'\\n'", "_close_enough_allow_suggestion"},
+		{"fish", "set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
+		{"pwsh", "CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()", "Allow-CloseEnoughSuggestion"},
+	} {
+		t.Run(test.shell, func(t *testing.T) {
+			script, err := Script(test.shell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(script, test.cache) || !strings.Contains(script, test.allow) {
+				t.Fatalf("%s adapter lacks repeated-suggestion cache: %q", test.shell, script)
+			}
+		})
+	}
+}
+
+func TestZshSuppressesRepeatedSuggestions(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh unavailable")
@@ -179,8 +203,8 @@ func TestZshRateLimitAllowsFiveHints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zsh rate-limit harness: %v: %s", err, output)
 	}
-	if got := strings.Count(string(output), "close-enough [safe/0.90]: git status"); got != 5 {
-		t.Fatalf("rendered hints = %d, want 5: %s", got, output)
+	if got := strings.Count(string(output), "close-enough [safe/0.90]: git status"); got != 1 {
+		t.Fatalf("rendered hints = %d, want 1: %s", got, output)
 	}
 }
 

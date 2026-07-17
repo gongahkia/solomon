@@ -28,6 +28,7 @@ func TestResolveAction(t *testing.T) {
 	}{
 		{"none", "none", "safe", "", ActionResult{Submit: true}},
 		{"run unchanged", "run-unchanged", "high", "rm", ActionResult{Submit: true}},
+		{"skip once", "skip-once", "high", "rm", ActionResult{Submit: true}},
 		{"hint", "hint", "safe", "git status", ActionResult{Render: true, Submit: true}},
 		{"interrupt", "interrupt", "high", "rm", ActionResult{Render: true}},
 		{"rewrite", "rewrite", "safe", "git status", ActionResult{Rewrite: true}},
@@ -55,6 +56,13 @@ func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {
 		t.Fatal("one-time acceptance state is incorrect")
+	}
+}
+
+func TestSkipOnce(t *testing.T) {
+	var skip SkipOnce
+	if !skip.Skip("gti") || skip.Skip("gti") || skip.Skip("") || !skip.Skip("git sttaus") {
+		t.Fatal("skip-once state is incorrect")
 	}
 }
 

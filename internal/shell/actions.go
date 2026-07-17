@@ -14,6 +14,7 @@ const (
 	ActionRewrite      ActionState = "rewrite"
 	ActionRunUnchanged ActionState = "run-unchanged"
 	ActionEditInBuffer ActionState = "edit-in-buffer"
+	ActionSkipOnce     ActionState = "skip-once"
 )
 
 type ActionResult struct {
@@ -25,7 +26,7 @@ type ActionResult struct {
 
 func ResolveAction(action, risk, suggestion string) ActionResult {
 	switch ActionState(action) {
-	case ActionNone, ActionRunUnchanged:
+	case ActionNone, ActionRunUnchanged, ActionSkipOnce:
 		return ActionResult{Submit: true}
 	case ActionHint:
 		return ActionResult{Render: true, Submit: true}
@@ -48,6 +49,27 @@ func InlineDiagnostic(risk, confidence, suggestion string) string {
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}
+}
+
+type SkipOnce struct {
+	mu      sync.Mutex
+	skipped map[string]struct{}
+}
+
+func (s *SkipOnce) Skip(key string) bool {
+	if key == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.skipped == nil {
+		s.skipped = map[string]struct{}{}
+	}
+	if _, ok := s.skipped[key]; ok {
+		return false
+	}
+	s.skipped[key] = struct{}{}
+	return true
 }
 
 func (a *OneTimeAccept) Accept(key string) bool {

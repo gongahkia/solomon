@@ -10,11 +10,15 @@ const Replacement = "[REDACTED]"
 var secretAssignment = regexp.MustCompile(`(?i)((?:^|[[:space:]?&;]|--)(?:[a-z0-9_-]*_)?(?:token|secret|password|passwd|api[-_]?key|access[-_]?key|private[-_]?key|credential|authorization|cookie)=)[^[:space:]&;]+`)
 var URLUserInfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@[:space:]]+@`)
 var bearerCredential = regexp.MustCompile(`(?i)(bearer[[:space:]]+)[^[:space:]]+`)
+var authorizationCredential = regexp.MustCompile(`(?i)((?:proxy-)?authorization:[[:space:]]+(?:basic|bearer|token)[[:space:]]+)[^[:space:]]+`)
+var cookieCredential = regexp.MustCompile(`(?i)((?:set-)?cookie:[[:space:]]*)[^[:space:]]+`)
 
 func Text(value string) (string, bool) {
 	redacted := secretAssignment.ReplaceAllString(value, "${1}"+Replacement)
 	redacted = URLUserInfo.ReplaceAllString(redacted, "${1}"+Replacement+"@")
 	redacted = bearerCredential.ReplaceAllString(redacted, "${1}"+Replacement)
+	redacted = authorizationCredential.ReplaceAllString(redacted, "${1}"+Replacement)
+	redacted = cookieCredential.ReplaceAllString(redacted, "${1}"+Replacement)
 	return redacted, redacted != value
 }
 

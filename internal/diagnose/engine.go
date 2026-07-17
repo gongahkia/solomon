@@ -121,9 +121,8 @@ func noDecision() Decision {
 }
 
 func (e Engine) applyMode(decision Decision) Decision {
-	if e.safeAutoApply(decision) {
-		decision.Action = "rewrite"
-		return decision
+	if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
+		return rewritten
 	}
 	if e.shouldInterrupt(decision) {
 		decision.Action = "interrupt"
@@ -141,6 +140,14 @@ func (e Engine) safeAutoApply(decision Decision) bool {
 		decision.Risk == RiskSafe &&
 		decision.Confidence >= 0.80 &&
 		meetsConfidenceThreshold(decision.Class, decision.Confidence)
+}
+
+func (e Engine) evaluateRewriteBuffer(decision Decision) (Decision, bool) {
+	if !e.safeAutoApply(decision) {
+		return decision, false
+	}
+	decision.Action = "rewrite"
+	return decision, true
 }
 
 func (e Engine) shouldInterrupt(decision Decision) bool {

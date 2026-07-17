@@ -170,6 +170,27 @@ func TestSafeAutoApplyPolicy(t *testing.T) {
 	}
 }
 
+func TestRewriteBufferPolicy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mode, cfg.AutoApplySafe = "rewrite", true
+	engine := New(Options{Config: cfg})
+	decision := Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe}
+	rewritten, ok := engine.evaluateRewriteBuffer(decision)
+	if !ok || rewritten.Action != "rewrite" || decision.Action != "" {
+		t.Fatalf("rewrite result = %#v, %t", rewritten, ok)
+	}
+	for _, blocked := range []Decision{
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskHigh},
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskUnknown},
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.79, Risk: RiskSafe},
+	} {
+		unchanged, ok := engine.evaluateRewriteBuffer(blocked)
+		if ok || unchanged.Action != blocked.Action || unchanged.Suggestion != blocked.Suggestion {
+			t.Fatalf("blocked rewrite = %#v, %t", unchanged, ok)
+		}
+	}
+}
+
 func TestInterruptionPolicy(t *testing.T) {
 	base := Decision{Suggestion: "diagnostic", Class: RepairClassCommand, Confidence: 0.90, Risk: RiskUnknown}
 	for _, test := range []struct {

@@ -234,6 +234,41 @@ func TestCheckColorNeverDisablesANSI(t *testing.T) {
 	}
 }
 
+func TestRenderScreenReaderDiagnostic(t *testing.T) {
+	decision := diagnose.Decision{
+		Cause:       "unknown command",
+		Consequence: "the shell will reject it",
+		Suggestion:  "git status",
+		Risk:        diagnose.RiskSafe,
+		Trace:       []string{"resolver:path", "distance:1"},
+	}
+	display := config.Display{Cause: true, Change: true, Risk: true, Consequence: true, Trace: true}
+	want := "Cause: unknown command\nConsequence: the shell will reject it\nSuggested command: git status\nRisk level: safe\nTrace: resolver:path; distance:1\n"
+	if got := renderScreenReaderDiagnostic(decision, display); got != want {
+		t.Fatalf("screen-reader output = %q, want %q", got, want)
+	}
+	if got := renderScreenReaderDiagnostic(diagnose.Decision{}, display); got != "No suggestion.\n" {
+		t.Fatalf("empty screen-reader output = %q", got)
+	}
+	if got := renderScreenReaderDiagnostic(decision, config.Display{Change: true}); strings.Contains(got, "\x1b[") || strings.Contains(got, "[-") {
+		t.Fatalf("screen-reader output contains visual markup: %q", got)
+	}
+}
+
+func TestCheckScreenReaderMode(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"check", "--format", "plain", "--color", "always", "--screen-reader", "--command", "git sttaus"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); strings.Contains(got, "\x1b[") || strings.Contains(got, "[-") || !strings.Contains(got, "Suggested command: git status") {
+		t.Fatalf("screen-reader command output = %q", got)
+	}
+	if err := run([]string{"check", "--format", "json", "--screen-reader", "--command", "git sttaus"}, io.Discard, io.Discard); err == nil {
+		t.Fatal("expected screen-reader format error")
+	}
+}
+
 func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	configHome := t.TempDir()
 	path := filepath.Join(configHome, "close-enough", "config.json")

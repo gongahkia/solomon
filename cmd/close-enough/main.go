@@ -127,6 +127,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 	stage := fs.String("stage", "pre", "pre or post")
 	format := fs.String("format", "json", "json, plain, or record")
 	color := fs.String("color", colorAuto, "auto, always, or never")
+	screenReader := fs.Bool("screen-reader", false, "structured ANSI-free plain output")
 	if err := fs.Parse(args); err != nil {
 		return clierr.Wrap(clierr.Usage, err)
 	}
@@ -138,6 +139,9 @@ func checkCommand(args []string, stdout io.Writer) error {
 	}
 	if *color != colorAuto && *color != colorAlways && *color != colorNever {
 		return clierr.New(clierr.Usage, "--color must be auto, always, or never")
+	}
+	if *screenReader && *format != "plain" {
+		return clierr.New(clierr.Usage, "--screen-reader requires --format plain")
 	}
 	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
 	if err != nil {
@@ -161,6 +165,9 @@ func checkCommand(args []string, stdout io.Writer) error {
 			return clierr.New(clierr.Usage, err.Error())
 		}
 		output := renderPlainDiagnosticWithColor(decision, cfg.Display, *command, colorEnabled)
+		if *screenReader {
+			output = renderScreenReaderDiagnostic(decision, cfg.Display)
+		}
 		if len(output) > diagnose.MaxOutputBytes {
 			return clierr.Wrap(clierr.Operation, diagnose.ErrOutputLimit)
 		}
@@ -212,6 +219,36 @@ func renderPlainDiagnosticWithColor(decision diagnose.Decision, display config.D
 			trace[index] = sanitizeTerminalText(value)
 		}
 		lines = append(lines, diagnosticLabel("Trace: ", "36", colorEnabled)+strings.Join(trace, ", "))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func renderScreenReaderDiagnostic(decision diagnose.Decision, display config.Display) string {
+	if decision.Suggestion == "" {
+		return "No suggestion.\n"
+	}
+	lines := []string{}
+	if display.Cause && decision.Cause != "" {
+		lines = append(lines, "Cause: "+sanitizeTerminalText(decision.Cause))
+	}
+	if display.Consequence && decision.Consequence != "" {
+		lines = append(lines, "Consequence: "+sanitizeTerminalText(decision.Consequence))
+	}
+	if display.Change {
+		lines = append(lines, "Suggested command: "+sanitizeTerminalText(decision.Suggestion))
+	}
+	if display.Risk {
+		lines = append(lines, "Risk level: "+string(decision.Risk))
+	}
+	if display.Trace && len(decision.Trace) > 0 {
+		trace := make([]string, len(decision.Trace))
+		for index, value := range decision.Trace {
+			trace[index] = sanitizeTerminalText(value)
+		}
+		lines = append(lines, "Trace: "+strings.Join(trace, "; "))
 	}
 	if len(lines) == 0 {
 		return ""

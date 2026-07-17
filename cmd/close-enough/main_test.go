@@ -181,6 +181,59 @@ func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
 	}
 }
 
+func TestRenderPlainDiagnosticColorMode(t *testing.T) {
+	decision := diagnose.Decision{Suggestion: "git status", Risk: diagnose.RiskSafe}
+	colored := renderPlainDiagnosticWithColor(decision, config.Display{Change: true, Risk: true}, "", true)
+	if got, want := colored, "\x1b[32mDid you mean: \x1b[0mgit status\n\x1b[33mRisk: \x1b[0msafe\n"; got != want {
+		t.Fatalf("colored output = %q, want %q", got, want)
+	}
+	plain := renderPlainDiagnosticWithColor(decision, config.Display{Change: true, Risk: true}, "", false)
+	if strings.Contains(plain, "\x1b[") {
+		t.Fatalf("color-disabled output contains ANSI sequence: %q", plain)
+	}
+}
+
+func TestDiagnosticColorEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		env  map[string]string
+		want bool
+		err  bool
+	}{
+		{name: "never", mode: colorNever},
+		{name: "always", mode: colorAlways, want: true},
+		{name: "auto non-terminal", mode: colorAuto},
+		{name: "auto no color", mode: colorAuto, env: map[string]string{"NO_COLOR": "1"}},
+		{name: "invalid", mode: "invalid", err: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := diagnosticColorEnabled(test.mode, io.Discard, func(key string) string { return test.env[key] })
+			if (err != nil) != test.err || got != test.want {
+				t.Fatalf("diagnosticColorEnabled() = %t, %v; want %t, error=%t", got, err, test.want, test.err)
+			}
+		})
+	}
+}
+
+func TestCheckColorNeverDisablesANSI(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, color := range []string{colorAlways, colorNever} {
+		var output strings.Builder
+		if err := run([]string{"check", "--format", "plain", "--color", color, "--command", "git sttaus"}, &output, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		hasANSI := strings.Contains(output.String(), "\x1b[")
+		if hasANSI != (color == colorAlways) {
+			t.Fatalf("--color=%s ANSI output = %q", color, output.String())
+		}
+	}
+	if err := run([]string{"check", "--color", "invalid", "--command", "git sttaus"}, io.Discard, io.Discard); err == nil {
+		t.Fatal("expected invalid color error")
+	}
+}
+
 func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	configHome := t.TempDir()
 	path := filepath.Join(configHome, "close-enough", "config.json")

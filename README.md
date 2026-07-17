@@ -12,6 +12,8 @@ go build ./cmd/close-enough
 
 `close-enough` never sends command data over the network by default and does not auto-apply risky transformations.
 
+Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
+
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
 Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_REGISTRY_ENABLED`, and `CLOSE_ENOUGH_AUTO_UPDATE_ENABLED`; booleans must be `true` or `false`.

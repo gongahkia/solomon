@@ -591,9 +591,75 @@ func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || return`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `printf %s "$1" | base64 --decode`) || !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || return`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return`) {
 		t.Fatalf("bash protocol decoder is not binary-safe and fixed-field: %q", script)
 	}
+}
+
+func FuzzBashProtocolDecoderMalformedRecords(f *testing.F) {
+	for _, record := range []string{"", "1", "1\thint", "1\thint\tsafe\t1\t\t\t%", "2\thint\tsafe\t1\t\t\taGVsbG8", "1\thint\tsafe\t1\t\t\taGVsbG8\textra", "1\trewrite\tsafe\t1\t\t\t%"} {
+		f.Add(record)
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		f.Skip("bash unavailable")
+	}
+	directory := f.TempDir()
+	script, err := Script("bash")
+	if err != nil {
+		f.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		f.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+		f.Fatal(err)
+	}
+	f.Fuzz(func(t *testing.T, record string) {
+		if len(record) > 4<<10 || strings.ContainsRune(record, 0) || !malformedBashProtocolRecord(record) {
+			t.Skip()
+		}
+		result := filepath.Join(directory, "result")
+		marker := filepath.Join(directory, "marker")
+		input := `$(touch "$MARKER")`
+		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
+		command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter, input)
+		command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "MARKER="+marker, "RECORD="+record, "RESULT="+result)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("bash decoder: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("decoder evaluated input: %v", err)
+		}
+		buffer, err := os.ReadFile(result)
+		if err != nil || string(buffer) != input {
+			t.Fatalf("buffer = %q, %v; want %q", buffer, err, input)
+		}
+	})
+}
+
+func malformedBashProtocolRecord(record string) bool {
+	if strings.ContainsAny(record, "\r\n") {
+		return true
+	}
+	fields := strings.Split(record, "\t")
+	if len(fields) != 7 || fields[0] != "1" {
+		return true
+	}
+	switch fields[1] {
+	case "none":
+		return false
+	case "hint", "interrupt", "rewrite":
+	default:
+		return true
+	}
+	if _, err := base64.RawStdEncoding.DecodeString(fields[6]); err == nil {
+		return false
+	}
+	_, err := base64.StdEncoding.DecodeString(fields[6])
+	return err != nil
 }
 
 func TestBashEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
@@ -786,7 +852,7 @@ func TestFishProtocolDecodingValidatesFixedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `function _close_enough_decode`) || !strings.Contains(script, `printf '%s' "$argv[1]" | base64`) || !strings.Contains(script, "if test (count $fields) -ne 7") || !strings.Contains(script, `set -l suggestion (_close_enough_decode "$fields[7]")`) || !strings.Contains(script, "or return") {
+	if !strings.Contains(script, `function _close_enough_decode`) || !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1`) || !strings.Contains(script, `printf '%s' "$argv[1]" | base64`) || !strings.Contains(script, "if test (count $fields) -ne 7") || !strings.Contains(script, `set -l suggestion (_close_enough_decode "$fields[7]")`) || !strings.Contains(script, "or return") {
 		t.Fatalf("fish protocol decoder is not binary-safe and fixed-field: %q", script)
 	}
 }
@@ -1124,8 +1190,7 @@ func TestZshProtocolDecodingFailsOpenOnMalformedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoder := `function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }`
-	if !strings.Contains(script, decoder) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `print -rn -- "$1" | base64 --decode`) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
 		t.Fatalf("zsh protocol decoder is not binary-safe and fail-open: %q", script)
 	}
 }

@@ -3,7 +3,13 @@ package shell
 const zshScript = `# close-enough zsh integration
 if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then
 typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
-function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
+function _close_enough_decode {
+  if base64 --decode </dev/null >/dev/null 2>&1; then
+    print -rn -- "$1" | base64 --decode
+  else
+    print -rn -- "$1" | base64 -D
+  fi
+}
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
 typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
@@ -94,7 +100,13 @@ fi
 const bashScript = `# close-enough bash integration
 if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then
 _CLOSE_ENOUGH_BASH_LOADED=1
-_close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
+_close_enough_decode() {
+  if base64 --decode </dev/null >/dev/null 2>&1; then
+    printf %s "$1" | base64 --decode
+  else
+    printf %s "$1" | base64 -D
+  fi
+}
 _close_enough_diagnostic_count=0
 _close_enough_diagnostic_limit=5
 _close_enough_seen_suggestions=$'\n'
@@ -195,7 +207,11 @@ function _close_enough_allow_suggestion
   set -ga _CLOSE_ENOUGH_SEEN_SUGGESTIONS "$key"
 end
 function _close_enough_decode
-  printf '%s' "$argv[1]" | base64 --decode 2>/dev/null; or printf '%s' "$argv[1]" | base64 -D
+  if base64 --decode </dev/null >/dev/null 2>&1
+    printf '%s' "$argv[1]" | base64 --decode
+  else
+    printf '%s' "$argv[1]" | base64 -D
+  end
 end
 function _close_enough_accept_line
   set -l command (commandline -b)

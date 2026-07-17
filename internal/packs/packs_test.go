@@ -559,3 +559,42 @@ func TestVerifyTUFSnapshot(t *testing.T) {
 		t.Fatal("accepted snapshot version mismatch")
 	}
 }
+
+func TestVerifyTUFTargets(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key TUFKey
+	key.KeyType, key.Scheme = "ed25519", "ed25519"
+	key.KeyVal.Public = base64.RawStdEncoding.EncodeToString(publicKey)
+	root := TUFRoot{Type: "root", Version: 1, Keys: map[string]TUFKey{"targets-key": key}, Roles: map[string]TUFRole{"root": {KeyIDs: []string{"targets-key"}, Threshold: 1}, "targets": {KeyIDs: []string{"targets-key"}, Threshold: 1}}}
+	snapshot := TUFSnapshot{Type: "snapshot", Version: 1, Expires: "2030-01-01T00:00:00Z", Meta: map[string]TUFMetaFile{"targets.json": {Version: 1}}}
+	targets := TUFTargets{Type: "targets", Version: 1, Expires: "2030-01-01T00:00:00Z", Targets: map[string]TUFMetaFile{"core-git.json": {Length: 1, Hashes: map[string]string{"sha256": "00"}}}}
+	payload, err := json.Marshal(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := TUFEnvelope{Signed: payload, Signatures: []TUFSignature{{KeyID: "targets-key", Sig: hex.EncodeToString(ed25519.Sign(privateKey, payload))}}}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyTargets(data, root, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	targets.Targets = map[string]TUFMetaFile{"../pack.json": {Length: 1, Hashes: map[string]string{"sha256": "00"}}}
+	payload, err = json.Marshal(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope.Signed = payload
+	envelope.Signatures[0].Sig = hex.EncodeToString(ed25519.Sign(privateKey, payload))
+	data, err = json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyTargets(data, root, snapshot); err == nil {
+		t.Fatal("accepted unsafe target path")
+	}
+}

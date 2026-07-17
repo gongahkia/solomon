@@ -8,10 +8,10 @@ function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion
   command="$BUFFER"
   record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return 0
-  IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record"
+  IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record" || return 0
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
-  suggestion="$(_close_enough_decode "$suggestion")"
+  suggestion="$(_close_enough_decode "$suggestion")" || return 0
   if [[ "$action" == rewrite ]]; then
     if [[ "$risk" != safe || -z "$suggestion" ]]; then
       zle -M "close-enough: refused unsafe rewrite"

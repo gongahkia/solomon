@@ -188,6 +188,17 @@ func TestZshPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	}
 }
 
+func TestZshProtocolDecodingFailsOpenOnMalformedRecords(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := `function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }`
+	if !strings.Contains(script, decoder) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record" || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
+		t.Fatalf("zsh protocol decoder is not binary-safe and fail-open: %q", script)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

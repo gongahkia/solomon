@@ -442,6 +442,33 @@ func TestRustFlagRepairRules(t *testing.T) {
 	}
 }
 
+func TestRustPathRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "rust.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "rust-path-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"cargo-build-manifest-tmol", "cargo-test-manifest-tmol", "rustc-source-mian"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Rust path corpus")
+	}
+}
+
 func TestPythonSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
 	if err != nil {

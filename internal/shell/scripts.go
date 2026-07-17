@@ -77,8 +77,9 @@ if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then
 _CLOSE_ENOUGH_BASH_LOADED=1
 _close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
 _close_enough_accept_line() {
-  local record version action risk confidence cause consequence suggestion
-  record="$(command close-enough check --stage pre --format record --command "$READLINE_LINE" 2>/dev/null)" || return
+  local command record version action risk confidence cause consequence suggestion
+  command="$READLINE_LINE"
+  record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return
   IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record"
   [ "$version" = 1 ] || return
   [ "$action" = none ] && return

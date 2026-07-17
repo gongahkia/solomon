@@ -264,6 +264,18 @@ func TestBashInitializationIsGuarded(t *testing.T) {
 	}
 }
 
+func TestBashPreExecutionUsesCapturedBuffer(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := `command="$READLINE_LINE"`
+	check := `--stage pre --format record --command "$command"`
+	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$READLINE_LINE"`) {
+		t.Fatalf("bash pre-execution check does not use a captured buffer: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

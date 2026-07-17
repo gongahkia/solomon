@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -39,6 +40,12 @@ func Load(path string) (Pack, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&pack); err != nil {
 		return Pack{}, fmt.Errorf("parse pack: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return Pack{}, errors.New("parse pack: multiple JSON values")
+		}
+		return Pack{}, fmt.Errorf("parse pack: trailing data: %w", err)
 	}
 	return pack, nil
 }

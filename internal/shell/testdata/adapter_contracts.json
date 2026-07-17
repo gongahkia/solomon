@@ -33,6 +33,6 @@
     "capabilities": ["pre-execution", "hint", "interrupt", "rewrite"],
     "configuration": ["mode"],
     "limitations": ["requires PSReadLine", "no post-failure diagnostics"],
-    "markers": ["--stage pre", "-eq 'rewrite'", "-eq 'hint'", "-ne 'interrupt'"]
+    "markers": ["--stage pre", "-eq 'rewrite'", "-eq 'hint'", "-eq 'interrupt'"]
   }
 ]

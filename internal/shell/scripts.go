@@ -215,7 +215,14 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $command = $line
   $decision = & close-enough check --stage pre --format json --command $command 2>$null | ConvertFrom-Json
   if ($decision.version -ne 1) { return }
-  if ($decision.action -eq 'rewrite') { [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion); return }
+  if ($decision.action -eq 'rewrite') {
+    if ($decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) {
+      Write-Host "close-enough: refused unsafe rewrite"
+      return
+    }
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
+    return
+  }
   if ($decision.action -eq 'hint') {
     Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)"
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()

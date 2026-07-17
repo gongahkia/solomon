@@ -694,7 +694,7 @@ func TestPowerShellHintRenderingDoesNotSuppressSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	hint := "if ($decision.action -eq 'hint') {"
-	interrupt := "if ($decision.action -ne 'interrupt')"
+	interrupt := "if ($decision.action -eq 'interrupt') {"
 	start, end := strings.Index(script, hint), strings.Index(script, interrupt)
 	if start < 0 || end < start || !strings.Contains(script[start:end], "Write-Host") || !strings.Contains(script[start:end], "AcceptLine()") || !strings.Contains(script[start:end], "return") {
 		t.Fatalf("PowerShell hint path is not non-blocking: %q", script)
@@ -710,6 +710,19 @@ func TestPowerShellInterruptReturnsBeforeCommandExecution(t *testing.T) {
 	start := strings.Index(script, interrupt)
 	if start < 0 || !strings.Contains(script[start:], "Write-Host") || !strings.Contains(script[start:], "return") {
 		t.Fatalf("PowerShell interrupt path does not suppress command submission: %q", script)
+	}
+}
+
+func TestPowerShellRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
+	script, err := Script("powershell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrite := "if ($decision.action -eq 'rewrite') {"
+	hint := "if ($decision.action -eq 'hint') {"
+	start, end := strings.Index(script, rewrite), strings.Index(script, hint)
+	if start < 0 || end < start || !strings.Contains(script[start:end], "$decision.risk -ne 'safe'") || !strings.Contains(script[start:end], "IsNullOrEmpty($decision.suggestion)") || !strings.Contains(script[start:end], "refused unsafe rewrite") || !strings.Contains(script[start:end], "PSConsoleReadLine]::Replace") {
+		t.Fatalf("PowerShell rewrite path does not fail closed: %q", script)
 	}
 }
 

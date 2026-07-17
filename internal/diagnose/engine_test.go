@@ -229,6 +229,16 @@ func TestKeyboardAdjacencyBreaksEqualEditDistance(t *testing.T) {
 	}
 }
 
+func TestCandidateRankingUsesStableTieBreakers(t *testing.T) {
+	ranked := rankCandidates("gkt", []string{"get", "git", "git", "go"})
+	if got := []string{ranked[0].value, ranked[1].value, ranked[2].value}; !slices.Equal(got, []string{"git", "get", "go"}) {
+		t.Fatalf("ranked candidates = %#v", got)
+	}
+	if len(rankCandidates("git", nil)) != 0 {
+		t.Fatal("empty candidates must remain empty")
+	}
+}
+
 func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")

@@ -439,18 +439,39 @@ func isPathQualified(value, platform string) bool {
 }
 
 func nearest(value string, candidates []string) (string, int) {
-	best, bestDistance, bestKeyboardDistance := "", 1<<30, 1<<30
-	for _, candidate := range candidates {
-		distance := damerauLevenshtein(value, candidate)
-		keyboardDistance := keyboardAdjacencyDistance(value, candidate)
-		if distance < bestDistance || distance == bestDistance && (keyboardDistance < bestKeyboardDistance || keyboardDistance == bestKeyboardDistance && candidate < best) {
-			best, bestDistance, bestKeyboardDistance = candidate, distance, keyboardDistance
-		}
-	}
-	if best == "" {
+	ranked := rankCandidates(value, candidates)
+	if len(ranked) == 0 {
 		return "", 0
 	}
-	return best, bestDistance
+	return ranked[0].value, ranked[0].editDistance
+}
+
+type rankedCandidate struct {
+	value            string
+	editDistance     int
+	keyboardDistance int
+}
+
+func rankCandidates(value string, candidates []string) []rankedCandidate {
+	seen := map[string]struct{}{}
+	ranked := make([]rankedCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		ranked = append(ranked, rankedCandidate{value: candidate, editDistance: damerauLevenshtein(value, candidate), keyboardDistance: keyboardAdjacencyDistance(value, candidate)})
+	}
+	sort.Slice(ranked, func(left, right int) bool {
+		if ranked[left].editDistance != ranked[right].editDistance {
+			return ranked[left].editDistance < ranked[right].editDistance
+		}
+		if ranked[left].keyboardDistance != ranked[right].keyboardDistance {
+			return ranked[left].keyboardDistance < ranked[right].keyboardDistance
+		}
+		return ranked[left].value < ranked[right].value
+	})
+	return ranked
 }
 
 var keyboardRows = [][]rune{

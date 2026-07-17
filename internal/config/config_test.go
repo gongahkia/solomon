@@ -192,6 +192,37 @@ func TestLoadAppliesSessionOverrides(t *testing.T) {
 	}
 }
 
+func TestSessionOverridesDoNotPersist(t *testing.T) {
+	base := t.TempDir()
+	path := filepath.Join(base, "close-enough", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mode":"hint"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := Paths{
+		Home: func() (string, error) { return base, nil },
+		CWD:  func() (string, error) { return t.TempDir(), nil },
+		Env: func(key string) string {
+			if key == "XDG_CONFIG_HOME" {
+				return base
+			}
+			return ""
+		},
+		Environ: func() []string { return []string{"CLOSE_ENOUGH_MODE=interrupt"} },
+	}
+	withOverride, err := Load(paths)
+	if err != nil || withOverride.Mode != "interrupt" {
+		t.Fatalf("session configuration = %#v, %v", withOverride, err)
+	}
+	paths.Environ = func() []string { return nil }
+	withoutOverride, err := Load(paths)
+	if err != nil || withoutOverride.Mode != "hint" {
+		t.Fatalf("persisted configuration = %#v, %v", withoutOverride, err)
+	}
+}
+
 func TestSessionOverridesTakePrecedenceOverApprovedProjectAndGlobalConfig(t *testing.T) {
 	root := t.TempDir()
 	configHome := filepath.Join(root, "config")

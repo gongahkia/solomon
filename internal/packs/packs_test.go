@@ -362,6 +362,42 @@ func TestPythonCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestPythonSubcommandTypoRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "python-subcommand-typos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := LoadBundled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundledPack Pack
+	for _, candidate := range bundled {
+		if candidate.ID == pack.ID {
+			bundledPack = candidate
+		}
+	}
+	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
+		t.Fatalf("bundled Python pack = %#v", bundledPack)
+	}
+	for _, rule := range pack.Rules {
+		if rule.Risk != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", rule.ID, rule.Risk)
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Python corpus")
+	}
+}
+
 func TestJavaScriptSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "javascript.json"))
 	if err != nil {
@@ -968,11 +1004,11 @@ func TestPackCompatibilityRequirements(t *testing.T) {
 
 func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	names, err := BundledNames()
-	if err != nil || !slices.Equal(names, []string{"core-git.json", "core-javascript.json", "core-package-managers.json"}) {
+	if err != nil || !slices.Equal(names, []string{"core-git.json", "core-javascript.json", "core-package-managers.json", "core-python.json"}) {
 		t.Fatalf("bundled names = %#v, %v", names, err)
 	}
 	packs, err := LoadBundled()
-	if err != nil || len(packs) != 3 || packs[0].ID != "core-git" || packs[1].ID != "core-javascript" || packs[2].ID != "core-package-managers" {
+	if err != nil || len(packs) != 4 || packs[0].ID != "core-git" || packs[1].ID != "core-javascript" || packs[2].ID != "core-package-managers" || packs[3].ID != "core-python" {
 		t.Fatalf("bundled packs = %#v, %v", packs, err)
 	}
 	packs[0].Rules[0].ID = "mutated"

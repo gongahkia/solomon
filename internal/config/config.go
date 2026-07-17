@@ -13,6 +13,7 @@ import (
 	"github.com/gongahkia/close-enough/internal/credential"
 	"github.com/gongahkia/close-enough/internal/featuregate"
 	"github.com/gongahkia/close-enough/internal/filesystem"
+	"github.com/gongahkia/close-enough/internal/history"
 	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
@@ -53,6 +54,10 @@ func (c Config) Features() featuregate.Gates {
 
 func (c Config) HistoryKeys(store credential.Store) credential.HistoryKeys {
 	return credential.NewHistoryKeys(c.LocalHistoryEnabled, store)
+}
+
+func (c Config) HistoryRanker(store history.Store) history.Ranker {
+	return history.New(c.LocalHistoryEnabled, store)
 }
 
 func GlobalPath(home func() (string, error)) (string, error) {

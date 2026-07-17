@@ -22,6 +22,8 @@ Registry and auto-update features are disabled by default; auto-update requires 
 
 Optional local-history encryption keys use an injected OS credential-store backend only; no file fallback is provided.
 
+History ranking is disabled by default and stores only SHA-256 command keys through an injected local backend after opt-in.
+
 Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories; `close-enough doctor` reports these findings without blocking.
 
 Secure writes and trusted project configuration require platform support for atomic replacement, restrictive permissions, and ownership verification; unsupported platforms fail closed.

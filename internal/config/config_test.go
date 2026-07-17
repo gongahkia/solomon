@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gongahkia/close-enough/internal/credential"
 	"github.com/gongahkia/close-enough/internal/featuregate"
+	"github.com/gongahkia/close-enough/internal/history"
 )
 
 func TestSetValidatesMode(t *testing.T) {
@@ -46,6 +48,17 @@ func TestFeatureGatesRequireExplicitRegistryEnablement(t *testing.T) {
 func TestHistoryKeysRequireLocalHistoryOptIn(t *testing.T) {
 	if _, err := Default().HistoryKeys(nil).Generate(); !errors.Is(err, credential.ErrDisabled) {
 		t.Fatalf("default history key error = %v", err)
+	}
+}
+
+func TestHistoryRankerRequiresLocalHistoryOptIn(t *testing.T) {
+	if _, err := Default().HistoryRanker(nil).Score(context.Background(), "git"); err != nil {
+		t.Fatalf("default ranker error = %v", err)
+	}
+	cfg := Default()
+	cfg.LocalHistoryEnabled = true
+	if _, err := cfg.HistoryRanker(nil).Score(context.Background(), "git"); !errors.Is(err, history.ErrUnavailable) {
+		t.Fatalf("enabled ranker error = %v", err)
 	}
 }
 

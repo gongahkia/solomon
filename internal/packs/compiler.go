@@ -13,7 +13,7 @@ type CompiledPack struct {
 }
 
 func Compile(pack Pack) (CompiledPack, error) {
-	if err := pack.Validate(); err != nil {
+	if err := pack.CheckCompatibility(EngineVersion); err != nil {
 		return CompiledPack{}, err
 	}
 	compiled := CompiledPack{Pack: pack, Rules: make([]CompiledRule, 0, len(pack.Rules))}

@@ -235,3 +235,33 @@ func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 		}
 	}
 }
+
+func TestPackCompatibilityRequirements(t *testing.T) {
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", MinEngineVersion: "1.0.0", Capabilities: []string{"matcher-v1", "risk-v1"}, Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	if err := pack.CheckCompatibility("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pack.CheckCompatibility("0.9.0"); err == nil {
+		t.Fatal("accepted old engine")
+	}
+	pack.Capabilities = []string{"unknown-v1"}
+	if err := pack.CheckCompatibility(EngineVersion); err == nil {
+		t.Fatal("accepted unsupported capability")
+	}
+	pack.Capabilities = []string{"matcher-v1", "matcher-v1"}
+	if err := pack.Validate(); err == nil {
+		t.Fatal("accepted duplicate capabilities")
+	}
+	for _, test := range []struct {
+		left, right string
+		want        int
+	}{
+		{"1.0.0-alpha.2", "1.0.0-alpha.10", -1},
+		{"1.0.0", "1.0.0-rc.1", 1},
+		{"1.0.0+build.1", "1.0.0+build.2", 0},
+	} {
+		if got := compareVersion(test.left, test.right); got != test.want {
+			t.Fatalf("compareVersion(%q, %q) = %d, want %d", test.left, test.right, got, test.want)
+		}
+	}
+}

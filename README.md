@@ -54,6 +54,8 @@ Pack fixture schema v1 runs declarative command/input cases against expected rul
 
 Pack resolution sorts by pack ID and rejects duplicate IDs or duplicate command/pattern matchers.
 
+Packs can declare a minimum engine SemVer and supported capability identifiers; validation rejects unmet or unknown requirements.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

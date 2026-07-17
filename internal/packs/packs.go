@@ -15,11 +15,13 @@ import (
 )
 
 type Pack struct {
-	SchemaVersion int    `json:"schema_version"`
-	ID            string `json:"id"`
-	Version       string `json:"version"`
-	Publisher     string `json:"publisher"`
-	Rules         []Rule `json:"rules"`
+	SchemaVersion    int      `json:"schema_version"`
+	ID               string   `json:"id"`
+	Version          string   `json:"version"`
+	Publisher        string   `json:"publisher"`
+	MinEngineVersion string   `json:"min_engine_version,omitempty"`
+	Capabilities     []string `json:"capabilities,omitempty"`
+	Rules            []Rule   `json:"rules"`
 }
 
 type Rule struct {
@@ -58,6 +60,9 @@ func (p Pack) Validate() error {
 	}
 	if !identifier(p.ID) || !semanticVersion(p.Version) || !identifier(p.Publisher) {
 		return errors.New("id and publisher must be lowercase kebab identifiers; version must be semantic")
+	}
+	if err := validateCompatibilityMetadata(p); err != nil {
+		return err
 	}
 	if len(p.Rules) == 0 {
 		return errors.New("pack must contain at least one rule")

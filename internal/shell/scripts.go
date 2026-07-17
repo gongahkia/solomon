@@ -138,15 +138,22 @@ fi
 const fishScript = `# close-enough fish integration
 if not set -q _CLOSE_ENOUGH_FISH_LOADED
   set -g _CLOSE_ENOUGH_FISH_LOADED 1
+function _close_enough_decode
+  printf '%s' "$argv[1]" | base64 --decode 2>/dev/null; or printf '%s' "$argv[1]" | base64 -D
+end
 function _close_enough_accept_line
   set -l command (commandline -b)
   set -l record (command close-enough check --stage pre --format record --command "$command" 2>/dev/null)
   set -l fields (string split \t -- $record)
+  if test (count $fields) -ne 7
+    return
+  end
   if test "$fields[1]" != 1
     return
   end
   if test "$fields[2]" = rewrite
-    set -l suggestion (echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D)
+    set -l suggestion (_close_enough_decode "$fields[7]")
+    or return
     if test "$fields[3]" != safe; or test -z "$suggestion"
       echo "close-enough: refused unsafe rewrite" >&2
       commandline -f repaint
@@ -156,12 +163,16 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = hint
-    echo "close-enough [$fields[3]/$fields[4]]: "(echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D) >&2
+    set -l suggestion (_close_enough_decode "$fields[7]")
+    or return
+    echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
     commandline -f execute
     return
   end
   if test "$fields[2]" = interrupt
-    echo "close-enough [$fields[3]/$fields[4]]: "(echo $fields[7] | base64 --decode 2>/dev/null; or echo $fields[7] | base64 -D) >&2
+    set -l suggestion (_close_enough_decode "$fields[7]")
+    or return
+    echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
     commandline -f repaint
     return
   end

@@ -548,6 +548,16 @@ func TestFishPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	}
 }
 
+func TestFishProtocolDecodingValidatesFixedFields(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `function _close_enough_decode`) || !strings.Contains(script, `printf '%s' "$argv[1]" | base64`) || !strings.Contains(script, "if test (count $fields) -ne 7") || !strings.Contains(script, `set -l suggestion (_close_enough_decode "$fields[7]")`) || !strings.Contains(script, "or return") {
+		t.Fatalf("fish protocol decoder is not binary-safe and fixed-field: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

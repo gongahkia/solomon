@@ -58,6 +58,8 @@ Packs can declare a minimum engine SemVer and supported capability identifiers; 
 
 Bundled packs are embedded read-only and discovered deterministically at runtime.
 
+Use `close-enough pack install <path>` to validate and atomically install a local pack without overwrite.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

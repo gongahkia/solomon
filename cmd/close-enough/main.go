@@ -424,18 +424,46 @@ func ruleCommand(args []string, stdout io.Writer) error {
 }
 
 func packCommand(args []string, stdout io.Writer) error {
-	if len(args) != 2 || args[0] != "validate" {
-		return clierr.New(clierr.Usage, "usage: close-enough pack validate <path>")
+	if len(args) != 2 {
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install> <path>")
 	}
-	pack, err := packs.Load(args[1])
-	if err != nil {
-		return clierr.Wrap(clierr.Input, err)
+	switch args[0] {
+	case "validate":
+		pack, err := packs.Load(args[1])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		if _, err := packs.Compile(pack); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)
+		return clierr.Wrap(clierr.Operation, err)
+	case "install":
+		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
+		if err != nil {
+			return clierr.Wrap(clierr.Configuration, err)
+		}
+		path, err := packs.Install(args[1], directory)
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		_, err = fmt.Fprintln(stdout, "installed", path)
+		return clierr.Wrap(clierr.Operation, err)
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install> <path>")
 	}
-	if _, err := packs.Compile(pack); err != nil {
-		return clierr.Wrap(clierr.Input, err)
+}
+
+func packDirectory(home func() (string, error), environment func(string) string) (string, error) {
+	base := environment("XDG_DATA_HOME")
+	if base == "" || !filepath.IsAbs(base) {
+		value, err := home()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(value, ".local", "share")
 	}
-	_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)
-	return clierr.Wrap(clierr.Operation, err)
+	return filepath.Join(base, "close-enough", "packs"), nil
 }
 
 func doctorCommand(stdout io.Writer) error {

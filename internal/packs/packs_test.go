@@ -2,6 +2,7 @@ package packs
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -280,5 +281,26 @@ func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	reloaded, err := LoadBundled()
 	if err != nil || reloaded[0].Rules[0].ID != "git-status-typo" {
 		t.Fatalf("bundled pack mutation leaked: %#v, %v", reloaded, err)
+	}
+}
+
+func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.json")
+	data := []byte(`{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`)
+	if err := os.WriteFile(source, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetDirectory := filepath.Join(directory, "installed")
+	target, err := Install(source, targetDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := os.ReadFile(target)
+	if err != nil || string(installed) != string(data) {
+		t.Fatalf("installed pack = %q, %v", installed, err)
+	}
+	if _, err := Install(source, targetDirectory); err == nil {
+		t.Fatal("expected no-overwrite failure")
 	}
 }

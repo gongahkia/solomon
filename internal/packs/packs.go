@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
 type Pack struct {
@@ -56,6 +58,41 @@ func decodePack(data []byte) (Pack, error) {
 		return Pack{}, fmt.Errorf("parse pack: trailing data: %w", err)
 	}
 	return pack, nil
+}
+
+func Install(source, directory string) (string, error) {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	pack, err := decodePack(data)
+	if err != nil {
+		return "", err
+	}
+	if _, err := Compile(pack); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", err
+	}
+	target := filepath.Join(directory, pack.ID+"-"+pack.Version+".json")
+	if _, err := os.Lstat(target); err == nil {
+		return "", fmt.Errorf("pack %q is already installed", pack.ID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	temporary, err := securetemp.Create(directory, "."+filepath.Base(target)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	defer temporary.Cleanup()
+	if _, err := temporary.Write(data); err != nil {
+		return "", err
+	}
+	if err := temporary.Commit(target); err != nil {
+		return "", err
+	}
+	return target, nil
 }
 
 func (p Pack) Validate() error {

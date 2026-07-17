@@ -380,6 +380,18 @@ func TestInspectDecisionCommand(t *testing.T) {
 	}
 }
 
+func TestPackDirectoryUsesAbsoluteXDGDataHome(t *testing.T) {
+	base := t.TempDir()
+	directory, err := packDirectory(func() (string, error) { return "/unused", nil }, func(string) string { return base })
+	if err != nil || directory != filepath.Join(base, "close-enough", "packs") {
+		t.Fatalf("pack directory = %q, %v", directory, err)
+	}
+	directory, err = packDirectory(func() (string, error) { return "/home/user", nil }, func(string) string { return "relative" })
+	if err != nil || directory != "/home/user/.local/share/close-enough/packs" {
+		t.Fatalf("fallback pack directory = %q, %v", directory, err)
+	}
+}
+
 func TestConfigCauseToggleControlsPlainDiagnostic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := run([]string{"config", "set", "display.cause", "false"}, io.Discard, io.Discard); err != nil {

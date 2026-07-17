@@ -392,6 +392,21 @@ func TestGoCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestContainersCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "containers-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"dockre": "docker", "dokcer": "docker", "podmna": "podman", "docker-comopse": "docker-compose", "docker-composee": "docker-compose"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "dockre")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err == nil {
+		t.Fatal("accepted incomplete container candidates")
+	}
+}
+
 func TestGoSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "go.json"))
 	if err != nil {

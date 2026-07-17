@@ -6,9 +6,12 @@ typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
 function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }
 function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion
+  local -a fields
   command="$BUFFER"
   record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return 0
-  IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record" || return 0
+  fields=("${(@ps:\t:)record}")
+  (( ${#fields} == 7 )) || return 0
+  version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
   suggestion="$(_close_enough_decode "$suggestion")" || return 0

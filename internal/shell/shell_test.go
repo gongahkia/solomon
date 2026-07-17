@@ -1,8 +1,11 @@
 package shell
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -145,6 +148,65 @@ func TestZshEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		input  string
+		action string
+		want   string
+	}{
+		{name: "command", input: `$(touch "$MARKER") ; echo injected`, action: "hint", want: `$(touch "$MARKER") ; echo injected`},
+		{name: "rewrite", input: "gti", action: "rewrite", want: `$(touch "$MARKER")`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capture := filepath.Join(directory, test.name+"-arguments")
+			result := filepath.Join(directory, test.name+"-buffer")
+			marker := filepath.Join(directory, test.name+"-marker")
+			payload := test.input
+			if test.name == "rewrite" {
+				payload = test.want
+			}
+			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
+			harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; print -rn -- "$BUFFER" > "$RESULT"`
+			command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath, test.input)
+			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("zsh harness: %v\n%s", err, output)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("adapter evaluated payload: %v", err)
+			}
+			buffer, err := os.ReadFile(result)
+			if err != nil || string(buffer) != test.want {
+				t.Fatalf("buffer = %q, %v; want %q", buffer, err, test.want)
+			}
+			if test.name == "command" {
+				arguments, err := os.ReadFile(capture)
+				if err != nil || !strings.Contains(string(arguments), test.input) {
+					t.Fatalf("checker arguments = %q, %v", arguments, err)
+				}
+			}
+		})
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {
@@ -208,7 +270,7 @@ func TestZshProtocolDecodingFailsOpenOnMalformedRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoder := `function _close_enough_decode { print -rn -- "$1" | { base64 --decode 2>/dev/null || base64 -D; } }`
-	if !strings.Contains(script, decoder) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record" || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
+	if !strings.Contains(script, decoder) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
 		t.Fatalf("zsh protocol decoder is not binary-safe and fail-open: %q", script)
 	}
 }

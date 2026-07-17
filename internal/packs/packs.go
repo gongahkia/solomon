@@ -44,8 +44,8 @@ func Load(path string) (Pack, error) {
 }
 
 func (p Pack) Validate() error {
-	if p.SchemaVersion != 1 {
-		return fmt.Errorf("unsupported schema version %d", p.SchemaVersion)
+	if err := ValidateSchemaCompatibility(p.SchemaVersion); err != nil {
+		return err
 	}
 	if !identifier(p.ID) || p.Version == "" || p.Publisher == "" {
 		return errors.New("id, version, and publisher are required")

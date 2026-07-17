@@ -8,9 +8,25 @@ import (
 )
 
 func TestValidatePack(t *testing.T) {
-	pack := Pack{SchemaVersion: 1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
 	if err := pack.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSchemaCompatibilityPolicyRejectsLegacyAndFutureVersions(t *testing.T) {
+	for _, test := range []struct {
+		version int
+		valid   bool
+	}{
+		{SchemaVersionV1 - 1, false},
+		{SchemaVersionV1, true},
+		{SchemaVersionV1 + 1, false},
+	} {
+		compatibility := SchemaCompatibility(test.version)
+		if compatibility.SchemaVersion != test.version || compatibility.Compatible != test.valid || (ValidateSchemaCompatibility(test.version) == nil) != test.valid {
+			t.Fatalf("schema compatibility = %#v for version %d", compatibility, test.version)
+		}
 	}
 }
 

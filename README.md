@@ -38,6 +38,8 @@ Use `close-enough inspect-decision --command '<command>'` for full structured di
 
 `close-enough doctor` includes remediation hints for shell adapter limitations.
 
+Pack schema v1 is strictly compatible only with schema version `1`; legacy and future schemas are rejected without migration.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

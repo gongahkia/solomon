@@ -69,7 +69,7 @@ func Load(paths Paths) (Config, error) {
 	}
 	cwd, err := paths.CWD()
 	if err == nil {
-		if project, ok := projectPath(cwd); ok && trustedProject(project) {
+		if project, ok := projectPath(cwd); ok {
 			cfg, err = merge(cfg, project)
 			if err != nil {
 				return Config{}, err
@@ -157,7 +157,8 @@ func LoadGlobal(path string) (Config, error) {
 func projectPath(cwd string) (string, bool) {
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, ".close-enough", "config.json")
-		if _, err := os.Stat(candidate); err == nil {
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() && trustedProject(candidate) {
 			return candidate, true
 		}
 		parent := filepath.Dir(dir)

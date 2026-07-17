@@ -142,6 +142,79 @@ func TestLoadAppliesSessionOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadDiscoversNearestTrustedProjectConfiguration(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectConfig(t, parent, "rewrite", true)
+	writeProjectConfig(t, child, "off", true)
+	cfg, err := loadFromDirectory(t, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != "off" {
+		t.Fatalf("mode = %q, want off", cfg.Mode)
+	}
+}
+
+func TestLoadSkipsUntrustedProjectConfiguration(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectConfig(t, parent, "rewrite", true)
+	writeProjectConfig(t, child, "off", false)
+	cfg, err := loadFromDirectory(t, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != "rewrite" {
+		t.Fatalf("mode = %q, want rewrite", cfg.Mode)
+	}
+}
+
+func TestProjectPathRejectsNonRegularConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, ".close-enough", "config.json")
+	if err := os.MkdirAll(configPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := projectPath(directory); ok {
+		t.Fatal("expected non-regular config to be ignored")
+	}
+}
+
+func loadFromDirectory(t *testing.T, directory string) (Config, error) {
+	t.Helper()
+	return Load(Paths{
+		Home:    func() (string, error) { return t.TempDir(), nil },
+		CWD:     func() (string, error) { return directory, nil },
+		Env:     func(string) string { return "" },
+		Environ: func() []string { return nil },
+	})
+}
+
+func writeProjectConfig(t *testing.T, directory, mode string, trusted bool) {
+	t.Helper()
+	configDirectory := filepath.Join(directory, ".close-enough")
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "config.json"), []byte(`{"mode":"`+mode+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		if err := os.WriteFile(filepath.Join(configDirectory, "trusted"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestDecodeMigratesVersionlessConfiguration(t *testing.T) {
 	cfg, err := decode([]byte(`{"mode":"rewrite"}`), Default())
 	if err != nil {

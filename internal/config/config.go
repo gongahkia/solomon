@@ -33,6 +33,7 @@ type Config struct {
 type Display struct {
 	Cause       bool `json:"cause"`
 	Change      bool `json:"change"`
+	Confidence  bool `json:"confidence"`
 	Risk        bool `json:"risk"`
 	Consequence bool `json:"consequence"`
 	Trace       bool `json:"trace"`
@@ -46,7 +47,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
 }
 
 func (c Config) Features() featuregate.Gates {
@@ -287,7 +288,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "display.cause", "display.change", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -305,6 +306,8 @@ func (c *Config) Set(key, value string) error {
 			c.Display.Cause = parsed
 		case "display.change":
 			c.Display.Change = parsed
+		case "display.confidence":
+			c.Display.Confidence = parsed
 		case "display.risk":
 			c.Display.Risk = parsed
 		case "display.consequence":

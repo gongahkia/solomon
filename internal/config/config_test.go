@@ -35,6 +35,9 @@ func TestSetConfiguresDisplayFields(t *testing.T) {
 	if err := cfg.Set("display.trace", "true"); err != nil || !cfg.Display.Trace {
 		t.Fatalf("display trace = %#v, %v", cfg.Display, err)
 	}
+	if err := cfg.Set("display.confidence", "false"); err != nil || cfg.Display.Confidence {
+		t.Fatalf("display confidence = %#v, %v", cfg.Display, err)
+	}
 	if err := cfg.Set("display.risk", "invalid"); err == nil {
 		t.Fatal("expected display value error")
 	}

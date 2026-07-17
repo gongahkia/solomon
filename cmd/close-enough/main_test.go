@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,8 +159,8 @@ func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
 }
 
 func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
-	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Risk: diagnose.RiskSafe, Trace: []string{"resolver:path", "distance:1"}}
-	if got := renderPlainDiagnostic(decision, config.Default().Display, ""); got != "unknown command: the shell will reject it\nDid you mean: git status\nRisk: safe\n" {
+	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Confidence: 0.85, Risk: diagnose.RiskSafe, Trace: []string{"resolver:path", "distance:1"}}
+	if got := renderPlainDiagnostic(decision, config.Default().Display, ""); got != "unknown command: the shell will reject it\nDid you mean: git status\nConfidence: medium\nRisk: safe\n" {
 		t.Fatalf("default display = %q", got)
 	}
 	display := config.Display{Change: true}
@@ -175,9 +176,26 @@ func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
 	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}, ""); got != "no suggestion\n" {
 		t.Fatalf("empty trace display = %q", got)
 	}
-	unsafe := diagnose.Decision{Cause: "bad\x1b", Consequence: "next\nline", Suggestion: "git\tstatus", Risk: diagnose.RiskSafe}
-	if got := renderPlainDiagnostic(unsafe, config.Default().Display, ""); got != "bad\\x1B: next\\x0Aline\nDid you mean: git\\x09status\nRisk: safe\n" {
+	unsafe := diagnose.Decision{Cause: "bad\x1b", Consequence: "next\nline", Suggestion: "git\tstatus", Confidence: 0.95, Risk: diagnose.RiskSafe}
+	if got := renderPlainDiagnostic(unsafe, config.Default().Display, ""); got != "bad\\x1B: next\\x0Aline\nDid you mean: git\\x09status\nConfidence: high\nRisk: safe\n" {
 		t.Fatalf("sanitized display = %q", got)
+	}
+}
+
+func TestConfidencePresentation(t *testing.T) {
+	for _, test := range []struct {
+		confidence float64
+		want       string
+	}{
+		{0.90, "high"},
+		{0.80, "medium"},
+		{0.79, "low"},
+		{-0.01, "unknown"},
+		{math.NaN(), "unknown"},
+	} {
+		if got := confidencePresentation(test.confidence); got != test.want {
+			t.Fatalf("confidencePresentation(%v) = %q, want %q", test.confidence, got, test.want)
+		}
 	}
 }
 
@@ -239,11 +257,12 @@ func TestRenderScreenReaderDiagnostic(t *testing.T) {
 		Cause:       "unknown command",
 		Consequence: "the shell will reject it",
 		Suggestion:  "git status",
+		Confidence:  0.85,
 		Risk:        diagnose.RiskSafe,
 		Trace:       []string{"resolver:path", "distance:1"},
 	}
-	display := config.Display{Cause: true, Change: true, Risk: true, Consequence: true, Trace: true}
-	want := "Cause: unknown command\nConsequence: the shell will reject it\nSuggested command: git status\nRisk level: safe\nTrace: resolver:path; distance:1\n"
+	display := config.Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true, Trace: true}
+	want := "Cause: unknown command\nConsequence: the shell will reject it\nSuggested command: git status\nConfidence level: medium\nRisk level: safe\nTrace: resolver:path; distance:1\n"
 	if got := renderScreenReaderDiagnostic(decision, display); got != want {
 		t.Fatalf("screen-reader output = %q, want %q", got, want)
 	}
@@ -275,7 +294,7 @@ func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"display":{"cause":false,"change":true,"risk":false,"consequence":false}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"display":{"cause":false,"change":true,"confidence":false,"risk":false,"consequence":false}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", configHome)

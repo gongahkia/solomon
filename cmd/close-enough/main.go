@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,6 +211,9 @@ func renderPlainDiagnosticWithColor(decision diagnose.Decision, display config.D
 			lines = append(lines, sanitizeTerminalText(diff))
 		}
 	}
+	if display.Confidence {
+		lines = append(lines, diagnosticLabel("Confidence: ", "35", colorEnabled)+confidencePresentation(decision.Confidence))
+	}
 	if display.Risk {
 		lines = append(lines, diagnosticLabel("Risk: ", "33", colorEnabled)+string(decision.Risk))
 	}
@@ -226,6 +230,19 @@ func renderPlainDiagnosticWithColor(decision diagnose.Decision, display config.D
 	return strings.Join(lines, "\n") + "\n"
 }
 
+func confidencePresentation(confidence float64) string {
+	switch {
+	case math.IsNaN(confidence), math.IsInf(confidence, 0), confidence < 0, confidence > 1:
+		return "unknown"
+	case confidence >= 0.90:
+		return "high"
+	case confidence >= 0.80:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
 func renderScreenReaderDiagnostic(decision diagnose.Decision, display config.Display) string {
 	if decision.Suggestion == "" {
 		return "No suggestion.\n"
@@ -239,6 +256,9 @@ func renderScreenReaderDiagnostic(decision diagnose.Decision, display config.Dis
 	}
 	if display.Change {
 		lines = append(lines, "Suggested command: "+sanitizeTerminalText(decision.Suggestion))
+	}
+	if display.Confidence {
+		lines = append(lines, "Confidence level: "+confidencePresentation(decision.Confidence))
 	}
 	if display.Risk {
 		lines = append(lines, "Risk level: "+string(decision.Risk))

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
 const CurrentSchemaVersion = 1
@@ -263,40 +265,21 @@ func (c *Config) Set(key, value string) error {
 	return nil
 }
 
-func Write(path string, cfg Config) error {
+func Write(path string, cfg Config) (result error) {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	temporary, err := securetemp.Create(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	temporaryPath := temporary.Name()
 	defer func() {
-		if temporaryPath != "" {
-			_ = os.Remove(temporaryPath)
-		}
+		result = errors.Join(result, temporary.Cleanup())
 	}()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
 	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
 		return err
 	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	temporaryPath = ""
-	return nil
+	return temporary.Commit(path)
 }

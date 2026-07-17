@@ -214,6 +214,27 @@ func TestReleaseWorkflowSmokeTestsEveryArchive(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"bundled-packs:",
+		"scripts/release-pack-name.sh",
+		"scripts/release-pack-bundle.sh",
+		"id: bundled-pack",
+		"cosign sign-blob --yes --bundle",
+		"cosign verify-blob",
+		"name: bundled-packs-",
+		"name: bundled-packs-signature-",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks bundled pack publication marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

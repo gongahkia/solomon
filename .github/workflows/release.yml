@@ -136,3 +136,32 @@ jobs:
           archive=$(find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
           test -n "$archive"
           sh scripts/release-smoke-test.sh "$archive" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$GITHUB_REF_NAME"
+  bundled-packs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: mkdir -p dist && go build -trimpath -buildvcs=false -mod=readonly -o dist/close-enough ./cmd/close-enough
+      - id: bundled-pack
+        run: |
+          archive=$(sh scripts/release-pack-name.sh "$GITHUB_REF_NAME")
+          sh scripts/release-pack-bundle.sh dist/close-enough internal/packs/bundled "dist/$archive" "${archive%.tar.gz}"
+          printf 'path=%s\n' "dist/$archive" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@v4.1.0
+      - run: |
+          bundle='${{ steps.bundled-pack.outputs.path }}'
+          cosign sign-blob --yes --bundle "$bundle.sigstore.json" "$bundle"
+          test -s "$bundle.sigstore.json"
+          cosign verify-blob "$bundle" --bundle "$bundle.sigstore.json" --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-packs-${{ github.ref_name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-packs-signature-${{ github.ref_name }}
+          path: dist/*.sigstore.json
+          if-no-files-found: error

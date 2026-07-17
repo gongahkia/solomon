@@ -665,6 +665,17 @@ expect eof`
 	}
 }
 
+func TestPowerShellInitializationIsGuarded(t *testing.T) {
+	script, err := Script("powershell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := "if (-not $global:CloseEnoughAdapterLoaded) {\n$global:CloseEnoughAdapterLoaded = $true"
+	if !strings.HasPrefix(script, "# close-enough PowerShell integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "}") || strings.Count(script, "Set-PSReadLineKeyHandler -Key Enter") != 1 {
+		t.Fatalf("PowerShell script lacks an enclosing idempotence guard: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

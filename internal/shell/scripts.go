@@ -207,6 +207,8 @@ end
 `
 
 const powerShellScript = `# close-enough PowerShell integration
+if (-not $global:CloseEnoughAdapterLoaded) {
+$global:CloseEnoughAdapterLoaded = $true
 Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
@@ -215,5 +217,6 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   if ($decision.action -eq 'rewrite') { [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion); return }
   if ($decision.action -eq 'hint') { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)" }
   if ($decision.action -ne 'interrupt') { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() }
+}
 }
 `

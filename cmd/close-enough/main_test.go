@@ -36,7 +36,7 @@ func TestRunExitCodes(t *testing.T) {
 			},
 			args: []string{"config", "show"}, want: clierr.ExitConfiguration,
 		},
-		{name: "input", args: []string{"check", "--command", "git '"}, want: clierr.ExitInput},
+		{name: "input", args: []string{"pack", "validate", "missing-pack.json"}, want: clierr.ExitInput},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestProcessExitCodes(t *testing.T) {
 		{name: "success", args: []string{"version"}, configHome: configHome, want: clierr.ExitSuccess},
 		{name: "usage", args: []string{"check"}, configHome: configHome, want: clierr.ExitUsage},
 		{name: "configuration", args: []string{"config", "show"}, configHome: invalidConfigHome, want: clierr.ExitConfiguration},
-		{name: "input", args: []string{"check", "--command", "git '"}, configHome: configHome, want: clierr.ExitInput},
+		{name: "input", args: []string{"pack", "validate", "missing-pack.json"}, configHome: configHome, want: clierr.ExitInput},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -141,6 +141,17 @@ func TestCheckJSONIncludesStageWithoutRawCommand(t *testing.T) {
 	value := output.String()
 	if !strings.Contains(value, `"stage":"pre"`) || strings.Contains(value, "super-secret") || strings.Contains(value, `"command"`) {
 		t.Fatalf("unexpected diagnostic event: %s", value)
+	}
+}
+
+func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"check", "--command", "git '"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"action":"none"`) || !strings.Contains(output.String(), `"incomplete":true`) || strings.Contains(output.String(), `"suggestion"`) {
+		t.Fatalf("unexpected incomplete event: %s", output.String())
 	}
 }
 

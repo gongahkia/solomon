@@ -31,6 +31,7 @@ type Decision struct {
 	Suggestion  string   `json:"suggestion,omitempty"`
 	Confidence  float64  `json:"confidence"`
 	Risk        Risk     `json:"risk"`
+	Incomplete  bool     `json:"incomplete,omitempty"`
 	Trace       []string `json:"trace,omitempty"`
 }
 
@@ -43,11 +44,12 @@ type Event struct {
 	Suggestion  string   `json:"suggestion,omitempty"`
 	Confidence  float64  `json:"confidence"`
 	Risk        Risk     `json:"risk"`
+	Incomplete  bool     `json:"incomplete,omitempty"`
 	Trace       []string `json:"trace,omitempty"`
 }
 
 func (d Decision) Event(stage string) Event {
-	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Confidence: d.Confidence, Risk: d.Risk, Trace: append([]string(nil), d.Trace...)}
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
 func (d Decision) Record() string {
@@ -67,8 +69,13 @@ func New(options Options) Engine { return Engine{options: options} }
 
 func (e Engine) Check(line, stage string) (Decision, error) {
 	words, err := tokenize(line)
-	if err != nil || len(words) == 0 || e.options.Config.Mode == "off" {
-		return noDecision(), err
+	if err != nil {
+		decision := noDecision()
+		decision.Incomplete = true
+		return decision, nil
+	}
+	if len(words) == 0 || e.options.Config.Mode == "off" {
+		return noDecision(), nil
 	}
 	if decision := e.commandDecision(words); decision.Suggestion != "" {
 		return e.applyMode(decision), nil

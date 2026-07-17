@@ -68,10 +68,13 @@ func TestHighRiskNeverAutoApplied(t *testing.T) {
 	}
 }
 
-func TestIncompleteInputFails(t *testing.T) {
-	_, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
-	if err == nil {
-		t.Fatal("expected error")
+func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
+	decision, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != "none" || !decision.Incomplete || decision.Suggestion != "" {
+		t.Fatalf("unexpected incomplete decision: %#v", decision)
 	}
 }
 

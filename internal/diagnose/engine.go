@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -188,6 +189,13 @@ var executableCache = struct {
 func New(options Options) Engine { return Engine{options: options} }
 
 func (e Engine) Check(line, stage string) (Decision, error) {
+	return e.CheckContext(context.Background(), line, stage)
+}
+
+func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision, error) {
+	if err := ctx.Err(); err != nil {
+		return noDecision(), err
+	}
 	limits := e.limits()
 	if len(line) > limits.InputBytes {
 		return noDecision(), ErrInputLimit
@@ -199,17 +207,29 @@ func (e Engine) Check(line, stage string) (Decision, error) {
 		decision.Incomplete = true
 		return decision, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return noDecision(), err
+	}
 	if len(words) == 0 || e.options.Config.Mode == "off" {
 		return noDecision(), nil
 	}
-	if decision := e.commandDecision(words); decision.Suggestion != "" {
-		return e.finish(decision, stage, started, limits)
+	if decision, err := e.commandDecision(ctx, words); err != nil {
+		return noDecision(), err
+	} else if decision.Suggestion != "" {
+		return e.finish(ctx, decision, stage, started, limits)
 	}
-	if decision := semanticDecision(words); decision.Suggestion != "" {
-		return e.finish(decision, stage, started, limits)
+	if decision, err := semanticDecision(ctx, words); err != nil {
+		return noDecision(), err
+	} else if decision.Suggestion != "" {
+		return e.finish(ctx, decision, stage, started, limits)
 	}
-	if decision := e.pathDecision(words); decision.Suggestion != "" {
-		return e.finish(decision, stage, started, limits)
+	if decision, err := e.pathDecision(ctx, words); err != nil {
+		return noDecision(), err
+	} else if decision.Suggestion != "" {
+		return e.finish(ctx, decision, stage, started, limits)
+	}
+	if err := ctx.Err(); err != nil {
+		return noDecision(), err
 	}
 	if e.now().Sub(started) > limits.AnalysisTime {
 		return noDecision(), ErrAnalysisLimit
@@ -238,7 +258,10 @@ func (e Engine) now() time.Time {
 	return time.Now()
 }
 
-func (e Engine) finish(decision Decision, stage string, started time.Time, limits Limits) (Decision, error) {
+func (e Engine) finish(ctx context.Context, decision Decision, stage string, started time.Time, limits Limits) (Decision, error) {
+	if err := ctx.Err(); err != nil {
+		return noDecision(), err
+	}
 	if e.now().Sub(started) > limits.AnalysisTime {
 		return noDecision(), ErrAnalysisLimit
 	}
@@ -307,9 +330,18 @@ func (e Engine) shouldInterrupt(decision Decision, stage string) bool {
 		meetsConfidenceThreshold(decision.Class, decision.Confidence)
 }
 
-func (e Engine) commandDecision(words []string) Decision {
+func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, error) {
+	if err := ctx.Err(); err != nil {
+		return Decision{}, err
+	}
 	candidates := executableNames(e.options.Path)
+	if err := ctx.Err(); err != nil {
+		return Decision{}, err
+	}
 	for _, position := range commandPositions(words) {
+		if err := ctx.Err(); err != nil {
+			return Decision{}, err
+		}
 		word := words[position]
 		if isPathQualified(word, runtime.GOOS) || commandExists(word, e.options.Path) {
 			continue
@@ -326,14 +358,17 @@ func (e Engine) commandDecision(words []string) Decision {
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassCommand)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}, nil
 	}
-	return Decision{}
+	return Decision{}, nil
 }
 
-func semanticDecision(words []string) Decision {
+func semanticDecision(ctx context.Context, words []string) (Decision, error) {
 	known := []string{"add", "branch", "checkout", "clone", "commit", "diff", "fetch", "init", "log", "merge", "pull", "push", "rebase", "restore", "status", "switch"}
 	for _, position := range commandPositions(words) {
+		if err := ctx.Err(); err != nil {
+			return Decision{}, err
+		}
 		if words[position] != "git" || position+1 >= len(words) || isCompoundOperator(words[position+1]) {
 			continue
 		}
@@ -349,13 +384,16 @@ func semanticDecision(words []string) Decision {
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassSemantic)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
 	}
-	return Decision{}
+	return Decision{}, nil
 }
 
-func (e Engine) pathDecision(words []string) Decision {
+func (e Engine) pathDecision(ctx context.Context, words []string) (Decision, error) {
 	for i := 1; i < len(words); i++ {
+		if err := ctx.Err(); err != nil {
+			return Decision{}, err
+		}
 		word := words[i]
 		if strings.HasPrefix(word, "-") || !strings.Contains(word, "/") && !strings.HasPrefix(word, ".") {
 			continue
@@ -385,9 +423,9 @@ func (e Engine) pathDecision(words []string) Decision {
 		replaced[i] = replacement
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassPath)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}, nil
 	}
-	return Decision{}
+	return Decision{}, nil
 }
 
 func tokenize(line string) ([]string, error) {

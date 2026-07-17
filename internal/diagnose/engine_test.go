@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,30 @@ func TestDiagnosticLimitsBoundInputOutputAndAnalysis(t *testing.T) {
 	}
 	if _, err := New(Options{Config: config.Default(), Limits: Limits{AnalysisTime: time.Nanosecond}, Clock: clock}).Check("git sttaus", "pre"); !errors.Is(err, ErrAnalysisLimit) {
 		t.Fatalf("analysis limit error = %v", err)
+	}
+}
+
+func TestCheckContextPropagatesCancellationAndDeadline(t *testing.T) {
+	engine := New(Options{Config: config.Default()})
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	decision, err := engine.CheckContext(canceled, "git sttaus", "pre")
+	if !errors.Is(err, context.Canceled) || decision.Action != "none" {
+		t.Fatalf("canceled check = %#v, %v", decision, err)
+	}
+	deadline, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := engine.CheckContext(deadline, "git sttaus", "pre"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline check error = %v", err)
+	}
+	active, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clock := func() time.Time {
+		cancel()
+		return time.Unix(0, 0)
+	}
+	if _, err := New(Options{Config: config.Default(), Clock: clock}).CheckContext(active, "git sttaus", "pre"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("in-flight cancellation error = %v", err)
 	}
 }
 

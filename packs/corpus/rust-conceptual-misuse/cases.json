@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"cargo-publish","command":"cargo","input":"publish","rule_id":"cargo-publish"},{"id":"cargo-clean","command":"cargo","input":"clean","rule_id":"cargo-clean"},{"id":"cargo-run","command":"cargo","input":"run","rule_id":"cargo-run"},{"id":"rustup-update","command":"rustup","input":"update","rule_id":"rustup-update"}]}

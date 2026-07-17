@@ -469,6 +469,33 @@ func TestRustPathRepairRules(t *testing.T) {
 	}
 }
 
+func TestRustConceptualMisuseRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "rust.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "rust-conceptual-misuse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	rules := map[string]Rule{}
+	for _, rule := range pack.Rules {
+		rules[rule.ID] = rule
+	}
+	for _, id := range []string{"cargo-publish", "cargo-clean", "cargo-run", "rustup-update"} {
+		if rules[id].Risk != diagnose.RiskHigh || rules[id].Cause == "" {
+			t.Fatalf("conceptual rule %s = %#v", id, rules[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Rust conceptual corpus")
+	}
+}
+
 func TestPythonSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
 	if err != nil {

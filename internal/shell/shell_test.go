@@ -701,6 +701,18 @@ func TestPowerShellHintRenderingDoesNotSuppressSubmission(t *testing.T) {
 	}
 }
 
+func TestPowerShellInterruptReturnsBeforeCommandExecution(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupt := "if ($decision.action -eq 'interrupt') {"
+	start := strings.Index(script, interrupt)
+	if start < 0 || !strings.Contains(script[start:], "Write-Host") || !strings.Contains(script[start:], "return") {
+		t.Fatalf("PowerShell interrupt path does not suppress command submission: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

@@ -221,7 +221,11 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
-  if ($decision.action -ne 'interrupt') { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() }
+  if ($decision.action -eq 'interrupt') {
+    Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)"
+    return
+  }
+  [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
 }
 `

@@ -59,6 +59,15 @@ func RiskConfirmation(risk, suggestion string) ConfirmationDialog {
 	return ConfirmationDialog{Required: true, Message: fmt.Sprintf("confirm %s-risk repair: %s", risk, suggestion)}
 }
 
+const NonBlockingHintConfidence = 0.80
+
+func LowConfidenceHint(confidence float64) ActionResult {
+	if confidence >= 0 && confidence < NonBlockingHintConfidence {
+		return ActionResult{Render: true, Submit: true}
+	}
+	return ActionResult{}
+}
+
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}

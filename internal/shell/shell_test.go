@@ -61,6 +61,15 @@ func TestRiskConfirmation(t *testing.T) {
 	}
 }
 
+func TestLowConfidenceHintIsNonBlocking(t *testing.T) {
+	if got := LowConfidenceHint(0.79); !got.Render || !got.Submit {
+		t.Fatalf("low confidence action = %#v", got)
+	}
+	if got := LowConfidenceHint(0.80); got != (ActionResult{}) {
+		t.Fatalf("threshold action = %#v", got)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

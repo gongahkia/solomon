@@ -98,3 +98,29 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	compiled, err := Compile(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rule, ok := compiled.Match("git", "sttaus"); !ok || rule.ID != "git-status" {
+		t.Fatalf("compiled match = %#v, %t", rule, ok)
+	}
+	if _, ok := compiled.Match("sh", "sttaus"); ok {
+		t.Fatal("matcher ignored declared command")
+	}
+	marker := t.TempDir() + "/marker"
+	injection := Pack{SchemaVersion: SchemaVersionV1, ID: "literal", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "literal-text", Command: "git", Pattern: `^\$\(touch .+\)$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	compiled, err = Compile(injection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := compiled.Match("git", "$(touch "+marker+")"); !ok {
+		t.Fatal("literal matcher did not match")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("matcher executed input: %v", err)
+	}
+}

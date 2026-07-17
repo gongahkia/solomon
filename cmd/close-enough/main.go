@@ -431,7 +431,7 @@ func packCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Input, err)
 	}
-	if err := pack.Validate(); err != nil {
+	if _, err := packs.Compile(pack); err != nil {
 		return clierr.Wrap(clierr.Input, err)
 	}
 	_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)

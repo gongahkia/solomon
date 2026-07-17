@@ -17,6 +17,7 @@ import (
 )
 
 type Risk string
+type RepairClass string
 
 const AdapterProtocolVersion = 1
 
@@ -24,35 +25,41 @@ const (
 	RiskSafe    Risk = "safe"
 	RiskUnknown Risk = "unknown"
 	RiskHigh    Risk = "high"
+
+	RepairClassCommand  RepairClass = "command"
+	RepairClassSemantic RepairClass = "semantic"
+	RepairClassPath     RepairClass = "path"
 )
 
 type Decision struct {
-	Version     int      `json:"version"`
-	Action      string   `json:"action"`
-	Cause       string   `json:"cause,omitempty"`
-	Consequence string   `json:"consequence,omitempty"`
-	Suggestion  string   `json:"suggestion,omitempty"`
-	Confidence  float64  `json:"confidence"`
-	Risk        Risk     `json:"risk"`
-	Incomplete  bool     `json:"incomplete,omitempty"`
-	Trace       []string `json:"trace,omitempty"`
+	Version     int         `json:"version"`
+	Action      string      `json:"action"`
+	Cause       string      `json:"cause,omitempty"`
+	Consequence string      `json:"consequence,omitempty"`
+	Suggestion  string      `json:"suggestion,omitempty"`
+	Class       RepairClass `json:"class,omitempty"`
+	Confidence  float64     `json:"confidence"`
+	Risk        Risk        `json:"risk"`
+	Incomplete  bool        `json:"incomplete,omitempty"`
+	Trace       []string    `json:"trace,omitempty"`
 }
 
 type Event struct {
-	Version     int      `json:"version"`
-	Stage       string   `json:"stage"`
-	Action      string   `json:"action"`
-	Cause       string   `json:"cause,omitempty"`
-	Consequence string   `json:"consequence,omitempty"`
-	Suggestion  string   `json:"suggestion,omitempty"`
-	Confidence  float64  `json:"confidence"`
-	Risk        Risk     `json:"risk"`
-	Incomplete  bool     `json:"incomplete,omitempty"`
-	Trace       []string `json:"trace,omitempty"`
+	Version     int         `json:"version"`
+	Stage       string      `json:"stage"`
+	Action      string      `json:"action"`
+	Cause       string      `json:"cause,omitempty"`
+	Consequence string      `json:"consequence,omitempty"`
+	Suggestion  string      `json:"suggestion,omitempty"`
+	Class       RepairClass `json:"class,omitempty"`
+	Confidence  float64     `json:"confidence"`
+	Risk        Risk        `json:"risk"`
+	Incomplete  bool        `json:"incomplete,omitempty"`
+	Trace       []string    `json:"trace,omitempty"`
 }
 
 func (d Decision) Event(stage string) Event {
-	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Class: d.Class, Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
 func (d Decision) Record() string {
@@ -130,10 +137,14 @@ func (e Engine) commandDecision(words []string) Decision {
 		if best == "" || distance > maxDistance(word) {
 			continue
 		}
+		confidence := confidence(word, best)
+		if !meetsConfidenceThreshold(RepairClassCommand, confidence) {
+			continue
+		}
 		replaced := append([]string{}, words...)
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(word, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Class: RepairClassCommand, Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
 	}
 	return Decision{}
 }
@@ -148,10 +159,14 @@ func semanticDecision(words []string) Decision {
 		if best == "" || distance > maxDistance(words[position+1]) {
 			continue
 		}
+		confidence := confidence(words[position+1], best)
+		if !meetsConfidenceThreshold(RepairClassSemantic, confidence) {
+			continue
+		}
 		replaced := append([]string{}, words...)
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[position+1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Class: RepairClassSemantic, Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
 	}
 	return Decision{}
 }
@@ -178,10 +193,14 @@ func (e Engine) pathDecision(words []string) Decision {
 		if best == "" || distance > maxDistance(base) {
 			continue
 		}
+		confidence := confidence(base, best)
+		if !meetsConfidenceThreshold(RepairClassPath, confidence) {
+			continue
+		}
 		replaced := append([]string{}, words...)
 		replaced[i] = filepath.Join(dir, best)
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Confidence: confidence(base, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Class: RepairClassPath, Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
 	}
 	return Decision{}
 }
@@ -597,6 +616,21 @@ func maxDistance(value string) int {
 }
 func confidence(a, b string) float64 {
 	return 1 - float64(damerauLevenshtein(a, b))/float64(max(len([]rune(a)), len([]rune(b))))
+}
+func meetsConfidenceThreshold(class RepairClass, value float64) bool {
+	return value >= confidenceThreshold(class)
+}
+func confidenceThreshold(class RepairClass) float64 {
+	switch class {
+	case RepairClassCommand:
+		return 0.60
+	case RepairClassSemantic:
+		return 0.75
+	case RepairClassPath:
+		return 0.90
+	default:
+		return 1
+	}
 }
 func isShellKeyword(value string) bool {
 	_, ok := map[string]struct{}{"if": {}, "then": {}, "else": {}, "fi": {}, "for": {}, "while": {}, "do": {}, "done": {}, "case": {}, "esac": {}, "function": {}, "time": {}, "command": {}, "builtin": {}, "exec": {}, "sudo": {}}[value]

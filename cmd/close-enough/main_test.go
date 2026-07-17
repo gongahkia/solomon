@@ -139,7 +139,7 @@ func TestCheckJSONIncludesStageWithoutRawCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := output.String()
-	if !strings.Contains(value, `"stage":"pre"`) || strings.Contains(value, "super-secret") || strings.Contains(value, `"command"`) {
+	if !strings.Contains(value, `"stage":"pre"`) || strings.Contains(value, "super-secret") || strings.Contains(value, `"command":`) {
 		t.Fatalf("unexpected diagnostic event: %s", value)
 	}
 }

@@ -42,6 +42,58 @@ func TestGitSubcommandTypo(t *testing.T) {
 	}
 }
 
+func TestConfidenceThresholdsDifferByRepairClass(t *testing.T) {
+	for _, test := range []struct {
+		class     RepairClass
+		threshold float64
+	}{
+		{RepairClassCommand, 0.60},
+		{RepairClassSemantic, 0.75},
+		{RepairClassPath, 0.90},
+	} {
+		if got := confidenceThreshold(test.class); got != test.threshold {
+			t.Fatalf("%s threshold = %.2f, want %.2f", test.class, got, test.threshold)
+		}
+		if !meetsConfidenceThreshold(test.class, test.threshold) || meetsConfidenceThreshold(test.class, test.threshold-0.01) {
+			t.Fatalf("%s threshold boundary was not enforced", test.class)
+		}
+	}
+	if meetsConfidenceThreshold(RepairClass("unknown"), 0.99) {
+		t.Fatal("unknown repair class must fail closed")
+	}
+}
+
+func TestRepairClassesApplyTheirConfidenceThresholds(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "git")
+	engine := New(Options{Config: config.Default(), Path: dir, CWD: dir})
+
+	decision, err := engine.Check("gti status", "pre")
+	if err != nil || decision.Class != RepairClassCommand {
+		t.Fatalf("command repair = %#v, %v", decision, err)
+	}
+	decision, err = engine.Check("git sttaus", "pre")
+	if err != nil || decision.Class != RepairClassSemantic {
+		t.Fatalf("semantic repair = %#v, %v", decision, err)
+	}
+	decision, err = engine.Check("git stzzus", "pre")
+	if err != nil || decision.Action != "none" {
+		t.Fatalf("low-confidence semantic repair = %#v, %v", decision, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	decision, err = engine.Check("cat ./reporx.txt", "pre")
+	if err != nil || decision.Class != RepairClassPath {
+		t.Fatalf("path repair = %#v, %v", decision, err)
+	}
+	decision, err = engine.Check("cat ./reporxx.txt", "pre")
+	if err != nil || decision.Action != "none" {
+		t.Fatalf("low-confidence path repair = %#v, %v", decision, err)
+	}
+}
+
 func TestRewriteNeedsVeryHighConfidence(t *testing.T) {
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
@@ -255,7 +307,7 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == "" || contains(string(data), "super-secret") || contains(string(data), `"command"`) || contains(decision.Record(), "super-secret") {
+	if string(data) == "" || contains(string(data), "super-secret") || contains(string(data), `"command":`) || contains(decision.Record(), "super-secret") {
 		t.Fatalf("secret leaked in diagnostic: %s", data)
 	}
 }
@@ -269,7 +321,7 @@ func TestEventContainsOnlyDiagnosticMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(string(data), `"command"`) {
+	if contains(string(data), `"command":`) {
 		t.Fatalf("event exposes raw command field: %s", data)
 	}
 }

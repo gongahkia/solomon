@@ -387,14 +387,43 @@ func TestPythonSubcommandTypoRules(t *testing.T) {
 	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
 		t.Fatalf("bundled Python pack = %#v", bundledPack)
 	}
+	risk := map[string]diagnose.Risk{}
 	for _, rule := range pack.Rules {
-		if rule.Risk != diagnose.RiskHigh {
-			t.Fatalf("risk for %s = %q, want high", rule.ID, rule.Risk)
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"python-pip-install-instal", "python-venv-venvv", "pip-install-instal", "uv-run-rnu"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
 		}
 	}
 	corpus[0].Cases[0].RuleID = "missing"
 	if err := RunFixtureCorpus(pack, corpus); err == nil {
 		t.Fatal("accepted mismatched Python corpus")
+	}
+}
+
+func TestPythonFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "python-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["python-version-verison"] != diagnose.RiskSafe || risk["pip-install-no-dep"] != diagnose.RiskHigh || risk["pip-install-2020-resolver"] != diagnose.RiskHigh {
+		t.Fatalf("Python flag risks = %#v", risk)
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Python flag corpus")
 	}
 }
 

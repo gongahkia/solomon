@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"python-version-verison","command":"python","input":"--verison","rule_id":"python-version-verison"},{"id":"pip-install-no-dep","command":"pip","input":"install --no-dep","rule_id":"pip-install-no-dep"},{"id":"pip-install-2020-resolver","command":"pip","input":"install --use-feature=2020-resolver","rule_id":"pip-install-2020-resolver"}]}

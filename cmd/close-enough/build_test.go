@@ -130,6 +130,8 @@ func TestReleaseWorkflowConfiguresKeylessSigning(t *testing.T) {
 		"cosign sign-blob --yes --bundle",
 		`test -n "$archive"`,
 		`test -s "$archive.sigstore.json"`,
+		"name: sigstore-bundle-",
+		"path: dist/*.sigstore.json",
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release workflow lacks keyless signing marker %q", marker)

@@ -1409,6 +1409,37 @@ func TestExtractRustFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractGoFailureEvidence(t *testing.T) {
+	output := "go buid: unknown command\nflag provided but not defined: -counnt\ngo: open go.mdo: no such file or directory\nlstat ./cmd/mian.go: no such file or directory\ngo buid: unknown command\n"
+	evidence, err := ExtractGoFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "go-flag-unknown", Value: "-counnt"},
+		{Kind: "go-modfile-missing", Value: "go.mdo"},
+		{Kind: "go-path-missing", Value: "./cmd/mian.go"},
+		{Kind: "go-unknown-subcommand", Value: "buid"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractGoFailureEvidence("go buid: unknown command\nlstat ./cmd/mian.go: no such file or directory\ngo: open go.mdo: no such file or directory\nflag provided but not defined: -counnt\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractGoFailureEvidence("lstat https://user:password@example.invalid/main.go: no such file or directory\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/main.go" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if evidence, err := ExtractGoFailureEvidence("go: unrelated"); err != nil || len(evidence) != 0 {
+		t.Fatalf("unmatched evidence = %#v, %v", evidence, err)
+	}
+	if _, err := ExtractGoFailureEvidence(strings.Repeat("x", maxGoFailureOutputBytes+1)); !errors.Is(err, ErrGoFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

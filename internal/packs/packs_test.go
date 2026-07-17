@@ -67,6 +67,32 @@ func TestLoadRejectsNestedUnknownFieldsAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func FuzzDecodePack(f *testing.F) {
+	for _, seed := range [][]byte{
+		[]byte(`{"schema_version":1,"id":"core","version":"1.0.0","publisher":"close-enough","rules":[]}`),
+		[]byte(`{"schema_version":1,"id":"core","unknown":true}`),
+		[]byte(`{"schema_version":1} {}`),
+		[]byte(`{`),
+		[]byte("\x00"),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 64<<10 {
+			t.Skip()
+		}
+		if _, err := decodePack(data); err != nil {
+			return
+		}
+		if _, err := decodePack(append(append([]byte{}, data...), ' ')); err != nil {
+			t.Fatalf("valid pack rejected with trailing whitespace: %v", err)
+		}
+		if _, err := decodePack(append(append([]byte{}, data...), '{')); err == nil {
+			t.Fatal("accepted trailing JSON data")
+		}
+	})
+}
+
 func TestRejectInvalidPattern(t *testing.T) {
 	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.Validate(); err == nil {

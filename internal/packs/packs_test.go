@@ -326,3 +326,40 @@ func TestUninstallPackOnlyRemovesManagedRegularFile(t *testing.T) {
 		t.Fatal("expected invalid target error")
 	}
 }
+
+func TestPackEnableDisableStateStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state, err := LoadState(path)
+	if err != nil || !state.Enable("core-git") || state.Enable("core-git") || !state.Enable("containers") {
+		t.Fatalf("enable state = %#v, %v", state, err)
+	}
+	if err := WriteState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil || !loaded.EnabledFor("core-git") || !loaded.Disable("core-git") || loaded.Disable("core-git") {
+		t.Fatalf("loaded state = %#v, %v", loaded, err)
+	}
+	if err := WriteState(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackStateRejectsInvalidOrUnknownData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	for _, data := range [][]byte{
+		[]byte(`{"enabled":["core-git","core-git"]}`),
+		[]byte(`{"enabled":["Core"]}`),
+		[]byte(`{"enabled":[],"unknown":true}`),
+	} {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadState(path); err == nil {
+			t.Fatalf("accepted invalid state %s", data)
+		}
+	}
+}

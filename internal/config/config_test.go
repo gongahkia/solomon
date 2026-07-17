@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/gongahkia/close-enough/internal/featuregate"
 )
 
 func TestSetValidatesMode(t *testing.T) {
@@ -25,6 +27,18 @@ func TestSetValidatesMode(t *testing.T) {
 func TestDefaultIsNonBlocking(t *testing.T) {
 	if Default().Mode != "hint" {
 		t.Fatal("default must be hint")
+	}
+}
+
+func TestFeatureGatesRequireExplicitRegistryEnablement(t *testing.T) {
+	cfg := Default()
+	cfg.AutoUpdateEnabled = true
+	if cfg.Features().Enabled(featuregate.AutoUpdate) {
+		t.Fatal("auto-update must remain disabled without registry opt-in")
+	}
+	cfg.RegistryEnabled = true
+	if !cfg.Features().Enabled(featuregate.Registry) || !cfg.Features().Enabled(featuregate.AutoUpdate) {
+		t.Fatal("explicitly enabled features must be available")
 	}
 }
 

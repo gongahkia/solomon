@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gongahkia/close-enough/internal/featuregate"
 	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
@@ -42,6 +43,10 @@ type Paths struct {
 
 func Default() Config {
 	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Risk: true, Consequence: true}}
+}
+
+func (c Config) Features() featuregate.Gates {
+	return featuregate.New(c.RegistryEnabled, c.AutoUpdateEnabled)
 }
 
 func GlobalPath(home func() (string, error)) (string, error) {

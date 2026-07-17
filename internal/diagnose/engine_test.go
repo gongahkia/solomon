@@ -374,6 +374,46 @@ func TestSafeAutoApplyPolicy(t *testing.T) {
 	}
 }
 
+type unsafeAutoApplyFixture struct {
+	Name       string      `json:"name"`
+	Stage      string      `json:"stage"`
+	Mode       string      `json:"mode"`
+	AutoApply  bool        `json:"auto_apply"`
+	Suggestion string      `json:"suggestion"`
+	Class      RepairClass `json:"class"`
+	Confidence float64     `json:"confidence"`
+	Risk       Risk        `json:"risk"`
+	Incomplete bool        `json:"incomplete"`
+	Action     string      `json:"action"`
+}
+
+func TestUnsafeAutoApplyDenialRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/unsafe_auto_apply_denials.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []unsafeAutoApplyFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("unsafe auto-apply corpus is empty")
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Stage == "" || fixture.Mode == "" || fixture.Suggestion == "" || fixture.Action == "" {
+				t.Fatalf("invalid unsafe auto-apply fixture: %#v", fixture)
+			}
+			cfg := config.Default()
+			cfg.Mode, cfg.AutoApplySafe = fixture.Mode, fixture.AutoApply
+			decision := Decision{Suggestion: fixture.Suggestion, Class: fixture.Class, Confidence: fixture.Confidence, Risk: fixture.Risk, Incomplete: fixture.Incomplete}
+			if got := New(Options{Config: cfg}).applyMode(decision, fixture.Stage); got.Action != fixture.Action {
+				t.Fatalf("applyMode(%#v, %q).Action = %q, want %q", decision, fixture.Stage, got.Action, fixture.Action)
+			}
+		})
+	}
+}
+
 func TestRewriteBufferPolicy(t *testing.T) {
 	cfg := config.Default()
 	cfg.Mode, cfg.AutoApplySafe = "rewrite", true

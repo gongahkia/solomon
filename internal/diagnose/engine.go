@@ -379,8 +379,10 @@ func consequenceFor(class RepairClass) (consequenceTemplate, bool) {
 }
 
 func (e Engine) applyMode(decision Decision, stage string) Decision {
-	if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
-		return rewritten
+	if stage == "pre" {
+		if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
+			return rewritten
+		}
 	}
 	if e.shouldInterrupt(decision, stage) {
 		decision.Action = "interrupt"

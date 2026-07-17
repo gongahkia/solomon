@@ -1,0 +1,11 @@
+[
+  {"name":"safe-pre-allowed","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"git status","class":"semantic","confidence":0.90,"risk":"safe","action":"rewrite"},
+  {"name":"high-risk","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"rm -rf target","class":"command","confidence":0.95,"risk":"high","action":"hint"},
+  {"name":"unknown-risk","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"danger target","class":"command","confidence":0.95,"risk":"unknown","action":"hint"},
+  {"name":"secret-bearing","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"git --token=[REDACTED]","class":"semantic","confidence":0.95,"risk":"high","action":"hint"},
+  {"name":"incomplete-input","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"git status","class":"semantic","confidence":0.95,"risk":"safe","incomplete":true,"action":"hint"},
+  {"name":"low-confidence","stage":"pre","mode":"rewrite","auto_apply":true,"suggestion":"git status","class":"semantic","confidence":0.79,"risk":"safe","action":"hint"},
+  {"name":"opt-in-disabled","stage":"pre","mode":"rewrite","auto_apply":false,"suggestion":"git status","class":"semantic","confidence":0.95,"risk":"safe","action":"hint"},
+  {"name":"wrong-mode","stage":"pre","mode":"hint","auto_apply":true,"suggestion":"git status","class":"semantic","confidence":0.95,"risk":"safe","action":"hint"},
+  {"name":"post-execution","stage":"post","mode":"rewrite","auto_apply":true,"suggestion":"git status","class":"semantic","confidence":0.95,"risk":"safe","action":"hint"}
+]

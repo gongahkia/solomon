@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 )
 
 type TUFTargets struct {
@@ -17,6 +18,10 @@ type TUFTargets struct {
 }
 
 func VerifyTargets(data []byte, root TUFRoot, snapshot TUFSnapshot) (TUFTargets, error) {
+	return VerifyTargetsAt(data, root, snapshot, nil, time.Now())
+}
+
+func VerifyTargetsAt(data []byte, root TUFRoot, snapshot TUFSnapshot, state *RegistryState, now time.Time) (TUFTargets, error) {
 	if err := validateRoot(root); err != nil {
 		return TUFTargets{}, err
 	}
@@ -49,6 +54,9 @@ func VerifyTargets(data []byte, root TUFRoot, snapshot TUFSnapshot) (TUFTargets,
 		return TUFTargets{}, err
 	}
 	if err := verifyRootRoleSignatures(envelope.Signatures, payload, root, "targets"); err != nil {
+		return TUFTargets{}, err
+	}
+	if err := state.Accept("targets", targets.Version, targets.Expires, now); err != nil {
 		return TUFTargets{}, err
 	}
 	return targets, nil

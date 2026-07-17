@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type TUFSnapshot struct {
@@ -15,6 +16,10 @@ type TUFSnapshot struct {
 }
 
 func VerifySnapshot(data []byte, root TUFRoot, timestamp TUFTimestamp) (TUFSnapshot, error) {
+	return VerifySnapshotAt(data, root, timestamp, nil, time.Now())
+}
+
+func VerifySnapshotAt(data []byte, root TUFRoot, timestamp TUFTimestamp, state *RegistryState, now time.Time) (TUFSnapshot, error) {
 	if err := validateRoot(root); err != nil {
 		return TUFSnapshot{}, err
 	}
@@ -42,6 +47,9 @@ func VerifySnapshot(data []byte, root TUFRoot, timestamp TUFTimestamp) (TUFSnaps
 		return TUFSnapshot{}, err
 	}
 	if err := verifyRootRoleSignatures(envelope.Signatures, payload, root, "snapshot"); err != nil {
+		return TUFSnapshot{}, err
+	}
+	if err := state.Accept("snapshot", snapshot.Version, snapshot.Expires, now); err != nil {
 		return TUFSnapshot{}, err
 	}
 	return snapshot, nil

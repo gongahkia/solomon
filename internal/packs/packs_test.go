@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
 )
@@ -596,5 +597,22 @@ func TestVerifyTUFTargets(t *testing.T) {
 	}
 	if _, err := VerifyTargets(data, root, snapshot); err == nil {
 		t.Fatal("accepted unsafe target path")
+	}
+}
+
+func TestRegistryMetadataRejectsExpiryAndRollback(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	var state RegistryState
+	if err := state.Accept("timestamp", 2, "2030-01-02T00:00:00Z", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Accept("timestamp", 1, "2030-01-02T00:00:00Z", now); err == nil {
+		t.Fatal("accepted metadata rollback")
+	}
+	if err := state.Accept("snapshot", 1, "2030-01-01T00:00:00Z", now); err == nil {
+		t.Fatal("accepted expired metadata")
+	}
+	if err := state.Accept("targets", 1, "invalid", now); err == nil {
+		t.Fatal("accepted invalid expiry")
 	}
 }

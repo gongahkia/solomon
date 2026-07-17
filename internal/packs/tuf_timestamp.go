@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type TUFMetaFile struct {
@@ -23,6 +24,10 @@ type TUFTimestamp struct {
 }
 
 func VerifyTimestamp(data []byte, root TUFRoot) (TUFTimestamp, error) {
+	return VerifyTimestampAt(data, root, nil, time.Now())
+}
+
+func VerifyTimestampAt(data []byte, root TUFRoot, state *RegistryState, now time.Time) (TUFTimestamp, error) {
 	if err := validateRoot(root); err != nil {
 		return TUFTimestamp{}, err
 	}
@@ -46,6 +51,9 @@ func VerifyTimestamp(data []byte, root TUFRoot) (TUFTimestamp, error) {
 		return TUFTimestamp{}, err
 	}
 	if err := verifyRootRoleSignatures(envelope.Signatures, payload, root, "timestamp"); err != nil {
+		return TUFTimestamp{}, err
+	}
+	if err := state.Accept("timestamp", timestamp.Version, timestamp.Expires, now); err != nil {
 		return TUFTimestamp{}, err
 	}
 	return timestamp, nil

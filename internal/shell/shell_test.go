@@ -43,6 +43,30 @@ func TestResolveAction(t *testing.T) {
 	}
 }
 
+func TestInlineDiagnostic(t *testing.T) {
+	if got := InlineDiagnostic("safe", "0.91", "git status"); got != "close-enough [safe/0.91]: git status" {
+		t.Fatalf("InlineDiagnostic() = %q", got)
+	}
+}
+
+func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
+	markers := map[string]string{
+		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,
+		"bash":       `close-enough [%s/%s]: %s`,
+		"fish":       `close-enough [$fields[3]/$fields[4]]: $suggestion`,
+		"powershell": `close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)`,
+	}
+	for name, marker := range markers {
+		script, err := Script(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(script, marker) {
+			t.Fatalf("%s adapter lacks compact inline layout %q", name, marker)
+		}
+	}
+}
+
 func TestAdapterCompatibilityFixtures(t *testing.T) {
 	data, err := os.ReadFile("testdata/adapter_contracts.json")
 	if err != nil {

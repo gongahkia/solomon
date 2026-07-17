@@ -1,5 +1,7 @@
 package shell
 
+import "fmt"
+
 type ActionState string
 
 const (
@@ -32,4 +34,8 @@ func ResolveAction(action, risk, suggestion string) ActionResult {
 	default:
 		return ActionResult{Submit: true}
 	}
+}
+
+func InlineDiagnostic(risk, confidence, suggestion string) string {
+	return fmt.Sprintf("close-enough [%s/%s]: %s", risk, confidence, suggestion)
 }

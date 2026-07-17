@@ -16,6 +16,8 @@ Plain diagnostics use color only on a terminal; pass `check --color=never` to di
 
 Pass `check --format=plain --screen-reader` for structured, ANSI-free diagnostics without visual diff markers.
 
+JSON diagnostics include stable `cause_key` and `consequence_key` fields alongside their default English text.
+
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
 Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_REGISTRY_ENABLED`, and `CLOSE_ENOUGH_AUTO_UPDATE_ENABLED`; booleans must be `true` or `false`.

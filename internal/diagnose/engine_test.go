@@ -124,7 +124,7 @@ func TestRecordEncoderIsBinarySafeAndRejectsInvalidControlFields(t *testing.T) {
 }
 
 func TestJSONProtocolEncoderCompatibility(t *testing.T) {
-	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", Consequence: "shell rejects it", Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe}
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", CauseKey: MessageCauseCommandNotFound, Consequence: "shell rejects it", ConsequenceKey: MessageConsequenceCommandRejects, Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe}
 	data, err := decision.JSON("pre")
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestJSONProtocolEncoderCompatibility(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
+	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.CauseKey != MessageCauseCommandNotFound || event.ConsequenceKey != MessageConsequenceCommandRejects || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
 		t.Fatalf("incompatible event: %#v", event)
 	}
 	var fields map[string]json.RawMessage
@@ -156,28 +156,38 @@ func TestGitSubcommandTypo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Suggestion != "git status" || decision.Cause != "unknown Git subcommand" {
+	if decision.Suggestion != "git status" || decision.Cause != "unknown Git subcommand" || decision.CauseKey != MessageCauseUnknownGitSubcommand || decision.ConsequenceKey != MessageConsequenceGitExits {
 		t.Fatalf("unexpected decision: %#v", decision)
 	}
 }
 
 func TestConsequenceTemplatesCoverRepairClasses(t *testing.T) {
 	for _, test := range []struct {
-		class       RepairClass
-		cause       string
-		consequence string
+		class          RepairClass
+		causeKey       MessageKey
+		cause          string
+		consequenceKey MessageKey
+		consequence    string
 	}{
-		{RepairClassCommand, "command not found locally", "the shell would reject this command"},
-		{RepairClassSemantic, "unknown Git subcommand", "Git will exit before performing work"},
-		{RepairClassPath, "path does not exist", "the command may fail or target the wrong file"},
+		{RepairClassCommand, MessageCauseCommandNotFound, "command not found locally", MessageConsequenceCommandRejects, "the shell would reject this command"},
+		{RepairClassSemantic, MessageCauseUnknownGitSubcommand, "unknown Git subcommand", MessageConsequenceGitExits, "Git will exit before performing work"},
+		{RepairClassPath, MessageCausePathNotFound, "path does not exist", MessageConsequencePathMayFail, "the command may fail or target the wrong file"},
 	} {
 		template, ok := consequenceFor(test.class)
-		if !ok || template.cause != test.cause || template.consequence != test.consequence {
+		cause, causeOK := DefaultMessage(test.causeKey)
+		consequence, consequenceOK := DefaultMessage(test.consequenceKey)
+		if !ok || template.cause != test.causeKey || template.consequence != test.consequenceKey || !causeOK || cause != test.cause || !consequenceOK || consequence != test.consequence {
 			t.Fatalf("template(%s) = %#v, %t", test.class, template, ok)
 		}
 	}
 	if _, ok := consequenceFor(RepairClass("unknown")); ok {
 		t.Fatal("unknown repair class must not have a consequence template")
+	}
+}
+
+func TestDefaultMessageRejectsUnknownKey(t *testing.T) {
+	if _, ok := DefaultMessage(MessageKey("diagnostic.unknown")); ok {
+		t.Fatal("unknown message key must not resolve")
 	}
 }
 

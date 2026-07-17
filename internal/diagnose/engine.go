@@ -24,6 +24,7 @@ import (
 
 type Risk string
 type RepairClass string
+type MessageKey string
 
 type Evidence struct {
 	Kind  string `json:"kind"`
@@ -57,50 +58,77 @@ const (
 )
 
 type consequenceTemplate struct {
-	cause       string
-	consequence string
+	cause       MessageKey
+	consequence MessageKey
+}
+
+const (
+	MessageCauseCommandNotFound      MessageKey = "diagnostic.cause.command_not_found"
+	MessageConsequenceCommandRejects MessageKey = "diagnostic.consequence.command_rejects"
+	MessageCauseUnknownGitSubcommand MessageKey = "diagnostic.cause.unknown_git_subcommand"
+	MessageConsequenceGitExits       MessageKey = "diagnostic.consequence.git_exits"
+	MessageCausePathNotFound         MessageKey = "diagnostic.cause.path_not_found"
+	MessageConsequencePathMayFail    MessageKey = "diagnostic.consequence.path_may_fail"
+)
+
+var defaultMessages = map[MessageKey]string{
+	MessageCauseCommandNotFound:      "command not found locally",
+	MessageConsequenceCommandRejects: "the shell would reject this command",
+	MessageCauseUnknownGitSubcommand: "unknown Git subcommand",
+	MessageConsequenceGitExits:       "Git will exit before performing work",
+	MessageCausePathNotFound:         "path does not exist",
+	MessageConsequencePathMayFail:    "the command may fail or target the wrong file",
 }
 
 var consequenceTemplates = map[RepairClass]consequenceTemplate{
-	RepairClassCommand:  {cause: "command not found locally", consequence: "the shell would reject this command"},
-	RepairClassSemantic: {cause: "unknown Git subcommand", consequence: "Git will exit before performing work"},
-	RepairClassPath:     {cause: "path does not exist", consequence: "the command may fail or target the wrong file"},
+	RepairClassCommand:  {cause: MessageCauseCommandNotFound, consequence: MessageConsequenceCommandRejects},
+	RepairClassSemantic: {cause: MessageCauseUnknownGitSubcommand, consequence: MessageConsequenceGitExits},
+	RepairClassPath:     {cause: MessageCausePathNotFound, consequence: MessageConsequencePathMayFail},
+}
+
+func DefaultMessage(key MessageKey) (string, bool) {
+	value, ok := defaultMessages[key]
+	return value, ok
 }
 
 type Decision struct {
-	Version     int         `json:"version"`
-	Action      string      `json:"action"`
-	Cause       string      `json:"cause,omitempty"`
-	Consequence string      `json:"consequence,omitempty"`
-	Suggestion  string      `json:"suggestion,omitempty"`
-	Class       RepairClass `json:"class,omitempty"`
-	Evidence    []Evidence  `json:"evidence,omitempty"`
-	Confidence  float64     `json:"confidence"`
-	Risk        Risk        `json:"risk"`
-	Incomplete  bool        `json:"incomplete,omitempty"`
-	Trace       []string    `json:"trace,omitempty"`
-	original    string
-	replacement string
-	occurrence  int
+	Version        int         `json:"version"`
+	Action         string      `json:"action"`
+	Cause          string      `json:"cause,omitempty"`
+	CauseKey       MessageKey  `json:"cause_key,omitempty"`
+	Consequence    string      `json:"consequence,omitempty"`
+	ConsequenceKey MessageKey  `json:"consequence_key,omitempty"`
+	Suggestion     string      `json:"suggestion,omitempty"`
+	Class          RepairClass `json:"class,omitempty"`
+	Evidence       []Evidence  `json:"evidence,omitempty"`
+	Confidence     float64     `json:"confidence"`
+	Risk           Risk        `json:"risk"`
+	Incomplete     bool        `json:"incomplete,omitempty"`
+	Trace          []string    `json:"trace,omitempty"`
+	original       string
+	replacement    string
+	occurrence     int
 }
 
 type Event struct {
-	Version     int         `json:"version"`
-	Stage       string      `json:"stage"`
-	Action      string      `json:"action"`
-	Cause       string      `json:"cause,omitempty"`
-	Consequence string      `json:"consequence,omitempty"`
-	Suggestion  string      `json:"suggestion,omitempty"`
-	Class       RepairClass `json:"class,omitempty"`
-	Evidence    []Evidence  `json:"evidence,omitempty"`
-	Confidence  float64     `json:"confidence"`
-	Risk        Risk        `json:"risk"`
-	Incomplete  bool        `json:"incomplete,omitempty"`
-	Trace       []string    `json:"trace,omitempty"`
+	Version        int         `json:"version"`
+	Stage          string      `json:"stage"`
+	Action         string      `json:"action"`
+	Cause          string      `json:"cause,omitempty"`
+	CauseKey       MessageKey  `json:"cause_key,omitempty"`
+	Consequence    string      `json:"consequence,omitempty"`
+	ConsequenceKey MessageKey  `json:"consequence_key,omitempty"`
+	Suggestion     string      `json:"suggestion,omitempty"`
+	Class          RepairClass `json:"class,omitempty"`
+	Evidence       []Evidence  `json:"evidence,omitempty"`
+	Confidence     float64     `json:"confidence"`
+	Risk           Risk        `json:"risk"`
+	Incomplete     bool        `json:"incomplete,omitempty"`
+	Trace          []string    `json:"trace,omitempty"`
 }
 
 func (d Decision) Event(stage string) Event {
-	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
 func (d Decision) Record() (string, error) {
@@ -382,7 +410,7 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassCommand)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}, nil
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}, nil
 	}
 	return Decision{}, nil
 }
@@ -408,7 +436,7 @@ func semanticDecision(ctx context.Context, words []string) (Decision, error) {
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassSemantic)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
 	}
 	return Decision{}, nil
 }
@@ -447,7 +475,7 @@ func (e Engine) pathDecision(ctx context.Context, words []string) (Decision, err
 		replaced[i] = replacement
 		suggestion, containsSecret := redact.Command(replaced)
 		template, _ := consequenceFor(RepairClassPath)
-		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}, nil
+		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}, nil
 	}
 	return Decision{}, nil
 }

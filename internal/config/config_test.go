@@ -88,6 +88,60 @@ func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 	}
 }
 
+func TestApplySessionOverridesUsesStrictAllowlist(t *testing.T) {
+	cfg, err := ApplySessionOverrides(Default(), map[string]string{
+		"CLOSE_ENOUGH_MODE":                  "rewrite",
+		"CLOSE_ENOUGH_AUTO_APPLY_SAFE":       "true",
+		"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != "rewrite" || !cfg.AutoApplySafe || !cfg.LocalHistoryEnabled {
+		t.Fatalf("unexpected override result: %#v", cfg)
+	}
+}
+
+func TestApplySessionOverridesRejectsUnknownAndInvalidValues(t *testing.T) {
+	for name, values := range map[string]map[string]string{
+		"unknown": {"CLOSE_ENOUGH_UNSAFE": "true"},
+		"boolean": {"CLOSE_ENOUGH_AUTO_APPLY_SAFE": "1"},
+		"mode":    {"CLOSE_ENOUGH_MODE": "unsafe"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ApplySessionOverrides(Default(), values); err == nil {
+				t.Fatal("expected override error")
+			}
+		})
+	}
+}
+
+func TestSessionValuesRejectsDuplicateOverrides(t *testing.T) {
+	_, err := sessionValues(Paths{Environ: func() []string {
+		return []string{"CLOSE_ENOUGH_MODE=hint", "CLOSE_ENOUGH_MODE=rewrite"}
+	}})
+	if err == nil || !strings.Contains(err.Error(), "duplicate session override") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadAppliesSessionOverrides(t *testing.T) {
+	cfg, err := Load(Paths{
+		Home: func() (string, error) { return t.TempDir(), nil },
+		CWD:  func() (string, error) { return t.TempDir(), nil },
+		Env:  func(string) string { return "" },
+		Environ: func() []string {
+			return []string{"CLOSE_ENOUGH_MODE=interrupt"}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != "interrupt" {
+		t.Fatalf("mode = %q, want interrupt", cfg.Mode)
+	}
+}
+
 func TestDecodeMigratesVersionlessConfiguration(t *testing.T) {
 	cfg, err := decode([]byte(`{"mode":"rewrite"}`), Default())
 	if err != nil {

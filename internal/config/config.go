@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 const CurrentSchemaVersion = 1
@@ -30,9 +32,10 @@ type Display struct {
 }
 
 type Paths struct {
-	Home func() (string, error)
-	CWD  func() (string, error)
-	Env  func(string) string
+	Home    func() (string, error)
+	CWD     func() (string, error)
+	Env     func(string) string
+	Environ func() []string
 }
 
 func Default() Config {
@@ -73,11 +76,68 @@ func Load(paths Paths) (Config, error) {
 			}
 		}
 	}
-	if mode := paths.Env("CLOSE_ENOUGH_MODE"); mode != "" {
-		if !validMode(mode) {
-			return Config{}, fmt.Errorf("invalid CLOSE_ENOUGH_MODE %q", mode)
+	values, err := sessionValues(paths)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg, err = ApplySessionOverrides(cfg, values)
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+var sessionOverrideKeys = map[string]string{
+	"CLOSE_ENOUGH_MODE":                  "mode",
+	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":       "auto_apply_safe",
+	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED": "local_history_enabled",
+	"CLOSE_ENOUGH_REGISTRY_ENABLED":      "registry_enabled",
+	"CLOSE_ENOUGH_AUTO_UPDATE_ENABLED":   "auto_update_enabled",
+}
+
+func sessionValues(paths Paths) (map[string]string, error) {
+	if paths.Environ == nil {
+		values := make(map[string]string, len(sessionOverrideKeys))
+		for key := range sessionOverrideKeys {
+			values[key] = paths.Env(key)
 		}
-		cfg.Mode = mode
+		return values, nil
+	}
+	values := map[string]string{}
+	for _, entry := range paths.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(key, "CLOSE_ENOUGH_") {
+			continue
+		}
+		if _, exists := values[key]; exists {
+			return nil, fmt.Errorf("duplicate session override %q", key)
+		}
+		values[key] = value
+	}
+	return values, nil
+}
+
+func ApplySessionOverrides(cfg Config, values map[string]string) (Config, error) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := values[key]
+		setting, ok := sessionOverrideKeys[key]
+		if !ok {
+			return Config{}, fmt.Errorf("unknown session override %q", key)
+		}
+		if value == "" {
+			continue
+		}
+		if setting != "mode" && value != "true" && value != "false" {
+			return Config{}, fmt.Errorf("invalid %s %q: must be true or false", key, value)
+		}
+		if err := cfg.Set(setting, value); err != nil {
+			return Config{}, fmt.Errorf("invalid %s %q: %w", key, value, err)
+		}
 	}
 	return cfg, nil
 }

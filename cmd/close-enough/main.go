@@ -86,7 +86,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 	if *stage != "pre" && *stage != "post" {
 		return clierr.New(clierr.Usage, "--stage must be pre or post")
 	}
-	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv})
+	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
 	if err != nil {
 		return clierr.Wrap(clierr.Configuration, err)
 	}
@@ -114,7 +114,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 
 func configCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "show" {
-		cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv})
+		cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
 		}

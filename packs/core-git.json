@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-git",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
@@ -139,6 +139,60 @@
       "cause": "Deprecated Git pull rebase mode",
       "risk": "high",
       "risk_rationale": "may contact a remote and rewrite history"
+    },
+    {
+      "id": "git-add-gitingore",
+      "command": "git",
+      "pattern": "^add \\.gitingore$",
+      "replacement": "add .gitignore",
+      "cause": "Git ignore-file path typo",
+      "risk": "high",
+      "risk_rationale": "may stage a file for commit"
+    },
+    {
+      "id": "git-diff-gitingore",
+      "command": "git",
+      "pattern": "^diff \\.gitingore$",
+      "replacement": "diff .gitignore",
+      "cause": "Git ignore-file path typo",
+      "risk": "safe",
+      "risk_rationale": "read-only file comparison"
+    },
+    {
+      "id": "git-add-readme-mkd",
+      "command": "git",
+      "pattern": "^add README\\.mkd$",
+      "replacement": "add README.md",
+      "cause": "Project README extension typo",
+      "risk": "high",
+      "risk_rationale": "may stage a file for commit"
+    },
+    {
+      "id": "git-diff-readme-mkd",
+      "command": "git",
+      "pattern": "^diff README\\.mkd$",
+      "replacement": "diff README.md",
+      "cause": "Project README extension typo",
+      "risk": "safe",
+      "risk_rationale": "read-only file comparison"
+    },
+    {
+      "id": "git-add-github-workflow",
+      "command": "git",
+      "pattern": "^add \\.github/workflow$",
+      "replacement": "add .github/workflows",
+      "cause": "GitHub workflow directory typo",
+      "risk": "high",
+      "risk_rationale": "may stage files for commit"
+    },
+    {
+      "id": "git-diff-github-workflow",
+      "command": "git",
+      "pattern": "^diff -- \\.github/workflow$",
+      "replacement": "diff -- .github/workflows",
+      "cause": "GitHub workflow directory typo",
+      "risk": "safe",
+      "risk_rationale": "read-only file comparison"
     }
   ]
 }

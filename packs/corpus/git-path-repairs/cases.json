@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "git-add-gitingore", "command": "git", "input": "add .gitingore", "rule_id": "git-add-gitingore"},
+    {"id": "git-diff-gitingore", "command": "git", "input": "diff .gitingore", "rule_id": "git-diff-gitingore"},
+    {"id": "git-add-readme-mkd", "command": "git", "input": "add README.mkd", "rule_id": "git-add-readme-mkd"},
+    {"id": "git-diff-readme-mkd", "command": "git", "input": "diff README.mkd", "rule_id": "git-diff-readme-mkd"},
+    {"id": "git-add-github-workflow", "command": "git", "input": "add .github/workflow", "rule_id": "git-add-github-workflow"},
+    {"id": "git-diff-github-workflow", "command": "git", "input": "diff -- .github/workflow", "rule_id": "git-diff-github-workflow"}
+  ]
+}

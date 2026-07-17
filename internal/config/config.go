@@ -37,8 +37,12 @@ func Default() Config {
 }
 
 func GlobalPath(home func() (string, error)) (string, error) {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
+	return globalPath(home, os.Getenv)
+}
+
+func globalPath(home func() (string, error), env func(string) string) (string, error) {
+	base := env("XDG_CONFIG_HOME")
+	if base == "" || !filepath.IsAbs(base) {
 		value, err := home()
 		if err != nil {
 			return "", err
@@ -49,7 +53,7 @@ func GlobalPath(home func() (string, error)) (string, error) {
 }
 
 func Load(paths Paths) (Config, error) {
-	global, err := GlobalPath(paths.Home)
+	global, err := globalPath(paths.Home, paths.Env)
 	if err != nil {
 		return Config{}, err
 	}

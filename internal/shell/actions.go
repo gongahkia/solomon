@@ -75,6 +75,13 @@ func LowConfidenceInterrupt(confidence float64, optedIn bool) ActionResult {
 	return ActionResult{}
 }
 
+func LowConfidenceKeybindingInterrupt(confidence float64, invoked bool) ActionResult {
+	if invoked && confidence >= 0 && confidence < NonBlockingHintConfidence {
+		return ActionResult{Render: true}
+	}
+	return ActionResult{}
+}
+
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}

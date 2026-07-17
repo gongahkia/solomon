@@ -79,6 +79,15 @@ func TestLowConfidenceInterruptRequiresOptIn(t *testing.T) {
 	}
 }
 
+func TestLowConfidenceKeybindingInterruptRequiresInvocation(t *testing.T) {
+	if got := LowConfidenceKeybindingInterrupt(0.5, false); got != (ActionResult{}) {
+		t.Fatalf("uninvoked action = %#v", got)
+	}
+	if got := LowConfidenceKeybindingInterrupt(0.5, true); !got.Render || got.Submit {
+		t.Fatalf("invoked action = %#v", got)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

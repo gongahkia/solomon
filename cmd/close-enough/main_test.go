@@ -195,7 +195,7 @@ func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	if err := run([]string{"check", "--format", "plain", "--command", "git sttaus"}, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := output.String(); got != "Did you mean: git status\n- git sttaus\n+ git status\n" {
+	if got := output.String(); got != "Did you mean: git status\ngit [-sttaus-]{+status+}\n" {
 		t.Fatalf("plain output = %q", got)
 	}
 }

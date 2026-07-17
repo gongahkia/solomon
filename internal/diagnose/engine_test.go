@@ -190,6 +190,9 @@ func TestCommandDiffPreservesShellQuotingAndRedactsSecrets(t *testing.T) {
 	if got := decision.CommandDiff(line); got != "- git \"sttaus\" --message 'keep quote'\n+ git \"status\" --message 'keep quote'" {
 		t.Fatalf("quoted diff = %q", got)
 	}
+	if got := decision.CommandDiffEmphasis(line); got != `git [-"sttaus"-]{+"status"+} --message 'keep quote'` {
+		t.Fatalf("emphasized diff = %q", got)
+	}
 	repeated := Decision{original: "gti", replacement: "git", occurrence: 2}
 	if got := repeated.CommandDiff("echo gti && gti status"); got != "- echo gti && gti status\n+ echo gti && git status" {
 		t.Fatalf("repeated diff = %q", got)
@@ -197,6 +200,9 @@ func TestCommandDiffPreservesShellQuotingAndRedactsSecrets(t *testing.T) {
 	secret := Decision{original: "gti", replacement: "git", occurrence: 1}
 	if got := secret.CommandDiff("gti --token=top-secret"); got != "" {
 		t.Fatalf("secret diff = %q", got)
+	}
+	if got := secret.CommandDiffEmphasis("gti --token=top-secret"); got != "" {
+		t.Fatalf("secret emphasized diff = %q", got)
 	}
 }
 

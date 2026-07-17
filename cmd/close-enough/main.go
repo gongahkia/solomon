@@ -181,8 +181,8 @@ func renderPlainDiagnostic(decision diagnose.Decision, display config.Display, c
 	}
 	if display.Change && decision.Suggestion != "" {
 		lines = append(lines, "Did you mean: "+sanitizeTerminalText(decision.Suggestion))
-		if diff := decision.CommandDiff(command); diff != "" {
-			lines = append(lines, strings.Split(diff, "\n")...)
+		if diff := decision.CommandDiffEmphasis(command); diff != "" {
+			lines = append(lines, sanitizeTerminalText(diff))
 		}
 	}
 	if display.Risk {

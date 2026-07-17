@@ -541,6 +541,32 @@ func (d Decision) CommandDiff(line string) string {
 	return "- " + line + "\n+ " + corrected
 }
 
+func (d Decision) CommandDiffEmphasis(line string) string {
+	if d.Risk == RiskHigh || d.original == "" || d.replacement == "" || d.occurrence < 1 {
+		return ""
+	}
+	words, err := tokenize(line)
+	if err != nil {
+		return ""
+	}
+	if _, containsSecret := redact.Command(words); containsSecret {
+		return ""
+	}
+	matched := 0
+	for _, token := range shellTokenRanges(line) {
+		if token.value != d.original {
+			continue
+		}
+		matched++
+		if matched != d.occurrence {
+			continue
+		}
+		replacement := quotedReplacement(line[token.start:token.end], d.replacement)
+		return line[:token.start] + "[-" + line[token.start:token.end] + "-]{+" + replacement + "+}" + line[token.end:]
+	}
+	return ""
+}
+
 type shellTokenRange struct {
 	start int
 	end   int

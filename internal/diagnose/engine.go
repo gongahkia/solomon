@@ -668,13 +668,11 @@ func classify(words []string, containsSecret bool) Risk {
 	if escalatesPrivileges(words) {
 		return RiskHigh
 	}
-	if mutatesFilesystem(words) {
+	if hasNetworkEffect(words) {
 		return RiskHigh
 	}
-	for _, word := range words {
-		if word == "curl" || word == "wget" || word == "ssh" {
-			return RiskHigh
-		}
+	if mutatesFilesystem(words) {
+		return RiskHigh
 	}
 	return RiskSafe
 }
@@ -712,6 +710,42 @@ func commandStartAt(words []string, target int) bool {
 			continue
 		}
 		expectCommand = false
+	}
+	return false
+}
+
+var networkEffectCommands = map[string]struct{}{
+	"curl": {}, "ftp": {}, "nc": {}, "ncat": {}, "netcat": {}, "scp": {}, "sftp": {}, "ssh": {}, "telnet": {}, "tftp": {}, "wget": {},
+}
+
+func hasNetworkEffect(words []string) bool {
+	for position, word := range words {
+		if !commandStartAt(words, position) {
+			continue
+		}
+		command := commandName(word)
+		if _, ok := networkEffectCommands[command]; ok {
+			return true
+		}
+		if command == "git" && hasNetworkGitSubcommand(words[position+1:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNetworkGitSubcommand(words []string) bool {
+	for _, word := range words {
+		if isCompoundOperator(word) {
+			return false
+		}
+		switch word {
+		case "clone", "fetch", "ls-remote", "pull", "push":
+			return true
+		}
+		if !strings.HasPrefix(word, "-") {
+			return false
+		}
 	}
 	return false
 }

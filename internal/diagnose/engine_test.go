@@ -232,6 +232,44 @@ func TestPrivilegeEscalationRepairNeverRewrites(t *testing.T) {
 	}
 }
 
+func TestNetworkEffectClassifier(t *testing.T) {
+	for _, line := range []string{
+		"curl https://example.invalid",
+		"wget https://example.invalid/file",
+		"/usr/bin/SSH host",
+		"echo ready && scp source host:target",
+		"git push origin main",
+	} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskHigh {
+			t.Fatalf("classify(%q) = %s, want high", line, got)
+		}
+	}
+	for _, line := range []string{"echo curl", "git status", "curlish https://example.invalid"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskSafe {
+			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
+func TestNetworkEffectRepairNeverRewrites(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "curl")
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("crul https://example.invalid", "pre")
+	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
+		t.Fatalf("unsafe network decision: %#v, %v", decision, err)
+	}
+}
+
 func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
 	if err != nil {

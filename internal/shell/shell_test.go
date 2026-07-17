@@ -130,6 +130,23 @@ func TestZshInterruptReturnsBeforeCommandExecution(t *testing.T) {
 	}
 }
 
+func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrite := `if [[ "$action" == rewrite ]]; then`
+	hint := `if [[ "$action" == hint ]]; then`
+	start, end := strings.Index(script, rewrite), strings.Index(script, hint)
+	if start < 0 || end < start {
+		t.Fatalf("zsh rewrite branch is missing: %q", script)
+	}
+	branch := script[start:end]
+	if !strings.Contains(branch, `if [[ "$risk" != safe || -z "$suggestion" ]]; then`) || !strings.Contains(branch, "refused unsafe rewrite") || !strings.Contains(branch, "BUFFER=\"$suggestion\"") || strings.Count(branch, "return 1") != 2 {
+		t.Fatalf("zsh rewrite branch does not fail closed: %q", branch)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

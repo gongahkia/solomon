@@ -12,7 +12,15 @@ function _close_enough_check {
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
   suggestion="$(_close_enough_decode "$suggestion")"
-  if [[ "$action" == rewrite ]]; then BUFFER="$suggestion"; zle -R; return 1; fi
+  if [[ "$action" == rewrite ]]; then
+    if [[ "$risk" != safe || -z "$suggestion" ]]; then
+      zle -M "close-enough: refused unsafe rewrite"
+      return 1
+    fi
+    BUFFER="$suggestion"
+    zle -R
+    return 1
+  fi
   if [[ "$action" == hint ]]; then
     zle -M "close-enough [$risk/$confidence]: $suggestion"
     return 0

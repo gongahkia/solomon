@@ -66,6 +66,34 @@ func TestRecordEncoderIsBinarySafeAndRejectsInvalidControlFields(t *testing.T) {
 	}
 }
 
+func TestJSONProtocolEncoderCompatibility(t *testing.T) {
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", Consequence: "shell rejects it", Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe}
+	data, err := decision.JSON("pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
+		t.Fatalf("incompatible event: %#v", event)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["command"]; ok {
+		t.Fatalf("event exposes raw command: %s", data)
+	}
+	if _, err := decision.JSON("invalid"); err == nil {
+		t.Fatal("accepted invalid JSON stage")
+	}
+	if _, err := (Decision{Version: AdapterProtocolVersion, Action: "invalid", Risk: RiskSafe}).JSON("pre"); err == nil {
+		t.Fatal("accepted invalid JSON control fields")
+	}
+}
+
 func TestGitSubcommandTypo(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git sttaus", "pre")
 	if err != nil {
@@ -669,7 +697,7 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	if decision.Action == "rewrite" || decision.Risk != RiskHigh || decision.Suggestion != "git --token=[REDACTED]" {
 		t.Fatalf("unsafe decision: %#v", decision)
 	}
-	data, err := json.Marshal(decision.Event("pre"))
+	data, err := decision.JSON("pre")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +715,7 @@ func TestEventContainsOnlyDiagnosticMetadata(t *testing.T) {
 	if event.Stage != "post" || event.Suggestion != "git status" || event.Version != AdapterProtocolVersion {
 		t.Fatalf("unexpected event: %#v", event)
 	}
-	data, err := json.Marshal(event)
+	data, err := Decision{Version: AdapterProtocolVersion, Action: "hint", Suggestion: "git status", Risk: RiskSafe}.JSON("post")
 	if err != nil {
 		t.Fatal(err)
 	}

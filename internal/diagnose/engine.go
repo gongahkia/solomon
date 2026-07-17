@@ -2,6 +2,7 @@ package diagnose
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -71,20 +72,37 @@ func (d Decision) Event(stage string) Event {
 }
 
 func (d Decision) Record() (string, error) {
-	if d.Version != AdapterProtocolVersion {
-		return "", fmt.Errorf("unsupported record version %d", d.Version)
-	}
-	if !validAction(d.Action) {
-		return "", fmt.Errorf("invalid record action %q", d.Action)
-	}
-	if !validRisk(d.Risk) {
-		return "", fmt.Errorf("invalid record risk %q", d.Risk)
-	}
-	if math.IsNaN(d.Confidence) || math.IsInf(d.Confidence, 0) || d.Confidence < 0 || d.Confidence > 1 {
-		return "", fmt.Errorf("invalid record confidence %v", d.Confidence)
+	if err := d.validateProtocol(); err != nil {
+		return "", err
 	}
 	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), encodeRecordText(d.Cause), encodeRecordText(d.Consequence), encodeRecordText(d.Suggestion)}
 	return strings.Join(fields, "\t") + "\n", nil
+}
+
+func (d Decision) JSON(stage string) ([]byte, error) {
+	if stage != "pre" && stage != "post" {
+		return nil, fmt.Errorf("invalid JSON stage %q", stage)
+	}
+	if err := d.validateProtocol(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(d.Event(stage))
+}
+
+func (d Decision) validateProtocol() error {
+	if d.Version != AdapterProtocolVersion {
+		return fmt.Errorf("unsupported protocol version %d", d.Version)
+	}
+	if !validAction(d.Action) {
+		return fmt.Errorf("invalid protocol action %q", d.Action)
+	}
+	if !validRisk(d.Risk) {
+		return fmt.Errorf("invalid protocol risk %q", d.Risk)
+	}
+	if math.IsNaN(d.Confidence) || math.IsInf(d.Confidence, 0) || d.Confidence < 0 || d.Confidence > 1 {
+		return fmt.Errorf("invalid protocol confidence %v", d.Confidence)
+	}
+	return nil
 }
 
 func encodeRecordText(value string) string {

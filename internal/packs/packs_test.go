@@ -384,6 +384,33 @@ func TestGitPathRepairRules(t *testing.T) {
 	}
 }
 
+func TestExtractGitFailureEvidence(t *testing.T) {
+	output := "fatal: pathspec '.gitingore' did not match any file(s) known to git\nerror: unknown option '--shortt'\ngit: 'statsu' is not a git command. See 'git --help'.\nerror: unknown option '--shortt'\n"
+	evidence, err := ExtractGitFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "git-pathspec-miss", Value: ".gitingore"},
+		{Kind: "git-unknown-option", Value: "--shortt"},
+		{Kind: "git-unknown-subcommand", Value: "statsu"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractGitFailureEvidence("git: 'statsu' is not a git command.\nerror: unknown option '--shortt'\nfatal: pathspec '.gitingore' did not match any file(s) known to git\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractGitFailureEvidence("git: 'https://user:password@example.invalid/repo' is not a git command\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/repo" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if _, err := ExtractGitFailureEvidence(strings.Repeat("x", maxGitFailureOutputBytes+1)); !errors.Is(err, ErrGitFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

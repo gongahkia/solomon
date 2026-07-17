@@ -200,6 +200,20 @@ func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	}
 }
 
+func TestConfigCauseToggleControlsPlainDiagnostic(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := run([]string{"config", "set", "display.cause", "false"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	if err := run([]string{"check", "--format", "plain", "--command", "git sttaus"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "unknown subcommand") || !strings.Contains(output.String(), "Did you mean: git status") {
+		t.Fatalf("cause toggle output = %q", output.String())
+	}
+}
+
 func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
 	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "git-status-statsu", "command": "git", "input": "statsu", "rule_id": "git-status-statsu"}
+  ]
+}

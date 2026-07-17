@@ -447,6 +447,36 @@ func TestContainersSubcommandTypoRules(t *testing.T) {
 	}
 }
 
+func TestContainersFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "containers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "containers-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["docker-search-stars"] != diagnose.RiskSafe || risk["docker-search-automated"] != diagnose.RiskSafe {
+		t.Fatalf("container search flag risks = %#v", risk)
+	}
+	for _, id := range []string{"docker-run-detachd", "docker-build-no-cachee", "docker-compose-dryrun"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched container flag corpus")
+	}
+}
+
 func TestGoSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "go.json"))
 	if err != nil {

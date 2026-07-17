@@ -23,7 +23,12 @@ function _close_enough_check {
   fi
   return 0
 }
-function _close_enough_accept_line { _close_enough_check || return; zle .accept-line }
+function _close_enough_accept_line {
+  if ! _close_enough_check; then
+    return 0
+  fi
+  zle .accept-line
+}
 zle -N _close_enough_accept_line
 bindkey '^M' _close_enough_accept_line
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''

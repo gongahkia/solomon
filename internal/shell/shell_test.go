@@ -113,6 +113,23 @@ func TestZshHintRenderingDoesNotSuppressSubmission(t *testing.T) {
 	}
 }
 
+func TestZshInterruptReturnsBeforeCommandExecution(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupt := `if [[ "$action" == interrupt ]]; then`
+	widget := "function _close_enough_accept_line {"
+	interruptStart, widgetStart := strings.Index(script, interrupt), strings.Index(script, widget)
+	if interruptStart < 0 || widgetStart < interruptStart || !strings.Contains(script[interruptStart:widgetStart], "return 1") {
+		t.Fatalf("zsh interrupt does not suppress command submission: %q", script)
+	}
+	widgetEnd := strings.Index(script[widgetStart:], "zle -N _close_enough_accept_line")
+	if widgetEnd < 0 || !strings.Contains(script[widgetStart:widgetStart+widgetEnd], "if ! _close_enough_check; then\n    return 0\n  fi\n  zle .accept-line") {
+		t.Fatalf("zsh enter widget executes without an explicit suppression gate: %q", script)
+	}
+}
+
 func TestContractReturnsIndependentSlices(t *testing.T) {
 	first, err := ContractFor("zsh")
 	if err != nil {

@@ -1,0 +1,9 @@
+[
+  {"name":"accept-new-timestamp","initial":{},"role":"timestamp","version":2,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":true,"want_versions":{"timestamp":2}},
+  {"name":"reject-timestamp-rollback","initial":{"timestamp":2},"role":"timestamp","version":1,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":false,"want_versions":{"timestamp":2}},
+  {"name":"accept-same-version","initial":{"timestamp":2},"role":"timestamp","version":2,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":true,"want_versions":{"timestamp":2}},
+  {"name":"reject-expired-upgrade","initial":{"timestamp":2},"role":"timestamp","version":3,"expires":"2030-01-01T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":false,"want_versions":{"timestamp":2}},
+  {"name":"reject-invalid-expiry","initial":{"snapshot":4},"role":"snapshot","version":5,"expires":"not-a-time","now":"2030-01-01T00:00:00Z","accept":false,"want_versions":{"snapshot":4}},
+  {"name":"role-scoped-version-floor","initial":{"timestamp":3},"role":"snapshot","version":1,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":true,"want_versions":{"timestamp":3,"snapshot":1}},
+  {"name":"reject-unknown-role","initial":{"timestamp":3},"role":"root","version":4,"expires":"2030-01-02T00:00:00Z","now":"2030-01-01T00:00:00Z","accept":false,"want_versions":{"timestamp":3}}
+]

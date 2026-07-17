@@ -2397,6 +2397,59 @@ func TestRegistryMetadataRejectsExpiryAndRollback(t *testing.T) {
 	}
 }
 
+type registryRollbackFixture struct {
+	Name         string         `json:"name"`
+	Initial      map[string]int `json:"initial"`
+	Role         string         `json:"role"`
+	Version      int            `json:"version"`
+	Expires      string         `json:"expires"`
+	Now          string         `json:"now"`
+	Accept       bool           `json:"accept"`
+	WantVersions map[string]int `json:"want_versions"`
+}
+
+func TestRegistryRollbackAttackRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/registry_rollback_attacks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []registryRollbackFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("registry rollback corpus is empty")
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Role == "" || fixture.Expires == "" || fixture.Now == "" || fixture.WantVersions == nil {
+				t.Fatalf("invalid registry rollback fixture: %#v", fixture)
+			}
+			now, err := time.Parse(time.RFC3339, fixture.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			versions := make(map[string]int, len(fixture.Initial))
+			for role, version := range fixture.Initial {
+				versions[role] = version
+			}
+			state := RegistryState{Versions: versions}
+			err = state.Accept(fixture.Role, fixture.Version, fixture.Expires, now)
+			if (err == nil) != fixture.Accept {
+				t.Fatalf("Accept(%q, %d) error = %v, want accept=%t", fixture.Role, fixture.Version, err, fixture.Accept)
+			}
+			if len(state.Versions) != len(fixture.WantVersions) {
+				t.Fatalf("versions = %#v, want %#v", state.Versions, fixture.WantVersions)
+			}
+			for role, version := range fixture.WantVersions {
+				if state.Versions[role] != version {
+					t.Fatalf("versions = %#v, want %#v", state.Versions, fixture.WantVersions)
+				}
+			}
+		})
+	}
+}
+
 func TestRegistryOptInStateMachine(t *testing.T) {
 	state := RegistryDisabled
 	for _, event := range []RegistryOptInEvent{RegistryRequest, RegistryConfirm} {

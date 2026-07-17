@@ -9,6 +9,9 @@ import (
 type RegistryState struct{ Versions map[string]int }
 
 func (s *RegistryState) Accept(role string, version int, expires string, now time.Time) error {
+	if role != "timestamp" && role != "snapshot" && role != "targets" {
+		return errors.New("invalid registry metadata role")
+	}
 	if version < 1 {
 		return errors.New("invalid metadata version")
 	}

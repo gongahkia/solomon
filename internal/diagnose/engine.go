@@ -268,6 +268,9 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 	if len(line) > limits.InputBytes {
 		return noDecision(), ErrInputLimit
 	}
+	if e.options.Config.HasRuleException(line) {
+		return noDecision(), nil
+	}
 	started := e.now()
 	words, err := tokenize(line)
 	if err != nil {

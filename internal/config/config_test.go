@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -40,6 +41,39 @@ func TestSetConfiguresDisplayFields(t *testing.T) {
 	}
 	if err := cfg.Set("display.risk", "invalid"); err == nil {
 		t.Fatal("expected display value error")
+	}
+}
+
+func TestRuleExceptionCRUD(t *testing.T) {
+	cfg := Default()
+	if err := cfg.AddRuleException(RuleException{ID: "skip-git", Command: "git sttaus"}); err != nil || !cfg.HasRuleException("git sttaus") {
+		t.Fatalf("add exception = %#v, %v", cfg.RuleExceptions, err)
+	}
+	if err := cfg.AddRuleException(RuleException{ID: "skip-git", Command: "git statsu"}); err == nil {
+		t.Fatal("expected duplicate id error")
+	}
+	if err := cfg.UpdateRuleException("skip-git", "git statsu"); err != nil || cfg.HasRuleException("git sttaus") || !cfg.HasRuleException("git statsu") {
+		t.Fatalf("update exception = %#v, %v", cfg.RuleExceptions, err)
+	}
+	if err := cfg.RemoveRuleException("skip-git"); err != nil || len(cfg.RuleExceptions) != 0 {
+		t.Fatalf("remove exception = %#v, %v", cfg.RuleExceptions, err)
+	}
+	if err := cfg.RemoveRuleException("skip-git"); err == nil {
+		t.Fatal("expected missing exception error")
+	}
+}
+
+func TestRuleExceptionsRejectInvalidValues(t *testing.T) {
+	for _, exception := range []RuleException{
+		{ID: "", Command: "git status"},
+		{ID: "Invalid", Command: "git status"},
+		{ID: "skip", Command: " "},
+		{ID: "skip", Command: strings.Repeat("x", maxRuleExceptionCommandBytes+1)},
+	} {
+		cfg := Default()
+		if err := cfg.AddRuleException(exception); err == nil {
+			t.Fatalf("accepted invalid exception %#v", exception)
+		}
 	}
 }
 
@@ -319,7 +353,7 @@ func TestUnapprovedProjectConfigurationCannotOverrideGlobalConfiguration(t *test
 	base := Default()
 	base.Mode = "interrupt"
 	merged, err := mergeApprovedProject(base, path)
-	if err != nil || merged != base {
+	if err != nil || !reflect.DeepEqual(merged, base) {
 		t.Fatalf("unapproved merge = %#v, %v", merged, err)
 	}
 }
@@ -451,6 +485,8 @@ func TestDecodeValidatesGlobalConfigurationSchema(t *testing.T) {
 		`{"auto_apply_safe":"true"}`,
 		`{"unexpected":true}`,
 		`{"display":{"unexpected":true}}`,
+		`{"rule_exceptions":[{"id":"Invalid","command":"git status"}]}`,
+		`{"rule_exceptions":[{"id":"skip-one","command":"git status"},{"id":"skip-two","command":"git status"}]}`,
 	} {
 		if _, err := decode([]byte(data), Default()); err == nil {
 			t.Fatalf("accepted invalid configuration %s", data)

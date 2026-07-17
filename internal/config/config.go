@@ -18,16 +18,25 @@ import (
 	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
-const CurrentSchemaVersion = 1
+const (
+	CurrentSchemaVersion         = 1
+	maxRuleExceptionCommandBytes = 8 << 10
+)
+
+type RuleException struct {
+	ID      string `json:"id"`
+	Command string `json:"command"`
+}
 
 type Config struct {
-	SchemaVersion       int     `json:"schema_version"`
-	Mode                string  `json:"mode"`
-	Display             Display `json:"display"`
-	AutoApplySafe       bool    `json:"auto_apply_safe"`
-	LocalHistoryEnabled bool    `json:"local_history_enabled"`
-	RegistryEnabled     bool    `json:"registry_enabled"`
-	AutoUpdateEnabled   bool    `json:"auto_update_enabled"`
+	SchemaVersion       int             `json:"schema_version"`
+	Mode                string          `json:"mode"`
+	Display             Display         `json:"display"`
+	AutoApplySafe       bool            `json:"auto_apply_safe"`
+	LocalHistoryEnabled bool            `json:"local_history_enabled"`
+	RegistryEnabled     bool            `json:"registry_enabled"`
+	AutoUpdateEnabled   bool            `json:"auto_update_enabled"`
+	RuleExceptions      []RuleException `json:"rule_exceptions,omitempty"`
 }
 
 type Display struct {
@@ -48,6 +57,105 @@ type Paths struct {
 
 func Default() Config {
 	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
+}
+
+func (c Config) HasRuleException(command string) bool {
+	for _, exception := range c.RuleExceptions {
+		if exception.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) AddRuleException(exception RuleException) error {
+	if err := validateRuleException(exception); err != nil {
+		return err
+	}
+	for _, existing := range c.RuleExceptions {
+		if existing.ID == exception.ID {
+			return fmt.Errorf("rule exception %q already exists", exception.ID)
+		}
+		if existing.Command == exception.Command {
+			return errors.New("rule exception command already exists")
+		}
+	}
+	c.RuleExceptions = append(c.RuleExceptions, exception)
+	return nil
+}
+
+func (c *Config) UpdateRuleException(id, command string) error {
+	if !validRuleExceptionID(id) {
+		return fmt.Errorf("invalid rule exception id %q", id)
+	}
+	if err := validateRuleException(RuleException{ID: id, Command: command}); err != nil {
+		return err
+	}
+	for index, existing := range c.RuleExceptions {
+		if existing.ID != id && existing.Command == command {
+			return errors.New("rule exception command already exists")
+		}
+		if existing.ID == id {
+			c.RuleExceptions[index].Command = command
+			return nil
+		}
+	}
+	return fmt.Errorf("rule exception %q does not exist", id)
+}
+
+func (c *Config) RemoveRuleException(id string) error {
+	if !validRuleExceptionID(id) {
+		return fmt.Errorf("invalid rule exception id %q", id)
+	}
+	for index, exception := range c.RuleExceptions {
+		if exception.ID == id {
+			c.RuleExceptions = append(c.RuleExceptions[:index], c.RuleExceptions[index+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("rule exception %q does not exist", id)
+}
+
+func validateRuleExceptions(exceptions []RuleException) error {
+	seenIDs := map[string]struct{}{}
+	seenCommands := map[string]struct{}{}
+	for _, exception := range exceptions {
+		if err := validateRuleException(exception); err != nil {
+			return err
+		}
+		if _, exists := seenIDs[exception.ID]; exists {
+			return fmt.Errorf("duplicate rule exception id %q", exception.ID)
+		}
+		if _, exists := seenCommands[exception.Command]; exists {
+			return errors.New("duplicate rule exception command")
+		}
+		seenIDs[exception.ID] = struct{}{}
+		seenCommands[exception.Command] = struct{}{}
+	}
+	return nil
+}
+
+func validateRuleException(exception RuleException) error {
+	if !validRuleExceptionID(exception.ID) {
+		return fmt.Errorf("invalid rule exception id %q", exception.ID)
+	}
+	if strings.TrimSpace(exception.Command) == "" || len(exception.Command) > maxRuleExceptionCommandBytes {
+		return errors.New("rule exception command must be non-empty and within the input limit")
+	}
+	return nil
+}
+
+func validRuleExceptionID(value string) bool {
+	if len(value) == 0 || len(value) > 64 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, character := range value[1:] {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c Config) Features() featuregate.Gates {
@@ -257,6 +365,9 @@ func decode(data []byte, base Config) (Config, error) {
 	base = migrated
 	if !validMode(base.Mode) {
 		return Config{}, fmt.Errorf("invalid mode %q", base.Mode)
+	}
+	if err := validateRuleExceptions(base.RuleExceptions); err != nil {
+		return Config{}, err
 	}
 	return base, nil
 }

@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return checkCommand(args[1:], stdout)
 	case "config":
 		return configCommand(args[1:], stdout)
+	case "rule":
+		return ruleCommand(args[1:], stdout)
 	case "pack":
 		return packCommand(args[1:], stdout)
 	case "doctor":
@@ -97,7 +99,7 @@ func versionString() string {
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|config|pack|doctor|version>"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|config|rule|pack|doctor|version>"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
@@ -334,6 +336,55 @@ func configCommand(args []string, stdout io.Writer) error {
 	}
 	if err := cfg.Set(args[1], args[2]); err != nil {
 		return clierr.Wrap(clierr.Configuration, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	return clierr.Wrap(clierr.Configuration, config.Write(path, cfg))
+}
+
+func ruleCommand(args []string, stdout io.Writer) error {
+	usage := "usage: close-enough rule <list|add <id> <command>|update <id> <command>|remove <id>>"
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, usage)
+	}
+	path, err := config.GlobalPath(os.UserHomeDir)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	cfg, err := config.LoadGlobal(path)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough rule list")
+		}
+		exceptions := cfg.RuleExceptions
+		if exceptions == nil {
+			exceptions = []config.RuleException{}
+		}
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(exceptions))
+	case "add", "update":
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough rule "+args[0]+" <id> <command>")
+		}
+		if args[0] == "add" {
+			err = cfg.AddRuleException(config.RuleException{ID: args[1], Command: args[2]})
+		} else {
+			err = cfg.UpdateRuleException(args[1], args[2])
+		}
+	case "remove":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough rule remove <id>")
+		}
+		err = cfg.RemoveRuleException(args[1])
+	default:
+		return clierr.New(clierr.Usage, usage)
+	}
+	if err != nil {
+		return clierr.New(clierr.Usage, err.Error())
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return clierr.Wrap(clierr.Configuration, err)

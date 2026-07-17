@@ -161,6 +161,17 @@ func TestGitSubcommandTypo(t *testing.T) {
 	}
 }
 
+func TestRuleExceptionSuppressesExactCommand(t *testing.T) {
+	cfg := config.Default()
+	if err := cfg.AddRuleException(config.RuleException{ID: "skip-git", Command: "git sttaus"}); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := New(Options{Config: cfg}).Check("git sttaus", "pre")
+	if err != nil || decision.Action != "none" || decision.Suggestion != "" {
+		t.Fatalf("exception decision = %#v, %v", decision, err)
+	}
+}
+
 func TestConsequenceTemplatesCoverRepairClasses(t *testing.T) {
 	for _, test := range []struct {
 		class          RepairClass

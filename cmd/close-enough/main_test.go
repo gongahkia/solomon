@@ -318,6 +318,48 @@ func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	}
 }
 
+func TestRuleCommandCRUD(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"rule", "list"}, &output, io.Discard); err != nil || output.String() != "[]\n" {
+		t.Fatalf("empty rule list = %q, %v", output.String(), err)
+	}
+	if err := run([]string{"rule", "add", "skip-git", "git sttaus"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := run([]string{"rule", "list"}, &output, io.Discard); err != nil || output.String() != "[{\"id\":\"skip-git\",\"command\":\"git sttaus\"}]\n" {
+		t.Fatalf("created rule list = %q, %v", output.String(), err)
+	}
+	output.Reset()
+	if err := run([]string{"check", "--command", "git sttaus"}, &output, io.Discard); err != nil || !strings.Contains(output.String(), `"action":"none"`) || strings.Contains(output.String(), `"suggestion"`) {
+		t.Fatalf("suppressed diagnostic = %q, %v", output.String(), err)
+	}
+	if err := run([]string{"rule", "update", "skip-git", "git statsu"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"rule", "remove", "skip-git"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := run([]string{"rule", "list"}, &output, io.Discard); err != nil || output.String() != "[]\n" {
+		t.Fatalf("removed rule list = %q, %v", output.String(), err)
+	}
+}
+
+func TestRuleCommandRejectsInvalidMutations(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"rule", "add", "Invalid", "git sttaus"},
+		{"rule", "update", "missing", "git sttaus"},
+		{"rule", "remove", "missing"},
+	} {
+		if err := run(args, io.Discard, io.Discard); err == nil {
+			t.Fatalf("accepted invalid rule command %q", args)
+		}
+	}
+}
+
 func TestConfigCauseToggleControlsPlainDiagnostic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := run([]string{"config", "set", "display.cause", "false"}, io.Discard, io.Discard); err != nil {

@@ -22,6 +22,8 @@ Registry and auto-update features are disabled by default; auto-update requires 
 
 Optional local-history encryption keys use an injected OS credential-store backend only; no file fallback is provided.
 
+Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories; `close-enough doctor` reports these findings without blocking.
+
 Release builds report injected version and commit metadata through `close-enough version`.
 
 Run the local CI target with `make ci`.

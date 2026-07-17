@@ -14,6 +14,7 @@ import (
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/packs"
+	"github.com/gongahkia/close-enough/internal/runtimecheck"
 	"github.com/gongahkia/close-enough/internal/shell"
 )
 
@@ -21,10 +22,22 @@ var version = "dev"
 var commit = "unknown"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	args := os.Args[1:]
+	if err := startupError(args, runtimecheck.Current()); err != nil {
+		fmt.Fprint(os.Stderr, renderError(err))
+		os.Exit(clierr.ExitOperation)
+	}
+	if err := run(args, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprint(os.Stderr, renderError(err))
 		os.Exit(clierr.Code(err))
 	}
+}
+
+func startupError(args []string, report runtimecheck.Report) error {
+	if len(args) > 0 && args[0] == "doctor" {
+		return nil
+	}
+	return report.Error()
 }
 
 func renderError(err error) string {
@@ -187,7 +200,10 @@ func packCommand(args []string, stdout io.Writer) error {
 
 func doctorCommand(stdout io.Writer) error {
 	result := shell.Doctor(os.Getenv("SHELL"), runtimeGOOS())
-	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(result))
+	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(struct {
+		shell.DoctorResult
+		Runtime runtimecheck.Report `json:"runtime"`
+	}{DoctorResult: result, Runtime: runtimecheck.Current()}))
 }
 
 func mustGetwd() string {

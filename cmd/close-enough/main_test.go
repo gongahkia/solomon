@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
+	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
 
 func TestRunExitCodes(t *testing.T) {
@@ -153,5 +154,25 @@ func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 func TestRenderErrorPreservesSafeText(t *testing.T) {
 	if got := renderError(errors.New("missing --command")); got != "close-enough: missing --command\n" {
 		t.Fatalf("renderError() = %q", got)
+	}
+}
+
+func TestStartupErrorFailsClosedExceptDoctor(t *testing.T) {
+	report := runtimecheck.Report{Safe: false, Findings: []runtimecheck.Finding{{Code: "unsafe-path"}}}
+	if err := startupError([]string{"check"}, report); err == nil {
+		t.Fatal("expected unsafe startup error")
+	}
+	if err := startupError([]string{"doctor"}, report); err != nil {
+		t.Fatalf("doctor should remain available: %v", err)
+	}
+}
+
+func TestDoctorIncludesRuntimeReport(t *testing.T) {
+	var output strings.Builder
+	if err := run([]string{"doctor"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"runtime":`) {
+		t.Fatalf("doctor output lacks runtime report: %s", output.String())
 	}
 }

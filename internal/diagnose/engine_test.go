@@ -58,8 +58,35 @@ func TestConfidenceThresholdsDifferByRepairClass(t *testing.T) {
 			t.Fatalf("%s threshold boundary was not enforced", test.class)
 		}
 	}
-	if meetsConfidenceThreshold(RepairClass("unknown"), 0.99) {
+	if meetsConfidenceThreshold(RepairClass("unknown"), 1) {
 		t.Fatal("unknown repair class must fail closed")
+	}
+}
+
+func TestEvidenceCollectorUsesLocalDecisionFacts(t *testing.T) {
+	evidence := collectEvidence(RepairClassCommand, "path", 1, 2.0/3.0)
+	want := []Evidence{
+		{Kind: "resolver", Value: "path"},
+		{Kind: "edit_distance", Value: "1"},
+		{Kind: "confidence_threshold", Value: "0.60"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	for _, test := range []struct {
+		class    RepairClass
+		resolver string
+		distance int
+		value    float64
+	}{
+		{RepairClass("unknown"), "path", 0, 1},
+		{RepairClassCommand, "", 0, 1},
+		{RepairClassCommand, "path", -1, 1},
+		{RepairClassPath, "filesystem", 1, 0.89},
+	} {
+		if got := collectEvidence(test.class, test.resolver, test.distance, test.value); got != nil {
+			t.Fatalf("invalid evidence = %#v", got)
+		}
 	}
 }
 
@@ -69,8 +96,16 @@ func TestRepairClassesApplyTheirConfidenceThresholds(t *testing.T) {
 	engine := New(Options{Config: config.Default(), Path: dir, CWD: dir})
 
 	decision, err := engine.Check("gti status", "pre")
-	if err != nil || decision.Class != RepairClassCommand {
+	if err != nil || decision.Class != RepairClassCommand || len(decision.Evidence) == 0 {
 		t.Fatalf("command repair = %#v, %v", decision, err)
+	}
+	event := decision.Event("pre")
+	if !slices.Equal(event.Evidence, decision.Evidence) {
+		t.Fatalf("event evidence = %#v, want %#v", event.Evidence, decision.Evidence)
+	}
+	event.Evidence[0].Value = "mutated"
+	if decision.Evidence[0].Value == "mutated" {
+		t.Fatal("event evidence aliases decision evidence")
 	}
 	decision, err = engine.Check("git sttaus", "pre")
 	if err != nil || decision.Class != RepairClassSemantic {

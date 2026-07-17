@@ -21,6 +21,11 @@ type compatibilityFixture struct {
 	Markers       []string        `json:"markers"`
 }
 
+type commandInjectionFixture struct {
+	Name    string `json:"name"`
+	Payload string `json:"payload"`
+}
+
 func TestResolveAction(t *testing.T) {
 	tests := []struct {
 		name, action, risk, suggestion string
@@ -287,6 +292,115 @@ func TestAdapterCompatibilityFixtures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCommandInjectionRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/command_injection.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []commandInjectionFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("command injection corpus is empty")
+	}
+	for _, shellName := range []string{"zsh", "bash", "fish"} {
+		shellPath, err := exec.LookPath(shellName)
+		if err != nil {
+			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
+			continue
+		}
+		for _, fixture := range fixtures {
+			t.Run(shellName+"/"+fixture.Name, func(t *testing.T) {
+				if fixture.Name == "" || fixture.Payload == "" {
+					t.Fatalf("invalid command injection fixture: %#v", fixture)
+				}
+				runCommandInjectionFixture(t, shellName, shellPath, fixture)
+			})
+		}
+	}
+}
+
+func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixture commandInjectionFixture) {
+	t.Helper()
+	script, err := Script(shellName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter."+shellName)
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CAPTURE\"\nif [ \"$7\" = \"$COMMAND_INPUT\" ]; then\n  printf '%s\\n' \"$COMMAND_RECORD\"\nelif [ \"$7\" = \"$SAFE_INPUT\" ]; then\n  printf '%s\\n' \"$SAFE_RECORD\"\nelse\n  printf '%s\\n' \"$HIGH_RECORD\"\nfi\n"
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "arguments")
+	commandResult := filepath.Join(directory, "command-buffer")
+	rewriteResult := filepath.Join(directory, "rewrite-buffer")
+	highRiskResult := filepath.Join(directory, "high-risk-buffer")
+	marker := filepath.Join(directory, "marker")
+	safeInput, highInput := "close-enough-safe-rewrite", "close-enough-high-rewrite"
+	env := append(os.Environ(),
+		"PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"CAPTURE="+capture,
+		"COMMAND_INPUT="+fixture.Payload,
+		"COMMAND_RECORD="+commandInjectionRecord("hint", "safe", fixture.Payload),
+		"SAFE_INPUT="+safeInput,
+		"SAFE_RECORD="+commandInjectionRecord("rewrite", "safe", fixture.Payload),
+		"HIGH_INPUT="+highInput,
+		"HIGH_RECORD="+commandInjectionRecord("rewrite", "high", fixture.Payload),
+		"COMMAND_RESULT="+commandResult,
+		"REWRITE_RESULT="+rewriteResult,
+		"HIGH_RISK_RESULT="+highRiskResult,
+		"MARKER="+marker,
+	)
+	var command *exec.Cmd
+	switch shellName {
+	case "zsh":
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; print -rn -- "$BUFFER" > "$COMMAND_RESULT"; BUFFER="$SAFE_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$REWRITE_RESULT"; BUFFER="$HIGH_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$HIGH_RISK_RESULT"`
+		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Payload)
+	case "bash":
+		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$COMMAND_RESULT"; READLINE_LINE="$SAFE_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$REWRITE_RESULT"; READLINE_LINE="$HIGH_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$HIGH_RISK_RESULT"`
+		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Payload)
+	case "fish":
+		harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$COMMAND_RESULT"; set -g BUFFER "$SAFE_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$REWRITE_RESULT"; set -g BUFFER "$HIGH_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$HIGH_RISK_RESULT"`
+		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Payload)
+	default:
+		t.Fatalf("unsupported shell %q", shellName)
+	}
+	command.Env = env
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%s harness: %v\n%s", shellName, err, output)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("%s adapter evaluated payload: %v", shellName, err)
+	}
+	for _, result := range []string{commandResult, rewriteResult} {
+		buffer, err := os.ReadFile(result)
+		if err != nil || string(buffer) != fixture.Payload {
+			t.Fatalf("buffer = %q, %v; want %q", buffer, err, fixture.Payload)
+		}
+	}
+	highRiskBuffer, err := os.ReadFile(highRiskResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(highRiskBuffer) == fixture.Payload {
+		t.Fatalf("%s applied high-risk rewrite %q", shellName, fixture.Payload)
+	}
+	arguments, err := os.ReadFile(capture)
+	if err != nil || !strings.Contains(string(arguments), fixture.Payload) {
+		t.Fatalf("checker arguments = %q, %v", arguments, err)
+	}
+}
+
+func commandInjectionRecord(action, risk, payload string) string {
+	return "1\t" + action + "\t" + risk + "\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
 }
 
 func TestFishInterruptPreventsExecution(t *testing.T) {

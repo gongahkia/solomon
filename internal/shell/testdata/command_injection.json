@@ -1,0 +1,7 @@
+[
+  {"name":"command-substitution","payload":"$(touch \"$MARKER\")"},
+  {"name":"backtick-substitution","payload":"`touch \"$MARKER\"`"},
+  {"name":"command-sequence","payload":"; touch \"$MARKER\""},
+  {"name":"parameter-expansion","payload":"${MARKER:+$(touch \"$MARKER\")}"},
+  {"name":"redirected-substitution","payload":"$(touch \"$MARKER\") > /dev/null"}
+]

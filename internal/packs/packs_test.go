@@ -691,3 +691,29 @@ func TestTransactionalPackDownloadStaging(t *testing.T) {
 		t.Fatalf("staging residue = %#v, %v", entries, err)
 	}
 }
+
+func TestAtomicVerifiedPackActivation(t *testing.T) {
+	directory := t.TempDir()
+	data := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`
+	staged, err := StageDownload(directory, strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := ActivateStagedPack(staged, directory)
+	if err != nil || filepath.Base(target) != "core-git-1.0.0.json" {
+		t.Fatalf("activation = %q, %v", target, err)
+	}
+	invalid, err := StageDownload(directory, strings.NewReader("invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ActivateStagedPack(invalid, directory); err == nil {
+		t.Fatal("activated invalid pack")
+	}
+	if _, err := os.Stat(invalid.Path()); err != nil {
+		t.Fatalf("invalid stage unexpectedly removed: %v", err)
+	}
+	if err := invalid.Discard(); err != nil {
+		t.Fatal(err)
+	}
+}

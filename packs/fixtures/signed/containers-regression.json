@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"containers-regression","version":"1.0.0","publisher":"close-enough","rules":[{"id":"docker-run-runn","command":"docker","pattern":"^runn$","replacement":"run","cause":"Docker subcommand typo","risk":"high","risk_rationale":"may create and execute containers"}]}

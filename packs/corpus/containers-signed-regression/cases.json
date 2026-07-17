@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"docker-run-runn","command":"docker","input":"runn","rule_id":"docker-run-runn"}]}

@@ -616,3 +616,24 @@ func TestRegistryMetadataRejectsExpiryAndRollback(t *testing.T) {
 		t.Fatal("accepted invalid expiry")
 	}
 }
+
+func TestRegistryOptInStateMachine(t *testing.T) {
+	state := RegistryDisabled
+	for _, event := range []RegistryOptInEvent{RegistryRequest, RegistryConfirm} {
+		var err error
+		state, err = TransitionRegistryOptIn(state, event)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !state.Allowed() {
+		t.Fatal("registry enabled without permission")
+	}
+	state, err := TransitionRegistryOptIn(state, RegistryRevoke)
+	if err != nil || state != RegistryDisabled || state.Allowed() {
+		t.Fatalf("registry revoke = %s, %v", state, err)
+	}
+	if _, err := TransitionRegistryOptIn(RegistryDisabled, RegistryConfirm); err == nil {
+		t.Fatal("accepted confirmation without request")
+	}
+}

@@ -299,6 +299,27 @@ func TestGitCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestPackageManagerCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "package-manager-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"npn": "npm", "pnmp": "pnpm", "yarnn": "yarn", "breww": "brew", "cargoa": "cargo"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "npn")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err == nil {
+		t.Fatal("accepted incomplete package manager candidates")
+	}
+}
+
 func TestGitSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "core-git.json"))
 	if err != nil {

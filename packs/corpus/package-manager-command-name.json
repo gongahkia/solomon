@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {"id": "package-manager-command-npn", "command": "npn", "replacement": "npm"},
+    {"id": "package-manager-command-pnmp", "command": "pnmp", "replacement": "pnpm"},
+    {"id": "package-manager-command-yarnn", "command": "yarnn", "replacement": "yarn"},
+    {"id": "package-manager-command-breww", "command": "breww", "replacement": "brew"},
+    {"id": "package-manager-command-cargoa", "command": "cargoa", "replacement": "cargo"}
+  ]
+}

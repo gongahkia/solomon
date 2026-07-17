@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "npm-install-instal", "command": "npm", "input": "instal", "rule_id": "npm-install-instal"},
+    {"id": "npm-uninstall-uninstal", "command": "npm", "input": "uninstal", "rule_id": "npm-uninstall-uninstal"},
+    {"id": "npm-run-rnu", "command": "npm", "input": "rnu", "rule_id": "npm-run-rnu"},
+    {"id": "npm-publish-publsih", "command": "npm", "input": "publsih", "rule_id": "npm-publish-publsih"},
+    {"id": "yarn-install-instal", "command": "yarn", "input": "instal", "rule_id": "yarn-install-instal"},
+    {"id": "pnpm-install-instal", "command": "pnpm", "input": "instal", "rule_id": "pnpm-install-instal"},
+    {"id": "brew-install-instal", "command": "brew", "input": "instal", "rule_id": "brew-install-instal"}
+  ]
+}

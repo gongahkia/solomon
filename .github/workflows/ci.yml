@@ -49,3 +49,22 @@ jobs:
           result_code=$?
           set -e
           test "$result_code" -eq 2
+
+  windows-integration:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - shell: pwsh
+        run: |
+          go vet ./...
+          go test -race ./...
+          go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=dev -X main.commit=unknown" -o close-enough.exe ./cmd/close-enough
+      - shell: pwsh
+        run: |
+          & .\close-enough.exe version
+          if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
+          & .\close-enough.exe check
+          if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }

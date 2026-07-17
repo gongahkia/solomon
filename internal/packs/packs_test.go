@@ -299,6 +299,37 @@ func TestGitCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestGitSubcommandTypoRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "core-git.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "git-subcommand-typos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := LoadBundled()
+	if err != nil || len(bundled) != 1 || bundled[0].Version != pack.Version || !slices.Equal(bundled[0].Rules, pack.Rules) {
+		t.Fatalf("bundled Git pack = %#v, %v", bundled, err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"git-checkout-chekcout", "git-commit-comit", "git-push-puhs"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Git subcommand corpus")
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
@@ -358,7 +389,7 @@ func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	}
 	packs[0].Rules[0].ID = "mutated"
 	reloaded, err := LoadBundled()
-	if err != nil || reloaded[0].Rules[0].ID != "git-status-typo" {
+	if err != nil || reloaded[0].Rules[0].ID != "git-status-sttaus" {
 		t.Fatalf("bundled pack mutation leaked: %#v, %v", reloaded, err)
 	}
 }

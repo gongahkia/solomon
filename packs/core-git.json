@@ -1,18 +1,90 @@
 {
   "schema_version": 1,
   "id": "core-git",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
     {
-      "id": "git-status-typo",
+      "id": "git-status-sttaus",
       "command": "git",
       "pattern": "^sttaus$",
       "replacement": "status",
       "cause": "Git subcommand typo",
       "risk": "safe",
       "risk_rationale": "read-only status query"
+    },
+    {
+      "id": "git-status-statsu",
+      "command": "git",
+      "pattern": "^statsu$",
+      "replacement": "status",
+      "cause": "Git subcommand transposition",
+      "risk": "safe",
+      "risk_rationale": "read-only status query"
+    },
+    {
+      "id": "git-status-stauts",
+      "command": "git",
+      "pattern": "^stauts$",
+      "replacement": "status",
+      "cause": "Git subcommand transposition",
+      "risk": "safe",
+      "risk_rationale": "read-only status query"
+    },
+    {
+      "id": "git-log-logg",
+      "command": "git",
+      "pattern": "^logg$",
+      "replacement": "log",
+      "cause": "Git subcommand typo",
+      "risk": "safe",
+      "risk_rationale": "read-only history query"
+    },
+    {
+      "id": "git-diff-dif",
+      "command": "git",
+      "pattern": "^dif$",
+      "replacement": "diff",
+      "cause": "Git subcommand typo",
+      "risk": "safe",
+      "risk_rationale": "read-only comparison query"
+    },
+    {
+      "id": "git-branch-brnach",
+      "command": "git",
+      "pattern": "^brnach$",
+      "replacement": "branch",
+      "cause": "Git subcommand transposition",
+      "risk": "safe",
+      "risk_rationale": "read-only branch listing without arguments"
+    },
+    {
+      "id": "git-checkout-chekcout",
+      "command": "git",
+      "pattern": "^chekcout$",
+      "replacement": "checkout",
+      "cause": "Git subcommand transposition",
+      "risk": "high",
+      "risk_rationale": "may switch the working tree or overwrite files"
+    },
+    {
+      "id": "git-commit-comit",
+      "command": "git",
+      "pattern": "^comit$",
+      "replacement": "commit",
+      "cause": "Git subcommand typo",
+      "risk": "high",
+      "risk_rationale": "may create a commit"
+    },
+    {
+      "id": "git-push-puhs",
+      "command": "git",
+      "pattern": "^puhs$",
+      "replacement": "push",
+      "cause": "Git subcommand transposition",
+      "risk": "high",
+      "risk_rationale": "may send commits to a remote"
     }
   ]
 }

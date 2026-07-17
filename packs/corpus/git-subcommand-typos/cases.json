@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "git-status-sttaus", "command": "git", "input": "sttaus", "rule_id": "git-status-sttaus"},
+    {"id": "git-status-statsu", "command": "git", "input": "statsu", "rule_id": "git-status-statsu"},
+    {"id": "git-status-stauts", "command": "git", "input": "stauts", "rule_id": "git-status-stauts"},
+    {"id": "git-log-logg", "command": "git", "input": "logg", "rule_id": "git-log-logg"},
+    {"id": "git-diff-dif", "command": "git", "input": "dif", "rule_id": "git-diff-dif"},
+    {"id": "git-branch-brnach", "command": "git", "input": "brnach", "rule_id": "git-branch-brnach"},
+    {"id": "git-checkout-chekcout", "command": "git", "input": "chekcout", "rule_id": "git-checkout-chekcout"},
+    {"id": "git-commit-comit", "command": "git", "input": "comit", "rule_id": "git-commit-comit"},
+    {"id": "git-push-puhs", "command": "git", "input": "puhs", "rule_id": "git-push-puhs"}
+  ]
+}

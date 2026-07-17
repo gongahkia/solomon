@@ -14,6 +14,13 @@ func TestScriptsExistForSupportedShells(t *testing.T) {
 		if !strings.Contains(script, "close-enough") {
 			t.Fatalf("%s script lacks binary invocation", name)
 		}
+		versionMarker := "version"
+		if name == "fish" {
+			versionMarker = "fields[1]"
+		}
+		if !strings.Contains(script, versionMarker) {
+			t.Fatalf("%s script lacks protocol-version validation", name)
+		}
 	}
 }
 

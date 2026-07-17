@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gongahkia/close-enough/internal/config"
@@ -14,6 +15,8 @@ import (
 
 type Risk string
 
+const AdapterProtocolVersion = 1
+
 const (
 	RiskSafe    Risk = "safe"
 	RiskUnknown Risk = "unknown"
@@ -21,6 +24,7 @@ const (
 )
 
 type Decision struct {
+	Version     int      `json:"version"`
 	Action      string   `json:"action"`
 	Cause       string   `json:"cause,omitempty"`
 	Consequence string   `json:"consequence,omitempty"`
@@ -31,7 +35,7 @@ type Decision struct {
 }
 
 func (d Decision) Record() string {
-	fields := []string{d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), base64.RawStdEncoding.EncodeToString([]byte(d.Cause)), base64.RawStdEncoding.EncodeToString([]byte(d.Consequence)), base64.RawStdEncoding.EncodeToString([]byte(d.Suggestion))}
+	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), base64.RawStdEncoding.EncodeToString([]byte(d.Cause)), base64.RawStdEncoding.EncodeToString([]byte(d.Consequence)), base64.RawStdEncoding.EncodeToString([]byte(d.Suggestion))}
 	return strings.Join(fields, "\t") + "\n"
 }
 
@@ -48,7 +52,7 @@ func New(options Options) Engine { return Engine{options: options} }
 func (e Engine) Check(line, stage string) (Decision, error) {
 	words, err := tokenize(line)
 	if err != nil || len(words) == 0 || e.options.Config.Mode == "off" {
-		return Decision{Action: "none", Risk: RiskSafe}, err
+		return noDecision(), err
 	}
 	if decision := e.commandDecision(words); decision.Suggestion != "" {
 		return e.applyMode(decision), nil
@@ -59,7 +63,11 @@ func (e Engine) Check(line, stage string) (Decision, error) {
 	if decision := e.pathDecision(words); decision.Suggestion != "" {
 		return e.applyMode(decision), nil
 	}
-	return Decision{Action: "none", Risk: RiskSafe}, nil
+	return noDecision(), nil
+}
+
+func noDecision() Decision {
+	return Decision{Version: AdapterProtocolVersion, Action: "none", Risk: RiskSafe}
 }
 
 func (e Engine) applyMode(decision Decision) Decision {
@@ -86,7 +94,7 @@ func (e Engine) commandDecision(words []string) Decision {
 	}
 	replaced := append([]string{best}, words[1:]...)
 	suggestion, containsSecret := redact.Command(replaced)
-	return Decision{Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(words[0], best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
+	return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(words[0], best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
 }
 
 func semanticDecision(words []string) Decision {
@@ -100,7 +108,7 @@ func semanticDecision(words []string) Decision {
 	}
 	replaced := append([]string{"git", best}, words[2:]...)
 	suggestion, containsSecret := redact.Command(replaced)
-	return Decision{Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
+	return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
 }
 
 func (e Engine) pathDecision(words []string) Decision {
@@ -128,7 +136,7 @@ func (e Engine) pathDecision(words []string) Decision {
 		replaced := append([]string{}, words...)
 		replaced[i] = filepath.Join(dir, best)
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Confidence: confidence(base, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Confidence: confidence(base, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
 	}
 	return Decision{}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/config"
@@ -16,8 +17,16 @@ func TestCommandTypoProducesHint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != "hint" || decision.Suggestion != "git status" || decision.Risk != RiskSafe {
+	if decision.Version != AdapterProtocolVersion || decision.Action != "hint" || decision.Suggestion != "git status" || decision.Risk != RiskSafe {
 		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestRecordCarriesAdapterProtocolVersion(t *testing.T) {
+	decision := noDecision()
+	fields := strings.Split(strings.TrimSuffix(decision.Record(), "\n"), "\t")
+	if len(fields) != 7 || fields[0] != "1" || fields[1] != "none" {
+		t.Fatalf("unexpected record: %q", decision.Record())
 	}
 }
 

@@ -3,6 +3,7 @@ package diagnose
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -23,6 +24,37 @@ func TestCommandTypoProducesHint(t *testing.T) {
 	}
 	if decision.Version != AdapterProtocolVersion || decision.Action != "hint" || decision.Suggestion != "git status" || decision.Risk != RiskSafe {
 		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestDiagnosticLimitsBoundInputOutputAndAnalysis(t *testing.T) {
+	engine := New(Options{Config: config.Default()})
+	if _, err := engine.Check(strings.Repeat("x", MaxInputBytes+1), "pre"); !errors.Is(err, ErrInputLimit) {
+		t.Fatalf("input limit error = %v", err)
+	}
+	if _, err := New(Options{Config: config.Default(), Limits: Limits{OutputBytes: 1}}).Check("git sttaus", "pre"); !errors.Is(err, ErrOutputLimit) {
+		t.Fatalf("output limit error = %v", err)
+	}
+	start := time.Unix(0, 0)
+	clocks := []time.Time{start, start.Add(2 * time.Nanosecond)}
+	index := 0
+	clock := func() time.Time {
+		value := clocks[index]
+		index++
+		return value
+	}
+	if _, err := New(Options{Config: config.Default(), Limits: Limits{AnalysisTime: time.Nanosecond}, Clock: clock}).Check("git sttaus", "pre"); !errors.Is(err, ErrAnalysisLimit) {
+		t.Fatalf("analysis limit error = %v", err)
+	}
+}
+
+func TestProtocolEncodersLimitOutputSize(t *testing.T) {
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: strings.Repeat("x", MaxOutputBytes), Risk: RiskSafe}
+	if _, err := decision.Record(); !errors.Is(err, ErrOutputLimit) {
+		t.Fatalf("record output limit error = %v", err)
+	}
+	if _, err := decision.JSON("pre"); !errors.Is(err, ErrOutputLimit) {
+		t.Fatalf("JSON output limit error = %v", err)
 	}
 }
 

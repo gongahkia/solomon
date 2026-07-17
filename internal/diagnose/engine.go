@@ -3,7 +3,9 @@ package diagnose
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/config"
@@ -27,6 +30,20 @@ type Evidence struct {
 }
 
 const AdapterProtocolVersion = 1
+
+const (
+	MaxInputBytes       = 8 << 10
+	MaxOutputBytes      = 8 << 10
+	MaxAnalysisDuration = time.Second
+	maxPathDirectories  = 64
+	maxDirectoryEntries = 512
+)
+
+var (
+	ErrInputLimit    = errors.New("diagnostic input exceeds size limit")
+	ErrOutputLimit   = errors.New("diagnostic output exceeds size limit")
+	ErrAnalysisLimit = errors.New("diagnostic analysis exceeds time limit")
+)
 
 const (
 	RiskSafe    Risk = "safe"
@@ -90,7 +107,11 @@ func (d Decision) Record() (string, error) {
 		return "", err
 	}
 	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), encodeRecordText(d.Cause), encodeRecordText(d.Consequence), encodeRecordText(d.Suggestion)}
-	return strings.Join(fields, "\t") + "\n", nil
+	record := strings.Join(fields, "\t") + "\n"
+	if len(record) > MaxOutputBytes {
+		return "", ErrOutputLimit
+	}
+	return record, nil
 }
 
 func (d Decision) JSON(stage string) ([]byte, error) {
@@ -100,7 +121,14 @@ func (d Decision) JSON(stage string) ([]byte, error) {
 	if err := d.validateProtocol(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(d.Event(stage))
+	data, err := json.Marshal(d.Event(stage))
+	if err != nil {
+		return nil, err
+	}
+	if len(data)+1 > MaxOutputBytes {
+		return nil, ErrOutputLimit
+	}
+	return data, nil
 }
 
 func (d Decision) validateProtocol() error {
@@ -135,6 +163,14 @@ type Options struct {
 	Config config.Config
 	Path   string
 	CWD    string
+	Limits Limits
+	Clock  func() time.Time
+}
+
+type Limits struct {
+	InputBytes   int
+	OutputBytes  int
+	AnalysisTime time.Duration
 }
 
 type Engine struct{ options Options }
@@ -152,6 +188,11 @@ var executableCache = struct {
 func New(options Options) Engine { return Engine{options: options} }
 
 func (e Engine) Check(line, stage string) (Decision, error) {
+	limits := e.limits()
+	if len(line) > limits.InputBytes {
+		return noDecision(), ErrInputLimit
+	}
+	started := e.now()
 	words, err := tokenize(line)
 	if err != nil {
 		decision := noDecision()
@@ -162,15 +203,60 @@ func (e Engine) Check(line, stage string) (Decision, error) {
 		return noDecision(), nil
 	}
 	if decision := e.commandDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision, stage), nil
+		return e.finish(decision, stage, started, limits)
 	}
 	if decision := semanticDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision, stage), nil
+		return e.finish(decision, stage, started, limits)
 	}
 	if decision := e.pathDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision, stage), nil
+		return e.finish(decision, stage, started, limits)
+	}
+	if e.now().Sub(started) > limits.AnalysisTime {
+		return noDecision(), ErrAnalysisLimit
 	}
 	return noDecision(), nil
+}
+
+func (e Engine) limits() Limits {
+	limits := e.options.Limits
+	if limits.InputBytes <= 0 {
+		limits.InputBytes = MaxInputBytes
+	}
+	if limits.OutputBytes <= 0 {
+		limits.OutputBytes = MaxOutputBytes
+	}
+	if limits.AnalysisTime <= 0 {
+		limits.AnalysisTime = MaxAnalysisDuration
+	}
+	return limits
+}
+
+func (e Engine) now() time.Time {
+	if e.options.Clock != nil {
+		return e.options.Clock()
+	}
+	return time.Now()
+}
+
+func (e Engine) finish(decision Decision, stage string, started time.Time, limits Limits) (Decision, error) {
+	if e.now().Sub(started) > limits.AnalysisTime {
+		return noDecision(), ErrAnalysisLimit
+	}
+	if decisionOutputSize(decision) > limits.OutputBytes {
+		return noDecision(), ErrOutputLimit
+	}
+	return e.applyMode(decision, stage), nil
+}
+
+func decisionOutputSize(decision Decision) int {
+	size := len(decision.Cause) + len(decision.Consequence) + len(decision.Suggestion) + len(decision.Class) + len(decision.Risk) + 128
+	for _, evidence := range decision.Evidence {
+		size += len(evidence.Kind) + len(evidence.Value)
+	}
+	for _, trace := range decision.Trace {
+		size += len(trace)
+	}
+	return size
 }
 
 func noDecision() Decision {
@@ -278,7 +364,7 @@ func (e Engine) pathDecision(words []string) Decision {
 			continue
 		}
 		dir, base := filepath.Split(word)
-		entries, err := os.ReadDir(filepath.Join(e.options.CWD, dir))
+		entries, err := limitedReadDir(filepath.Join(e.options.CWD, dir))
 		if err != nil {
 			continue
 		}
@@ -558,8 +644,11 @@ func executableNamesFor(pathValue, platform, pathExt string) []string {
 		return append([]string(nil), entry.names...)
 	}
 	seen := map[string]struct{}{}
-	for _, dir := range filepath.SplitList(pathValue) {
-		entries, err := os.ReadDir(dir)
+	for index, dir := range filepath.SplitList(pathValue) {
+		if index >= maxPathDirectories {
+			break
+		}
+		entries, err := limitedReadDir(dir)
 		if err != nil {
 			continue
 		}
@@ -584,11 +673,36 @@ func executableNamesFor(pathValue, platform, pathExt string) []string {
 	return result
 }
 
+func limitedReadDir(path string) ([]os.DirEntry, error) {
+	directory, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(maxDirectoryEntries)
+	if errors.Is(err, io.EOF) {
+		return entries, nil
+	}
+	return entries, err
+}
+
 func commandExists(name, pathValue string) bool {
 	return commandExistsFor(name, pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
 }
 
 func commandExistsFor(name, pathValue, platform, pathExt string) bool {
+	if platform != "windows" {
+		for index, dir := range filepath.SplitList(pathValue) {
+			if index >= maxPathDirectories {
+				break
+			}
+			info, err := os.Stat(filepath.Join(dir, name))
+			if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+				return true
+			}
+		}
+		return false
+	}
 	names := executableNamesFor(pathValue, platform, pathExt)
 	name = normalizeExecutableName(name, platform, pathExt)
 	index := sort.SearchStrings(names, name)
@@ -603,7 +717,11 @@ func InvalidateExecutableIndex() {
 
 func pathSignature(pathValue string) string {
 	var signature strings.Builder
-	for _, dir := range filepath.SplitList(pathValue) {
+	for index, dir := range filepath.SplitList(pathValue) {
+		if index >= maxPathDirectories {
+			signature.WriteString("truncated\x00")
+			break
+		}
 		info, err := os.Stat(dir)
 		if err != nil {
 			signature.WriteString(dir)

@@ -146,7 +146,11 @@ func checkCommand(args []string, stdout io.Writer) error {
 		_, err = stdout.Write(append(data, '\n'))
 		return clierr.Wrap(clierr.Operation, err)
 	case "plain":
-		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display, *command))
+		output := renderPlainDiagnostic(decision, cfg.Display, *command)
+		if len(output) > diagnose.MaxOutputBytes {
+			return clierr.Wrap(clierr.Operation, diagnose.ErrOutputLimit)
+		}
+		_, err = fmt.Fprint(stdout, output)
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
 		record, err := decision.Record()

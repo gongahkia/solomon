@@ -84,7 +84,15 @@ _close_enough_accept_line() {
   [ "$version" = 1 ] || return
   [ "$action" = none ] && return
   suggestion="$(_close_enough_decode "$suggestion")"
-  if [ "$action" = rewrite ]; then READLINE_LINE="$suggestion"; return; fi
+  if [ "$action" = rewrite ]; then
+    if [ "$risk" != safe ] || [ -z "$suggestion" ]; then
+      printf '\nclose-enough: refused unsafe rewrite\n' >&2
+      READLINE_LINE=''
+      return 1
+    fi
+    READLINE_LINE="$suggestion"
+    return 1
+  fi
   if [ "$action" = hint ]; then
     printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
     return

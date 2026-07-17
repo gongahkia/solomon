@@ -301,6 +301,19 @@ func TestBashInterruptClearsBufferBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestBashRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrite := `if [ "$action" = rewrite ]; then`
+	hint := `if [ "$action" = hint ]; then`
+	start, end := strings.Index(script, rewrite), strings.Index(script, hint)
+	if start < 0 || end < start || !strings.Contains(script[start:end], `[ "$risk" != safe ] || [ -z "$suggestion" ]`) || !strings.Contains(script[start:end], "refused unsafe rewrite") || !strings.Contains(script[start:end], `READLINE_LINE="$suggestion"`) {
+		t.Fatalf("bash rewrite path does not fail closed: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

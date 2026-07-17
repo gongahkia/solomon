@@ -327,6 +327,25 @@ func TestDecodeRejectsUnsupportedConfigurationSchema(t *testing.T) {
 	}
 }
 
+func TestDecodeValidatesGlobalConfigurationSchema(t *testing.T) {
+	cfg, err := decode([]byte(`{"schema_version":1,"display":{"trace":true},"auto_apply_safe":true}`), Default())
+	if err != nil || !cfg.Display.Trace || !cfg.AutoApplySafe || !cfg.Display.Cause {
+		t.Fatalf("decoded configuration = %#v, %v", cfg, err)
+	}
+	for _, data := range []string{
+		`null`,
+		`{"schema_version":null}`,
+		`{"schema_version":"1"}`,
+		`{"auto_apply_safe":"true"}`,
+		`{"unexpected":true}`,
+		`{"display":{"unexpected":true}}`,
+	} {
+		if _, err := decode([]byte(data), Default()); err == nil {
+			t.Fatalf("accepted invalid configuration %s", data)
+		}
+	}
+}
+
 func TestWriteAtomicallyReplacesConfigWithRestrictivePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"mode":"off"}`), 0o644); err != nil {

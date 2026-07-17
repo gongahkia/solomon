@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -213,18 +214,26 @@ func merge(base Config, path string) (Config, error) {
 }
 
 func decode(data []byte, base Config) (Config, error) {
-	var envelope struct {
-		SchemaVersion *int `json:"schema_version"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	if err := json.Unmarshal(data, &base); err != nil {
-		return Config{}, fmt.Errorf("parse config: %w", err)
+	if fields == nil {
+		return Config{}, errors.New("parse config: configuration must be a JSON object")
 	}
 	version := 0
-	if envelope.SchemaVersion != nil {
-		version = *envelope.SchemaVersion
+	if value, ok := fields["schema_version"]; ok {
+		if bytes.Equal(value, []byte("null")) {
+			return Config{}, errors.New("parse config: schema_version must be an integer")
+		}
+		if err := json.Unmarshal(value, &version); err != nil {
+			return Config{}, fmt.Errorf("parse config: schema_version must be an integer: %w", err)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&base); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 	migrated, err := migrate(base, version)
 	if err != nil {

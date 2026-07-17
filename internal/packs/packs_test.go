@@ -57,8 +57,44 @@ func TestLoadRejectsNestedUnknownFieldsAndTrailingJSON(t *testing.T) {
 }
 
 func TestRejectInvalidPattern(t *testing.T) {
-	pack := Pack{SchemaVersion: 1, ID: "core", Version: "1", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
 	if err := pack.Validate(); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
+	for _, value := range []string{"core", "core-git", "rule-2"} {
+		if !identifier(value) {
+			t.Fatalf("rejected valid identifier %q", value)
+		}
+	}
+	for _, value := range []string{"Core", "core_git", "core-", "core--git", "../core"} {
+		if identifier(value) {
+			t.Fatalf("accepted invalid identifier %q", value)
+		}
+	}
+	for _, value := range []string{"1.0.0", "0.1.0-alpha.1", "1.2.3+build.7"} {
+		if !semanticVersion(value) {
+			t.Fatalf("rejected valid semantic version %q", value)
+		}
+	}
+	for _, value := range []string{"1", "1.0", "01.0.0", "1.0.0-01", "1.0.0+"} {
+		if semanticVersion(value) {
+			t.Fatalf("accepted invalid semantic version %q", value)
+		}
+	}
+	base := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe}}}
+	for _, mutate := range []func(*Pack){
+		func(pack *Pack) { pack.ID = "Core" },
+		func(pack *Pack) { pack.Version = "1" },
+		func(pack *Pack) { pack.Publisher = "close_enough" },
+		func(pack *Pack) { pack.Rules[0].ID = "rule_1" },
+	} {
+		pack := base
+		mutate(&pack)
+		if err := pack.Validate(); err == nil {
+			t.Fatalf("accepted invalid pack %#v", pack)
+		}
 	}
 }

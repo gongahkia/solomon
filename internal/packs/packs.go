@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strings"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
 )
@@ -54,8 +53,8 @@ func (p Pack) Validate() error {
 	if err := ValidateSchemaCompatibility(p.SchemaVersion); err != nil {
 		return err
 	}
-	if !identifier(p.ID) || p.Version == "" || p.Publisher == "" {
-		return errors.New("id, version, and publisher are required")
+	if !identifier(p.ID) || !semanticVersion(p.Version) || !identifier(p.Publisher) {
+		return errors.New("id and publisher must be lowercase kebab identifiers; version must be semantic")
 	}
 	if len(p.Rules) == 0 {
 		return errors.New("pack must contain at least one rule")
@@ -79,4 +78,9 @@ func (p Pack) Validate() error {
 	return nil
 }
 
-func identifier(value string) bool { return value != "" && !strings.ContainsAny(value, " \t/\\") }
+var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
+var semanticVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
+
+func identifier(value string) bool { return identifierPattern.MatchString(value) }
+
+func semanticVersion(value string) bool { return semanticVersionPattern.MatchString(value) }

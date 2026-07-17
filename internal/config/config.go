@@ -170,11 +170,16 @@ func projectPath(cwd string) (string, bool) {
 
 func trustedProject(path string) bool {
 	marker := filepath.Join(filepath.Dir(path), "trusted")
-	info, err := os.Stat(marker)
-	if err != nil || info.Mode().Perm()&0o022 != 0 {
+	markerInfo, err := os.Lstat(marker)
+	if err != nil || !markerInfo.Mode().IsRegular() || !hasSecurePermissions(marker, markerInfo, false) {
 		return false
 	}
-	return info.Mode().Perm()&0o077 == 0
+	directory := filepath.Dir(marker)
+	directoryInfo, err := os.Lstat(directory)
+	if err != nil || !directoryInfo.IsDir() || !hasSecurePermissions(directory, directoryInfo, true) {
+		return false
+	}
+	return ownedByCurrentUser(marker, markerInfo) && ownedByCurrentUser(directory, directoryInfo)
 }
 
 func merge(base Config, path string) (Config, error) {

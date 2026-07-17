@@ -189,6 +189,57 @@ func TestProjectPathRejectsNonRegularConfiguration(t *testing.T) {
 	}
 }
 
+func TestTrustedProjectRejectsInsecureMarkers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission mutation uses POSIX mode bits")
+	}
+	directory := t.TempDir()
+	writeProjectConfig(t, directory, "hint", true)
+	configPath := filepath.Join(directory, ".close-enough", "config.json")
+	marker := filepath.Join(directory, ".close-enough", "trusted")
+	if !trustedProject(configPath) {
+		t.Fatal("expected secure marker to be trusted")
+	}
+	if err := os.Chmod(marker, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if trustedProject(configPath) {
+		t.Fatal("expected world-readable marker to be rejected")
+	}
+	if err := os.Chmod(marker, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(marker), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if trustedProject(configPath) {
+		t.Fatal("expected group-writable marker directory to be rejected")
+	}
+}
+
+func TestTrustedProjectRejectsSymlinkMarker(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires additional Windows privileges")
+	}
+	directory := t.TempDir()
+	writeProjectConfig(t, directory, "hint", true)
+	configPath := filepath.Join(directory, ".close-enough", "config.json")
+	marker := filepath.Join(directory, ".close-enough", "trusted")
+	target := filepath.Join(directory, "target")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, marker); err != nil {
+		t.Fatal(err)
+	}
+	if trustedProject(configPath) {
+		t.Fatal("expected symlink marker to be rejected")
+	}
+}
+
 func loadFromDirectory(t *testing.T, directory string) (Config, error) {
 	t.Helper()
 	return Load(Paths{

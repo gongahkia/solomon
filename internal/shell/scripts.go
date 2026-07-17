@@ -13,8 +13,14 @@ function _close_enough_check {
   [[ "$action" == none ]] && return 0
   suggestion="$(_close_enough_decode "$suggestion")"
   if [[ "$action" == rewrite ]]; then BUFFER="$suggestion"; zle -R; return 1; fi
-  zle -M "close-enough [$risk/$confidence]: $suggestion"
-  [[ "$action" == interrupt ]] && return 1
+  if [[ "$action" == hint ]]; then
+    zle -M "close-enough [$risk/$confidence]: $suggestion"
+    return 0
+  fi
+  if [[ "$action" == interrupt ]]; then
+    zle -M "close-enough [$risk/$confidence]: $suggestion"
+    return 1
+  fi
   return 0
 }
 function _close_enough_accept_line { _close_enough_check || return; zle .accept-line }

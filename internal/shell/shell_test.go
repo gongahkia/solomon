@@ -71,12 +71,13 @@ func TestZshInitializationIsGuardedAndRetainsInterrupt(t *testing.T) {
 	}
 	guard := "if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then"
 	marker := "typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1"
-	interrupt := `[[ "$action" == interrupt ]] && return 1`
+	interrupt := `if [[ "$action" == interrupt ]]; then`
 	accept := "zle .accept-line"
 	if !strings.HasPrefix(script, "# close-enough zsh integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") {
 		t.Fatalf("zsh script lacks an enclosing idempotence guard: %q", script)
 	}
-	if strings.Count(script, marker) != 1 || strings.Index(script, interrupt) < 0 || strings.Index(script, interrupt) > strings.Index(script, accept) {
+	interruptStart := strings.Index(script, interrupt)
+	if strings.Count(script, marker) != 1 || interruptStart < 0 || interruptStart > strings.Index(script, accept) || !strings.Contains(script[interruptStart:], "return 1") {
 		t.Fatalf("zsh script does not preserve one guarded interrupt path: %q", script)
 	}
 }
@@ -93,6 +94,22 @@ func TestZshPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 	if !strings.Contains(script, `2>/dev/null)" || return 0`) {
 		t.Fatalf("zsh check failure does not preserve normal submission: %q", script)
+	}
+}
+
+func TestZshHintRenderingDoesNotSuppressSubmission(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint := `if [[ "$action" == hint ]]; then`
+	interrupt := `if [[ "$action" == interrupt ]]; then`
+	start, end := strings.Index(script, hint), strings.Index(script, interrupt)
+	if start < 0 || end < start || !strings.Contains(script[start:end], "zle -M") || !strings.Contains(script[start:end], "return 0") {
+		t.Fatalf("zsh hint path is not non-blocking: %q", script)
+	}
+	if strings.Index(script, "zle .accept-line") < end || !strings.Contains(script[end:], "return 1") {
+		t.Fatalf("zsh interrupt path does not retain the confirmation boundary: %q", script)
 	}
 }
 

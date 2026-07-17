@@ -671,7 +671,7 @@ func TestPowerShellInitializationIsGuarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := "if (-not $global:CloseEnoughAdapterLoaded) {\n$global:CloseEnoughAdapterLoaded = $true"
-	if !strings.HasPrefix(script, "# close-enough PowerShell integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "}") || strings.Count(script, "Set-PSReadLineKeyHandler -Key Enter") != 1 {
+	if !strings.HasPrefix(script, "# close-enough PowerShell integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "}") || strings.Count(script, "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock") != 1 {
 		t.Fatalf("PowerShell script lacks an enclosing idempotence guard: %q", script)
 	}
 }
@@ -760,6 +760,16 @@ func TestPowerShellProtocolDecodingFailsOpenOnMalformedJSON(t *testing.T) {
 	}
 	if !strings.Contains(script, `$record = & close-enough check --stage pre --format json --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { return }`) {
 		t.Fatalf("PowerShell protocol decoder is not binary-safe and failure-aware: %q", script)
+	}
+}
+
+func TestPowerShellEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `Get-PSReadLineKeyHandler -Chord Enter`) || !strings.Contains(script, `$global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine'`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -ScriptBlock`) || !strings.Contains(script, `function global:Restore-CloseEnoughEnterHandler`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine`) {
+		t.Fatalf("PowerShell Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
 

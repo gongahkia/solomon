@@ -211,6 +211,8 @@ if (-not $global:CloseEnoughAdapterLoaded) {
 $global:CloseEnoughAdapterLoaded = $true
 $global:CloseEnoughLastHistoryId = 0
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
+$global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
+if ($global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
 Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
@@ -237,6 +239,12 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     return
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+}
+}
+function global:Restore-CloseEnoughEnterHandler {
+  if ($null -ne $global:CloseEnoughPreviousEnterHandler -and $global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
+    Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine
+  }
 }
 function global:prompt {
   $status = $?

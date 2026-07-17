@@ -3,6 +3,7 @@
   "id": "core-git",
   "version": "0.1.0",
   "publisher": "close-enough",
+  "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
     {
       "id": "git-status-typo",
@@ -10,7 +11,8 @@
       "pattern": "^sttaus$",
       "replacement": "status",
       "cause": "Git subcommand typo",
-      "risk": "safe"
+      "risk": "safe",
+      "risk_rationale": "read-only status query"
     }
   ]
 }

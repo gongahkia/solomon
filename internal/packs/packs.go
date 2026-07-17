@@ -39,6 +39,10 @@ func Load(path string) (Pack, error) {
 	if err != nil {
 		return Pack{}, err
 	}
+	return decodePack(data)
+}
+
+func decodePack(data []byte) (Pack, error) {
 	var pack Pack
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

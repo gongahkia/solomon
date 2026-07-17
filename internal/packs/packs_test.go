@@ -2,6 +2,7 @@ package packs
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
@@ -263,5 +264,21 @@ func TestPackCompatibilityRequirements(t *testing.T) {
 		if got := compareVersion(test.left, test.right); got != test.want {
 			t.Fatalf("compareVersion(%q, %q) = %d, want %d", test.left, test.right, got, test.want)
 		}
+	}
+}
+
+func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
+	names, err := BundledNames()
+	if err != nil || !slices.Equal(names, []string{"core-git.json"}) {
+		t.Fatalf("bundled names = %#v, %v", names, err)
+	}
+	packs, err := LoadBundled()
+	if err != nil || len(packs) != 1 || packs[0].ID != "core-git" {
+		t.Fatalf("bundled packs = %#v, %v", packs, err)
+	}
+	packs[0].Rules[0].ID = "mutated"
+	reloaded, err := LoadBundled()
+	if err != nil || reloaded[0].Rules[0].ID != "git-status-typo" {
+		t.Fatalf("bundled pack mutation leaked: %#v, %v", reloaded, err)
 	}
 }

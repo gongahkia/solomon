@@ -56,6 +56,8 @@ Pack resolution sorts by pack ID and rejects duplicate IDs or duplicate command/
 
 Packs can declare a minimum engine SemVer and supported capability identifiers; validation rejects unmet or unknown requirements.
 
+Bundled packs are embedded read-only and discovered deterministically at runtime.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

@@ -86,12 +86,26 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	if decision.Action == "rewrite" || decision.Risk != RiskHigh || decision.Suggestion != "git --token=[REDACTED]" {
 		t.Fatalf("unsafe decision: %#v", decision)
 	}
-	data, err := json.Marshal(decision)
+	data, err := json.Marshal(decision.Event("pre"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == "" || contains(string(data), "super-secret") || contains(decision.Record(), "super-secret") {
+	if string(data) == "" || contains(string(data), "super-secret") || contains(string(data), `"command"`) || contains(decision.Record(), "super-secret") {
 		t.Fatalf("secret leaked in diagnostic: %s", data)
+	}
+}
+
+func TestEventContainsOnlyDiagnosticMetadata(t *testing.T) {
+	event := Decision{Version: AdapterProtocolVersion, Action: "hint", Suggestion: "git status", Risk: RiskSafe}.Event("post")
+	if event.Stage != "post" || event.Suggestion != "git status" || event.Version != AdapterProtocolVersion {
+		t.Fatalf("unexpected event: %#v", event)
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(string(data), `"command"`) {
+		t.Fatalf("event exposes raw command field: %s", data)
 	}
 }
 

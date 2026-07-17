@@ -131,6 +131,18 @@ func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
 	}
 }
 
+func TestCheckJSONIncludesStageWithoutRawCommand(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var output strings.Builder
+	if err := run([]string{"check", "--command", "gti --token=super-secret"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	value := output.String()
+	if !strings.Contains(value, `"stage":"pre"`) || strings.Contains(value, "super-secret") || strings.Contains(value, `"command"`) {
+		t.Fatalf("unexpected diagnostic event: %s", value)
+	}
+}
+
 func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
 	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {

@@ -126,7 +126,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 	}
 	switch *format {
 	case "json":
-		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(decision))
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(decision.Event(*stage)))
 	case "plain":
 		if decision.Suggestion == "" {
 			_, err = fmt.Fprintln(stdout, "no suggestion")

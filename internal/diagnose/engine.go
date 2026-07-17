@@ -34,6 +34,22 @@ type Decision struct {
 	Trace       []string `json:"trace,omitempty"`
 }
 
+type Event struct {
+	Version     int      `json:"version"`
+	Stage       string   `json:"stage"`
+	Action      string   `json:"action"`
+	Cause       string   `json:"cause,omitempty"`
+	Consequence string   `json:"consequence,omitempty"`
+	Suggestion  string   `json:"suggestion,omitempty"`
+	Confidence  float64  `json:"confidence"`
+	Risk        Risk     `json:"risk"`
+	Trace       []string `json:"trace,omitempty"`
+}
+
+func (d Decision) Event(stage string) Event {
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, Consequence: d.Consequence, Suggestion: d.Suggestion, Confidence: d.Confidence, Risk: d.Risk, Trace: append([]string(nil), d.Trace...)}
+}
+
 func (d Decision) Record() string {
 	fields := []string{strconv.Itoa(d.Version), d.Action, string(d.Risk), fmt.Sprintf("%.2f", d.Confidence), base64.RawStdEncoding.EncodeToString([]byte(d.Cause)), base64.RawStdEncoding.EncodeToString([]byte(d.Consequence)), base64.RawStdEncoding.EncodeToString([]byte(d.Suggestion))}
 	return strings.Join(fields, "\t") + "\n"

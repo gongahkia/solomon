@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
 )
@@ -75,6 +77,9 @@ func (p Pack) Validate() error {
 		if err := validateTransformationTemplate(rule.Replacement, pattern.NumSubexp()); err != nil {
 			return fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
+		if err := validateExplanationTemplate(rule.Cause, pattern.NumSubexp()); err != nil {
+			return fmt.Errorf("rule %q: %w", rule.ID, err)
+		}
 		if rule.Risk != diagnose.RiskSafe && rule.Risk != diagnose.RiskHigh && rule.Risk != diagnose.RiskUnknown {
 			return fmt.Errorf("rule %q has invalid risk", rule.ID)
 		}
@@ -114,4 +119,16 @@ func validateTransformationTemplate(template string, captures int) error {
 		}
 	}
 	return nil
+}
+
+func validateExplanationTemplate(template string, captures int) error {
+	if len(template) > 512 || !utf8.ValidString(template) {
+		return errors.New("explanation template exceeds limits")
+	}
+	for _, character := range template {
+		if unicode.IsControl(character) {
+			return errors.New("explanation template contains control characters")
+		}
+	}
+	return validateTransformationTemplate(template, captures)
 }

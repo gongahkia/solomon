@@ -46,6 +46,8 @@ Pack matchers are compiled as in-process regular expressions and never execute m
 
 Transformation templates allow literal text, `$$`, and in-range `$1` capture references only.
 
+Explanation templates use the same capture syntax and reject control characters.
+
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.

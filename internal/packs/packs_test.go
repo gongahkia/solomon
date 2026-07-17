@@ -144,3 +144,20 @@ func TestTransformationTemplateValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestExplanationTemplateValidation(t *testing.T) {
+	for _, test := range []struct {
+		cause string
+		valid bool
+	}{
+		{"unknown subcommand $1", true},
+		{"unsafe\x1b[31m", false},
+		{"$(touch marker)", false},
+		{string(make([]byte, 513)), false},
+	} {
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^(sttaus)$`, Replacement: "status", Cause: test.cause, Risk: diagnose.RiskSafe}}}
+		if got := pack.Validate() == nil; got != test.valid {
+			t.Fatalf("explanation %q valid = %t, want %t", test.cause, got, test.valid)
+		}
+	}
+}

@@ -568,6 +568,58 @@ func TestFishEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestFishAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.fish")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ name, input, action, want string }{
+		{name: "command", input: `$(touch "$MARKER") ; echo injected`, action: "hint", want: `$(touch "$MARKER") ; echo injected`},
+		{name: "rewrite", input: "gti", action: "rewrite", want: `$(touch "$MARKER")`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capture, result, marker := filepath.Join(directory, test.name+"-arguments"), filepath.Join(directory, test.name+"-buffer"), filepath.Join(directory, test.name+"-marker")
+			payload := test.input
+			if test.name == "rewrite" {
+				payload = test.want
+			}
+			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
+			harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$RESULT"`
+			command := exec.Command(fish, "-c", harness, adapter, test.input)
+			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("fish harness: %v\n%s", err, output)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("adapter evaluated payload: %v", err)
+			}
+			buffer, err := os.ReadFile(result)
+			if err != nil || string(buffer) != test.want {
+				t.Fatalf("buffer = %q, %v; want %q", buffer, err, test.want)
+			}
+			if test.name == "command" {
+				arguments, err := os.ReadFile(capture)
+				if err != nil || !strings.Contains(string(arguments), test.input) {
+					t.Fatalf("checker arguments = %q, %v", arguments, err)
+				}
+			}
+		})
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

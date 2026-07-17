@@ -95,6 +95,24 @@ func TestRenderCandidateSelector(t *testing.T) {
 	}
 }
 
+func TestTruncateForWidth(t *testing.T) {
+	tests := []struct {
+		value string
+		width int
+		want  string
+	}{
+		{"git status", 20, "git status"},
+		{"git status", 6, "git s…"},
+		{"世界", 1, "…"},
+		{"git", 0, ""},
+	}
+	for _, test := range tests {
+		if got := TruncateForWidth(test.value, test.width); got != test.want {
+			t.Fatalf("TruncateForWidth(%q, %d) = %q, want %q", test.value, test.width, got, test.want)
+		}
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

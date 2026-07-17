@@ -108,6 +108,20 @@ func RenderCandidateSelector(candidates []string) string {
 	return strings.Join(lines, "\n")
 }
 
+func TruncateForWidth(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
+}
+
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}

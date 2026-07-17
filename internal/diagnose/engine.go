@@ -665,10 +665,56 @@ func classify(words []string, containsSecret bool) Risk {
 	if containsSecret {
 		return RiskHigh
 	}
+	if mutatesFilesystem(words) {
+		return RiskHigh
+	}
 	for _, word := range words {
-		if word == "sudo" || word == "rm" || word == "dd" || word == "mkfs" || word == "curl" || word == "wget" || word == "ssh" {
+		if word == "sudo" || word == "curl" || word == "wget" || word == "ssh" {
 			return RiskHigh
 		}
 	}
 	return RiskSafe
+}
+
+var filesystemMutationCommands = map[string]struct{}{
+	"chgrp": {}, "chmod": {}, "chown": {}, "cp": {}, "dd": {}, "install": {}, "ln": {}, "mkdir": {}, "mkfifo": {}, "mknod": {}, "mkfs": {}, "mv": {}, "patch": {}, "rm": {}, "rmdir": {}, "rsync": {}, "shred": {}, "tee": {}, "touch": {}, "truncate": {}, "unlink": {}, "wipefs": {},
+}
+
+func mutatesFilesystem(words []string) bool {
+	for _, position := range commandPositions(words) {
+		command := commandName(words[position])
+		if _, ok := filesystemMutationCommands[command]; ok {
+			return true
+		}
+		switch command {
+		case "find":
+			if hasArgument(words[position+1:], "-delete") {
+				return true
+			}
+		case "sed", "perl":
+			if hasArgument(words[position+1:], "-i") || hasArgument(words[position+1:], "--in-place") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandName(value string) string {
+	if index := strings.LastIndexAny(value, "/\\"); index >= 0 {
+		value = value[index+1:]
+	}
+	return strings.ToLower(value)
+}
+
+func hasArgument(words []string, value string) bool {
+	for _, word := range words {
+		if isCompoundOperator(word) {
+			return false
+		}
+		if word == value {
+			return true
+		}
+	}
+	return false
 }

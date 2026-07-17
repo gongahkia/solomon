@@ -156,6 +156,44 @@ func TestHighRiskNeverAutoApplied(t *testing.T) {
 	}
 }
 
+func TestFilesystemMutationClassifier(t *testing.T) {
+	for _, line := range []string{
+		"rm -rf target",
+		`C:\\tools\\MV source target`,
+		"echo ready && cp source target",
+		"sed -i 's/a/b/' file",
+		"find . -delete",
+	} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskHigh {
+			t.Fatalf("classify(%q) = %s, want high", line, got)
+		}
+	}
+	for _, line := range []string{"echo rm", "sed 's/a/b/' file", "find . -name file"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskSafe {
+			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
+func TestFilesystemMutationRepairNeverRewrites(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "mv")
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("mvv source target", "pre")
+	if err != nil || decision.Risk != RiskHigh || decision.Action == "rewrite" {
+		t.Fatalf("unsafe filesystem decision: %#v, %v", decision, err)
+	}
+}
+
 func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
 	if err != nil {

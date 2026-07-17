@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gongahkia/close-enough/internal/credential"
 	"github.com/gongahkia/close-enough/internal/featuregate"
 )
 
@@ -39,6 +40,12 @@ func TestFeatureGatesRequireExplicitRegistryEnablement(t *testing.T) {
 	cfg.RegistryEnabled = true
 	if !cfg.Features().Enabled(featuregate.Registry) || !cfg.Features().Enabled(featuregate.AutoUpdate) {
 		t.Fatal("explicitly enabled features must be available")
+	}
+}
+
+func TestHistoryKeysRequireLocalHistoryOptIn(t *testing.T) {
+	if _, err := Default().HistoryKeys(nil).Generate(); !errors.Is(err, credential.ErrDisabled) {
+		t.Fatalf("default history key error = %v", err)
 	}
 }
 

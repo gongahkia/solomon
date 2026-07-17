@@ -20,6 +20,8 @@ Project configuration requires `.close-enough/config.json` and a same-directory 
 
 Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.
 
+Optional local-history encryption keys use an injected OS credential-store backend only; no file fallback is provided.
+
 Release builds report injected version and commit metadata through `close-enough version`.
 
 Run the local CI target with `make ci`.

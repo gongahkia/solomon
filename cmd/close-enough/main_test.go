@@ -228,6 +228,20 @@ func TestConfigChangeToggleControlsPlainDiagnostic(t *testing.T) {
 	}
 }
 
+func TestConfigRiskToggleControlsPlainDiagnostic(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := run([]string{"config", "set", "display.risk", "false"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	if err := run([]string{"check", "--format", "plain", "--command", "git sttaus"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "Risk:") {
+		t.Fatalf("risk toggle output = %q", output.String())
+	}
+}
+
 func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
 	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {

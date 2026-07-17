@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-javascript",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [
@@ -121,6 +121,33 @@
       "cause": "Deno project configuration path typo",
       "risk": "high",
       "risk_rationale": "may execute project task code"
+    },
+    {
+      "id": "node-eval",
+      "command": "node",
+      "pattern": "^--eval$",
+      "replacement": "--check",
+      "cause": "Node.js eval executes supplied source text; syntax-check before running untrusted code",
+      "risk": "high",
+      "risk_rationale": "may execute arbitrary code"
+    },
+    {
+      "id": "deno-run-allow-all",
+      "command": "deno",
+      "pattern": "^run --allow-all$",
+      "replacement": "run --allow-read",
+      "cause": "Deno allow-all grants every permission; start with the smallest required permission set",
+      "risk": "high",
+      "risk_rationale": "may grant filesystem, network, process, and environment access"
+    },
+    {
+      "id": "npx-yes",
+      "command": "npx",
+      "pattern": "^--yes$",
+      "replacement": "--no-install",
+      "cause": "npx automatic installs can execute an unexpected package; require an already-installed command first",
+      "risk": "high",
+      "risk_rationale": "may download and execute a package"
     }
   ]
 }

@@ -1,0 +1,1 @@
+{"schema_version":1,"cases":[{"id":"node-eval","command":"node","input":"--eval","rule_id":"node-eval"},{"id":"deno-run-allow-all","command":"deno","input":"run --allow-all","rule_id":"deno-run-allow-all"},{"id":"npx-yes","command":"npx","input":"--yes","rule_id":"npx-yes"}]}

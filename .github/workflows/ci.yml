@@ -33,3 +33,19 @@ jobs:
           result_code=$?
           set -e
           test "$result_code" -eq 2
+
+  linux-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make ci
+      - run: ./close-enough version
+      - run: |
+          set +e
+          ./close-enough check
+          result_code=$?
+          set -e
+          test "$result_code" -eq 2

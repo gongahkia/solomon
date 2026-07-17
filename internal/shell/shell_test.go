@@ -736,6 +736,23 @@ func TestPowerShellPostFailureConsumesHistoryEntry(t *testing.T) {
 	}
 }
 
+func TestPowerShellPropagatesModeAndDisplayConfiguration(t *testing.T) {
+	contract, err := ContractFor("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(contract.Configuration, []Configuration{ModeConfiguration, DisplayConfiguration}) {
+		t.Fatalf("PowerShell configuration contract = %#v", contract.Configuration)
+	}
+	script, err := Script("powershell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "--stage pre --format json") || !strings.Contains(script, "--stage post --format plain") {
+		t.Fatalf("PowerShell script does not delegate mode and display configuration: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

@@ -349,6 +349,16 @@ func TestBashPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	}
 }
 
+func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || return`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return`) {
+		t.Fatalf("bash protocol decoder is not binary-safe and fixed-field: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

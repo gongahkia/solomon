@@ -77,13 +77,18 @@ if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then
 _CLOSE_ENOUGH_BASH_LOADED=1
 _close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
 _close_enough_accept_line() {
-  local command record version action risk confidence cause consequence suggestion
+  local command record version action risk confidence cause consequence suggestion separator
+  local -a fields
   command="$READLINE_LINE"
   record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return
-  IFS=$'\t' read -r version action risk confidence cause consequence suggestion <<< "$record"
+  separator=$'\034'
+  record="${record//$'\t'/$separator}"
+  IFS="$separator" read -r -a fields <<< "$record"
+  [ "${#fields[@]}" -eq 7 ] || return
+  version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" confidence="${fields[3]}" cause="${fields[4]}" consequence="${fields[5]}" suggestion="${fields[6]}"
   [ "$version" = 1 ] || return
   [ "$action" = none ] && return
-  suggestion="$(_close_enough_decode "$suggestion")"
+  suggestion="$(_close_enough_decode "$suggestion")" || return
   if [ "$action" = rewrite ]; then
     if [ "$risk" != safe ] || [ -z "$suggestion" ]; then
       printf '\nclose-enough: refused unsafe rewrite\n' >&2

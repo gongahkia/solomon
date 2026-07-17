@@ -276,6 +276,19 @@ func TestBashPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 }
 
+func TestBashHintRenderingDoesNotAlterBuffer(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint := `if [ "$action" = hint ]; then`
+	interrupt := `if [ "$action" = interrupt ]; then`
+	start, end := strings.Index(script, hint), strings.Index(script, interrupt)
+	if start < 0 || end < start || !strings.Contains(script[start:end], "printf") || !strings.Contains(script[start:end], "return") || strings.Contains(script[start:end], "READLINE_LINE=") {
+		t.Fatalf("bash hint path is not non-blocking: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

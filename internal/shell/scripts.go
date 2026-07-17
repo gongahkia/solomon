@@ -85,8 +85,14 @@ _close_enough_accept_line() {
   [ "$action" = none ] && return
   suggestion="$(_close_enough_decode "$suggestion")"
   if [ "$action" = rewrite ]; then READLINE_LINE="$suggestion"; return; fi
-  printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
-  [ "$action" = interrupt ] && READLINE_LINE=''
+  if [ "$action" = hint ]; then
+    printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+    return
+  fi
+  if [ "$action" = interrupt ]; then
+    printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+    READLINE_LINE=''
+  fi
 }
 bind -x '"\C-m":_close_enough_accept_line'
 _close_enough_last_command=''

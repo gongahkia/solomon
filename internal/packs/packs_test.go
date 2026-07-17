@@ -497,3 +497,36 @@ func TestVerifyTUFRootBootstrap(t *testing.T) {
 		t.Fatal("accepted tampered root signature")
 	}
 }
+
+func TestVerifyTUFTimestamp(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key TUFKey
+	key.KeyType, key.Scheme = "ed25519", "ed25519"
+	key.KeyVal.Public = base64.RawStdEncoding.EncodeToString(publicKey)
+	root := TUFRoot{Type: "root", Version: 1, Keys: map[string]TUFKey{"timestamp-key": key}, Roles: map[string]TUFRole{"root": {KeyIDs: []string{"timestamp-key"}, Threshold: 1}, "timestamp": {KeyIDs: []string{"timestamp-key"}, Threshold: 1}}}
+	timestamp := TUFTimestamp{Type: "timestamp", Version: 1, Expires: "2030-01-01T00:00:00Z", Meta: map[string]TUFMetaFile{"snapshot.json": {Version: 1}}}
+	payload, err := json.Marshal(timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := TUFEnvelope{Signed: payload, Signatures: []TUFSignature{{KeyID: "timestamp-key", Sig: hex.EncodeToString(ed25519.Sign(privateKey, payload))}}}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyTimestamp(data, root)
+	if err != nil || verified.Meta["snapshot.json"].Version != 1 {
+		t.Fatalf("timestamp = %#v, %v", verified, err)
+	}
+	envelope.Signatures[0].Sig = hex.EncodeToString(ed25519.Sign(privateKey, []byte("tampered")))
+	data, err = json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyTimestamp(data, root); err == nil {
+		t.Fatal("accepted invalid timestamp signature")
+	}
+}

@@ -97,6 +97,51 @@ func TestTokenizeRejectsIncompleteQuotedAndEscapedInput(t *testing.T) {
 	}
 }
 
+func TestTokenizeSeparatesUnquotedCompoundOperators(t *testing.T) {
+	words, err := tokenize(`echo "a|b" && gti status; git sttaus | gti\|literal`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"echo", "a|b", "&&", "gti", "status", ";", "git", "sttaus", "|", "gti|literal"}
+	if !slices.Equal(words, want) {
+		t.Fatalf("words = %#v, want %#v", words, want)
+	}
+}
+
+func TestCommandPositionsResolveCompoundCommandStarts(t *testing.T) {
+	words := []string{"MODE=1", "if", "gti", "&&", "echo", "ok", ";", "then", "git", "sttaus", ";", "fi"}
+	if got := commandPositions(words); !slices.Equal(got, []int{2, 4, 8}) {
+		t.Fatalf("positions = %#v", got)
+	}
+}
+
+func TestCompoundCommandSuggestionsAndNonCommandArguments(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "git")
+	engine := New(Options{Config: config.Default(), Path: dir, CWD: dir})
+	decision, err := engine.Check("echo gti && gti status", "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Suggestion != "echo gti && git status" {
+		t.Fatalf("unexpected command suggestion: %#v", decision)
+	}
+	decision, err = engine.Check("echo ready; git sttaus", "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Suggestion != "echo ready ; git status" {
+		t.Fatalf("unexpected semantic suggestion: %#v", decision)
+	}
+	decision, err = engine.Check("echo gti", "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != "none" {
+		t.Fatalf("argument was treated as command: %#v", decision)
+	}
+}
+
 func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")

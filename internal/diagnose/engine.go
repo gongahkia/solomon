@@ -107,31 +107,40 @@ func (e Engine) applyMode(decision Decision) Decision {
 }
 
 func (e Engine) commandDecision(words []string) Decision {
-	if strings.Contains(words[0], "/") || isShellKeyword(words[0]) || commandExists(words[0], e.options.Path) {
-		return Decision{}
-	}
 	candidates := executableNames(e.options.Path)
-	best, distance := nearest(words[0], candidates)
-	if best == "" || distance > maxDistance(words[0]) {
-		return Decision{}
+	for _, position := range commandPositions(words) {
+		word := words[position]
+		if strings.Contains(word, "/") || commandExists(word, e.options.Path) {
+			continue
+		}
+		best, distance := nearest(word, candidates)
+		if best == "" || distance > maxDistance(word) {
+			continue
+		}
+		replaced := append([]string{}, words...)
+		replaced[position] = best
+		suggestion, containsSecret := redact.Command(replaced)
+		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(word, best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
 	}
-	replaced := append([]string{best}, words[1:]...)
-	suggestion, containsSecret := redact.Command(replaced)
-	return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Confidence: confidence(words[0], best), Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
+	return Decision{}
 }
 
 func semanticDecision(words []string) Decision {
-	if words[0] != "git" || len(words) < 2 {
-		return Decision{}
-	}
 	known := []string{"add", "branch", "checkout", "clone", "commit", "diff", "fetch", "init", "log", "merge", "pull", "push", "rebase", "restore", "status", "switch"}
-	best, distance := nearest(words[1], known)
-	if best == "" || distance > maxDistance(words[1]) {
-		return Decision{}
+	for _, position := range commandPositions(words) {
+		if words[position] != "git" || position+1 >= len(words) || isCompoundOperator(words[position+1]) {
+			continue
+		}
+		best, distance := nearest(words[position+1], known)
+		if best == "" || distance > maxDistance(words[position+1]) {
+			continue
+		}
+		replaced := append([]string{}, words...)
+		replaced[position+1] = best
+		suggestion, containsSecret := redact.Command(replaced)
+		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[position+1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
 	}
-	replaced := append([]string{"git", best}, words[2:]...)
-	suggestion, containsSecret := redact.Command(replaced)
-	return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Confidence: confidence(words[1], best), Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
+	return Decision{}
 }
 
 func (e Engine) pathDecision(words []string) Decision {
@@ -177,7 +186,9 @@ func tokenize(line string) ([]string, error) {
 			wordStarted = false
 		}
 	}
-	for _, r := range line {
+	runes := []rune(line)
+	for index := 0; index < len(runes); index++ {
+		r := runes[index]
 		if escaped {
 			current.WriteRune(r)
 			escaped = false
@@ -203,6 +214,12 @@ func tokenize(line string) ([]string, error) {
 			wordStarted = true
 			continue
 		}
+		if operator, width := compoundOperator(runes[index:]); width > 0 {
+			flush()
+			result = append(result, operator)
+			index += width - 1
+			continue
+		}
 		if r == ' ' || r == '\t' {
 			flush()
 			continue
@@ -215,6 +232,68 @@ func tokenize(line string) ([]string, error) {
 	}
 	flush()
 	return result, nil
+}
+
+func compoundOperator(runes []rune) (string, int) {
+	if len(runes) == 0 {
+		return "", 0
+	}
+	switch runes[0] {
+	case ';', '(', ')':
+		return string(runes[0]), 1
+	case '&':
+		if len(runes) > 1 && runes[1] == '&' {
+			return "&&", 2
+		}
+		return "&", 1
+	case '|':
+		if len(runes) > 1 && (runes[1] == '|' || runes[1] == '&') {
+			return string(runes[:2]), 2
+		}
+		return "|", 1
+	case '\n':
+		return ";", 1
+	default:
+		return "", 0
+	}
+}
+
+func commandPositions(words []string) []int {
+	positions := []int{}
+	expectCommand := true
+	for index, word := range words {
+		if isCompoundOperator(word) {
+			expectCommand = word != ")"
+			continue
+		}
+		if !expectCommand {
+			continue
+		}
+		if isShellKeyword(word) || assignmentWord(word) {
+			continue
+		}
+		positions = append(positions, index)
+		expectCommand = false
+	}
+	return positions
+}
+
+func isCompoundOperator(value string) bool {
+	return value == ";" || value == "&" || value == "&&" || value == "|" || value == "|&" || value == "||" || value == "(" || value == ")"
+}
+
+func assignmentWord(value string) bool {
+	name, _, found := strings.Cut(value, "=")
+	if !found || name == "" {
+		return false
+	}
+	for index, character := range name {
+		if character == '_' || character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || index > 0 && character >= '0' && character <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func executableNames(pathValue string) []string {

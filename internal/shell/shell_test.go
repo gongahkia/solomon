@@ -1400,23 +1400,160 @@ func TestPowerShellInteractivePTYLoadsAdapter(t *testing.T) {
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '{\"version\":1,\"action\":\"none\",\"risk\":\"safe\",\"confidence\":0}\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pty := `set timeout 10
-spawn -noecho pwsh -NoLogo -NoProfile
-expect -re {PS .*>
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
 }
-send -- ". \$env:ADAPTER\r"
-expect -re {PS .*>
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
 }
-send -- "Write-Output ready\r"
-expect "ready"
-expect -re {PS .*>
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
 }
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS .*?> }
 send -- "exit\r"
-expect eof`
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
 	command := exec.Command(expect, "-c", pty)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+}
+
+func TestPowerShellInteractivePTYInterruptPreventsExecution(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '{\"version\":1,\"action\":\"interrupt\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS .*?> }
+send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
+expect_text {close-enough [safe/1]: keep buffer}
+close`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("interrupt executed buffered command: %v", err)
+	}
+}
+
+func TestPowerShellInteractivePTYHintSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checked := filepath.Join(directory, "checked")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\nprintf '{\"version\":1,\"action\":\"hint\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS .*?> }
+send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
+expect_text {close-enough [safe/1]: keep buffer}
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(checked); err != nil {
+		t.Fatalf("hint did not invoke checker: %v\n%s", err, output)
 	}
 }
 

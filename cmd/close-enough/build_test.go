@@ -88,6 +88,37 @@ func TestReleaseArtifactChecksumVerification(t *testing.T) {
 	}
 }
 
+func TestReleaseBuildMatrixTargets(t *testing.T) {
+	for _, target := range []struct{ goos, goarch string }{
+		{goos: "linux", goarch: "amd64"},
+		{goos: "linux", goarch: "arm64"},
+		{goos: "darwin", goarch: "amd64"},
+		{goos: "darwin", goarch: "arm64"},
+		{goos: "windows", goarch: "amd64"},
+	} {
+		t.Run(target.goos+"-"+target.goarch, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "close-enough")
+			command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit=abc123", "-o", output, ".")
+			command.Env = replaceHarnessEnvironment(replaceHarnessEnvironment(replaceHarnessEnvironment(os.Environ(), "GOOS", target.goos), "GOARCH", target.goarch), "CGO_ENABLED", "0")
+			if data, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("release build: %v\n%s", err, data)
+			}
+			info, err := os.Stat(output)
+			if err != nil || info.Size() == 0 {
+				t.Fatalf("release artifact = %#v, %v", info, err)
+			}
+		})
+	}
+}
+
+func TestReleaseBuildMatrixRejectsUnsupportedTarget(t *testing.T) {
+	command := exec.Command("go", "build", "-mod=readonly", ".")
+	command.Env = replaceHarnessEnvironment(replaceHarnessEnvironment(os.Environ(), "GOOS", "unsupported"), "GOARCH", "amd64")
+	if data, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("unsupported release target built successfully: %s", data)
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

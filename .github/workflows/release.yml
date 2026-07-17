@@ -5,20 +5,38 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
   attestations: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: mkdir -p dist && GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/close-enough-linux-amd64 ./cmd/close-enough
-      - run: sha256sum dist/* > dist/SHA256SUMS
+      - run: mkdir -p dist && GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/close-enough ./cmd/close-enough
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/close-enough
+          if-no-files-found: error
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: 'dist/*'
+          subject-path: dist/close-enough

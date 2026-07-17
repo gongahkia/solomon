@@ -688,6 +688,19 @@ func TestPowerShellPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 }
 
+func TestPowerShellHintRenderingDoesNotSuppressSubmission(t *testing.T) {
+	script, err := Script("powershell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint := "if ($decision.action -eq 'hint') {"
+	interrupt := "if ($decision.action -ne 'interrupt')"
+	start, end := strings.Index(script, hint), strings.Index(script, interrupt)
+	if start < 0 || end < start || !strings.Contains(script[start:end], "Write-Host") || !strings.Contains(script[start:end], "AcceptLine()") || !strings.Contains(script[start:end], "return") {
+		t.Fatalf("PowerShell hint path is not non-blocking: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

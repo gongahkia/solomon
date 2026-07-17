@@ -21,10 +21,10 @@
     "name": "fish",
     "shell": "fish",
     "tier": "tiered",
-    "capabilities": ["pre-execution", "hint", "interrupt", "rewrite"],
-    "configuration": ["mode"],
-    "limitations": ["adapter replaces enter binding", "no post-failure diagnostics"],
-    "markers": ["--stage pre", "\"$fields[2]\" = rewrite", "\"$fields[2]\" = interrupt"]
+    "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
+    "configuration": ["mode", "display"],
+    "limitations": ["adapter replaces enter binding"],
+    "markers": ["--stage pre", "--stage post", "\"$fields[2]\" = rewrite", "\"$fields[2]\" = interrupt"]
   },
   {
     "name": "PowerShell.EXE",

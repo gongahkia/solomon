@@ -519,6 +519,18 @@ func TestFishRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	}
 }
 
+func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := "function _close_enough_post_failure --on-event fish_postexec"
+	start := strings.Index(script, hook)
+	if start < 0 || !strings.Contains(script[start:], "set -l status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `test $status -ne 0; and test -n "$command"`) || !strings.Contains(script[start:], `--stage post --format plain --command "$command"`) {
+		t.Fatalf("fish post-failure hook is missing or unsafe: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

@@ -168,6 +168,13 @@ function _close_enough_accept_line
   commandline -f execute
 end
 bind \r _close_enough_accept_line
+function _close_enough_post_failure --on-event fish_postexec
+  set -l status $status
+  set -l command $argv[1]
+  if test $status -ne 0; and test -n "$command"
+    command close-enough check --stage post --format plain --command "$command" 2>/dev/null
+  end
+end
 end
 `
 

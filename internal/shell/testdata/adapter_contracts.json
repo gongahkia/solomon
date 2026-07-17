@@ -1,0 +1,34 @@
+[
+  {
+    "name": "zsh",
+    "shell": "zsh",
+    "tier": "first-class",
+    "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
+    "limitations": [],
+    "markers": ["--stage pre", "--stage post", "\"$action\" == rewrite", "\"$action\" == interrupt"]
+  },
+  {
+    "name": "bash",
+    "shell": "bash",
+    "tier": "first-class",
+    "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
+    "limitations": [],
+    "markers": ["--stage pre", "--stage post", "\"$action\" = rewrite", "\"$action\" = interrupt"]
+  },
+  {
+    "name": "fish",
+    "shell": "fish",
+    "tier": "tiered",
+    "capabilities": ["pre-execution", "hint", "interrupt", "rewrite"],
+    "limitations": ["adapter replaces enter binding", "no post-failure diagnostics"],
+    "markers": ["--stage pre", "\"$fields[2]\" = rewrite", "\"$fields[2]\" = interrupt"]
+  },
+  {
+    "name": "PowerShell.EXE",
+    "shell": "powershell",
+    "tier": "tiered",
+    "capabilities": ["pre-execution", "hint", "interrupt", "rewrite"],
+    "limitations": ["requires PSReadLine", "no post-failure diagnostics"],
+    "markers": ["--stage pre", "-eq 'rewrite'", "-eq 'hint'", "-ne 'interrupt'"]
+  }
+]

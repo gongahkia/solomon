@@ -1,6 +1,26 @@
 package shell
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+type Capability string
+
+const (
+	PreExecution Capability = "pre-execution"
+	PostFailure  Capability = "post-failure"
+	Hint         Capability = "hint"
+	Interrupt    Capability = "interrupt"
+	Rewrite      Capability = "rewrite"
+)
+
+type Contract struct {
+	Shell        string       `json:"shell"`
+	Tier         string       `json:"tier"`
+	Capabilities []Capability `json:"capabilities"`
+	Limitations  []string     `json:"limitations,omitempty"`
+}
 
 type DoctorResult struct {
 	Shell       string   `json:"shell"`
@@ -12,33 +32,32 @@ type DoctorResult struct {
 }
 
 func Script(name string) (string, error) {
-	switch name {
-	case "zsh":
-		return zshScript, nil
-	case "bash":
-		return bashScript, nil
-	case "fish":
-		return fishScript, nil
-	case "powershell", "pwsh":
-		return powerShellScript, nil
-	default:
+	adapter, ok := adapterFor(name)
+	if !ok {
 		return "", fmt.Errorf("unsupported shell %q", name)
 	}
+	return adapter.script, nil
+}
+
+func ContractFor(name string) (Contract, error) {
+	adapter, ok := adapterFor(name)
+	if !ok {
+		return Contract{}, fmt.Errorf("unsupported shell %q", name)
+	}
+	return adapter.contract(), nil
 }
 
 func Doctor(shellPath, osName string) DoctorResult {
 	name := shellName(shellPath)
 	result := DoctorResult{Shell: name, OS: osName}
-	switch name {
-	case "zsh", "bash":
-		result.Supported, result.Tier, result.Features = true, "first-class", []string{"pre-execution", "post-failure", "hint", "interrupt", "rewrite"}
-	case "fish":
-		result.Supported, result.Tier, result.Features, result.Limitations = true, "tiered", []string{"command-not-found", "custom enter binding"}, []string{"adapter replaces enter binding"}
-	case "pwsh", "powershell":
-		result.Supported, result.Tier, result.Features, result.Limitations = true, "tiered", []string{"command validation", "post-failure"}, []string{"requires PSReadLine"}
-	default:
+	contract, err := ContractFor(name)
+	if err != nil {
 		result.Limitations = []string{"unsupported shell"}
+		return result
 	}
+	result.Supported, result.Tier = true, contract.Tier
+	result.Features = capabilityStrings(contract.Capabilities)
+	result.Limitations = append([]string(nil), contract.Limitations...)
 	return result
 }
 
@@ -48,5 +67,42 @@ func shellName(value string) string {
 			return value[i+1:]
 		}
 	}
-	return value
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+type adapter struct {
+	Contract
+	script string
+}
+
+func (a adapter) contract() Contract {
+	return Contract{
+		Shell:        a.Shell,
+		Tier:         a.Tier,
+		Capabilities: append([]Capability(nil), a.Capabilities...),
+		Limitations:  append([]string(nil), a.Limitations...),
+	}
+}
+
+var adapters = map[string]adapter{
+	"zsh":            {Contract: Contract{Shell: "zsh", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}}, script: zshScript},
+	"bash":           {Contract: Contract{Shell: "bash", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}}, script: bashScript},
+	"fish":           {Contract: Contract{Shell: "fish", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"adapter replaces enter binding", "no post-failure diagnostics"}}, script: fishScript},
+	"powershell":     {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"powershell.exe": {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"pwsh":           {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+	"pwsh.exe":       {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, Hint, Interrupt, Rewrite}, Limitations: []string{"requires PSReadLine", "no post-failure diagnostics"}}, script: powerShellScript},
+}
+
+func adapterFor(name string) (adapter, bool) {
+	adapter, ok := adapters[shellName(name)]
+	return adapter, ok
+}
+
+func capabilityStrings(capabilities []Capability) []string {
+	result := make([]string, len(capabilities))
+	for i, capability := range capabilities {
+		result[i] = string(capability)
+	}
+	return result
 }

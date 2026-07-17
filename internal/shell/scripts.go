@@ -92,6 +92,7 @@ _close_enough_accept_line() {
   if [ "$action" = interrupt ]; then
     printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
     READLINE_LINE=''
+    return 1
   fi
 }
 bind -x '"\C-m":_close_enough_accept_line'

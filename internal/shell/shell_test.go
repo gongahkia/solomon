@@ -289,6 +289,18 @@ func TestBashHintRenderingDoesNotAlterBuffer(t *testing.T) {
 	}
 }
 
+func TestBashInterruptClearsBufferBeforeReturning(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupt := `if [ "$action" = interrupt ]; then`
+	start := strings.Index(script, interrupt)
+	if start < 0 || !strings.Contains(script[start:], "READLINE_LINE=''\n    return 1") {
+		t.Fatalf("bash interrupt path does not suppress command execution: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

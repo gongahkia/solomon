@@ -67,7 +67,7 @@ func TestFishInterruptPreventsExecution(t *testing.T) {
 	}
 	branch := script[interrupt:]
 	execute := strings.Index(branch, "commandline -f execute")
-	if execute < 0 || !strings.Contains(branch[:execute], "return") {
+	if execute < 0 || !strings.Contains(branch[:execute], "commandline -f repaint") || !strings.Contains(branch[:execute], "return") {
 		t.Fatalf("fish interrupt does not precede execution: %q", script)
 	}
 }

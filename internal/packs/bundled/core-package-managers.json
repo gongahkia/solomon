@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "core-package-managers",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "close-enough",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [{
@@ -148,5 +148,37 @@
     "cause": "Local Homebrew formula path typo",
     "risk": "high",
     "risk_rationale": "may download and modify installed packages"
+  }, {
+    "id": "npm-publish",
+    "command": "npm",
+    "pattern": "^publish$",
+    "replacement": "pack --dry-run",
+    "cause": "Publishing uploads a package to a registry; inspect the package contents before publishing",
+    "risk": "high",
+    "risk_rationale": "may publish a package to a registry"
+  }, {
+    "id": "npm-audit-fix-force",
+    "command": "npm",
+    "pattern": "^audit fix --force$",
+    "replacement": "audit",
+    "cause": "Forced audit fixes can apply breaking dependency upgrades; inspect audit findings first",
+    "risk": "high",
+    "risk_rationale": "may rewrite dependency versions and lockfiles"
+  }, {
+    "id": "pnpm-update-latest",
+    "command": "pnpm",
+    "pattern": "^update --latest$",
+    "replacement": "outdated",
+    "cause": "Latest dependency updates can cross major versions; inspect available updates first",
+    "risk": "high",
+    "risk_rationale": "may rewrite dependency versions and lockfiles"
+  }, {
+    "id": "brew-upgrade",
+    "command": "brew",
+    "pattern": "^upgrade$",
+    "replacement": "outdated",
+    "cause": "Upgrades replace installed packages; inspect outdated packages before upgrading",
+    "risk": "high",
+    "risk_rationale": "may replace installed packages"
   }]
 }

@@ -402,6 +402,33 @@ func TestPackageManagerPathRepairRules(t *testing.T) {
 	}
 }
 
+func TestPackageManagerConceptualMisuseRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "package-managers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "package-manager-conceptual-misuse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	rules := map[string]Rule{}
+	for _, rule := range pack.Rules {
+		rules[rule.ID] = rule
+	}
+	for _, id := range []string{"npm-publish", "npm-audit-fix-force", "pnpm-update-latest", "brew-upgrade"} {
+		if rules[id].Risk != diagnose.RiskHigh || rules[id].Cause == "" {
+			t.Fatalf("conceptual rule %s = %#v", id, rules[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched package manager conceptual corpus")
+	}
+}
+
 func TestGitSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "core-git.json"))
 	if err != nil {

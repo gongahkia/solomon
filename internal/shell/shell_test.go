@@ -332,6 +332,23 @@ func TestBashPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 }
 
+func TestBashPropagatesModeAndDisplayConfiguration(t *testing.T) {
+	contract, err := ContractFor("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(contract.Configuration, []Configuration{ModeConfiguration, DisplayConfiguration}) {
+		t.Fatalf("bash configuration contract = %#v", contract.Configuration)
+	}
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
+		t.Fatalf("bash script does not delegate mode and display configuration: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

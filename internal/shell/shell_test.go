@@ -70,6 +70,15 @@ func TestLowConfidenceHintIsNonBlocking(t *testing.T) {
 	}
 }
 
+func TestLowConfidenceInterruptRequiresOptIn(t *testing.T) {
+	if got := LowConfidenceInterrupt(0.5, false); got != (ActionResult{}) {
+		t.Fatalf("unopted action = %#v", got)
+	}
+	if got := LowConfidenceInterrupt(0.5, true); !got.Render || got.Submit {
+		t.Fatalf("opted action = %#v", got)
+	}
+}
+
 func TestOneTimeAccept(t *testing.T) {
 	var accept OneTimeAccept
 	if !accept.Accept("rewrite:git-status") || accept.Accept("rewrite:git-status") || accept.Accept("") || !accept.Accept("rewrite:git-log") {

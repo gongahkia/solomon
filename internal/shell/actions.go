@@ -68,6 +68,13 @@ func LowConfidenceHint(confidence float64) ActionResult {
 	return ActionResult{}
 }
 
+func LowConfidenceInterrupt(confidence float64, optedIn bool) ActionResult {
+	if optedIn && confidence >= 0 && confidence < NonBlockingHintConfidence {
+		return ActionResult{Render: true}
+	}
+	return ActionResult{}
+}
+
 type OneTimeAccept struct {
 	mu       sync.Mutex
 	accepted map[string]struct{}

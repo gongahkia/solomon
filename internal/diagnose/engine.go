@@ -125,7 +125,7 @@ func (e Engine) applyMode(decision Decision) Decision {
 		decision.Action = "rewrite"
 		return decision
 	}
-	if e.options.Config.Mode == "interrupt" && decision.Confidence >= 0.90 {
+	if e.shouldInterrupt(decision) {
 		decision.Action = "interrupt"
 		return decision
 	}
@@ -140,6 +140,14 @@ func (e Engine) safeAutoApply(decision Decision) bool {
 		!decision.Incomplete &&
 		decision.Risk == RiskSafe &&
 		decision.Confidence >= 0.80 &&
+		meetsConfidenceThreshold(decision.Class, decision.Confidence)
+}
+
+func (e Engine) shouldInterrupt(decision Decision) bool {
+	return e.options.Config.Mode == "interrupt" &&
+		decision.Suggestion != "" &&
+		!decision.Incomplete &&
+		decision.Confidence >= 0.90 &&
 		meetsConfidenceThreshold(decision.Class, decision.Confidence)
 }
 

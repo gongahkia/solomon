@@ -170,6 +170,42 @@ func TestSafeAutoApplyPolicy(t *testing.T) {
 	}
 }
 
+func TestInterruptionPolicy(t *testing.T) {
+	base := Decision{Suggestion: "diagnostic", Class: RepairClassCommand, Confidence: 0.90, Risk: RiskUnknown}
+	for _, test := range []struct {
+		name     string
+		mode     string
+		decision Decision
+		want     bool
+	}{
+		{"unknown risk", "interrupt", base, true},
+		{"high risk", "interrupt", Decision{Suggestion: "diagnostic", Class: RepairClassCommand, Confidence: 0.90, Risk: RiskHigh}, true},
+		{"wrong mode", "hint", base, false},
+		{"incomplete", "interrupt", Decision{Suggestion: "diagnostic", Class: RepairClassCommand, Confidence: 0.90, Risk: RiskUnknown, Incomplete: true}, false},
+		{"below threshold", "interrupt", Decision{Suggestion: "diagnostic", Class: RepairClassCommand, Confidence: 0.89, Risk: RiskUnknown}, false},
+		{"unknown class", "interrupt", Decision{Suggestion: "diagnostic", Class: RepairClass("unknown"), Confidence: 1, Risk: RiskUnknown}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Mode = test.mode
+			if got := New(Options{Config: cfg}).shouldInterrupt(test.decision); got != test.want {
+				t.Fatalf("shouldInterrupt() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestInterruptModeBlocksHighConfidenceRepair(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutable(t, dir, "diagnostic")
+	cfg := config.Default()
+	cfg.Mode = "interrupt"
+	decision, err := New(Options{Config: cfg, Path: dir, CWD: dir}).Check("diagnostci", "pre")
+	if err != nil || decision.Action != "interrupt" || decision.Risk != RiskUnknown {
+		t.Fatalf("interrupt decision: %#v, %v", decision, err)
+	}
+}
+
 func TestHighRiskNeverAutoApplied(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "rm")

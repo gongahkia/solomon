@@ -261,6 +261,30 @@ func TestReleaseWorkflowPublishesTUFRegistryMetadata(t *testing.T) {
 	}
 }
 
+func TestReleaseRevocationWorkflowRequiresConfirmation(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release-revocation.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"workflow_dispatch:",
+		"confirm:",
+		"enter REVOKE to publish",
+		"environment: release",
+		"group: release-revocation",
+		"test \"$REVOCATION_CONFIRM\" = REVOKE",
+		"cmd/release-revocation",
+		"cosign sign-blob --yes --bundle",
+		"go run ./cmd/tuf-metadata",
+		"name: release-revocation-",
+		"name: release-revocation-tuf-",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release revocation workflow lacks marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

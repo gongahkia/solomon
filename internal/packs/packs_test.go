@@ -422,6 +422,49 @@ func TestKubernetesCloudCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestKubernetesCloudSubcommandTypoRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "kubernetes-cloud.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "kubernetes-cloud-subcommand-typos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := LoadBundled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundledPack Pack
+	for _, candidate := range bundled {
+		if candidate.ID == pack.ID {
+			bundledPack = candidate
+		}
+	}
+	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
+		t.Fatalf("bundled Kubernetes/cloud pack = %#v", bundledPack)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	if risk["kubectl-get-gett"] != diagnose.RiskSafe || risk["aws-s3-ls-lss"] != diagnose.RiskSafe {
+		t.Fatalf("Kubernetes/cloud safe risks = %#v", risk)
+	}
+	for _, id := range []string{"kubectl-apply-aply", "kubectl-delete-delet", "helm-install-instal", "terraform-apply-aply"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Kubernetes/cloud corpus")
+	}
+}
+
 func TestContainersSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "containers.json"))
 	if err != nil {
@@ -1780,11 +1823,11 @@ func TestPackCompatibilityRequirements(t *testing.T) {
 
 func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	names, err := BundledNames()
-	if err != nil || !slices.Equal(names, []string{"core-containers.json", "core-git.json", "core-go.json", "core-javascript.json", "core-package-managers.json", "core-python.json", "core-rust.json"}) {
+	if err != nil || !slices.Equal(names, []string{"core-containers.json", "core-git.json", "core-go.json", "core-javascript.json", "core-kubernetes-cloud.json", "core-package-managers.json", "core-python.json", "core-rust.json"}) {
 		t.Fatalf("bundled names = %#v, %v", names, err)
 	}
 	packs, err := LoadBundled()
-	if err != nil || len(packs) != 7 || packs[0].ID != "core-containers" || packs[1].ID != "core-git" || packs[2].ID != "core-go" || packs[3].ID != "core-javascript" || packs[4].ID != "core-package-managers" || packs[5].ID != "core-python" || packs[6].ID != "core-rust" {
+	if err != nil || len(packs) != 8 || packs[0].ID != "core-containers" || packs[1].ID != "core-git" || packs[2].ID != "core-go" || packs[3].ID != "core-javascript" || packs[4].ID != "core-kubernetes-cloud" || packs[5].ID != "core-package-managers" || packs[6].ID != "core-python" || packs[7].ID != "core-rust" {
 		t.Fatalf("bundled packs = %#v, %v", packs, err)
 	}
 	packs[0].Rules[0].ID = "mutated"

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "npm-install-savee", "command": "npm", "input": "install --savee", "rule_id": "npm-install-savee"},
+    {"id": "npm-install-global-style", "command": "npm", "input": "install --global-style", "rule_id": "npm-install-global-style"},
+    {"id": "npm-install-legacy-bundling", "command": "npm", "input": "install --legacy-bundling", "rule_id": "npm-install-legacy-bundling"},
+    {"id": "pnpm-install-prodd", "command": "pnpm", "input": "install --prodd", "rule_id": "pnpm-install-prodd"},
+    {"id": "yarn-install-immutible", "command": "yarn", "input": "install --immutible", "rule_id": "yarn-install-immutible"},
+    {"id": "brew-install-forc", "command": "brew", "input": "install --forc", "rule_id": "brew-install-forc"}
+  ]
+}

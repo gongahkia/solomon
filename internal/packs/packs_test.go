@@ -356,6 +356,29 @@ func TestPackageManagerSubcommandTypoRules(t *testing.T) {
 	}
 }
 
+func TestPackageManagerFlagRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "package-managers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "package-manager-flag-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range pack.Rules {
+		if rule.Risk != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", rule.ID, rule.Risk)
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched package manager flag corpus")
+	}
+}
+
 func TestGitSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "core-git.json"))
 	if err != nil {

@@ -52,10 +52,14 @@ jobs:
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" windows amd64 zip)
           sh scripts/release-zip.sh dist/close-enough "dist/$archive" "${archive%.zip}"
-      - uses: sigstore/cosign-installer@v4.1.0
-      - run: |
+      - id: release-archive
+        run: |
           archive=$(find dist -maxdepth 1 -type f ! -name close-enough -print -quit)
           test -n "$archive"
+          printf 'path=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@v4.1.0
+      - run: |
+          archive='${{ steps.release-archive.outputs.path }}'
           cosign sign-blob --yes --bundle "$archive.sigstore.json" "$archive"
           test -s "$archive.sigstore.json"
       - uses: actions/upload-artifact@v4
@@ -70,4 +74,4 @@ jobs:
           if-no-files-found: error
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/close-enough
+          subject-path: ${{ steps.release-archive.outputs.path }}

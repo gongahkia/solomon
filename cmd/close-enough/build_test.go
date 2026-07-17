@@ -139,6 +139,23 @@ func TestReleaseWorkflowConfiguresKeylessSigning(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowAttestsPackagedArchive(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"attestations: write",
+		"actions/attest-build-provenance@v2",
+		"id: release-archive",
+		"subject-path: ${{ steps.release-archive.outputs.path }}",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks provenance marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

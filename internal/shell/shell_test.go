@@ -531,6 +531,23 @@ func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
 	}
 }
 
+func TestFishPropagatesModeAndDisplayConfiguration(t *testing.T) {
+	contract, err := ContractFor("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(contract.Configuration, []Configuration{ModeConfiguration, DisplayConfiguration}) {
+		t.Fatalf("fish configuration contract = %#v", contract.Configuration)
+	}
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
+		t.Fatalf("fish script does not delegate mode and display configuration: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

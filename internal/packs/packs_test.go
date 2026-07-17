@@ -392,6 +392,46 @@ func TestGoCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestGoSubcommandTypoRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "go.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "go-subcommand-typos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := LoadBundled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundledPack Pack
+	for _, candidate := range bundled {
+		if candidate.ID == pack.ID {
+			bundledPack = candidate
+		}
+	}
+	if bundledPack.Version != pack.Version || !slices.Equal(bundledPack.Rules, pack.Rules) {
+		t.Fatalf("bundled Go pack = %#v", bundledPack)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"go-build-buid", "go-test-tes", "go-install-instal", "go-get-gett"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched Go corpus")
+	}
+}
+
 func TestRustSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "rust.json"))
 	if err != nil {
@@ -1365,11 +1405,11 @@ func TestPackCompatibilityRequirements(t *testing.T) {
 
 func TestLoadBundledPacksIsDeterministicAndReadOnly(t *testing.T) {
 	names, err := BundledNames()
-	if err != nil || !slices.Equal(names, []string{"core-git.json", "core-javascript.json", "core-package-managers.json", "core-python.json", "core-rust.json"}) {
+	if err != nil || !slices.Equal(names, []string{"core-git.json", "core-go.json", "core-javascript.json", "core-package-managers.json", "core-python.json", "core-rust.json"}) {
 		t.Fatalf("bundled names = %#v, %v", names, err)
 	}
 	packs, err := LoadBundled()
-	if err != nil || len(packs) != 5 || packs[0].ID != "core-git" || packs[1].ID != "core-javascript" || packs[2].ID != "core-package-managers" || packs[3].ID != "core-python" || packs[4].ID != "core-rust" {
+	if err != nil || len(packs) != 6 || packs[0].ID != "core-git" || packs[1].ID != "core-go" || packs[2].ID != "core-javascript" || packs[3].ID != "core-package-managers" || packs[4].ID != "core-python" || packs[5].ID != "core-rust" {
 		t.Fatalf("bundled packs = %#v, %v", packs, err)
 	}
 	packs[0].Rules[0].ID = "mutated"

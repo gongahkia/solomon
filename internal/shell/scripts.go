@@ -73,6 +73,8 @@ fi
 `
 
 const bashScript = `# close-enough bash integration
+if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then
+_CLOSE_ENOUGH_BASH_LOADED=1
 _close_enough_decode() { printf %s "$1" | { base64 --decode 2>/dev/null || base64 -D; }; }
 _close_enough_accept_line() {
   local record version action risk confidence cause consequence suggestion
@@ -94,6 +96,7 @@ _close_enough_prompt() {
   [ "$status" -ne 0 ] && [ -n "$_close_enough_last_command" ] && command close-enough check --stage post --format plain --command "$_close_enough_last_command" 2>/dev/null
 }
 PROMPT_COMMAND="_close_enough_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+fi
 `
 
 const fishScript = `# close-enough fish integration

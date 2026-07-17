@@ -252,6 +252,18 @@ expect eof`
 	}
 }
 
+func TestBashInitializationIsGuarded(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := `if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then`
+	marker := "_CLOSE_ENOUGH_BASH_LOADED=1"
+	if !strings.HasPrefix(script, "# close-enough bash integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") || strings.Count(script, `bind -x '"\C-m":_close_enough_accept_line'`) != 1 || strings.Count(script, "trap _close_enough_debug DEBUG") != 1 {
+		t.Fatalf("bash script lacks an enclosing idempotence guard: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

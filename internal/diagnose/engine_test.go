@@ -763,6 +763,29 @@ func TestTokenizeIncompleteInputProperty(t *testing.T) {
 	}
 }
 
+func FuzzTokenizeMalformedShellInput(f *testing.F) {
+	for _, seed := range []string{"\\", "'", `"`, "git 'status", "git status\\", `echo "unterminated`, "'\\"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, line string) {
+		if len(line) > MaxInputBytes {
+			t.Skip()
+		}
+		if _, err := tokenize(line); err == nil {
+			return
+		} else if err.Error() != "incomplete shell input" {
+			t.Fatalf("tokenize(%q) error = %v", line, err)
+		}
+		decision, err := New(Options{Config: config.Default()}).Check(line, "pre")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != "none" || !decision.Incomplete || decision.Suggestion != "" {
+			t.Fatalf("malformed decision = %#v", decision)
+		}
+	})
+}
+
 func shellQuote(value string) string {
 	return `"` + strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`).Replace(value) + `"`
 }

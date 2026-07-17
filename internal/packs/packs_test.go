@@ -263,6 +263,42 @@ func TestFixtureCorpusLoadAndRun(t *testing.T) {
 	}
 }
 
+func TestCommandCandidateCorpusLoadAndRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "candidates.json")
+	data := []byte(`{"schema_version":1,"candidates":[{"id":"git-command-gti","command":"gti","replacement":"git"}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadCommandCandidateCorpus(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		return map[string]string{"gti": "git"}[command], command == "gti"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunCommandCandidateCorpus(corpus, func(string) (string, bool) { return "", false }); err == nil {
+		t.Fatal("accepted unresolved command candidate")
+	}
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"candidates":[{"id":"git-command-gti","command":"gti","replacement":"git","unknown":true}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCommandCandidateCorpus(path); err == nil {
+		t.Fatal("accepted invalid command candidate corpus")
+	}
+}
+
+func TestGitCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "git-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(corpus.Candidates) != 3 || corpus.Candidates[0].Command != "gti" || corpus.Candidates[0].Replacement != "git" {
+		t.Fatalf("git command candidates = %#v", corpus)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

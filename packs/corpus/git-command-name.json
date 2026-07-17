@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {"id": "git-command-gti", "command": "gti", "replacement": "git"},
+    {"id": "git-command-gitg", "command": "gitg", "replacement": "git"},
+    {"id": "git-command-gkt", "command": "gkt", "replacement": "git"}
+  ]
+}

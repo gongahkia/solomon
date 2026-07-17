@@ -242,7 +242,7 @@ func TestReleaseWorkflowPublishesTUFRegistryMetadata(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"tuf-registry:",
-		"needs: bundled-packs",
+		"needs: [bundled-packs, update-manifest]",
 		"TUF_ROOT_PRIVATE_KEY",
 		"TUF_TARGETS_PRIVATE_KEY",
 		"TUF_SNAPSHOT_PRIVATE_KEY",
@@ -257,6 +257,28 @@ func TestReleaseWorkflowPublishesTUFRegistryMetadata(t *testing.T) {
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release workflow lacks TUF registry marker %q", marker)
+		}
+	}
+}
+
+func TestReleaseWorkflowPublishesUpdateManifest(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"update-manifest:",
+		"needs: [build, smoke]",
+		"cmd/update-manifest",
+		"--channel stable",
+		"--commit \"$GITHUB_SHA\"",
+		"cosign sign-blob --yes --bundle",
+		"name: update-manifest-",
+		"name: update-manifest-signature-",
+		"needs: [bundled-packs, update-manifest]",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks update manifest marker %q", marker)
 		}
 	}
 }

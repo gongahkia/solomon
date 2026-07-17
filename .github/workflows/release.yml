@@ -165,8 +165,58 @@ jobs:
           name: bundled-packs-signature-${{ github.ref_name }}
           path: dist/*.sigstore.json
           if-no-files-found: error
+  update-manifest:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-linux-amd64
+          path: dist/releases/linux-amd64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-linux-arm64
+          path: dist/releases/linux-arm64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-darwin-amd64
+          path: dist/releases/darwin-amd64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-darwin-arm64
+          path: dist/releases/darwin-arm64
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-windows-amd64
+          path: dist/releases/windows-amd64
+      - id: update-manifest
+        run: |
+          set -- dist/releases/linux-amd64/*.tar.gz dist/releases/linux-arm64/*.tar.gz dist/releases/darwin-amd64/*.tar.gz dist/releases/darwin-arm64/*.tar.gz dist/releases/windows-amd64/*.zip
+          for artifact in "$@"; do test -f "$artifact"; done
+          go run ./cmd/update-manifest --channel stable --version "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --output dist/update/stable.json --artifact "$1" --artifact "$2" --artifact "$3" --artifact "$4" --artifact "$5"
+          printf 'path=%s\n' dist/update/stable.json >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@v4.1.0
+      - run: |
+          manifest='${{ steps.update-manifest.outputs.path }}'
+          cosign sign-blob --yes --bundle "$manifest.sigstore.json" "$manifest"
+          test -s "$manifest.sigstore.json"
+          cosign verify-blob "$manifest" --bundle "$manifest.sigstore.json" --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-manifest-${{ github.ref_name }}
+          path: dist/update/stable.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-manifest-signature-${{ github.ref_name }}
+          path: dist/update/stable.json.sigstore.json
+          if-no-files-found: error
   tuf-registry:
-    needs: bundled-packs
+    needs: [bundled-packs, update-manifest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,6 +231,14 @@ jobs:
         with:
           name: bundled-packs-signature-${{ github.ref_name }}
           path: dist/targets
+      - uses: actions/download-artifact@v5
+        with:
+          name: update-manifest-${{ github.ref_name }}
+          path: dist/targets
+      - uses: actions/download-artifact@v5
+        with:
+          name: update-manifest-signature-${{ github.ref_name }}
+          path: dist/targets
       - env:
           TUF_ROOT_PRIVATE_KEY: ${{ secrets.TUF_ROOT_PRIVATE_KEY }}
           TUF_TARGETS_PRIVATE_KEY: ${{ secrets.TUF_TARGETS_PRIVATE_KEY }}
@@ -191,13 +249,10 @@ jobs:
           test -n "$TUF_TARGETS_PRIVATE_KEY"
           test -n "$TUF_SNAPSHOT_PRIVATE_KEY"
           test -n "$TUF_TIMESTAMP_PRIVATE_KEY"
-          set -- dist/targets/*.tar.gz
-          test "$#" -eq 1
-          pack=$1
-          set -- dist/targets/*.sigstore.json
-          test "$#" -eq 1
-          signature=$1
-          go run ./cmd/tuf-metadata --output dist/tuf --version "$GITHUB_RUN_ID" --targets-expires "$(date -u -d '+365 days' +'%Y-%m-%dT%H:%M:%SZ')" --snapshot-expires "$(date -u -d '+1 day' +'%Y-%m-%dT%H:%M:%SZ')" --timestamp-expires "$(date -u -d '+1 day' +'%Y-%m-%dT%H:%M:%SZ')" --target "$pack" --target "$signature"
+          set -- dist/targets/*
+          test "$#" -eq 4
+          for target in "$@"; do test -f "$target"; done
+          go run ./cmd/tuf-metadata --output dist/tuf --version "$GITHUB_RUN_ID" --targets-expires "$(date -u -d '+365 days' +'%Y-%m-%dT%H:%M:%SZ')" --snapshot-expires "$(date -u -d '+1 day' +'%Y-%m-%dT%H:%M:%SZ')" --timestamp-expires "$(date -u -d '+1 day' +'%Y-%m-%dT%H:%M:%SZ')" --target "$1" --target "$2" --target "$3" --target "$4"
       - uses: actions/upload-artifact@v4
         with:
           name: tuf-registry-${{ github.ref_name }}

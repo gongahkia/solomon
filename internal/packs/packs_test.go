@@ -1830,6 +1830,39 @@ func TestExtractContainerFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractKubernetesCloudFailureEvidence(t *testing.T) {
+	output := "error: unknown command \"applly\" for \"kubectl\"\nerror: the path \"./k8s/deploymnet.yaml\" does not exist\nError: unknown command \"instlal\" for \"helm\"\nError: INSTALLATION FAILED: path \"./charts/ap\" not found\nError: Failed to read variables file\n\nGiven variables file env/prod.tfvar does not exist.\nInvalid template path template.yamll\nerror: unknown command \"applly\" for \"kubectl\"\n"
+	evidence, err := ExtractKubernetesCloudFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "aws-template-path-invalid", Value: "template.yamll"},
+		{Kind: "helm-chart-path-missing", Value: "./charts/ap"},
+		{Kind: "helm-unknown-subcommand", Value: "instlal"},
+		{Kind: "kubectl-path-missing", Value: "./k8s/deploymnet.yaml"},
+		{Kind: "kubectl-unknown-subcommand", Value: "applly"},
+		{Kind: "terraform-varfile-missing", Value: "env/prod.tfvar"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractKubernetesCloudFailureEvidence("Invalid template path template.yamll\nGiven variables file env/prod.tfvar does not exist.\nError: INSTALLATION FAILED: path \"./charts/ap\" not found\nError: unknown command \"instlal\" for \"helm\"\nerror: the path \"./k8s/deploymnet.yaml\" does not exist\nerror: unknown command \"applly\" for \"kubectl\"\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractKubernetesCloudFailureEvidence("error: the path \"https://user:password@example.invalid/manifest.yaml\" does not exist\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/manifest.yaml" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if evidence, err := ExtractKubernetesCloudFailureEvidence("kubernetes-cloud: unrelated"); err != nil || len(evidence) != 0 {
+		t.Fatalf("unmatched evidence = %#v, %v", evidence, err)
+	}
+	if _, err := ExtractKubernetesCloudFailureEvidence(strings.Repeat("x", maxKubernetesCloudFailureOutputBytes+1)); !errors.Is(err, ErrKubernetesCloudFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

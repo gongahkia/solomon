@@ -34,3 +34,12 @@ func TestTextLeavesNonSecretValuesUnchanged(t *testing.T) {
 		t.Fatalf("unexpected redaction: %q, %t", got, changed)
 	}
 }
+
+func TestContainsSecretUsesCommandTokenDetection(t *testing.T) {
+	if !ContainsSecret([]string{"curl", "--token", "top-secret"}) {
+		t.Fatal("secret-bearing arguments were not detected")
+	}
+	if ContainsSecret([]string{"git", "status", "--short"}) {
+		t.Fatal("non-secret arguments were detected as secrets")
+	}
+}

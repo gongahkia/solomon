@@ -270,6 +270,32 @@ func TestNetworkEffectRepairNeverRewrites(t *testing.T) {
 	}
 }
 
+func TestSecretBearingArgumentsAreHighRisk(t *testing.T) {
+	for _, line := range []string{
+		"git --token top-secret",
+		"git API_KEY=top-secret",
+		"git --password top-secret",
+		"git https://user:password@example.invalid/repo",
+	} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskHigh {
+			t.Fatalf("classify(%q) = %s, want high", line, got)
+		}
+	}
+	for _, line := range []string{"git status", "git --format=json"} {
+		words, err := tokenize(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classify(words, false); got != RiskSafe {
+			t.Fatalf("classify(%q) = %s, want safe", line, got)
+		}
+	}
+}
+
 func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git 'status", "pre")
 	if err != nil {

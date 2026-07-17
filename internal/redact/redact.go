@@ -39,6 +39,11 @@ func Command(words []string) (string, bool) {
 	return strings.Join(redacted, " "), changed
 }
 
+func ContainsSecret(words []string) bool {
+	_, changed := Command(words)
+	return changed
+}
+
 func secretFlag(value string) bool {
 	return strings.HasPrefix(value, "--") && !strings.Contains(value, "=") && secretName(value)
 }

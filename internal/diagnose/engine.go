@@ -662,7 +662,7 @@ func isShellKeyword(value string) bool {
 	return ok
 }
 func classify(words []string, containsSecret bool) Risk {
-	if containsSecret {
+	if containsSecret || redact.ContainsSecret(words) {
 		return RiskHigh
 	}
 	if escalatesPrivileges(words) {

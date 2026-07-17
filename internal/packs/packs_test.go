@@ -477,6 +477,33 @@ func TestContainersFlagRepairRules(t *testing.T) {
 	}
 }
 
+func TestContainersPathRepairRules(t *testing.T) {
+	pack, err := Load(filepath.Join("..", "..", "packs", "containers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", "containers-path-repairs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunFixtureCorpus(pack, corpus); err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]diagnose.Risk{}
+	for _, rule := range pack.Rules {
+		risk[rule.ID] = rule.Risk
+	}
+	for _, id := range []string{"docker-build-dockerfil", "docker-compose-file-yamll", "docker-compose-legacy-file-yamll"} {
+		if risk[id] != diagnose.RiskHigh {
+			t.Fatalf("risk for %s = %q, want high", id, risk[id])
+		}
+	}
+	corpus[0].Cases[0].RuleID = "missing"
+	if err := RunFixtureCorpus(pack, corpus); err == nil {
+		t.Fatal("accepted mismatched container path corpus")
+	}
+}
+
 func TestGoSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "go.json"))
 	if err != nil {

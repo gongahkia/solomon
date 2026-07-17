@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "core-javascript",
+  "version": "0.1.0",
+  "publisher": "close-enough",
+  "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
+  "rules": [
+    {
+      "id": "bun-install-instal",
+      "command": "bun",
+      "pattern": "^instal$",
+      "replacement": "install",
+      "cause": "Bun subcommand typo",
+      "risk": "high",
+      "risk_rationale": "may modify dependencies and run install scripts"
+    },
+    {
+      "id": "bun-run-rnu",
+      "command": "bun",
+      "pattern": "^rnu$",
+      "replacement": "run",
+      "cause": "Bun subcommand transposition",
+      "risk": "high",
+      "risk_rationale": "may execute arbitrary project scripts"
+    },
+    {
+      "id": "deno-run-rn",
+      "command": "deno",
+      "pattern": "^rn$",
+      "replacement": "run",
+      "cause": "Deno subcommand transposition",
+      "risk": "high",
+      "risk_rationale": "may execute local or remote code"
+    },
+    {
+      "id": "deno-test-tes",
+      "command": "deno",
+      "pattern": "^tes$",
+      "replacement": "test",
+      "cause": "Deno subcommand typo",
+      "risk": "high",
+      "risk_rationale": "may execute project test code"
+    },
+    {
+      "id": "npx-create-creat",
+      "command": "npx",
+      "pattern": "^creat$",
+      "replacement": "create",
+      "cause": "npx subcommand typo",
+      "risk": "high",
+      "risk_rationale": "may download and execute a package"
+    }
+  ]
+}

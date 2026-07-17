@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "bun-install-instal", "command": "bun", "input": "instal", "rule_id": "bun-install-instal"},
+    {"id": "bun-run-rnu", "command": "bun", "input": "rnu", "rule_id": "bun-run-rnu"},
+    {"id": "deno-run-rn", "command": "deno", "input": "rn", "rule_id": "deno-run-rn"},
+    {"id": "deno-test-tes", "command": "deno", "input": "tes", "rule_id": "deno-test-tes"},
+    {"id": "npx-create-creat", "command": "npx", "input": "creat", "rule_id": "npx-create-creat"}
+  ]
+}

@@ -1073,6 +1073,36 @@ func BenchmarkPreExecutionLatency(b *testing.B) {
 	}
 }
 
+func BenchmarkPATHIndexCache(b *testing.B) {
+	directory := b.TempDir()
+	want := []string{"cargo", "git", "go", "node", "npm", "python", "rustc"}
+	for _, name := range want {
+		writeExecutable(b, directory, name)
+	}
+	cache := NewCache()
+	if got := cache.executableNamesFor(directory, "linux", ""); !slices.Equal(got, want) {
+		b.Fatalf("initial PATH index = %#v, want %#v", got, want)
+	}
+	for _, test := range []struct {
+		name  string
+		reset func()
+	}{
+		{name: "warm", reset: func() {}},
+		{name: "invalidated", reset: cache.Invalidate},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				test.reset()
+				if got := cache.executableNamesFor(directory, "linux", ""); !slices.Equal(got, want) {
+					b.Fatalf("PATH index = %#v, want %#v", got, want)
+				}
+			}
+		})
+	}
+}
+
 func writeExecutable(t testing.TB, dir, name string) {
 	t.Helper()
 	path := filepath.Join(dir, name)

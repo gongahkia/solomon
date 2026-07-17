@@ -103,3 +103,36 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ steps.release-archive.outputs.path }}
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+          - goos: darwin
+            goarch: amd64
+            runner: macos-15-intel
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest
+          - goos: windows
+            goarch: amd64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release
+      - shell: bash
+        run: |
+          archive=$(find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
+          test -n "$archive"
+          sh scripts/release-smoke-test.sh "$archive" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$GITHUB_REF_NAME"

@@ -192,6 +192,28 @@ func TestReleaseWorkflowAuditsArtifactLicenses(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowSmokeTestsEveryArchive(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"smoke:",
+		"needs: build",
+		"runner: ubuntu-latest",
+		"runner: ubuntu-24.04-arm",
+		"runner: macos-15-intel",
+		"runner: macos-latest",
+		"runner: windows-latest",
+		"actions/download-artifact@v5",
+		"scripts/release-smoke-test.sh",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks smoke test marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

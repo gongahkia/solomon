@@ -16,6 +16,9 @@ import (
 	"github.com/gongahkia/close-enough/internal/shell"
 )
 
+var version = "dev"
+var commit = "unknown"
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "close-enough:", err)
@@ -29,7 +32,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	switch args[0] {
 	case "version":
-		_, err := fmt.Fprintln(stdout, "close-enough dev")
+		_, err := fmt.Fprintln(stdout, versionString())
 		return clierr.Wrap(clierr.Operation, err)
 	case "init":
 		return initCommand(args[1:], stdout)
@@ -44,6 +47,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	default:
 		return usage(stderr)
 	}
+}
+
+func versionString() string {
+	if commit == "" || commit == "unknown" {
+		return "close-enough " + version
+	}
+	return "close-enough " + version + " (" + commit + ")"
 }
 
 func usage(w io.Writer) error {

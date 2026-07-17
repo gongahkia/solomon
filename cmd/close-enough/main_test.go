@@ -117,3 +117,16 @@ func TestUsageWritesUsage(t *testing.T) {
 		t.Fatalf("unexpected usage result: %d, %q", clierr.Code(err), output.String())
 	}
 }
+
+func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
+	originalVersion, originalCommit := version, commit
+	t.Cleanup(func() { version, commit = originalVersion, originalCommit })
+	version, commit = "v1.2.3", "abc123"
+	if got := versionString(); got != "close-enough v1.2.3 (abc123)" {
+		t.Fatalf("versionString() = %q", got)
+	}
+	commit = "unknown"
+	if got := versionString(); got != "close-enough v1.2.3" {
+		t.Fatalf("versionString() = %q", got)
+	}
+}

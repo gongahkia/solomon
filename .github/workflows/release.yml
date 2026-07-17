@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: mkdir -p dist && GOOS=linux GOARCH=amd64 go build -trimpath -o dist/close-enough-linux-amd64 ./cmd/close-enough
+      - run: mkdir -p dist && GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/close-enough-linux-amd64 ./cmd/close-enough
       - run: sha256sum dist/* > dist/SHA256SUMS
       - uses: actions/attest-build-provenance@v2
         with:

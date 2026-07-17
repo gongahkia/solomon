@@ -47,3 +47,18 @@ func TestLocalBuildRejectsMissingPackage(t *testing.T) {
 		t.Fatalf("missing package built successfully: %s", data)
 	}
 }
+
+func TestBuildInjectsVersionAndCommit(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "close-enough")
+	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit=abc123", "-o", output, ".")
+	if data, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build injected metadata: %v\n%s", err, data)
+	}
+	data, err := exec.Command(output, "version").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "close-enough v1.2.3 (abc123)\n" {
+		t.Fatalf("version output = %q", data)
+	}
+}

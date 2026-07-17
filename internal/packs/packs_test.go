@@ -637,3 +637,21 @@ func TestRegistryOptInStateMachine(t *testing.T) {
 		t.Fatal("accepted confirmation without request")
 	}
 }
+
+func TestAutoUpdateOptInRequiresRegistryOptIn(t *testing.T) {
+	state, err := TransitionAutoUpdateOptIn(AutoUpdateDisabled, AutoUpdateRequest, RegistryDisabled)
+	if err != nil || state != AutoUpdatePending {
+		t.Fatalf("auto-update request = %s, %v", state, err)
+	}
+	if _, err := TransitionAutoUpdateOptIn(state, AutoUpdateConfirm, RegistryDisabled); err == nil {
+		t.Fatal("enabled auto-update without registry opt-in")
+	}
+	state, err = TransitionAutoUpdateOptIn(state, AutoUpdateConfirm, RegistryEnabled)
+	if err != nil || !state.Allowed() {
+		t.Fatalf("auto-update confirmation = %s, %v", state, err)
+	}
+	state, err = TransitionAutoUpdateOptIn(state, AutoUpdateRevoke, RegistryEnabled)
+	if err != nil || state != AutoUpdateDisabled {
+		t.Fatalf("auto-update revoke = %s, %v", state, err)
+	}
+}

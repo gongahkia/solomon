@@ -1202,6 +1202,38 @@ func TestExtractPythonFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractRustFailureEvidence(t *testing.T) {
+	output := "error: no such command: `buid`\nerror: unexpected argument '--relese' found\nerror: the manifest-path must be a path to a Cargo.toml file: `/tmp/Cargo.tmol`\nerror: couldn't read `./src/mian.rs`: No such file or directory (os error 2)\nerror: invalid value 'updat' for '[+toolchain]': error: \"updat\" is not a valid subcommand\nerror: no such command: `buid`\n"
+	evidence, err := ExtractRustFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "cargo-manifest-path-invalid", Value: "/tmp/Cargo.tmol"},
+		{Kind: "cargo-unknown-argument", Value: "--relese"},
+		{Kind: "cargo-unknown-subcommand", Value: "buid"},
+		{Kind: "rustc-source-not-found", Value: "./src/mian.rs"},
+		{Kind: "rustup-invalid-toolchain", Value: "updat"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractRustFailureEvidence("error: invalid value 'updat' for '[+toolchain]': error: \"updat\" is not a valid subcommand\nerror: couldn't read `./src/mian.rs`: No such file or directory (os error 2)\nerror: the manifest-path must be a path to a Cargo.toml file: `/tmp/Cargo.tmol`\nerror: unexpected argument '--relese' found\nerror: no such command: `buid`\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractRustFailureEvidence("error: couldn't read `https://user:password@example.invalid/main.rs`: No such file or directory (os error 2)\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/main.rs" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if evidence, err := ExtractRustFailureEvidence("error: unrelated"); err != nil || len(evidence) != 0 {
+		t.Fatalf("unmatched evidence = %#v, %v", evidence, err)
+	}
+	if _, err := ExtractRustFailureEvidence(strings.Repeat("x", maxRustFailureOutputBytes+1)); !errors.Is(err, ErrRustFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

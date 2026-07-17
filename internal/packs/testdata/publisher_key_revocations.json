@@ -1,0 +1,7 @@
+[
+  {"name":"active-publisher","publisher":"alpha","revoked":[],"verify":true},
+  {"name":"revoked-publisher","publisher":"alpha","revoked":["alpha"],"verify":false},
+  {"name":"unsorted-revocation-list","publisher":"alpha","revoked":["zeta","alpha"],"verify":false},
+  {"name":"other-publisher-revoked","publisher":"alpha","revoked":["beta"],"verify":true},
+  {"name":"missing-publisher","publisher":"missing","revoked":[],"verify":false}
+]

@@ -2244,6 +2244,48 @@ func TestRevokedPublisherKeyCannotVerify(t *testing.T) {
 	}
 }
 
+type publisherRevocationFixture struct {
+	Name      string   `json:"name"`
+	Publisher string   `json:"publisher"`
+	Revoked   []string `json:"revoked"`
+	Verify    bool     `json:"verify"`
+}
+
+func TestPublisherKeyRevocationRegressionCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/publisher_key_revocations.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []publisherRevocationFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("publisher revocation corpus is empty")
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("publisher revocation corpus")
+	signature := ed25519.Sign(privateKey, payload)
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			if fixture.Name == "" || fixture.Publisher == "" {
+				t.Fatalf("invalid publisher revocation fixture: %#v", fixture)
+			}
+			keyring := Keyring{Publishers: []PublisherKey{{ID: "alpha", PublicKey: base64.RawStdEncoding.EncodeToString(publicKey)}}, Revoked: append([]string(nil), fixture.Revoked...)}
+			err := VerifyPublisherSignature(payload, signature, fixture.Publisher, keyring)
+			if (err == nil) != fixture.Verify {
+				t.Fatalf("VerifyPublisherSignature(%q) error = %v, want verify=%t", fixture.Publisher, err, fixture.Verify)
+			}
+			if got, want := keyring.RevokedFor(fixture.Publisher), slices.Contains(fixture.Revoked, fixture.Publisher); got != want {
+				t.Fatalf("RevokedFor(%q) = %t, want %t", fixture.Publisher, got, want)
+			}
+		})
+	}
+}
+
 func TestVerifyTUFRootBootstrap(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

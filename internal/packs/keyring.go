@@ -66,8 +66,12 @@ func (k *Keyring) Revoke(id string) bool {
 }
 
 func (k Keyring) RevokedFor(id string) bool {
-	index := sort.SearchStrings(k.Revoked, id)
-	return index < len(k.Revoked) && k.Revoked[index] == id
+	for _, revoked := range k.Revoked {
+		if revoked == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (k *Keyring) Add(id string, key ed25519.PublicKey) error {

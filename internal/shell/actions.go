@@ -62,6 +62,35 @@ type RuleSuppressions struct {
 	rules map[string]struct{}
 }
 
+type SafeRuleAcceptances struct {
+	mu    sync.RWMutex
+	rules map[string]struct{}
+}
+
+func (a *SafeRuleAcceptances) Accept(rule, risk string) bool {
+	rule = strings.TrimSpace(rule)
+	if rule == "" || risk != "safe" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.rules == nil {
+		a.rules = map[string]struct{}{}
+	}
+	if _, ok := a.rules[rule]; ok {
+		return false
+	}
+	a.rules[rule] = struct{}{}
+	return true
+}
+
+func (a *SafeRuleAcceptances) Accepted(rule string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	_, ok := a.rules[strings.TrimSpace(rule)]
+	return ok
+}
+
 func (s *RuleSuppressions) Suppress(rule string) bool {
 	rule = strings.TrimSpace(rule)
 	if rule == "" {

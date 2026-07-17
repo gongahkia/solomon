@@ -73,6 +73,13 @@ func TestRuleSuppressions(t *testing.T) {
 	}
 }
 
+func TestSafeRuleAcceptances(t *testing.T) {
+	var acceptances SafeRuleAcceptances
+	if acceptances.Accept("core-git", "high") || acceptances.Accept("", "safe") || !acceptances.Accept("core-git", "safe") || acceptances.Accept("core-git", "safe") || !acceptances.Accepted("core-git") {
+		t.Fatal("safe rule acceptance state is incorrect")
+	}
+}
+
 func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
 	markers := map[string]string{
 		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,

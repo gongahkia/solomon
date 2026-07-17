@@ -209,6 +209,8 @@ end
 const powerShellScript = `# close-enough PowerShell integration
 if (-not $global:CloseEnoughAdapterLoaded) {
 $global:CloseEnoughAdapterLoaded = $true
+$global:CloseEnoughLastHistoryId = 0
+$global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
@@ -233,6 +235,15 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     return
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+}
+function global:prompt {
+  $status = $?
+  $entry = Get-History -Count 1
+  if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
+    $global:CloseEnoughLastHistoryId = $entry.Id
+    & close-enough check --stage post --format plain --command $entry.CommandLine 2>$null
+  }
+  if ($null -ne $global:CloseEnoughPreviousPrompt) { & $global:CloseEnoughPreviousPrompt }
 }
 }
 `

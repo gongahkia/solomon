@@ -726,6 +726,16 @@ func TestPowerShellRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	}
 }
 
+func TestPowerShellPostFailureConsumesHistoryEntry(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `--stage post --format plain --command $entry.CommandLine`) {
+		t.Fatalf("PowerShell post-failure hook is missing or unsafe: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

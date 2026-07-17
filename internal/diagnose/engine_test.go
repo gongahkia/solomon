@@ -104,6 +104,25 @@ func TestGitSubcommandTypo(t *testing.T) {
 	}
 }
 
+func TestCommandDiffPreservesShellQuotingAndRedactsSecrets(t *testing.T) {
+	line := `git "sttaus" --message 'keep quote'`
+	decision, err := New(Options{Config: config.Default()}).Check(line, "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decision.CommandDiff(line); got != "- git \"sttaus\" --message 'keep quote'\n+ git \"status\" --message 'keep quote'" {
+		t.Fatalf("quoted diff = %q", got)
+	}
+	repeated := Decision{original: "gti", replacement: "git", occurrence: 2}
+	if got := repeated.CommandDiff("echo gti && gti status"); got != "- echo gti && gti status\n+ echo gti && git status" {
+		t.Fatalf("repeated diff = %q", got)
+	}
+	secret := Decision{original: "gti", replacement: "git", occurrence: 1}
+	if got := secret.CommandDiff("gti --token=top-secret"); got != "" {
+		t.Fatalf("secret diff = %q", got)
+	}
+}
+
 func TestConfidenceThresholdsDifferByRepairClass(t *testing.T) {
 	for _, test := range []struct {
 		class     RepairClass

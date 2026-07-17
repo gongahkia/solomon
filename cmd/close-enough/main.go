@@ -146,7 +146,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 		_, err = stdout.Write(append(data, '\n'))
 		return clierr.Wrap(clierr.Operation, err)
 	case "plain":
-		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display))
+		_, err = fmt.Fprint(stdout, renderPlainDiagnostic(decision, cfg.Display, *command))
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
 		record, err := decision.Record()
@@ -160,7 +160,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 	}
 }
 
-func renderPlainDiagnostic(decision diagnose.Decision, display config.Display) string {
+func renderPlainDiagnostic(decision diagnose.Decision, display config.Display, command string) string {
 	if decision.Suggestion == "" {
 		return "no suggestion\n"
 	}
@@ -177,6 +177,9 @@ func renderPlainDiagnostic(decision diagnose.Decision, display config.Display) s
 	}
 	if display.Change && decision.Suggestion != "" {
 		lines = append(lines, "Did you mean: "+sanitizeTerminalText(decision.Suggestion))
+		if diff := decision.CommandDiff(command); diff != "" {
+			lines = append(lines, strings.Split(diff, "\n")...)
+		}
 	}
 	if display.Risk {
 		lines = append(lines, "Risk: "+string(decision.Risk))

@@ -50,6 +50,9 @@ type Decision struct {
 	Risk        Risk        `json:"risk"`
 	Incomplete  bool        `json:"incomplete,omitempty"`
 	Trace       []string    `json:"trace,omitempty"`
+	original    string
+	replacement string
+	occurrence  int
 }
 
 type Event struct {
@@ -220,7 +223,7 @@ func (e Engine) commandDecision(words []string) Decision {
 		replaced := append([]string{}, words...)
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}
 	}
 	return Decision{}
 }
@@ -242,7 +245,7 @@ func semanticDecision(words []string) Decision {
 		replaced := append([]string{}, words...)
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}
 	}
 	return Decision{}
 }
@@ -274,9 +277,10 @@ func (e Engine) pathDecision(words []string) Decision {
 			continue
 		}
 		replaced := append([]string{}, words...)
-		replaced[i] = filepath.Join(dir, best)
+		replacement := filepath.Join(dir, best)
+		replaced[i] = replacement
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}}
+		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}
 	}
 	return Decision{}
 }
@@ -340,6 +344,123 @@ func tokenize(line string) ([]string, error) {
 	}
 	flush()
 	return result, nil
+}
+
+func tokenOccurrence(words []string, position int) int {
+	occurrence := 0
+	for index := 0; index <= position; index++ {
+		if words[index] == words[position] {
+			occurrence++
+		}
+	}
+	return occurrence
+}
+
+func (d Decision) CommandDiff(line string) string {
+	if d.Risk == RiskHigh || d.original == "" || d.replacement == "" || d.occurrence < 1 {
+		return ""
+	}
+	words, err := tokenize(line)
+	if err != nil {
+		return ""
+	}
+	if _, containsSecret := redact.Command(words); containsSecret {
+		return ""
+	}
+	corrected, ok := replaceTokenOccurrence(line, d.original, d.replacement, d.occurrence)
+	if !ok {
+		return ""
+	}
+	return "- " + line + "\n+ " + corrected
+}
+
+type shellTokenRange struct {
+	start int
+	end   int
+	value string
+}
+
+func replaceTokenOccurrence(line, original, replacement string, occurrence int) (string, bool) {
+	matched := 0
+	for _, token := range shellTokenRanges(line) {
+		if token.value != original {
+			continue
+		}
+		matched++
+		if matched != occurrence {
+			continue
+		}
+		return line[:token.start] + quotedReplacement(line[token.start:token.end], replacement) + line[token.end:], true
+	}
+	return "", false
+}
+
+func shellTokenRanges(line string) []shellTokenRange {
+	ranges := []shellTokenRange{}
+	var value strings.Builder
+	start := -1
+	var quote rune
+	escaped := false
+	flush := func(end int) {
+		if start >= 0 {
+			ranges = append(ranges, shellTokenRange{start: start, end: end, value: value.String()})
+			value.Reset()
+			start = -1
+		}
+	}
+	for index, character := range line {
+		if escaped {
+			value.WriteRune(character)
+			escaped = false
+			continue
+		}
+		if character == '\\' && quote != '\'' {
+			if start < 0 {
+				start = index
+			}
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if character == quote {
+				quote = 0
+			} else {
+				value.WriteRune(character)
+			}
+			continue
+		}
+		if character == '\'' || character == '"' {
+			if start < 0 {
+				start = index
+			}
+			quote = character
+			continue
+		}
+		if character == ' ' || character == '\t' {
+			flush(index)
+			continue
+		}
+		if character == ';' || character == '&' || character == '|' || character == '(' || character == ')' || character == '\n' {
+			flush(index)
+			continue
+		}
+		if start < 0 {
+			start = index
+		}
+		value.WriteRune(character)
+	}
+	flush(len(line))
+	return ranges
+}
+
+func quotedReplacement(raw, replacement string) string {
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		return "'" + strings.ReplaceAll(replacement, "'", "'\\''") + "'"
+	}
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		return `"` + strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "$", "\\$", "`", "\\`").Replace(replacement) + `"`
+	}
+	return replacement
 }
 
 func compoundOperator(runes []rune) (string, int) {

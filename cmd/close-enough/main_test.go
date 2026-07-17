@@ -159,24 +159,24 @@ func TestCheckIncompleteInputReturnsNoRepair(t *testing.T) {
 
 func TestRenderPlainDiagnosticHonorsDisplayConfiguration(t *testing.T) {
 	decision := diagnose.Decision{Cause: "unknown command", Consequence: "the shell will reject it", Suggestion: "git status", Risk: diagnose.RiskSafe, Trace: []string{"resolver:path", "distance:1"}}
-	if got := renderPlainDiagnostic(decision, config.Default().Display); got != "unknown command: the shell will reject it\nDid you mean: git status\nRisk: safe\n" {
+	if got := renderPlainDiagnostic(decision, config.Default().Display, ""); got != "unknown command: the shell will reject it\nDid you mean: git status\nRisk: safe\n" {
 		t.Fatalf("default display = %q", got)
 	}
 	display := config.Display{Change: true}
-	if got := renderPlainDiagnostic(decision, display); got != "Did you mean: git status\n" {
+	if got := renderPlainDiagnostic(decision, display, ""); got != "Did you mean: git status\n" {
 		t.Fatalf("change-only display = %q", got)
 	}
-	if got := renderPlainDiagnostic(decision, config.Display{}); got != "" {
+	if got := renderPlainDiagnostic(decision, config.Display{}, ""); got != "" {
 		t.Fatalf("empty display = %q", got)
 	}
-	if got := renderPlainDiagnostic(decision, config.Display{Trace: true}); got != "Trace: resolver:path, distance:1\n" {
+	if got := renderPlainDiagnostic(decision, config.Display{Trace: true}, ""); got != "Trace: resolver:path, distance:1\n" {
 		t.Fatalf("trace display = %q", got)
 	}
-	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}); got != "no suggestion\n" {
+	if got := renderPlainDiagnostic(diagnose.Decision{}, config.Display{Trace: true}, ""); got != "no suggestion\n" {
 		t.Fatalf("empty trace display = %q", got)
 	}
 	unsafe := diagnose.Decision{Cause: "bad\x1b", Consequence: "next\nline", Suggestion: "git\tstatus", Risk: diagnose.RiskSafe}
-	if got := renderPlainDiagnostic(unsafe, config.Default().Display); got != "bad\\x1B: next\\x0Aline\nDid you mean: git\\x09status\nRisk: safe\n" {
+	if got := renderPlainDiagnostic(unsafe, config.Default().Display, ""); got != "bad\\x1B: next\\x0Aline\nDid you mean: git\\x09status\nRisk: safe\n" {
 		t.Fatalf("sanitized display = %q", got)
 	}
 }
@@ -195,7 +195,7 @@ func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	if err := run([]string{"check", "--format", "plain", "--command", "git sttaus"}, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := output.String(); got != "Did you mean: git status\n" {
+	if got := output.String(); got != "Did you mean: git status\n- git sttaus\n+ git status\n" {
 		t.Fatalf("plain output = %q", got)
 	}
 }

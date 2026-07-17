@@ -156,6 +156,24 @@ func TestReleaseWorkflowAttestsPackagedArchive(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowGeneratesCycloneDXSBOM(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0",
+		"scripts/release-sbom.sh",
+		"name: sbom-",
+		"path: dist/*.cdx.json",
+		"if-no-files-found: error",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks CycloneDX SBOM marker %q", marker)
+		}
+	}
+}
+
 func verifyReleaseArtifactChecksum(data []byte, artifact, manifest string) bool {
 	fields := strings.Fields(manifest)
 	if len(fields) != 2 || fields[1] != filepath.Base(artifact) {

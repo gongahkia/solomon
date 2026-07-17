@@ -38,6 +38,17 @@ const (
 	RepairClassPath     RepairClass = "path"
 )
 
+type consequenceTemplate struct {
+	cause       string
+	consequence string
+}
+
+var consequenceTemplates = map[RepairClass]consequenceTemplate{
+	RepairClassCommand:  {cause: "command not found locally", consequence: "the shell would reject this command"},
+	RepairClassSemantic: {cause: "unknown Git subcommand", consequence: "Git will exit before performing work"},
+	RepairClassPath:     {cause: "path does not exist", consequence: "the command may fail or target the wrong file"},
+}
+
 type Decision struct {
 	Version     int         `json:"version"`
 	Action      string      `json:"action"`
@@ -166,6 +177,11 @@ func noDecision() Decision {
 	return Decision{Version: AdapterProtocolVersion, Action: "none", Risk: RiskSafe}
 }
 
+func consequenceFor(class RepairClass) (consequenceTemplate, bool) {
+	template, ok := consequenceTemplates[class]
+	return template, ok
+}
+
 func (e Engine) applyMode(decision Decision, stage string) Decision {
 	if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
 		return rewritten
@@ -223,7 +239,8 @@ func (e Engine) commandDecision(words []string) Decision {
 		replaced := append([]string{}, words...)
 		replaced[position] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "command not found locally", Consequence: "the shell would reject this command", Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}
+		template, _ := consequenceFor(RepairClassCommand)
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassCommand, Evidence: collectEvidence(RepairClassCommand, "path", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:path", "distance:" + fmt.Sprint(distance)}, original: word, replacement: best, occurrence: tokenOccurrence(words, position)}
 	}
 	return Decision{}
 }
@@ -245,7 +262,8 @@ func semanticDecision(words []string) Decision {
 		replaced := append([]string{}, words...)
 		replaced[position+1] = best
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "unknown Git subcommand", Consequence: "Git will exit before performing work", Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}
+		template, _ := consequenceFor(RepairClassSemantic)
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}
 	}
 	return Decision{}
 }
@@ -280,7 +298,8 @@ func (e Engine) pathDecision(words []string) Decision {
 		replacement := filepath.Join(dir, best)
 		replaced[i] = replacement
 		suggestion, containsSecret := redact.Command(replaced)
-		return Decision{Version: AdapterProtocolVersion, Cause: "path does not exist", Consequence: "the command may fail or target the wrong file", Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}
+		template, _ := consequenceFor(RepairClassPath)
+		return Decision{Version: AdapterProtocolVersion, Cause: template.cause, Consequence: template.consequence, Suggestion: suggestion, Class: RepairClassPath, Evidence: collectEvidence(RepairClassPath, "filesystem", distance, confidence), Confidence: confidence, Risk: classify(replaced, containsSecret), Trace: []string{"resolver:filesystem", "distance:" + fmt.Sprint(distance)}, original: word, replacement: replacement, occurrence: tokenOccurrence(words, i)}
 	}
 	return Decision{}
 }

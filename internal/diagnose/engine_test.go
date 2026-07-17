@@ -104,6 +104,26 @@ func TestGitSubcommandTypo(t *testing.T) {
 	}
 }
 
+func TestConsequenceTemplatesCoverRepairClasses(t *testing.T) {
+	for _, test := range []struct {
+		class       RepairClass
+		cause       string
+		consequence string
+	}{
+		{RepairClassCommand, "command not found locally", "the shell would reject this command"},
+		{RepairClassSemantic, "unknown Git subcommand", "Git will exit before performing work"},
+		{RepairClassPath, "path does not exist", "the command may fail or target the wrong file"},
+	} {
+		template, ok := consequenceFor(test.class)
+		if !ok || template.cause != test.cause || template.consequence != test.consequence {
+			t.Fatalf("template(%s) = %#v, %t", test.class, template, ok)
+		}
+	}
+	if _, ok := consequenceFor(RepairClass("unknown")); ok {
+		t.Fatal("unknown repair class must not have a consequence template")
+	}
+}
+
 func TestCommandDiffPreservesShellQuotingAndRedactsSecrets(t *testing.T) {
 	line := `git "sttaus" --message 'keep quote'`
 	decision, err := New(Options{Config: config.Default()}).Check(line, "pre")

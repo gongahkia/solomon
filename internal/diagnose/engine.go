@@ -105,13 +105,13 @@ func (e Engine) Check(line, stage string) (Decision, error) {
 		return noDecision(), nil
 	}
 	if decision := e.commandDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision), nil
+		return e.applyMode(decision, stage), nil
 	}
 	if decision := semanticDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision), nil
+		return e.applyMode(decision, stage), nil
 	}
 	if decision := e.pathDecision(words); decision.Suggestion != "" {
-		return e.applyMode(decision), nil
+		return e.applyMode(decision, stage), nil
 	}
 	return noDecision(), nil
 }
@@ -120,11 +120,11 @@ func noDecision() Decision {
 	return Decision{Version: AdapterProtocolVersion, Action: "none", Risk: RiskSafe}
 }
 
-func (e Engine) applyMode(decision Decision) Decision {
+func (e Engine) applyMode(decision Decision, stage string) Decision {
 	if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
 		return rewritten
 	}
-	if e.shouldInterrupt(decision) {
+	if e.shouldInterrupt(decision, stage) {
 		decision.Action = "interrupt"
 		return decision
 	}
@@ -150,8 +150,9 @@ func (e Engine) evaluateRewriteBuffer(decision Decision) (Decision, bool) {
 	return decision, true
 }
 
-func (e Engine) shouldInterrupt(decision Decision) bool {
-	return e.options.Config.Mode == "interrupt" &&
+func (e Engine) shouldInterrupt(decision Decision, stage string) bool {
+	return stage == "pre" &&
+		e.options.Config.Mode == "interrupt" &&
 		decision.Suggestion != "" &&
 		!decision.Incomplete &&
 		decision.Confidence >= 0.90 &&

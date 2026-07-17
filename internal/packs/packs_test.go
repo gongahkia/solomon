@@ -1618,6 +1618,37 @@ func TestExtractGoFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractContainerFailureEvidence(t *testing.T) {
+	output := "docker: unknown command: docker bulid\nunknown flag: --detachd\nERROR: failed to build: failed to read dockerfile: open Dockerfil: no such file or directory\nopen compose.yamll: no such file or directory\ndocker: unknown command: docker bulid\n"
+	evidence, err := ExtractContainerFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "container-file-not-found", Value: "Dockerfil"},
+		{Kind: "container-file-not-found", Value: "compose.yamll"},
+		{Kind: "container-unknown-command", Value: "bulid"},
+		{Kind: "container-unknown-flag", Value: "--detachd"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractContainerFailureEvidence("unknown flag: --detachd\nopen compose.yamll: no such file or directory\nERROR: failed to build: failed to read dockerfile: open Dockerfil: no such file or directory\ndocker: unknown command: docker bulid\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractContainerFailureEvidence("error: open https://user:password@example.invalid/compose.yaml: no such file or directory\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid/compose.yaml" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if evidence, err := ExtractContainerFailureEvidence("container: unrelated"); err != nil || len(evidence) != 0 {
+		t.Fatalf("unmatched evidence = %#v, %v", evidence, err)
+	}
+	if _, err := ExtractContainerFailureEvidence(strings.Repeat("x", maxContainerFailureOutputBytes+1)); !errors.Is(err, ErrContainerFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

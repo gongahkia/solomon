@@ -741,3 +741,41 @@ func TestPackUpdateRollsBackOnActivationFailure(t *testing.T) {
 		t.Fatalf("rollback = %q, want %q", data, previous)
 	}
 }
+
+func TestRegistryRefreshUsesConfirmedRegistry(t *testing.T) {
+	pack := func(cause string) Pack {
+		return Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: cause, Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	}
+	called := false
+	result, err := RefreshRegistry(RegistryEnabled, []Pack{pack("cached")}, func() ([]Pack, error) {
+		called = true
+		return []Pack{pack("updated")}, nil
+	})
+	if err != nil || !called || !result.Updated || result.Offline {
+		t.Fatalf("refresh = %#v, %v, called=%t", result, err, called)
+	}
+	if len(result.Packs) != 1 || result.Packs[0].Rules[0].Cause != "updated" {
+		t.Fatalf("updated packs = %#v", result.Packs)
+	}
+	called = false
+	result, err = RefreshRegistry(RegistryPending, []Pack{pack("cached")}, func() ([]Pack, error) {
+		called = true
+		return nil, nil
+	})
+	if err != nil || called || result.Updated || result.Offline || result.Packs[0].Rules[0].Cause != "cached" {
+		t.Fatalf("unconfirmed refresh = %#v, %v, called=%t", result, err, called)
+	}
+}
+
+func TestRegistryRefreshOfflinePreservesCachedPacks(t *testing.T) {
+	cached := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "cached", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	result, err := RefreshRegistry(RegistryEnabled, []Pack{cached}, func() ([]Pack, error) {
+		return nil, errors.New("network unavailable")
+	})
+	if !errors.Is(err, ErrRegistryOffline) || !result.Offline || result.Updated {
+		t.Fatalf("offline refresh = %#v, %v", result, err)
+	}
+	if len(result.Packs) != 1 || result.Packs[0].Rules[0].Cause != "cached" {
+		t.Fatalf("cached packs = %#v", result.Packs)
+	}
+}

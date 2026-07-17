@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {"id": "javascript-command-ndoe", "command": "ndoe", "replacement": "node"},
+    {"id": "javascript-command-npxx", "command": "npxx", "replacement": "npx"},
+    {"id": "javascript-command-denoo", "command": "denoo", "replacement": "deno"},
+    {"id": "javascript-command-bnu", "command": "bnu", "replacement": "bun"},
+    {"id": "javascript-command-tsn", "command": "tsn", "replacement": "ts-node"}
+  ]
+}

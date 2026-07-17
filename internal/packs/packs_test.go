@@ -320,6 +320,27 @@ func TestPackageManagerCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestJavaScriptCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "javascript-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"ndoe": "node", "npxx": "npx", "denoo": "deno", "bnu": "bun", "tsn": "ts-node"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "ndoe")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err == nil {
+		t.Fatal("accepted incomplete JavaScript candidates")
+	}
+}
+
 func TestPackageManagerSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "package-managers.json"))
 	if err != nil {

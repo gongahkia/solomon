@@ -595,6 +595,35 @@ func TestExtractGitFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestExtractPackageManagerFailureEvidence(t *testing.T) {
+	output := "error Command \"buid\" not found.\nnpm error code E404\nERR_PNPM_NO_MATCHING_VERSION\nError: No available formula with the name \"fooo\".\nnpm error Missing script: \"buid\"\nnpm error code E404\n"
+	evidence, err := ExtractPackageManagerFailureEvidence(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{
+		{Kind: "brew-missing-formula", Value: "fooo"},
+		{Kind: "npm-error-code", Value: "E404"},
+		{Kind: "npm-missing-script", Value: "buid"},
+		{Kind: "pnpm-error-code", Value: "ERR_PNPM_NO_MATCHING_VERSION"},
+		{Kind: "yarn-unknown-command", Value: "buid"},
+	}
+	if !slices.Equal(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+	reversed, err := ExtractPackageManagerFailureEvidence("npm error Missing script: \"buid\"\nError: No available formula with the name \"fooo\".\nERR_PNPM_NO_MATCHING_VERSION\nnpm error code E404\nerror Command \"buid\" not found.\n")
+	if err != nil || !slices.Equal(reversed, want) {
+		t.Fatalf("reversed evidence = %#v, %v", reversed, err)
+	}
+	redacted, err := ExtractPackageManagerFailureEvidence("error Command \"https://user:password@example.invalid\" not found.\n")
+	if err != nil || len(redacted) != 1 || redacted[0].Value != "https://[REDACTED]@example.invalid" {
+		t.Fatalf("redacted evidence = %#v, %v", redacted, err)
+	}
+	if _, err := ExtractPackageManagerFailureEvidence(strings.Repeat("x", maxPackageManagerFailureOutputBytes+1)); !errors.Is(err, ErrPackageManagerFailureOutputTooLarge) {
+		t.Fatalf("oversized failure output = %v", err)
+	}
+}
+
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
 		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}

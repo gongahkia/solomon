@@ -34,7 +34,7 @@ func ExtractGitFailureEvidence(output string) ([]diagnose.Evidence, error) {
 	unique := map[string]diagnose.Evidence{}
 	for _, extractor := range gitFailurePatterns {
 		for _, match := range extractor.pattern.FindAllStringSubmatch(output, -1) {
-			value := sanitizeGitFailureEvidence(match[1])
+			value := sanitizeFailureEvidence(match[1])
 			if value == "" {
 				continue
 			}
@@ -54,7 +54,7 @@ func ExtractGitFailureEvidence(output string) ([]diagnose.Evidence, error) {
 	return evidence, nil
 }
 
-func sanitizeGitFailureEvidence(value string) string {
+func sanitizeFailureEvidence(value string) string {
 	value = strings.TrimSpace(value)
 	value, _ = redact.Text(value)
 	if value == "" || len(value) > maxGitFailureEvidenceSize {

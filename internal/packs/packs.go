@@ -68,7 +68,11 @@ func (p Pack) Validate() error {
 			return fmt.Errorf("duplicate rule %q", rule.ID)
 		}
 		seen[rule.ID] = struct{}{}
-		if _, err := regexp.Compile(rule.Pattern); err != nil {
+		pattern, err := regexp.Compile(rule.Pattern)
+		if err != nil {
+			return fmt.Errorf("rule %q: %w", rule.ID, err)
+		}
+		if err := validateTransformationTemplate(rule.Replacement, pattern.NumSubexp()); err != nil {
 			return fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
 		if rule.Risk != diagnose.RiskSafe && rule.Risk != diagnose.RiskHigh && rule.Risk != diagnose.RiskUnknown {
@@ -84,3 +88,30 @@ var semanticVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]
 func identifier(value string) bool { return identifierPattern.MatchString(value) }
 
 func semanticVersion(value string) bool { return semanticVersionPattern.MatchString(value) }
+
+func validateTransformationTemplate(template string, captures int) error {
+	for index := 0; index < len(template); index++ {
+		if template[index] != '$' {
+			continue
+		}
+		if index+1 >= len(template) {
+			return errors.New("transformation template ends with $")
+		}
+		if template[index+1] == '$' {
+			index++
+			continue
+		}
+		if template[index+1] < '1' || template[index+1] > '9' {
+			return errors.New("transformation template only permits numeric capture references")
+		}
+		capture := 0
+		for index+1 < len(template) && template[index+1] >= '0' && template[index+1] <= '9' {
+			index++
+			capture = capture*10 + int(template[index]-'0')
+			if capture > captures {
+				return fmt.Errorf("transformation template references unavailable capture $%d", capture)
+			}
+		}
+	}
+	return nil
+}

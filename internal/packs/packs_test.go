@@ -124,3 +124,23 @@ func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
 		t.Fatalf("matcher executed input: %v", err)
 	}
 }
+
+func TestTransformationTemplateValidation(t *testing.T) {
+	for _, test := range []struct {
+		pattern     string
+		replacement string
+		valid       bool
+	}{
+		{`^(git) (sttaus)$`, `$1 status`, true},
+		{`^sttaus$`, `status $$HOME`, true},
+		{`^(git)$`, `$2`, false},
+		{`^sttaus$`, `${command}`, false},
+		{`^sttaus$`, `$(touch marker)`, false},
+		{`^sttaus$`, `status$`, false},
+	} {
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: test.pattern, Replacement: test.replacement, Cause: "typo", Risk: diagnose.RiskSafe}}}
+		if got := pack.Validate() == nil; got != test.valid {
+			t.Fatalf("template %q with %q valid = %t, want %t", test.pattern, test.replacement, got, test.valid)
+		}
+	}
+}

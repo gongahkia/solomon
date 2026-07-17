@@ -341,6 +341,27 @@ func TestJavaScriptCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestPythonCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "python-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"pyhton": "python", "pip3p": "pip3", "pytestt": "pytest", "pyhton3": "python3", "uvv": "uv"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "pyhton")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) {
+		value, ok := resolved[command]
+		return value, ok
+	}); err == nil {
+		t.Fatal("accepted incomplete Python candidates")
+	}
+}
+
 func TestJavaScriptSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "javascript.json"))
 	if err != nil {

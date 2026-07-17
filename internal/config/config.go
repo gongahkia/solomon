@@ -12,6 +12,7 @@ import (
 
 	"github.com/gongahkia/close-enough/internal/credential"
 	"github.com/gongahkia/close-enough/internal/featuregate"
+	"github.com/gongahkia/close-enough/internal/filesystem"
 	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
@@ -181,6 +182,10 @@ func projectPath(cwd string) (string, bool) {
 }
 
 func trustedProject(path string) bool {
+	capabilities := filesystem.Current()
+	if !capabilities.Supports(filesystem.RestrictivePermissions) || !capabilities.Supports(filesystem.OwnerVerification) {
+		return false
+	}
 	marker := filepath.Join(filepath.Dir(path), "trusted")
 	markerInfo, err := os.Lstat(marker)
 	if err != nil || !markerInfo.Mode().IsRegular() || !hasSecurePermissions(marker, markerInfo, false) {

@@ -24,6 +24,8 @@ Optional local-history encryption keys use an injected OS credential-store backe
 
 Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories; `close-enough doctor` reports these findings without blocking.
 
+Secure writes and trusted project configuration require platform support for atomic replacement, restrictive permissions, and ownership verification; unsupported platforms fail closed.
+
 Release builds report injected version and commit metadata through `close-enough version`.
 
 Run the local CI target with `make ci`.

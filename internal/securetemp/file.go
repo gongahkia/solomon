@@ -3,6 +3,8 @@ package securetemp
 import (
 	"errors"
 	"os"
+
+	"github.com/gongahkia/close-enough/internal/filesystem"
 )
 
 type File struct {
@@ -36,6 +38,9 @@ func (file *File) Write(data []byte) (int, error) {
 }
 
 func (file *File) Commit(path string) error {
+	if err := filesystem.Current().Require(filesystem.AtomicReplace); err != nil {
+		return err
+	}
 	if file.committed {
 		return errors.New("temporary file already committed")
 	}

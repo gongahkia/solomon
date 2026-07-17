@@ -71,6 +71,20 @@ jobs:
           name: sbom-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.cdx.json
           if-no-files-found: error
+      - run: go install github.com/google/go-licenses/v2@v2.0.1
+      - run: |
+          archive='${{ steps.release-archive.outputs.path }}'
+          case "$archive" in
+            *.tar.gz) audit="${archive%.tar.gz}.licenses.csv" ;;
+            *.zip) audit="${archive%.zip}.licenses.csv" ;;
+            *) exit 2 ;;
+          esac
+          sh scripts/release-license-audit.sh "$(go env GOPATH)/bin/go-licenses" . "$audit" "${{ matrix.goos }}" "${{ matrix.goarch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: license-audit-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.licenses.csv
+          if-no-files-found: error
       - uses: sigstore/cosign-installer@v4.1.0
       - run: |
           archive='${{ steps.release-archive.outputs.path }}'

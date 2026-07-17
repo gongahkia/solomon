@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -457,5 +460,40 @@ func TestRevokedPublisherKeyCannotVerify(t *testing.T) {
 	}
 	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
 		t.Fatal("accepted revoked publisher")
+	}
+}
+
+func TestVerifyTUFRootBootstrap(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key TUFKey
+	key.KeyType, key.Scheme = "ed25519", "ed25519"
+	key.KeyVal.Public = base64.RawStdEncoding.EncodeToString(publicKey)
+	root := TUFRoot{Type: "root", Version: 1, Keys: map[string]TUFKey{"root-key": key}, Roles: map[string]TUFRole{"root": {KeyIDs: []string{"root-key"}, Threshold: 1}}}
+	payload, err := CanonicalRootPayload(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := TUFEnvelope{Signed: payload, Signatures: []TUFSignature{{KeyID: "root-key", Sig: hex.EncodeToString(ed25519.Sign(privateKey, payload))}}}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyRootBootstrap(data, map[string]ed25519.PublicKey{"root-key": publicKey})
+	if err != nil || verified.Version != 1 {
+		t.Fatalf("verified root = %#v, %v", verified, err)
+	}
+	if _, err := VerifyRootBootstrap(data, map[string]ed25519.PublicKey{}); err == nil {
+		t.Fatal("accepted missing trust anchor")
+	}
+	envelope.Signatures[0].Sig = hex.EncodeToString(ed25519.Sign(privateKey, []byte("tampered")))
+	data, err = json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyRootBootstrap(data, map[string]ed25519.PublicKey{"root-key": publicKey}); err == nil {
+		t.Fatal("accepted tampered root signature")
 	}
 }

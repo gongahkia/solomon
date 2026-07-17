@@ -21,6 +21,7 @@ type PublisherKey struct {
 
 type Keyring struct {
 	Publishers []PublisherKey `json:"publishers"`
+	Revoked    []string       `json:"revoked,omitempty"`
 }
 
 func LoadKeyring(path string) (Keyring, error) {
@@ -44,6 +45,9 @@ func LoadKeyring(path string) (Keyring, error) {
 }
 
 func (k Keyring) PublicKey(id string) (ed25519.PublicKey, bool) {
+	if k.RevokedFor(id) {
+		return nil, false
+	}
 	index := sort.Search(len(k.Publishers), func(index int) bool { return k.Publishers[index].ID >= id })
 	if index == len(k.Publishers) || k.Publishers[index].ID != id {
 		return nil, false
@@ -52,12 +56,28 @@ func (k Keyring) PublicKey(id string) (ed25519.PublicKey, bool) {
 	return ed25519.PublicKey(key), err == nil
 }
 
+func (k *Keyring) Revoke(id string) bool {
+	if !identifier(id) || k.RevokedFor(id) {
+		return false
+	}
+	k.Revoked = append(k.Revoked, id)
+	sort.Strings(k.Revoked)
+	return true
+}
+
+func (k Keyring) RevokedFor(id string) bool {
+	index := sort.SearchStrings(k.Revoked, id)
+	return index < len(k.Revoked) && k.Revoked[index] == id
+}
+
 func (k *Keyring) Add(id string, key ed25519.PublicKey) error {
 	if !identifier(id) || len(key) != ed25519.PublicKeySize {
 		return errors.New("invalid publisher key")
 	}
-	if _, exists := k.PublicKey(id); exists {
-		return fmt.Errorf("publisher %q already exists", id)
+	for _, publisher := range k.Publishers {
+		if publisher.ID == id {
+			return fmt.Errorf("publisher %q already exists", id)
+		}
 	}
 	k.Publishers = append(k.Publishers, PublisherKey{ID: id, PublicKey: base64.RawStdEncoding.EncodeToString(key)})
 	sort.Slice(k.Publishers, func(left, right int) bool { return k.Publishers[left].ID < k.Publishers[right].ID })
@@ -82,6 +102,13 @@ func (k Keyring) Validate() error {
 			return errors.New("invalid publisher keyring")
 		}
 		previous = publisher.ID
+	}
+	previous = ""
+	for _, id := range k.Revoked {
+		if !identifier(id) || id <= previous {
+			return errors.New("invalid publisher revocations")
+		}
+		previous = id
 	}
 	return nil
 }

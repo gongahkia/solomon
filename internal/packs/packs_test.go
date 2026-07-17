@@ -437,3 +437,25 @@ func TestKeyringRejectsMalformedKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestRevokedPublisherKeyCannotVerify(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("pack")
+	signature := ed25519.Sign(privateKey, payload)
+	var keyring Keyring
+	if err := keyring.Add("close-enough", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+		t.Fatal(err)
+	}
+	if !keyring.Revoke("close-enough") || keyring.Revoke("close-enough") || !keyring.RevokedFor("close-enough") {
+		t.Fatalf("revocations = %#v", keyring.Revoked)
+	}
+	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+		t.Fatal("accepted revoked publisher")
+	}
+}

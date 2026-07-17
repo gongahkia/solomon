@@ -30,3 +30,14 @@ func VerifyDetachedFiles(packPath, signaturePath string, publicKey ed25519.Publi
 	}
 	return VerifyDetachedSignature(payload, signature, publicKey)
 }
+
+func VerifyPublisherSignature(payload, signature []byte, publisher string, keyring Keyring) error {
+	if keyring.RevokedFor(publisher) {
+		return errors.New("publisher key is revoked")
+	}
+	publicKey, ok := keyring.PublicKey(publisher)
+	if !ok {
+		return errors.New("publisher key is unavailable")
+	}
+	return VerifyDetachedSignature(payload, signature, publicKey)
+}

@@ -646,7 +646,7 @@ expect "CE> "
 send -- "source \$ADAPTER\r"
 expect "CE> "
 send -- "touch \$MARKER\r"
-expect "close-enough [safe/1]: keep buffer"
+expect {close-enough [safe/1]: keep buffer}
 send -- "\003"
 expect "CE> "
 send -- "test ! -e \$MARKER && print protected\r"
@@ -661,6 +661,48 @@ expect eof`
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("interrupt executed buffered command: %v", err)
+	}
+}
+
+func TestZshInteractivePTYHintSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+spawn -noecho zsh -f
+expect -re {[%#] $}
+send -- "PROMPT='CE> '\r"
+expect "CE> "
+send -- "source \$ADAPTER\r"
+expect "CE> "
+send -- "touch \$MARKER\r"
+expect {close-enough [safe/1]: keep buffer}
+expect "CE> "
+send -- "exit\r"
+expect eof`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
 	}
 }
 

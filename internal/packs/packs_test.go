@@ -362,6 +362,21 @@ func TestPythonCommandNameCandidateCorpus(t *testing.T) {
 	}
 }
 
+func TestRustCommandNameCandidateCorpus(t *testing.T) {
+	corpus, err := LoadCommandCandidateCorpus(filepath.Join("..", "..", "packs", "corpus", "rust-command-name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]string{"cagro": "cargo", "rustcc": "rustc", "rustupp": "rustup", "cargo-fmt": "cargo", "clippyy": "clippy"}
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err != nil {
+		t.Fatal(err)
+	}
+	delete(resolved, "cagro")
+	if err := RunCommandCandidateCorpus(corpus, func(command string) (string, bool) { value, ok := resolved[command]; return value, ok }); err == nil {
+		t.Fatal("accepted incomplete Rust candidates")
+	}
+}
+
 func TestPythonSubcommandTypoRules(t *testing.T) {
 	pack, err := Load(filepath.Join("..", "..", "packs", "python.json"))
 	if err != nil {

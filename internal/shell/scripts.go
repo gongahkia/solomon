@@ -108,7 +108,21 @@ _close_enough_accept_line() {
     return 1
   fi
 }
-bind -x '"\C-m":_close_enough_accept_line'
+_close_enough_enter_binding=''
+_close_enough_bind_enter() {
+  local binding
+  binding="$(bind -p 2>/dev/null | command grep '^"\\C-m": ')" || return 0
+  [ "$binding" = '"\C-m": accept-line' ] || return 0
+  _close_enough_enter_binding=accept-line
+  bind -x '"\C-m":_close_enough_accept_line'
+}
+_close_enough_restore_enter() {
+  [ "$_close_enough_enter_binding" = accept-line ] || return 0
+  bind -X 2>/dev/null | command grep -F '"\C-m": _close_enough_accept_line' >/dev/null || return 0
+  bind '"\C-m": accept-line'
+  _close_enough_enter_binding=''
+}
+_close_enough_bind_enter
 _close_enough_last_command=''
 _close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }
 trap _close_enough_debug DEBUG

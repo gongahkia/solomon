@@ -359,6 +359,16 @@ func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
 	}
 }
 
+func TestBashEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, `bind -p 2>/dev/null | command grep '^"\\C-m": '`) || !strings.Contains(script, `[ "$binding" = '"\C-m": accept-line' ] || return 0`) || !strings.Contains(script, `bind -x '"\C-m":_close_enough_accept_line'`) || !strings.Contains(script, `bind -X 2>/dev/null | command grep -F '"\C-m": _close_enough_accept_line' >/dev/null || return 0`) || !strings.Contains(script, `bind '"\C-m": accept-line'`) {
+		t.Fatalf("bash Enter binding is not collision-safe and restorable: %q", script)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

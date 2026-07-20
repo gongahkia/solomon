@@ -106,6 +106,8 @@ def test_envelope_rejects_wrong_aad() -> None:
     payload = encrypt(key, b"secret", profile="personal", label="ledger")
     with pytest.raises(EncryptedStorageError, match="authentication"):
         decrypt(key, payload, profile="other", label="ledger")
+    with pytest.raises(EncryptedStorageError, match="authentication"):
+        decrypt(key, payload, profile="personal", label="source:other")
 
 
 def test_archived_source_is_encrypted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

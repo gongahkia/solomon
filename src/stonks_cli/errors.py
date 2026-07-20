@@ -1,36 +1,26 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-
-class ExitCodes:
-    OK = 0
-    UNKNOWN_ERROR = 1
-    USAGE_ERROR = 2
-    BAD_CONFIG = 10
-    NO_DATA = 11
-    PROVIDER_ERROR = 12
-
-
-@dataclass(frozen=True)
 class StonksError(Exception):
-    message: str
-    code: int = ExitCodes.UNKNOWN_ERROR
-
-    def __str__(self) -> str:  # pragma: no cover
-        return self.message
+    """Base application error."""
 
 
-class BadConfigError(StonksError):
-    def __init__(self, message: str = "Bad configuration"):
-        super().__init__(message=message, code=ExitCodes.BAD_CONFIG)
+class ProfileError(StonksError):
+    """A profile is missing or invalid."""
 
 
-class NoDataError(StonksError):
-    def __init__(self, message: str = "No data available"):
-        super().__init__(message=message, code=ExitCodes.NO_DATA)
+class KeyFileError(StonksError):
+    """A profile key cannot be used safely."""
+
+
+class EncryptedStorageError(StonksError):
+    """Encrypted storage cannot be authenticated or decoded."""
+
+
+class LedgerError(StonksError):
+    """A ledger invariant was violated."""
 
 
 class ProviderError(StonksError):
-    def __init__(self, message: str = "Data provider error"):
-        super().__init__(message=message, code=ExitCodes.PROVIDER_ERROR)
+    """A read-only provider failed."""
+
+
+class ExecutionDeniedError(StonksError):
+    """An execution capability was requested."""

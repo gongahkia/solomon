@@ -1,64 +1,17 @@
 # stonks-cli
 
-`stonks-cli` is a paper-first research and carry-validation CLI for SG-legal crypto venues. Hyperliquid is the first supported venue; funding/basis carry is the only live-candidate path.
+Encrypted, local-first portfolio intelligence for personal US/SG equity, ETF, and cash accounts.
 
-## Status
+It stores immutable encrypted source imports and a canonical transaction ledger, then reports holdings, cash, reconciliation, exposure, and performance. The first provider is Moomoo OpenD; portable CSV imports and provider plugins use the same contracts.
 
-- Wallet analysis, ingestion, and paper replay are research-only.
-- Carry remains paper-first. Tiny live operation is blocked on the 30-day carry paper gate, legal review, custody review, and explicit preflight.
-- Equity analysis, prediction-market execution, and sportsbook execution are out of scope.
+No command, plugin capability, MCP tool, or scheduler can unlock an account or submit/modify/cancel an order. Manual trading stays in the broker app.
 
-## Commands
+## Start
 
 ```console
-$ stonks-cli --help
-$ stonks-cli                         # interactive local status home
-$ stonks-cli onboard                 # guided paper-first configuration
-$ stonks-cli settings                # guided safe settings editor
-$ stonks-cli home --json             # machine-readable local readiness
-$ stonks-cli doctor --smoke          # local synthetic prerequisite checks
-$ stonks-cli alert-preview           # synthetic alert; never delivers
-$ stonks-cli clean --dry-run         # inspect removable cache/state paths
-$ stonks-cli uninstall --dry-run     # inspect app-data removal and package guidance
-$ stonks-cli init-config
-$ stonks-cli replay-ingest --fixture tests/fixtures/research/hyperliquid-ws.jsonl
-$ stonks-cli rank-wallet --fixture tests/fixtures/research/wallet-attribution.jsonl
-$ stonks-cli replay-paper --fixture tests/fixtures/research/paper-mirror.jsonl
-$ stonks-cli scan-carry
-$ stonks-cli run-carry-paper --asset BTC --asset ETH
-$ stonks-cli preflight-carry-live
+$ stonks-cli init-profile personal --key-file /absolute/path/personal.key
+$ stonks-cli import-csv personal /absolute/path/export.csv --key-file /absolute/path/personal.key
+$ stonks-cli portfolio personal --key-file /absolute/path/personal.key
 ```
 
-Old grouped command paths are intentionally unsupported.
-
-## First run
-
-Run `stonks-cli onboard` from an interactive terminal. It creates or updates local configuration, preserves a timestamped backup of an existing config, and can enable paper carry, crypto research, read-only Moomoo support, and operator-report settings. It never asks for secret values, enables execution, or arms live trading.
-
-`stonks-cli` without a command shows the local readiness home in an interactive terminal; in scripts it prints compact help. Use `stonks-cli home --json` for automation.
-
-`clean` removes only app-owned per-user cache and generated state after confirmation. `uninstall` also removes app-owned local config/data, then prints package-manager guidance; it does not remove the package itself. Neither command removes Linux carry-gate evidence or paths outside the managed per-user directories.
-
-## MCP
-
-`stonks-mcp` exposes the paper-first CLI through local stdio or authenticated loopback Streamable HTTP for MCP clients. It has structured outputs, explicit file roots, and two-step confirmation for every mutation. See [MCP setup](docs/mcp.md).
-
-## Synthetic smoke flow
-
-Run the isolated CLI-and-MCP smoke flow from a source checkout:
-
-```console
-$ uv run python scripts/smoke_synthetic.py
-```
-
-It creates a disposable app home, config, state, cache, artifacts, and provenance manifest. Set `STONKS_CLI_SMOKE_ROOT=/absolute/empty/path` to retain a chosen run directory. The manifest labels every result as synthetic; it is not capture, performance, or 30-day gate evidence. See [synthetic smoke testing](docs/smoke-testing.md). Run `bash scripts/verify_release.sh` before release.
-
-## Validation
-
-- [Capture validation](docs/validation-gates.md) documents the historical Hyperliquid connector gate.
-- [30-day carry paper gate](docs/carry-30d-paper-gate.md) is GitHub issue #14's active acceptance contract.
-- [Carry venue policy](docs/carry-sg-venue-policy.md) and [tiny-live runbook](docs/carry-tiny-live-runbook.md) define the fail-closed live posture.
-
-## Safety
-
-No command authorizes trading. Polymarket, Kalshi, sportsbooks, Bybit, and circumvention-based execution are blocked for SG use. Outputs are not financial, legal, tax, or investment advice.
+`init-profile` generates a 256-bit key file with private permissions. Losing the key makes encrypted data unrecoverable. This private repository has no public license.

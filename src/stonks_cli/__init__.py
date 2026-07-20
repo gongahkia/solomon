@@ -1,3 +1,3 @@
-__all__ = ["__version__"]
+"""Encrypted local portfolio intelligence."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0a1"

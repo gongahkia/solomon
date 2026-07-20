@@ -1,5 +1,0 @@
-{"type":"trade","wallet":"0xaaa0000000000000000000000000000000000001","trade_id":"pm-1","market":"BTC-PERP","asset":"BTC","side":"buy","price":65000.0,"size":0.02,"notional_usd":1300.0,"observed_at":"2026-02-02T02:40:00Z","raw":{"fixture":"paper-mirror"}}
-{"type":"mark","market":"BTC-PERP","mark_px":59000.0,"timestamp_utc":"2026-02-02T02:45:00Z"}
-{"type":"trade","wallet":"0xaaa0000000000000000000000000000000000001","trade_id":"pm-2","market":"BTC-PERP","asset":"BTC","side":"buy","price":59100.0,"size":0.02,"notional_usd":1182.0,"observed_at":"2026-02-02T03:00:00Z","raw":{"fixture":"paper-mirror"}}
-{"type":"trade","wallet":"0xbbb0000000000000000000000000000000000002","trade_id":"pm-3","market":"ETH-PERP","asset":"ETH","side":"sell","price":3425.0,"size":0.4,"notional_usd":1370.0,"observed_at":"2026-02-02T03:10:00Z","raw":{"fixture":"paper-mirror"}}
-{"type":"close","wallet":"0xbbb0000000000000000000000000000000000002","market":"ETH-PERP","exit_px":3300.0,"timestamp_utc":"2026-02-02T04:10:00Z","reason":"fixture_take_profit"}

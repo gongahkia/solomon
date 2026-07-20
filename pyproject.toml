@@ -4,29 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stonks-cli"
-version = "0.1.0"
+version = "1.0.0a1"
+description = "Encrypted, local-first portfolio intelligence CLI"
 requires-python = ">=3.11"
 dependencies = [
-  "apscheduler>=3.10",
   "cryptography>=46.0",
   "mcp>=1.27,<2",
-  "numpy>=1.26",
-  "pandas>=2.2",
   "platformdirs>=4.2",
   "pydantic>=2.7",
-  "requests>=2.32",
   "rich>=13.7",
   "typer>=0.12",
-  "uv>=0.9.21",
-  "websockets>=12",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "ruff>=0.5",
   "mypy>=1.10",
   "pytest>=8.0",
-  "types-requests>=2.32",
+  "ruff>=0.5",
+]
+moomoo = [
+  "moomoo-api>=10.9",
 ]
 
 [project.scripts]
@@ -34,7 +31,7 @@ stonks-cli = "stonks_cli.cli:main"
 stonks-mcp = "stonks_cli.mcp_server:main"
 
 [tool.ruff]
-line-length = 120
+line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
@@ -53,13 +50,11 @@ known-first-party = ["stonks_cli"]
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = false
-warn_unused_ignores = false
-warn_redundant_casts = false
-no_implicit_optional = true
-check_untyped_defs = false
-ignore_missing_imports = true
-disable_error_code = ["call-overload", "attr-defined", "operator", "misc", "arg-type", "assignment"]
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

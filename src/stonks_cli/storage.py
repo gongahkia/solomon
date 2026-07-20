@@ -1,135 +1,189 @@
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
-from datetime import UTC, datetime
+import hashlib
+import os
+import secrets
+import shutil
+import sqlite3
+import stat
+import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
-from stonks_cli.logging_utils import log_suppressed_exception
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from stonks_cli.config import ProfileConfig, profile_dir, save_profile
+from stonks_cli.errors import EncryptedStorageError, KeyFileError
+
+_MAGIC = b"STONKS\x01\x00"
+_NONCE_SIZE = 12
+_KEY_SIZE = 32
 
 
-def default_state_dir() -> Path:
-    from stonks_cli.paths import default_state_dir as _default_state_dir
-
-    return _default_state_dir()
-
-
-@dataclass(frozen=True)
-class RunRecord:
-    started_at: str
-    tickers: list[str]
-    report_path: str | None
-    json_path: str | None = None
+def _private_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
 
 
-def state_path() -> Path:
-    return default_state_dir() / "state.json"
-
-
-def history_path() -> Path:
-    return default_state_dir() / "history.jsonl"
-
-
-def load_state() -> dict:
-    path = state_path()
-    if not path.exists():
-        return {}
+def generate_key_file(path: Path) -> None:
+    path = path.expanduser().resolve()
+    _private_directory(path.parent)
+    if path.exists():
+        raise KeyFileError(f"key file already exists:{path}")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        log_suppressed_exception(context="storage.load_state", error=e, path=path)
-        return {}
+        os.write(descriptor, secrets.token_bytes(_KEY_SIZE))
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
-def save_state(state: dict) -> None:
-    path = state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+def read_key_file(path: Path) -> bytes:
+    path = path.expanduser().resolve()
+    try:
+        info = path.stat()
+    except FileNotFoundError as error:
+        raise KeyFileError(f"key file not found:{path}") from error
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise KeyFileError(f"key file must be a private regular file:{path}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise KeyFileError(f"key file owner does not match current user:{path}")
+    key = path.read_bytes()
+    if len(key) != _KEY_SIZE:
+        raise KeyFileError("key file must contain exactly 32 raw bytes")
+    return key
 
 
-def save_last_run(tickers: list[str], report_path: Path | None, json_path: Path | None = None) -> None:
-    state = load_state()
-    started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    record = {
-        "started_at": started_at,
-        "tickers": tickers,
-        "report_path": str(report_path) if report_path else None,
-        "json_path": str(json_path) if json_path else None,
-    }
-    state["last_run"] = {
-        **record,
-    }
-    save_state(state)
-
-    hp = history_path()
-    hp.parent.mkdir(parents=True, exist_ok=True)
-    with hp.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+def _aad(profile: str, label: str) -> bytes:
+    return f"stonks-cli:{profile}:{label}:v1".encode()
 
 
-def save_last_failure(*, error: str, where: str = "scheduler") -> None:
-    state = load_state()
-    failed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    state["last_failure"] = {
-        "failed_at": failed_at,
-        "where": where,
-        "error": str(error),
-    }
-    save_state(state)
+def encrypt(key: bytes, plaintext: bytes, *, profile: str, label: str) -> bytes:
+    nonce = secrets.token_bytes(_NONCE_SIZE)
+    return _MAGIC + nonce + AESGCM(key).encrypt(nonce, plaintext, _aad(profile, label))
 
 
-def list_history(limit: int = 20) -> list[RunRecord]:
-    hp = history_path()
-    if not hp.exists():
-        return []
-    lines = hp.read_text(encoding="utf-8").splitlines()
-    records: list[RunRecord] = []
-    # Newest-first ordering.
-    for line in reversed(lines[-limit:]):
-        try:
-            obj = json.loads(line)
-            records.append(
-                RunRecord(
-                    started_at=str(obj.get("started_at")),
-                    tickers=list(obj.get("tickers") or []),
-                    report_path=obj.get("report_path"),
-                    json_path=obj.get("json_path"),
-                )
+def decrypt(key: bytes, payload: bytes, *, profile: str, label: str) -> bytes:
+    if len(payload) < len(_MAGIC) + _NONCE_SIZE + 16 or not payload.startswith(_MAGIC):
+        raise EncryptedStorageError("invalid encrypted storage envelope")
+    nonce = payload[len(_MAGIC) : len(_MAGIC) + _NONCE_SIZE]
+    try:
+        return AESGCM(key).decrypt(
+            nonce, payload[len(_MAGIC) + _NONCE_SIZE :], _aad(profile, label)
+        )
+    except Exception as error:
+        raise EncryptedStorageError("encrypted storage authentication failed") from error
+
+
+def atomic_write(path: Path, data: bytes) -> None:
+    _private_directory(path.parent)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class EncryptedLedger:
+    def __init__(self, config: ProfileConfig) -> None:
+        self.config = config
+        self.root = profile_dir(config.name)
+        self.path = self.root / "ledger.sqlite.enc"
+        self.sources = self.root / "sources"
+
+    @property
+    def key(self) -> bytes:
+        return read_key_file(Path(self.config.key_file))
+
+    def archive_source(self, content: bytes) -> str:
+        digest = hashlib.sha256(content).hexdigest()
+        path = self.sources / f"{digest}.enc"
+        if not path.exists():
+            atomic_write(
+                path, encrypt(self.key, content, profile=self.config.name, label=f"source:{digest}")
             )
-        except Exception as e:
-            log_suppressed_exception(context="storage.list_history.parse_line", error=e)
-            continue
-    return records
+        return digest
+
+    def _load(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        if self.path.exists():
+            plaintext = decrypt(
+                self.key, self.path.read_bytes(), profile=self.config.name, label="ledger"
+            )
+            try:
+                connection.deserialize(plaintext)
+            except sqlite3.DatabaseError as error:
+                raise EncryptedStorageError("ledger SQLite image is invalid") from error
+        return connection
+
+    def _save(self, connection: sqlite3.Connection) -> None:
+        atomic_write(
+            self.path,
+            encrypt(self.key, connection.serialize(), profile=self.config.name, label="ledger"),
+        )
+
+    @contextmanager
+    def connection(self) -> Generator[sqlite3.Connection, None, None]:
+        connection = self._load()
+        try:
+            yield connection
+            connection.commit()
+            self._save(connection)
+        finally:
+            connection.close()
 
 
-def get_history_record(index: int, *, limit: int = 2000) -> RunRecord:
-    if index < 0:
-        raise IndexError("index must be >= 0")
-    records = list_history(limit=limit)
-    if index >= len(records):
-        raise IndexError("index out of range")
-    return records[index]
+def export_backup(config: ProfileConfig, destination: Path) -> Path:
+    source = profile_dir(config.name)
+    destination = destination.expanduser().resolve()
+    if not source.is_dir():
+        raise EncryptedStorageError(f"profile directory not found:{config.name}")
+    if destination.exists():
+        raise EncryptedStorageError(f"backup destination already exists:{destination}")
+    _private_directory(destination.parent)
+    shutil.copytree(source, destination, copy_function=shutil.copy2)
+    for path in destination.rglob("*"):
+        if path.is_file():
+            path.chmod(0o600)
+        elif path.is_dir():
+            path.chmod(0o700)
+    return destination
 
 
-def get_last_report_path() -> Path | None:
-    last = get_last_run()
-    if last is None or not last.report_path:
-        return None
+def rotate_key(config: ProfileConfig, new_key_file: Path) -> ProfileConfig:
+    old_key = read_key_file(Path(config.key_file))
+    new_key_file = new_key_file.expanduser().resolve()
+    generate_key_file(new_key_file)
+    new_key = read_key_file(new_key_file)
+    root = profile_dir(config.name)
+    encrypted_paths = [root / "ledger.sqlite.enc", *sorted((root / "sources").glob("*.enc"))]
+    staged: list[tuple[Path, Path]] = []
     try:
-        return Path(last.report_path)
-    except Exception as e:
-        log_suppressed_exception(context="storage.get_last_report_path", error=e, report_path=last.report_path)
-        return None
-
-
-def get_last_run() -> RunRecord | None:
-    state = load_state()
-    last = state.get("last_run") if isinstance(state, dict) else None
-    if not isinstance(last, dict):
-        return None
-    return RunRecord(
-        started_at=str(last.get("started_at")),
-        tickers=list(last.get("tickers") or []),
-        report_path=last.get("report_path"),
-        json_path=last.get("json_path"),
+        for path in encrypted_paths:
+            if not path.exists():
+                continue
+            label = "ledger" if path.name == "ledger.sqlite.enc" else f"source:{path.stem}"
+            plaintext = decrypt(old_key, path.read_bytes(), profile=config.name, label=label)
+            staged_path = path.with_name(f".{path.name}.rotating")
+            atomic_write(staged_path, encrypt(new_key, plaintext, profile=config.name, label=label))
+            staged.append((staged_path, path))
+        for staged_path, destination in staged:
+            os.replace(staged_path, destination)
+    except Exception:
+        for staged_path, _ in staged:
+            staged_path.unlink(missing_ok=True)
+        new_key_file.unlink(missing_ok=True)
+        raise
+    updated = ProfileConfig(
+        config.name, str(new_key_file), config.providers, config.benchmarks, config.schema_version
     )
+    save_profile(updated)
+    return updated

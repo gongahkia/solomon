@@ -1,106 +1,61 @@
 from __future__ import annotations
 
-import importlib
-import importlib.util
-from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
-from types import ModuleType
+from enum import StrEnum
+from importlib import metadata
+from typing import Protocol, runtime_checkable
 
-from stonks_cli.config import AppConfig
+from stonks_cli.errors import ExecutionDeniedError, ProviderError
 
-StrategyFn = Callable[[object], object]
-ProviderFactory = Callable[[AppConfig, str], object]
+PLUGIN_API_VERSION = 1
+
+
+class Capability(StrEnum):
+    ACCOUNTS = "accounts.read"
+    BALANCES = "balances.read"
+    POSITIONS = "positions.read"
+    TRANSACTIONS = "transactions.read"
+    CORPORATE_ACTIONS = "corporate_actions.read"
+    MARKET_DATA = "market_data.read"
+
+
+_FORBIDDEN = frozenset({"orders.write", "orders.read", "trade.unlock", "execution"})
 
 
 @dataclass(frozen=True)
-class PluginRegistry:
-    strategies: dict[str, StrategyFn]
-    provider_factories: dict[str, ProviderFactory]
+class PluginManifest:
+    identifier: str
+    api_version: int
+    capabilities: frozenset[Capability]
+
+    def __post_init__(self) -> None:
+        if not self.identifier or self.api_version != PLUGIN_API_VERSION:
+            raise ProviderError("incompatible plugin manifest")
 
 
-@dataclass(frozen=True)
-class PluginLoadSummary:
-    registry: PluginRegistry
-    ok: list[str]
-    errors: dict[str, str]
+@runtime_checkable
+class ProviderPlugin(Protocol):
+    manifest: PluginManifest
 
 
-def _load_module(spec: str) -> ModuleType:
-    s = (spec or "").strip()
-    if not s:
-        raise ValueError("plugin spec must be non-empty")
-    looks_like_path = s.endswith(".py") or "/" in s or "\\" in s
-    if looks_like_path:
-        path = Path(s).expanduser()
-        if not path.exists():
-            raise FileNotFoundError(f"plugin file not found: {path}")
-        mod_name = f"stonks_plugin_{path.stem}_{abs(hash(str(path)))}"
-        module_spec = importlib.util.spec_from_file_location(mod_name, str(path))
-        if module_spec is None or module_spec.loader is None:
-            raise ImportError(f"failed to load plugin module from {path}")
-        module = importlib.util.module_from_spec(module_spec)
-        module_spec.loader.exec_module(module)  # type: ignore[union-attr]
-        return module
-    return importlib.import_module(s)
+def validate_manifest(manifest: PluginManifest) -> None:
+    if any(
+        not isinstance(capability, Capability) or capability.value in _FORBIDDEN
+        for capability in manifest.capabilities
+    ):
+        raise ExecutionDeniedError("execution capabilities are prohibited")
 
 
-@lru_cache(maxsize=64)
-def load_plugins(plugin_specs: tuple[str, ...]) -> PluginRegistry:
-    strategies: dict[str, StrategyFn] = {}
-    provider_factories: dict[str, ProviderFactory] = {}
-    for spec in plugin_specs:
-        module = _load_module(spec)
-        mod_strats = getattr(module, "STONKS_STRATEGIES", None)
-        if isinstance(mod_strats, dict):
-            for name, fn in mod_strats.items():
-                if not isinstance(name, str) or not name.strip():
-                    continue
-                if callable(fn):
-                    strategies[name] = fn
-        mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
-        if isinstance(mod_providers, dict):
-            for name, factory in mod_providers.items():
-                if not isinstance(name, str) or not name.strip():
-                    continue
-                if callable(factory):
-                    provider_factories[name] = factory
-    return PluginRegistry(strategies=strategies, provider_factories=provider_factories)
-
-
-def load_plugins_best_effort(plugin_specs: tuple[str, ...]) -> PluginLoadSummary:
-    strategies: dict[str, StrategyFn] = {}
-    provider_factories: dict[str, ProviderFactory] = {}
-    ok: list[str] = []
-    errors: dict[str, str] = {}
-    for spec in plugin_specs:
-        try:
-            module = _load_module(spec)
-            ok.append(spec)
-        except Exception as e:
-            errors[spec] = str(e)
-            continue
-        mod_strats = getattr(module, "STONKS_STRATEGIES", None)
-        if isinstance(mod_strats, dict):
-            for name, fn in mod_strats.items():
-                if not isinstance(name, str) or not name.strip():
-                    continue
-                if callable(fn):
-                    strategies[name] = fn
-        mod_providers = getattr(module, "STONKS_PROVIDER_FACTORIES", None)
-        if isinstance(mod_providers, dict):
-            for name, factory in mod_providers.items():
-                if not isinstance(name, str) or not name.strip():
-                    continue
-                if callable(factory):
-                    provider_factories[name] = factory
-    return PluginLoadSummary(
-        registry=PluginRegistry(strategies=strategies, provider_factories=provider_factories),
-        ok=ok,
-        errors=errors,
-    )
-
-
-def registry_for_config(cfg: AppConfig) -> PluginRegistry:
-    return load_plugins(tuple(cfg.plugins or []))
+def discover() -> dict[str, ProviderPlugin]:
+    selected = metadata.entry_points(group="stonks_cli.providers")
+    providers: dict[str, ProviderPlugin] = {}
+    for entry in selected:
+        provider = entry.load()
+        manifest = getattr(provider, "manifest", None)
+        if not isinstance(manifest, PluginManifest):
+            raise ProviderError(f"plugin missing manifest:{entry.name}")
+        validate_manifest(manifest)
+        if manifest.identifier in providers:
+            raise ProviderError(f"duplicate plugin:{manifest.identifier}")
+        providers[manifest.identifier] = provider
+    return providers

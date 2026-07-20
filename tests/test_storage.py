@@ -140,6 +140,23 @@ def test_archived_source_is_encrypted(tmp_path: Path, monkeypatch: pytest.Monkey
     assert b"account_id" not in stored
 
 
+def test_ledger_rejects_tampered_encrypted_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    key = tmp_path / "personal.key"
+    generate_key_file(key)
+    ledger = EncryptedLedger(ProfileConfig("personal", str(key)))
+    with ledger.connection() as connection:
+        connection.execute("CREATE TABLE records (id INTEGER PRIMARY KEY)")
+    payload = bytearray(ledger.path.read_bytes())
+    payload[-1] ^= 1
+    ledger.path.write_bytes(payload)
+    with pytest.raises(EncryptedStorageError, match="authentication"):
+        with ledger.connection():
+            pass
+
+
 def test_backup_and_key_rotation_preserve_encrypted_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

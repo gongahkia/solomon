@@ -1,0 +1,249 @@
+package daemon
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/close-enough/internal/localstate"
+	"github.com/gongahkia/close-enough/internal/packs"
+	"github.com/gongahkia/close-enough/internal/redact"
+)
+
+type Service struct {
+	Engine        diagnose.Engine
+	Config        config.Config
+	Packs         packs.RuntimeResolver
+	Store         *localstate.Store
+	LearnedRules  []localstate.LearnedRule
+	mu            sync.Mutex
+	confirmations map[string]confirmation
+	failures      map[string]failure
+	now           func() time.Time
+}
+
+type confirmation struct {
+	command string
+	token   string
+	expires time.Time
+}
+
+type failure struct {
+	command string
+	output  string
+	created time.Time
+}
+
+func (s *Service) Handle(ctx context.Context, request Request) (Response, error) {
+	switch request.Operation {
+	case HandshakeOperation:
+		return Response{Version: ProtocolVersion, Action: "ready"}, nil
+	case StatusOperation:
+		return Response{Version: ProtocolVersion, Action: "ready"}, nil
+	case PreSendOperation:
+		if response, ok := s.curatedDecision(request.Command, request.Session, "pre"); ok {
+			return response, nil
+		}
+		if response, ok := s.learnedDecision(request.Command, "pre"); ok {
+			return response, nil
+		}
+		return s.decision(ctx, request.Command, "pre")
+	case PostFailureOperation:
+		s.rememberFailure(request)
+		if response, ok := s.curatedDecision(request.Command, request.Session, "post"); ok {
+			return response, nil
+		}
+		return s.decision(ctx, request.Command, "post")
+	case PostSuccessOperation:
+		s.recordSuccess(ctx, request)
+		return Response{Version: ProtocolVersion, Action: "none"}, nil
+	case UndoOperation, ConfirmOperation:
+		return Response{Version: ProtocolVersion, Action: "none"}, nil
+	case StopOperation:
+		return Response{Version: ProtocolVersion, Action: "stopping"}, nil
+	default:
+		return Response{}, fmt.Errorf("unsupported daemon operation %q", request.Operation)
+	}
+}
+
+func (s *Service) learnedDecision(command, stage string) (Response, bool) {
+	if stage != "pre" || !s.Config.LocalLearningEnabled {
+		return Response{}, false
+	}
+	failure, ok := normalizedLearningCommand(command)
+	if !ok {
+		return Response{}, false
+	}
+	for _, rule := range s.LearnedRules {
+		if !rule.Enabled || rule.Failure != failure {
+			continue
+		}
+		action := limitedLearnedAction(rule.Action, s.Config.LearnedRuleActionCeiling)
+		if action == "off" {
+			return Response{}, false
+		}
+		return Response{Version: ProtocolVersion, Action: action, Suggestion: rule.Correction, Explanation: "local learned repair", Confidence: "high", Risk: string(diagnose.RiskSafe), Source: "learned", RuleID: strconv.FormatInt(rule.ID, 10)}, true
+	}
+	return Response{}, false
+}
+
+func limitedLearnedAction(ruleAction, ceiling string) string {
+	levels := map[string]int{"off": 0, "hint": 1, "rewrite": 2}
+	ruleLevel, ruleOK := levels[ruleAction]
+	ceilingLevel, ceilingOK := levels[ceiling]
+	if !ruleOK || !ceilingOK {
+		return "off"
+	}
+	if ruleLevel > ceilingLevel {
+		ruleLevel = ceilingLevel
+	}
+	for action, level := range levels {
+		if level == ruleLevel {
+			return action
+		}
+	}
+	return "off"
+}
+
+func (s *Service) rememberFailure(request Request) {
+	if !s.Config.LocalLearningEnabled || s.Store == nil || request.Session == "" {
+		return
+	}
+	command, ok := normalizedLearningCommand(request.Command)
+	if !ok {
+		return
+	}
+	output, _ := redact.Text(request.FailureOutput)
+	if len(output) > 8<<10 {
+		output = output[:8<<10]
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failures == nil {
+		s.failures = map[string]failure{}
+	}
+	s.failures[request.Session] = failure{command: command, output: output, created: s.currentTime()}
+}
+
+func (s *Service) recordSuccess(ctx context.Context, request Request) {
+	if !s.Config.LocalLearningEnabled || s.Store == nil || request.Session == "" {
+		return
+	}
+	correction, ok := normalizedLearningCommand(request.Command)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	pending, exists := s.failures[request.Session]
+	if exists {
+		delete(s.failures, request.Session)
+	}
+	s.mu.Unlock()
+	if !exists || pending.command == correction || s.currentTime().Sub(pending.created) > 5*time.Minute {
+		return
+	}
+	_, _ = s.Store.RecordLearningPair(ctx, localstate.Observation{Session: request.Session, FailedCommand: pending.command, CorrectedCommand: correction, FailureOutput: pending.output, CreatedAt: s.currentTime().UTC()})
+}
+
+func normalizedLearningCommand(command string) (string, bool) {
+	if len(command) == 0 || len(command) > 8<<10 {
+		return "", false
+	}
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return "", false
+	}
+	value, containsSecret := redact.Command(words)
+	return value, !containsSecret
+}
+
+func (s *Service) curatedDecision(command, session, stage string) (Response, bool) {
+	match, ok := s.Packs.MatchLine(command)
+	if !ok {
+		return Response{}, false
+	}
+	action := "hint"
+	response := Response{Version: ProtocolVersion, Action: action, Suggestion: match.Suggestion, Explanation: match.Cause, Confidence: "high", Risk: match.Risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
+	if stage == "pre" && match.Risk == string(diagnose.RiskHigh) && s.Config.RiskInterrupt {
+		if session == "" {
+			return response, true
+		}
+		if s.consumeConfirmation(session, command) {
+			response.Action = "submit"
+			return response, true
+		}
+		token, err := newConfirmationToken()
+		if err != nil {
+			return Response{}, false
+		}
+		s.storeConfirmation(session, command, token)
+		response.Action = "interrupt"
+		response.ConfirmationToken = token
+		return response, true
+	}
+	if stage == "pre" && match.Risk == string(diagnose.RiskSafe) && s.Config.CuratedAutoCorrect {
+		response.Action = "rewrite"
+	}
+	return response, true
+}
+
+func (s *Service) decision(ctx context.Context, command, stage string) (Response, error) {
+	decision, err := s.Engine.CheckContext(ctx, command, stage)
+	if err != nil {
+		return Response{}, err
+	}
+	response := Response{
+		Version:     ProtocolVersion,
+		Action:      decision.Action,
+		Suggestion:  decision.Suggestion,
+		Explanation: decision.Cause,
+		Confidence:  strconv.FormatFloat(decision.Confidence, 'f', 2, 64),
+		Risk:        string(decision.Risk),
+	}
+	if response.Action == "" {
+		response.Action = "none"
+	}
+	return response, nil
+}
+
+func (s *Service) consumeConfirmation(session, command string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.confirmations[session]
+	if !ok {
+		return false
+	}
+	delete(s.confirmations, session)
+	return pending.command == command && s.currentTime().Before(pending.expires)
+}
+
+func (s *Service) storeConfirmation(session, command, token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.confirmations == nil {
+		s.confirmations = map[string]confirmation{}
+	}
+	s.confirmations[session] = confirmation{command: command, token: token, expires: s.currentTime().Add(5 * time.Second)}
+}
+
+func (s *Service) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func newConfirmationToken() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}

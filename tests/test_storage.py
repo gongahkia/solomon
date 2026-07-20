@@ -192,7 +192,7 @@ def test_ledger_restores_serialized_in_memory_sqlite_state(
         assert connection.execute("SELECT value FROM records").fetchone()["value"] == "restored"
 
 
-def test_backup_and_key_rotation_preserve_encrypted_source(
+def test_backup_and_key_rotation_preserve_encrypted_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
@@ -202,6 +202,10 @@ def test_backup_and_key_rotation_preserve_encrypted_source(
     save_profile(config)
     ledger = EncryptedLedger(config)
     digest = ledger.archive_source(b"source")
+    old_key_data = read_key_file(old_key)
+    with ledger.connection() as connection:
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES ('rotated')")
     backup = export_backup(config, tmp_path / "backup")
     assert (backup / "profile.json").is_file()
     assert (backup / "sources" / f"{digest}.enc").is_file()
@@ -220,6 +224,15 @@ def test_backup_and_key_rotation_preserve_encrypted_source(
         )
         == b"source"
     )
+    with pytest.raises(EncryptedStorageError, match="authentication"):
+        decrypt(
+            old_key_data,
+            (ledger.sources / f"{digest}.enc").read_bytes(),
+            profile="personal",
+            label=f"source:{digest}",
+        )
+    with EncryptedLedger(updated).connection() as connection:
+        assert connection.execute("SELECT value FROM records").fetchone()["value"] == "rotated"
 
 
 def test_backup_restore_preserves_encrypted_profile(

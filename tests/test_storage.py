@@ -91,6 +91,16 @@ def test_profile_config_schema_round_trips_versioned_fields(
     }
 
 
+def test_aes_gcm_envelope_has_versioned_header_and_rejects_truncation() -> None:
+    key = b"x" * 32
+    payload = encrypt(key, b"secret", profile="personal", label="ledger")
+    assert payload.startswith(b"STONKS\x01\x00")
+    assert b"secret" not in payload
+    assert decrypt(key, payload, profile="personal", label="ledger") == b"secret"
+    with pytest.raises(EncryptedStorageError, match="authentication"):
+        decrypt(key, payload[:-1], profile="personal", label="ledger")
+
+
 def test_envelope_rejects_wrong_aad() -> None:
     key = b"x" * 32
     payload = encrypt(key, b"secret", profile="personal", label="ledger")

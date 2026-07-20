@@ -41,6 +41,14 @@ def test_key_file_rejects_non_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         read_key_file(path)
 
 
+def test_key_file_rejects_non_256_bit_content(tmp_path: Path) -> None:
+    path = tmp_path / "profile.key"
+    path.write_bytes(b"x" * 31)
+    path.chmod(0o600)
+    with pytest.raises(KeyFileError, match="32 raw bytes"):
+        read_key_file(path)
+
+
 def test_profile_directory_layout_uses_expected_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

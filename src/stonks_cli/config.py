@@ -62,7 +62,7 @@ def save_profile(config: ProfileConfig) -> None:
 def load_profile(name: str) -> ProfileConfig:
     path = config_path(name)
     if not path.is_file():
-        raise ProfileError(f"profile not found:{name}")
+        raise ProfileError("profile not found")
     try:
         value = json.loads(path.read_text())
         return ProfileConfig(
@@ -73,4 +73,4 @@ def load_profile(name: str) -> ProfileConfig:
             schema_version=int(value.get("schema_version", 1)),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        raise ProfileError(f"invalid profile:{name}") from error
+        raise ProfileError("invalid profile") from error

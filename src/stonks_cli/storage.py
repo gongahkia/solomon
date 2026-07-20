@@ -89,7 +89,7 @@ def generate_key_file(path: Path) -> None:
     path = path.expanduser().resolve()
     _private_directory(path.parent)
     if path.exists():
-        raise KeyFileError(f"key file already exists:{path}")
+        raise KeyFileError("key file already exists")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.write(descriptor, secrets.token_bytes(_KEY_SIZE))
@@ -103,11 +103,11 @@ def read_key_file(path: Path) -> bytes:
     try:
         info = path.stat()
     except FileNotFoundError as error:
-        raise KeyFileError(f"key file not found:{path}") from error
+        raise KeyFileError("key file not found") from error
     if not stat.S_ISREG(info.st_mode) or info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-        raise KeyFileError(f"key file must be a private regular file:{path}")
+        raise KeyFileError("key file must be a private regular file")
     if hasattr(os, "getuid") and info.st_uid != os.getuid():
-        raise KeyFileError(f"key file owner does not match current user:{path}")
+        raise KeyFileError("key file owner does not match current user")
     key = path.read_bytes()
     if len(key) != _KEY_SIZE:
         raise KeyFileError("key file must contain exactly 32 raw bytes")
@@ -206,7 +206,7 @@ def export_backup(config: ProfileConfig, destination: Path) -> Path:
     source = profile_dir(config.name)
     destination = destination.expanduser().resolve()
     if not source.is_dir():
-        raise EncryptedStorageError(f"profile directory not found:{config.name}")
+        raise EncryptedStorageError("profile directory not found")
     if destination.exists():
         raise EncryptedStorageError(f"backup destination already exists:{destination}")
     _private_directory(destination.parent)
@@ -248,14 +248,14 @@ def restore_backup(source: Path) -> ProfileConfig:
     config = _backup_profile(source)
     destination = profile_dir(config.name)
     if destination.exists():
-        raise EncryptedStorageError(f"profile directory already exists:{config.name}")
+        raise EncryptedStorageError("profile directory already exists")
     _private_directory(destination.parent)
     staging = Path(tempfile.mkdtemp(prefix=f".{config.name}.restore-", dir=destination.parent))
     try:
         shutil.copytree(source, staging, copy_function=shutil.copy2, dirs_exist_ok=True)
         _private_tree(staging)
         if destination.exists():
-            raise EncryptedStorageError(f"profile directory already exists:{config.name}")
+            raise EncryptedStorageError("profile directory already exists")
         os.replace(staging, destination)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)

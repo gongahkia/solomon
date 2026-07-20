@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from stonks_cli.config import ProfileConfig, config_path, load_profile, profile_dir, save_profile
-from stonks_cli.errors import EncryptedStorageError, KeyFileError
+from stonks_cli.errors import EncryptedStorageError, KeyFileError, ProfileError
 from stonks_cli.storage import (
     EncryptedLedger,
     EncryptedStorageMigration,
@@ -51,6 +51,19 @@ def test_key_file_rejects_non_256_bit_content(tmp_path: Path) -> None:
     path.chmod(0o600)
     with pytest.raises(KeyFileError, match="32 raw bytes"):
         read_key_file(path)
+
+
+def test_storage_diagnostics_redact_key_paths_and_profile_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "private-key"
+    with pytest.raises(KeyFileError) as key_error:
+        read_key_file(key_path)
+    assert str(key_path) not in str(key_error.value)
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    with pytest.raises(ProfileError) as profile_error:
+        load_profile("confidential")
+    assert "confidential" not in str(profile_error.value)
 
 
 def test_atomic_write_preserves_existing_file_when_replacement_fails(

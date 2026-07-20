@@ -33,6 +33,11 @@ func (s *Server) Listen() error {
 	if s.listener != nil {
 		return ErrAlreadyRunning
 	}
+	if s.endpoint.Network == "unix" {
+		if err := removeStaleSocket(s.endpoint.Address); err != nil {
+			return err
+		}
+	}
 	listener, err := net.Listen(s.endpoint.Network, s.endpoint.Address)
 	if err != nil {
 		return err

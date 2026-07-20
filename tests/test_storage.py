@@ -202,7 +202,12 @@ def test_backup_and_key_rotation_preserve_encrypted_source(
     ledger = EncryptedLedger(config)
     digest = ledger.archive_source(b"source")
     backup = export_backup(config, tmp_path / "backup")
+    assert (backup / "profile.json").is_file()
     assert (backup / "sources" / f"{digest}.enc").is_file()
+    assert backup.stat().st_mode & 0o077 == 0
+    assert (backup / "sources" / f"{digest}.enc").stat().st_mode & 0o077 == 0
+    with pytest.raises(EncryptedStorageError, match="already exists"):
+        export_backup(config, backup)
     updated = rotate_key(config, tmp_path / "new.key")
     assert load_profile("personal") == updated
     assert (

@@ -6,6 +6,20 @@ It stores immutable encrypted source imports and a canonical transaction ledger,
 
 No command, plugin capability, MCP tool, or scheduler can unlock an account or submit/modify/cancel an order. Manual trading stays in the broker app.
 
+## Public command contract
+
+`stonks-cli` exposes only these commands:
+
+- Profiles and imports: `init-profile`, `import-csv`, `import-prices`
+- Portfolio reports: `portfolio`, `transactions`, `performance`
+- Profile maintenance: `backup-profile`, `rotate-key`
+- Research and operator utilities: `backtest-csv`, `schedule-render`, `notify-local`
+- Integrations and metadata: `plugins`, `moomoo-accounts`, `version`
+
+`stonks-mcp` is the separate MCP server entrypoint. All commands and tools are read-only,
+local-data management, reporting, notification, or simulation interfaces; none can unlock an
+account or submit, modify, or cancel an order.
+
 ## Start
 
 ```console

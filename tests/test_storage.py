@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,28 @@ def test_profile_directory_layout_uses_expected_paths(
     assert ledger.sources == root / "sources"
     assert (ledger.sources / f"{digest}.enc").is_file()
     assert root.stat().st_mode & 0o077 == 0
+
+
+def test_profile_config_schema_round_trips_versioned_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig(
+        "personal",
+        str(tmp_path / "personal.key"),
+        providers=("csv",),
+        benchmarks=("SPY",),
+        schema_version=1,
+    )
+    save_profile(config)
+    assert load_profile("personal") == config
+    assert json.loads(config_path("personal").read_text()) == {
+        "benchmarks": ["SPY"],
+        "key_file": str(tmp_path / "personal.key"),
+        "name": "personal",
+        "providers": ["csv"],
+        "schema_version": 1,
+    }
 
 
 def test_envelope_rejects_wrong_aad() -> None:

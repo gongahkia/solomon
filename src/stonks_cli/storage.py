@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import shutil
@@ -150,12 +151,56 @@ def export_backup(config: ProfileConfig, destination: Path) -> Path:
         raise EncryptedStorageError(f"backup destination already exists:{destination}")
     _private_directory(destination.parent)
     shutil.copytree(source, destination, copy_function=shutil.copy2)
-    for path in destination.rglob("*"):
+    _private_tree(destination)
+    return destination
+
+
+def _private_tree(root: Path) -> None:
+    root.chmod(0o700)
+    for path in root.rglob("*"):
         if path.is_file():
             path.chmod(0o600)
         elif path.is_dir():
             path.chmod(0o700)
-    return destination
+
+
+def _backup_profile(source: Path) -> ProfileConfig:
+    try:
+        value = json.loads((source / "profile.json").read_text())
+        return ProfileConfig(
+            name=value["name"],
+            key_file=value["key_file"],
+            providers=tuple(value.get("providers", ("csv", "moomoo"))),
+            benchmarks=tuple(value.get("benchmarks", ())),
+            schema_version=int(value.get("schema_version", 1)),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise EncryptedStorageError("backup profile configuration is invalid") from error
+
+
+def restore_backup(source: Path) -> ProfileConfig:
+    source = source.expanduser()
+    if source.is_symlink() or not source.is_dir():
+        raise EncryptedStorageError("backup source must be a regular directory")
+    source = source.resolve()
+    if any(path.is_symlink() for path in source.rglob("*")):
+        raise EncryptedStorageError("backup source must not contain symbolic links")
+    config = _backup_profile(source)
+    destination = profile_dir(config.name)
+    if destination.exists():
+        raise EncryptedStorageError(f"profile directory already exists:{config.name}")
+    _private_directory(destination.parent)
+    staging = Path(tempfile.mkdtemp(prefix=f".{config.name}.restore-", dir=destination.parent))
+    try:
+        shutil.copytree(source, staging, copy_function=shutil.copy2, dirs_exist_ok=True)
+        _private_tree(staging)
+        if destination.exists():
+            raise EncryptedStorageError(f"profile directory already exists:{config.name}")
+        os.replace(staging, destination)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return config
 
 
 def rotate_key(config: ProfileConfig, new_key_file: Path) -> ProfileConfig:

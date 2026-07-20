@@ -15,6 +15,7 @@ from stonks_cli.storage import (
     export_backup,
     generate_key_file,
     read_key_file,
+    restore_backup,
     rotate_key,
 )
 
@@ -219,3 +220,39 @@ def test_backup_and_key_rotation_preserve_encrypted_source(
         )
         == b"source"
     )
+
+
+def test_backup_restore_preserves_encrypted_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_home = tmp_path / "source-home"
+    monkeypatch.setenv("STONKS_CLI_HOME", str(source_home))
+    key = tmp_path / "personal.key"
+    generate_key_file(key)
+    config = ProfileConfig("personal", str(key))
+    save_profile(config)
+    ledger = EncryptedLedger(config)
+    digest = ledger.archive_source(b"source")
+    with ledger.connection() as connection:
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES ('backup')")
+    backup = export_backup(config, tmp_path / "backup")
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "restore-home"))
+    restored = restore_backup(backup)
+    assert restored == config
+    assert load_profile("personal") == config
+    restored_ledger = EncryptedLedger(restored)
+    restored_source = restored_ledger.sources / f"{digest}.enc"
+    assert (
+        decrypt(
+            read_key_file(key),
+            restored_source.read_bytes(),
+            profile="personal",
+            label=f"source:{digest}",
+        )
+        == b"source"
+    )
+    with restored_ledger.connection() as connection:
+        assert connection.execute("SELECT value FROM records").fetchone()["value"] == "backup"
+    with pytest.raises(EncryptedStorageError, match="already exists"):
+        restore_backup(backup)

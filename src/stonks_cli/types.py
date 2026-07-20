@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
+
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class Currency(StrEnum):
@@ -77,6 +80,31 @@ class Account:
     @property
     def key(self) -> str:
         return f"{self.provider_id}:{self.account_id}"
+
+
+@dataclass(frozen=True)
+class SourceProvenance:
+    provider_id: str
+    source_hash: str
+    record_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider_id, str) or not isinstance(self.record_id, str):
+            raise ValueError("source provider and record identifier are required")
+        provider_id = self.provider_id.strip().lower()
+        record_id = self.record_id.strip()
+        if not provider_id or not record_id or not isinstance(self.source_hash, str):
+            raise ValueError("source provider and record identifier are required")
+        source_hash = self.source_hash.lower()
+        if not _SHA256.fullmatch(source_hash):
+            raise ValueError("source hash must be a SHA-256 digest")
+        object.__setattr__(self, "provider_id", provider_id)
+        object.__setattr__(self, "source_hash", source_hash)
+        object.__setattr__(self, "record_id", record_id)
+
+    @property
+    def key(self) -> str:
+        return f"{self.provider_id}:{self.source_hash}:{self.record_id}"
 
 
 @dataclass(frozen=True)

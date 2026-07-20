@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from stonks_cli.types import Account, Currency, Instrument, decimal
+from stonks_cli.types import Account, Currency, Instrument, SourceProvenance, decimal
 
 
 def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
@@ -45,3 +45,17 @@ def test_account_identity_requires_provider_and_identifier(
 ) -> None:
     with pytest.raises(ValueError, match="required"):
         Account(provider_id, account_id)
+
+
+def test_source_provenance_is_immutable_and_canonicalized() -> None:
+    provenance = SourceProvenance(" CSV ", "A" * 64, " line-7 ")
+    assert provenance.provider_id == "csv"
+    assert provenance.source_hash == "a" * 64
+    assert provenance.record_id == "line-7"
+    assert provenance.key == f"csv:{'a' * 64}:line-7"
+
+
+@pytest.mark.parametrize("source_hash", ("short", "g" * 64))
+def test_source_provenance_requires_sha256_digest(source_hash: str) -> None:
+    with pytest.raises(ValueError, match="SHA-256"):
+        SourceProvenance("csv", source_hash, "line-1")

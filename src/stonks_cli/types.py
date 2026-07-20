@@ -59,6 +59,27 @@ class Instrument:
 
 
 @dataclass(frozen=True)
+class Account:
+    provider_id: str
+    account_id: str
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider_id, str) or not isinstance(self.account_id, str):
+            raise ValueError("account provider and identifier are required")
+        provider_id = self.provider_id.strip().lower()
+        account_id = self.account_id.strip()
+        if not provider_id or not account_id:
+            raise ValueError("account provider and identifier are required")
+        object.__setattr__(self, "provider_id", provider_id)
+        object.__setattr__(self, "account_id", account_id)
+
+    @property
+    def key(self) -> str:
+        return f"{self.provider_id}:{self.account_id}"
+
+
+@dataclass(frozen=True)
 class LedgerEvent:
     fingerprint: str
     source_id: str
@@ -73,8 +94,10 @@ class LedgerEvent:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.fingerprint or not self.source_id or not self.account_id:
+        account_id = self.account_id.strip()
+        if not self.fingerprint or not self.source_id or not account_id:
             raise ValueError("fingerprint, source_id, and account_id are required")
+        object.__setattr__(self, "account_id", account_id)
         object.__setattr__(self, "occurred_at", utc(self.occurred_at))
         object.__setattr__(self, "amount", decimal(self.amount))
         object.__setattr__(self, "quantity", decimal(self.quantity))

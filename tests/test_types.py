@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from stonks_cli.types import Currency, Instrument, decimal
+from stonks_cli.types import Account, Currency, Instrument, decimal
 
 
 def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
@@ -30,3 +30,18 @@ def test_instrument_identity_is_trimmed_and_canonicalized() -> None:
 def test_instrument_identity_requires_symbol_and_market(symbol: str, market: str) -> None:
     with pytest.raises(ValueError, match="required"):
         Instrument(symbol, market, Currency.USD)
+
+
+def test_account_identity_is_provider_qualified_and_canonicalized() -> None:
+    account = Account(" Moomoo ", " 123 ", "Personal")
+    assert account.provider_id == "moomoo"
+    assert account.account_id == "123"
+    assert account.key == "moomoo:123"
+
+
+@pytest.mark.parametrize("provider_id,account_id", (("", "123"), ("csv", "  ")))
+def test_account_identity_requires_provider_and_identifier(
+    provider_id: str, account_id: str
+) -> None:
+    with pytest.raises(ValueError, match="required"):
+        Account(provider_id, account_id)

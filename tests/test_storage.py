@@ -9,6 +9,8 @@ from stonks_cli.config import ProfileConfig, config_path, load_profile, profile_
 from stonks_cli.errors import EncryptedStorageError, KeyFileError
 from stonks_cli.storage import (
     EncryptedLedger,
+    EncryptedStorageMigration,
+    EncryptedStorageMigrationRegistry,
     atomic_write,
     decrypt,
     encrypt,
@@ -118,6 +120,27 @@ def test_aes_gcm_envelope_has_versioned_header_and_rejects_truncation() -> None:
     assert decrypt(key, payload, profile="personal", label="ledger") == b"secret"
     with pytest.raises(EncryptedStorageError, match="authentication"):
         decrypt(key, payload[:-1], profile="personal", label="ledger")
+
+
+def test_encrypted_storage_migration_registry_requires_contiguous_versions() -> None:
+    def upgrade(payload: bytes, _: bytes, __: str, ___: str) -> bytes:
+        return b"STONKS\x02\x00" + payload[8:]
+
+    registry = EncryptedStorageMigrationRegistry(
+        (EncryptedStorageMigration(2, "upgrade", upgrade),)
+    )
+    migrated = registry.migrate(b"STONKS\x01\x00payload", b"x" * 32, "personal", "ledger")
+    assert registry.latest_version == 2
+    assert migrated == b"STONKS\x02\x00payload"
+    with pytest.raises(ValueError, match="contiguous"):
+        EncryptedStorageMigrationRegistry((EncryptedStorageMigration(3, "upgrade", upgrade),))
+    with pytest.raises(ValueError, match="name"):
+        EncryptedStorageMigration(2, "", upgrade)
+
+
+def test_decrypt_rejects_unregistered_envelope_version() -> None:
+    with pytest.raises(EncryptedStorageError, match="unsupported"):
+        decrypt(b"x" * 32, b"STONKS\x02\x00" + b"x" * 28, profile="personal", label="ledger")
 
 
 def test_envelope_rejects_wrong_aad() -> None:

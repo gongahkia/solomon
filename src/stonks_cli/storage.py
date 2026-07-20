@@ -8,8 +8,9 @@ import shutil
 import sqlite3
 import stat
 import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -17,9 +18,66 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from stonks_cli.config import ProfileConfig, profile_dir, save_profile
 from stonks_cli.errors import EncryptedStorageError, KeyFileError
 
-_MAGIC = b"STONKS\x01\x00"
+_MAGIC_PREFIX = b"STONKS"
+_FORMAT_VERSION = 1
+_VERSION_SIZE = 2
+_MAGIC = _MAGIC_PREFIX + _FORMAT_VERSION.to_bytes(_VERSION_SIZE, "little")
 _NONCE_SIZE = 12
 _KEY_SIZE = 32
+MigrationFunction = Callable[[bytes, bytes, str, str], bytes]
+
+
+def _envelope_version(payload: bytes) -> int:
+    if len(payload) < len(_MAGIC) or not payload.startswith(_MAGIC_PREFIX):
+        raise EncryptedStorageError("invalid encrypted storage envelope")
+    return int.from_bytes(payload[len(_MAGIC_PREFIX) : len(_MAGIC)], "little")
+
+
+@dataclass(frozen=True)
+class EncryptedStorageMigration:
+    version: int
+    name: str
+    apply: MigrationFunction
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 2:
+            raise ValueError("encrypted storage migration version must be an integer of at least 2")
+        if not isinstance(self.name, str) or not self.name or not callable(self.apply):
+            raise ValueError("encrypted storage migration name and apply function are required")
+
+
+@dataclass(frozen=True)
+class EncryptedStorageMigrationRegistry:
+    migrations: tuple[EncryptedStorageMigration, ...] = ()
+
+    def __post_init__(self) -> None:
+        versions = tuple(migration.version for migration in self.migrations)
+        if versions != tuple(range(2, len(self.migrations) + 2)):
+            raise ValueError("encrypted storage migration versions must be contiguous and ordered")
+        if len({migration.name for migration in self.migrations}) != len(self.migrations):
+            raise ValueError("encrypted storage migration names must be unique")
+
+    @property
+    def latest_version(self) -> int:
+        return len(self.migrations) + 1
+
+    def migrate(self, payload: bytes, key: bytes, profile: str, label: str) -> bytes:
+        version = _envelope_version(payload)
+        if version < 1 or version > self.latest_version:
+            raise EncryptedStorageError(f"unsupported encrypted storage format version:{version}")
+        while version < self.latest_version:
+            migration = self.migrations[version - 1]
+            payload = migration.apply(payload, key, profile, label)
+            migrated_version = _envelope_version(payload)
+            if migrated_version != migration.version:
+                raise EncryptedStorageError(
+                    "encrypted storage migration produced an invalid version"
+                )
+            version = migrated_version
+        return payload
+
+
+_MIGRATIONS = EncryptedStorageMigrationRegistry()
 
 
 def _private_directory(path: Path) -> None:
@@ -66,6 +124,7 @@ def encrypt(key: bytes, plaintext: bytes, *, profile: str, label: str) -> bytes:
 
 
 def decrypt(key: bytes, payload: bytes, *, profile: str, label: str) -> bytes:
+    payload = _MIGRATIONS.migrate(payload, key, profile, label)
     if len(payload) < len(_MAGIC) + _NONCE_SIZE + 16 or not payload.startswith(_MAGIC):
         raise EncryptedStorageError("invalid encrypted storage envelope")
     nonce = payload[len(_MAGIC) : len(_MAGIC) + _NONCE_SIZE]

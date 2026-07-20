@@ -33,6 +33,14 @@ def test_key_file_rejects_group_readable_file(tmp_path: Path) -> None:
         read_key_file(path)
 
 
+def test_key_file_rejects_non_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "profile.key"
+    generate_key_file(path)
+    monkeypatch.setattr("stonks_cli.storage.os.getuid", lambda: path.stat().st_uid + 1)
+    with pytest.raises(KeyFileError, match="owner"):
+        read_key_file(path)
+
+
 def test_profile_directory_layout_uses_expected_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -108,6 +108,37 @@ func TestFeatureGatesRequireExplicitRegistryEnablement(t *testing.T) {
 	}
 }
 
+func TestDefaultV1PolicySettings(t *testing.T) {
+	cfg := Default()
+	if !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" {
+		t.Fatalf("unexpected defaults: %#v", cfg)
+	}
+}
+
+func TestSetV1PolicySettings(t *testing.T) {
+	cfg := Default()
+	for key, value := range map[string]string{
+		"curated_auto_correct":        "false",
+		"risk_interrupt":              "false",
+		"local_learning_enabled":      "true",
+		"learning_retention_days":     "45",
+		"learned_rule_action_ceiling": "rewrite",
+	} {
+		if err := cfg.Set(key, value); err != nil {
+			t.Fatalf("Set(%q, %q) = %v", key, value, err)
+		}
+	}
+	if cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" {
+		t.Fatalf("unexpected configured policy: %#v", cfg)
+	}
+	if err := cfg.Set("learning_retention_days", "91"); err == nil {
+		t.Fatal("accepted excessive retention")
+	}
+	if err := cfg.Set("learned_rule_action_ceiling", "interrupt"); err == nil {
+		t.Fatal("accepted unsupported learned-rule action")
+	}
+}
+
 func TestHistoryKeysRequireLocalHistoryOptIn(t *testing.T) {
 	if _, err := Default().HistoryKeys(nil).Generate(); !errors.Is(err, credential.ErrDisabled) {
 		t.Fatalf("default history key error = %v", err)
@@ -560,7 +591,7 @@ func TestDecodeMigratesVersionlessConfiguration(t *testing.T) {
 }
 
 func TestDecodeAcceptsCurrentConfigurationSchema(t *testing.T) {
-	cfg, err := decode([]byte(`{"schema_version":1,"mode":"off"}`), Default())
+	cfg, err := decode([]byte(`{"schema_version":`+strconv.Itoa(CurrentSchemaVersion)+`,"mode":"off"}`), Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +601,7 @@ func TestDecodeAcceptsCurrentConfigurationSchema(t *testing.T) {
 }
 
 func TestDecodeRejectsUnsupportedConfigurationSchema(t *testing.T) {
-	_, err := decode([]byte(`{"schema_version":2}`), Default())
+	_, err := decode([]byte(`{"schema_version":`+strconv.Itoa(CurrentSchemaVersion+1)+`}`), Default())
 	if err == nil || !strings.Contains(err.Error(), "unsupported configuration schema version") {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	CurrentSchemaVersion         = 1
+	CurrentSchemaVersion         = 2
 	maxRuleExceptionCommandBytes = 8 << 10
+	defaultLearningRetentionDays = 30
+	maxLearningRetentionDays     = 90
 )
 
 type RuleException struct {
@@ -29,14 +31,19 @@ type RuleException struct {
 }
 
 type Config struct {
-	SchemaVersion       int             `json:"schema_version"`
-	Mode                string          `json:"mode"`
-	Display             Display         `json:"display"`
-	AutoApplySafe       bool            `json:"auto_apply_safe"`
-	LocalHistoryEnabled bool            `json:"local_history_enabled"`
-	RegistryEnabled     bool            `json:"registry_enabled"`
-	AutoUpdateEnabled   bool            `json:"auto_update_enabled"`
-	RuleExceptions      []RuleException `json:"rule_exceptions,omitempty"`
+	SchemaVersion            int             `json:"schema_version"`
+	Mode                     string          `json:"mode"`
+	Display                  Display         `json:"display"`
+	AutoApplySafe            bool            `json:"auto_apply_safe"`
+	LocalHistoryEnabled      bool            `json:"local_history_enabled"`
+	RegistryEnabled          bool            `json:"registry_enabled"`
+	AutoUpdateEnabled        bool            `json:"auto_update_enabled"`
+	CuratedAutoCorrect       bool            `json:"curated_auto_correct"`
+	RiskInterrupt            bool            `json:"risk_interrupt"`
+	LocalLearningEnabled     bool            `json:"local_learning_enabled"`
+	LearningRetentionDays    int             `json:"learning_retention_days"`
+	LearnedRuleActionCeiling string          `json:"learned_rule_action_ceiling"`
+	RuleExceptions           []RuleException `json:"rule_exceptions,omitempty"`
 }
 
 type Display struct {
@@ -56,7 +63,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
 }
 
 func (c Config) HasRuleException(command string) bool {
@@ -158,12 +165,12 @@ func validRuleExceptionID(value string) bool {
 	return true
 }
 
-func (c Config) Features() featuregate.Gates {
-	return featuregate.New(c.RegistryEnabled, c.AutoUpdateEnabled)
-}
-
 func (c Config) HistoryKeys(store credential.Store) credential.HistoryKeys {
 	return credential.NewHistoryKeys(c.LocalHistoryEnabled, store)
+}
+
+func (c Config) Features() featuregate.Gates {
+	return featuregate.New(c.RegistryEnabled, c.AutoUpdateEnabled)
 }
 
 func (c Config) HistoryRanker(store history.Store) history.Ranker {
@@ -220,11 +227,14 @@ func applySessionPrecedence(base Config, paths Paths) (Config, error) {
 }
 
 var sessionOverrideKeys = map[string]string{
-	"CLOSE_ENOUGH_MODE":                  "mode",
-	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":       "auto_apply_safe",
-	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED": "local_history_enabled",
-	"CLOSE_ENOUGH_REGISTRY_ENABLED":      "registry_enabled",
-	"CLOSE_ENOUGH_AUTO_UPDATE_ENABLED":   "auto_update_enabled",
+	"CLOSE_ENOUGH_MODE":                   "mode",
+	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":        "auto_apply_safe",
+	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED":  "local_history_enabled",
+	"CLOSE_ENOUGH_REGISTRY_ENABLED":       "registry_enabled",
+	"CLOSE_ENOUGH_AUTO_UPDATE_ENABLED":    "auto_update_enabled",
+	"CLOSE_ENOUGH_CURATED_AUTO_CORRECT":   "curated_auto_correct",
+	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
+	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
 }
 
 func sessionValues(paths Paths) (map[string]string, error) {
@@ -370,6 +380,12 @@ func decode(data []byte, base Config) (Config, error) {
 	if !validMode(base.Mode) {
 		return Config{}, fmt.Errorf("invalid mode %q", base.Mode)
 	}
+	if !validLearnedRuleAction(base.LearnedRuleActionCeiling) {
+		return Config{}, fmt.Errorf("invalid learned rule action ceiling %q", base.LearnedRuleActionCeiling)
+	}
+	if base.LearningRetentionDays < 1 || base.LearningRetentionDays > maxLearningRetentionDays {
+		return Config{}, fmt.Errorf("learning retention days must be between 1 and %d", maxLearningRetentionDays)
+	}
 	if err := validateRuleExceptions(base.RuleExceptions); err != nil {
 		return Config{}, err
 	}
@@ -383,8 +399,15 @@ func migrate(cfg Config, version int) (Config, error) {
 	for version < CurrentSchemaVersion {
 		switch version {
 		case 0:
+			cfg.CuratedAutoCorrect = cfg.Mode == "rewrite" && cfg.AutoApplySafe
+			cfg.RiskInterrupt = cfg.Mode == "interrupt"
 			cfg.SchemaVersion = 1
 			version = 1
+		case 1:
+			cfg.CuratedAutoCorrect = cfg.Mode == "rewrite" && cfg.AutoApplySafe
+			cfg.RiskInterrupt = cfg.Mode == "interrupt"
+			cfg.SchemaVersion = 2
+			version = 2
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}
@@ -396,6 +419,10 @@ func validMode(value string) bool {
 	return value == "hint" || value == "interrupt" || value == "off" || value == "rewrite"
 }
 
+func validLearnedRuleAction(value string) bool {
+	return value == "off" || value == "hint" || value == "rewrite"
+}
+
 func (c *Config) Set(key, value string) error {
 	switch key {
 	case "mode":
@@ -403,7 +430,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -417,6 +444,12 @@ func (c *Config) Set(key, value string) error {
 			c.RegistryEnabled = parsed
 		case "auto_update_enabled":
 			c.AutoUpdateEnabled = parsed
+		case "curated_auto_correct":
+			c.CuratedAutoCorrect = parsed
+		case "risk_interrupt":
+			c.RiskInterrupt = parsed
+		case "local_learning_enabled":
+			c.LocalLearningEnabled = parsed
 		case "display.cause":
 			c.Display.Cause = parsed
 		case "display.change":
@@ -430,6 +463,17 @@ func (c *Config) Set(key, value string) error {
 		case "display.trace":
 			c.Display.Trace = parsed
 		}
+	case "learning_retention_days":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > maxLearningRetentionDays {
+			return fmt.Errorf("learning_retention_days must be between 1 and %d", maxLearningRetentionDays)
+		}
+		c.LearningRetentionDays = parsed
+	case "learned_rule_action_ceiling":
+		if !validLearnedRuleAction(value) {
+			return errors.New("learned_rule_action_ceiling must be off, hint, or rewrite")
+		}
+		c.LearnedRuleActionCeiling = value
 	default:
 		return fmt.Errorf("unknown configuration key %q", key)
 	}

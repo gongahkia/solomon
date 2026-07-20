@@ -37,6 +37,8 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     key = tmp_path / "key"
     result = runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)])
     assert result.exit_code == 0, result.output
+    assert len(key.read_bytes()) == 32
+    assert key.stat().st_mode & 0o077 == 0
     source = tmp_path / "events.csv"
     source.write_text(
         "account_id,occurred_at,kind,currency,amount\n"

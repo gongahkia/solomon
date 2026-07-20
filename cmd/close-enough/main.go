@@ -1,21 +1,30 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/close-enough/internal/localstate"
 	"github.com/gongahkia/close-enough/internal/packs"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 	"github.com/gongahkia/close-enough/internal/shell"
@@ -86,8 +95,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return configCommand(args[1:], stdout)
 	case "rule":
 		return ruleCommand(args[1:], stdout)
+	case "learn":
+		return learnCommand(args[1:], stdout)
 	case "pack":
 		return packCommand(args[1:], stdout)
+	case "daemon":
+		return daemonCommand(args[1:], stdout)
 	case "doctor":
 		return doctorCommand(stdout)
 	case "checksum":
@@ -105,10 +118,311 @@ func versionString() string {
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|pack|doctor|checksum|version>"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|learn|pack|daemon|doctor|checksum|version>"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
+}
+
+func learnCommand(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
+	}
+	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	if !cfg.LocalLearningEnabled {
+		return clierr.New(clierr.Configuration, "local learning is disabled")
+	}
+	directory, err := daemon.StateDirectory(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	store, err := localstate.Open(directory)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	defer store.Close()
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn list")
+		}
+		drafts, err := store.ListReviewableDrafts(context.Background())
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		rules, err := store.ListActiveRules(context.Background())
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(struct {
+			Drafts []localstate.Draft       `json:"drafts"`
+			Rules  []localstate.LearnedRule `json:"rules"`
+		}{Drafts: drafts, Rules: rules}))
+	case "activate":
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn activate <draft-id> <off|hint|rewrite>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return clierr.New(clierr.Usage, "learned rule draft id must be an integer")
+		}
+		rule, err := store.ActivateDraft(context.Background(), id, args[2])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(rule))
+	case "edit":
+		if len(args) != 4 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn edit <draft-id> <failed-command> <corrected-command>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return clierr.New(clierr.Usage, "learned rule draft id must be an integer")
+		}
+		draft, err := store.UpdateDraft(context.Background(), id, args[2], args[3])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(draft))
+	case "set-action":
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn set-action <rule-id> <off|hint|rewrite>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return clierr.New(clierr.Usage, "learned rule id must be an integer")
+		}
+		if err := store.SetRuleAction(context.Background(), id, args[2]); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
+		return nil
+	case "enable", "disable":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn "+args[0]+" <rule-id>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return clierr.New(clierr.Usage, "learned rule id must be an integer")
+		}
+		if err := store.SetRuleEnabled(context.Background(), id, args[0] == "enable"); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
+		return nil
+	case "remove":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough learn remove <rule-id>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return clierr.New(clierr.Usage, "learned rule id must be an integer")
+		}
+		if err := store.DeleteRule(context.Background(), id); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
+		return nil
+	case "purge":
+		if len(args) != 2 || args[1] != "--confirm=PURGE" {
+			return clierr.New(clierr.Usage, "usage: close-enough learn purge --confirm=PURGE")
+		}
+		if err := store.PurgeLearning(context.Background()); err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		restartDaemonIfRunning()
+		return nil
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
+	}
+}
+
+func restartDaemonIfRunning() {
+	directory, err := daemon.RuntimeDirectory(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		return
+	}
+	endpoint, err := daemon.LocalEndpoint(directory)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, _ = (daemon.Client{Endpoint: endpoint, Timeout: 15 * time.Millisecond}).Request(ctx, daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StopOperation})
+}
+
+func daemonCommand(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough daemon <serve|status|stop|request>")
+	}
+	runtimeDirectory, err := daemon.RuntimeDirectory(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	endpoint, err := daemon.LocalEndpoint(runtimeDirectory)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	switch args[0] {
+	case "status":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough daemon status")
+		}
+		response, err := (daemon.Client{Endpoint: endpoint}).Request(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation})
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(response))
+	case "serve":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough daemon serve")
+		}
+		cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
+		if err != nil {
+			return clierr.Wrap(clierr.Configuration, err)
+		}
+		resolver, err := packs.NewBundledRuntimeResolver()
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		var store *localstate.Store
+		var learnedRules []localstate.LearnedRule
+		if cfg.LocalLearningEnabled {
+			stateDirectory, err := daemon.StateDirectory(os.UserHomeDir, os.Getenv)
+			if err != nil {
+				return clierr.Wrap(clierr.Configuration, err)
+			}
+			store, err = localstate.Open(stateDirectory)
+			if err != nil {
+				return clierr.Wrap(clierr.Configuration, err)
+			}
+			defer store.Close()
+			if _, err := store.DeleteObservationsBefore(context.Background(), time.Now().AddDate(0, 0, -cfg.LearningRetentionDays)); err != nil {
+				return clierr.Wrap(clierr.Configuration, err)
+			}
+			learnedRules, err = store.ListActiveRules(context.Background())
+			if err != nil {
+				return clierr.Wrap(clierr.Configuration, err)
+			}
+		}
+		service := daemon.Service{Engine: diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd()}), Config: cfg, Packs: resolver, Store: store, LearnedRules: learnedRules}
+		server, err := daemon.NewServer(endpoint, service.Handle)
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		if err := server.Listen(); err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return clierr.Wrap(clierr.Operation, server.Serve(ctx))
+	case "stop":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough daemon stop")
+		}
+		response, err := (daemon.Client{Endpoint: endpoint}).Request(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StopOperation})
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(response))
+	case "request":
+		return daemonRequestCommand(args[1:], endpoint, stdout)
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough daemon <serve|status|stop|request>")
+	}
+}
+
+func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Writer) error {
+	fs := flag.NewFlagSet("daemon request", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	operation := fs.String("operation", "", "daemon operation")
+	shellName := fs.String("shell", "", "shell")
+	command := fs.String("command", "", "command line")
+	failureOutput := fs.String("failure-output", "", "failure output")
+	session := fs.String("session", "", "shell session")
+	token := fs.String("token", "", "confirmation or undo token")
+	format := fs.String("format", "json", "json or record")
+	ensure := fs.Bool("ensure", true, "start the local daemon when unavailable")
+	if err := fs.Parse(args); err != nil || *operation == "" || fs.NArg() != 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough daemon request --operation <handshake|status|pre-send|post-failure|post-success|undo|confirm|stop> [--shell <shell>] [--command <command>] [--failure-output <output>] [--session <id>] [--token <token>] [--format <json|record>] [--ensure=<true|false>]")
+	}
+	if *format != "json" && *format != "record" {
+		return clierr.New(clierr.Usage, "daemon request --format must be json or record")
+	}
+	request := daemon.Request{
+		Version:       daemon.ProtocolVersion,
+		Operation:     daemon.Operation(*operation),
+		Shell:         *shellName,
+		Command:       *command,
+		FailureOutput: *failureOutput,
+		Session:       *session,
+		Token:         *token,
+	}
+	response, err := requestDaemon(context.Background(), endpoint, request, *ensure)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	if *format == "record" {
+		_, err := io.WriteString(stdout, daemonRecord(response))
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(response))
+}
+
+func daemonRecord(response daemon.Response) string {
+	fields := []string{
+		strconv.Itoa(response.Version),
+		response.Action,
+		response.Risk,
+		response.Confidence,
+		base64.RawStdEncoding.EncodeToString([]byte(response.Explanation)),
+		base64.RawStdEncoding.EncodeToString(nil),
+		base64.RawStdEncoding.EncodeToString([]byte(response.Suggestion)),
+	}
+	return strings.Join(fields, "\t") + "\n"
+}
+
+var startDaemonProcess = startDaemonProcessDefault
+
+func requestDaemon(parent context.Context, endpoint daemon.Endpoint, request daemon.Request, ensure bool) (daemon.Response, error) {
+	ctx, cancel := context.WithTimeout(parent, 95*time.Millisecond)
+	defer cancel()
+	client := daemon.Client{Endpoint: endpoint, Timeout: 15 * time.Millisecond}
+	response, err := client.Request(ctx, request)
+	if err == nil || !ensure || !errors.Is(err, daemon.ErrUnavailable) {
+		return response, err
+	}
+	if err := startDaemonProcess(); err != nil {
+		return daemon.Response{}, errors.Join(daemon.ErrUnavailable, err)
+	}
+	for {
+		response, err = client.Request(ctx, request)
+		if err == nil || !errors.Is(err, daemon.ErrUnavailable) || ctx.Err() != nil {
+			return response, err
+		}
+		select {
+		case <-ctx.Done():
+			return daemon.Response{}, errors.Join(daemon.ErrUnavailable, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func startDaemonProcessDefault() error {
+	path, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	command := exec.Command(path, "daemon", "serve")
+	if err := command.Start(); err != nil {
+		return err
+	}
+	return command.Process.Release()
 }
 
 func checksumCommand(args []string, stdout io.Writer) error {

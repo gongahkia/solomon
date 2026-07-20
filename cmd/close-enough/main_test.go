@@ -13,6 +13,7 @@ import (
 
 	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
@@ -533,5 +534,20 @@ func TestDoctorIncludesRuntimeReport(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), `"runtime":`) {
 		t.Fatalf("doctor output lacks runtime report: %s", output.String())
+	}
+}
+
+func TestDaemonRecordIsAdapterCompatible(t *testing.T) {
+	record := daemonRecord(daemon.Response{Version: daemon.ProtocolVersion, Action: "rewrite", Risk: "safe", Confidence: "high", Explanation: "typo", Suggestion: "git status"})
+	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
+	if len(fields) != 7 || fields[0] != "1" || fields[1] != "rewrite" || fields[2] != "safe" || fields[3] != "high" || fields[6] != "Z2l0IHN0YXR1cw" {
+		t.Fatalf("record = %q", record)
+	}
+}
+
+func TestDaemonCommandRejectsInvalidUsage(t *testing.T) {
+	err := run([]string{"daemon"}, io.Discard, io.Discard)
+	if clierr.Code(err) != clierr.ExitUsage {
+		t.Fatalf("daemon command code = %d, error = %v", clierr.Code(err), err)
 	}
 }

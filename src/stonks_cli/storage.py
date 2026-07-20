@@ -121,6 +121,7 @@ class EncryptedLedger:
             )
             try:
                 connection.deserialize(plaintext)
+                connection.execute("PRAGMA schema_version").fetchone()
             except sqlite3.DatabaseError as error:
                 raise EncryptedStorageError("ledger SQLite image is invalid") from error
         return connection

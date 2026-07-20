@@ -163,6 +163,23 @@ def test_ledger_rejects_tampered_encrypted_file(
             pass
 
 
+def test_ledger_rejects_authenticated_non_sqlite_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    key = tmp_path / "personal.key"
+    generate_key_file(key)
+    ledger = EncryptedLedger(ProfileConfig("personal", str(key)))
+    with ledger.connection():
+        pass
+    ledger.path.write_bytes(
+        encrypt(ledger.key, b"not a SQLite image", profile="personal", label="ledger")
+    )
+    with pytest.raises(EncryptedStorageError, match="SQLite image"):
+        with ledger.connection():
+            pass
+
+
 def test_ledger_serializes_in_memory_sqlite_as_encrypted_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

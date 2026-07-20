@@ -135,9 +135,14 @@ def test_archived_source_is_encrypted(tmp_path: Path, monkeypatch: pytest.Monkey
     config = ProfileConfig("personal", str(key))
     save_profile(config)
     ledger = EncryptedLedger(config)
-    digest = ledger.archive_source(b"account_id,occurred_at\n")
-    stored = (ledger.sources / f"{digest}.enc").read_bytes()
+    source = b"account_id,occurred_at\n"
+    digest = ledger.archive_source(source)
+    path = ledger.sources / f"{digest}.enc"
+    stored = path.read_bytes()
     assert b"account_id" not in stored
+    assert decrypt(ledger.key, stored, profile="personal", label=f"source:{digest}") == source
+    assert ledger.archive_source(source) == digest
+    assert path.read_bytes() == stored
 
 
 def test_ledger_rejects_tampered_encrypted_file(

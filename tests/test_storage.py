@@ -172,6 +172,20 @@ def test_ledger_serializes_in_memory_sqlite_as_encrypted_file(
     assert b"serialized-secret" not in encrypted
 
 
+def test_ledger_restores_serialized_in_memory_sqlite_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    key = tmp_path / "personal.key"
+    generate_key_file(key)
+    ledger = EncryptedLedger(ProfileConfig("personal", str(key)))
+    with ledger.connection() as connection:
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES ('restored')")
+    with ledger.connection() as connection:
+        assert connection.execute("SELECT value FROM records").fetchone()["value"] == "restored"
+
+
 def test_backup_and_key_rotation_preserve_encrypted_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

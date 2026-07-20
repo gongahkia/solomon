@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -549,5 +550,38 @@ func TestDaemonCommandRejectsInvalidUsage(t *testing.T) {
 	err := run([]string{"daemon"}, io.Discard, io.Discard)
 	if clierr.Code(err) != clierr.ExitUsage {
 		t.Fatalf("daemon command code = %d, error = %v", clierr.Code(err), err)
+	}
+}
+
+func TestRequestDaemonStartsUnavailableDaemon(t *testing.T) {
+	endpoint, err := daemon.LocalEndpoint(filepath.Join(t.TempDir(), "runtime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := startDaemonProcess
+	var server *daemon.Server
+	startDaemonProcess = func() error {
+		var err error
+		server, err = daemon.NewServer(endpoint, func(_ context.Context, request daemon.Request) (daemon.Response, error) {
+			return daemon.Response{Version: daemon.ProtocolVersion, Action: string(request.Operation)}, nil
+		})
+		if err != nil {
+			return err
+		}
+		if err := server.Listen(); err != nil {
+			return err
+		}
+		go server.Serve(context.Background())
+		return nil
+	}
+	defer func() {
+		startDaemonProcess = original
+		if server != nil {
+			_ = server.Close()
+		}
+	}()
+	response, err := requestDaemon(context.Background(), endpoint, daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation}, true)
+	if err != nil || response.Action != string(daemon.StatusOperation) {
+		t.Fatalf("requestDaemon() = %#v, %v", response, err)
 	}
 }

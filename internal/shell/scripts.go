@@ -27,7 +27,7 @@ function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion suggestion_key
   local -a fields
   command="$BUFFER"
-  record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return 0
+  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --format record --command "$command" 2>/dev/null)" || return 0
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return 0
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"
@@ -35,23 +35,28 @@ function _close_enough_check {
   [[ "$action" == none ]] && return 0
   suggestion_key="$suggestion"
   suggestion="$(_close_enough_decode "$suggestion")" || return 0
+  cause="$(_close_enough_decode "$cause")" || cause=''
+  if [[ "$action" == submit ]]; then
+    return 0
+  fi
   if [[ "$action" == rewrite ]]; then
     if [[ "$risk" != safe || -z "$suggestion" ]]; then
       zle -M "close-enough: refused unsafe rewrite"
       return 1
     fi
     BUFFER="$suggestion"
+    zle -M "close-enough corrected: $suggestion ($cause; press Enter again)"
     zle -R
     return 1
   fi
   if [[ "$action" == hint ]]; then
     if _close_enough_allow_suggestion "$suggestion_key"; then
-      zle -M "close-enough [$risk/$confidence]: $suggestion"
+      zle -M "close-enough [$risk/$confidence]: $suggestion ($cause)"
     fi
     return 0
   fi
   if [[ "$action" == interrupt ]]; then
-    zle -M "close-enough [$risk/$confidence]: $suggestion"
+    zle -M "close-enough [$risk/$confidence]: $suggestion ($cause)"
     return 1
   fi
   return 0
@@ -85,7 +90,11 @@ function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
 function _close_enough_precmd {
   local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" output
   _CLOSE_ENOUGH_LAST_COMMAND=''
-  [[ $status -eq 0 || -z "$command" ]] && return
+  [[ -z "$command" ]] && return
+  if [[ $status -eq 0 ]]; then
+    command close-enough daemon request --operation post-success --shell zsh --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
+    return
+  fi
   output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
   [[ -z "$output" || "$output" == "no suggestion" ]] && return
   _close_enough_allow_diagnostic || return
@@ -125,7 +134,7 @@ _close_enough_accept_line() {
   local command record version action risk confidence cause consequence suggestion suggestion_key separator
   local -a fields
   command="$READLINE_LINE"
-  record="$(command close-enough check --stage pre --format record --command "$command" 2>/dev/null)" || return
+  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --format record --command "$command" 2>/dev/null)" || return
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
@@ -135,6 +144,10 @@ _close_enough_accept_line() {
   [ "$action" = none ] && return
   suggestion_key="$suggestion"
   suggestion="$(_close_enough_decode "$suggestion")" || return
+  cause="$(_close_enough_decode "$cause")" || cause=''
+  if [ "$action" = submit ]; then
+    return
+  fi
   if [ "$action" = rewrite ]; then
     if [ "$risk" != safe ] || [ -z "$suggestion" ]; then
       printf '\nclose-enough: refused unsafe rewrite\n' >&2
@@ -142,16 +155,17 @@ _close_enough_accept_line() {
       return 1
     fi
     READLINE_LINE="$suggestion"
+    printf '\nclose-enough corrected: %s (%s; press Enter again)\n' "$suggestion" "$cause" >&2
     return 1
   fi
   if [ "$action" = hint ]; then
     if _close_enough_allow_suggestion "$suggestion_key"; then
-      printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+      printf '\nclose-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause" >&2
     fi
     return
   fi
   if [ "$action" = interrupt ]; then
-    printf '\nclose-enough [%s/%s]: %s\n' "$risk" "$confidence" "$suggestion" >&2
+    printf '\nclose-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause" >&2
     READLINE_LINE=':'
     return 1
   fi
@@ -177,7 +191,11 @@ trap _close_enough_debug DEBUG
 _close_enough_prompt() {
   local status=$? command="$_close_enough_last_command" output
   _close_enough_last_command=''
-  [ "$status" -ne 0 ] && [ -n "$command" ] || return
+  [ -n "$command" ] || return
+  if [ "$status" -eq 0 ]; then
+    command close-enough daemon request --operation post-success --shell bash --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
+    return
+  fi
   output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
   [ -n "$output" ] && [ "$output" != "no suggestion" ] || return
   _close_enough_allow_diagnostic || return
@@ -215,7 +233,7 @@ function _close_enough_decode
 end
 function _close_enough_accept_line
   set -l command (commandline -b)
-  set -l record (command close-enough check --stage pre --format record --command "$command" 2>/dev/null)
+  set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --format record --command "$command" 2>/dev/null)
   set -l fields (string split \t -- $record)
   if test (count $fields) -ne 7
     return
@@ -223,8 +241,13 @@ function _close_enough_accept_line
   if test "$fields[1]" != 1
     return
   end
+  if test "$fields[2]" = submit
+    commandline -f execute
+    return
+  end
   if test "$fields[2]" = rewrite
     set -l suggestion (_close_enough_decode "$fields[7]")
+    set -l cause (_close_enough_decode "$fields[5]")
     or return
     if test "$fields[3]" != safe; or test -z "$suggestion"
       echo "close-enough: refused unsafe rewrite" >&2
@@ -232,22 +255,25 @@ function _close_enough_accept_line
       return
     end
     commandline -r "$suggestion"
+    echo "close-enough corrected: $suggestion ($cause; press Enter again)" >&2
     return
   end
   if test "$fields[2]" = hint
     set -l suggestion_key "$fields[7]"
     set -l suggestion (_close_enough_decode "$fields[7]")
+    set -l cause (_close_enough_decode "$fields[5]")
     or return
     if _close_enough_allow_suggestion "$suggestion_key"
-      echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
+      echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     end
     commandline -f execute
     return
   end
   if test "$fields[2]" = interrupt
     set -l suggestion (_close_enough_decode "$fields[7]")
+    set -l cause (_close_enough_decode "$fields[5]")
     or return
-    echo "close-enough [$fields[3]/$fields[4]]: $suggestion" >&2
+    echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     commandline -f repaint
     return
   end
@@ -274,7 +300,14 @@ _close_enough_bind_enter
 function _close_enough_post_failure --on-event fish_postexec
   set -l command_status $status
   set -l command $argv[1]
-  if test $command_status -ne 0; and test -n "$command"
+  if test -z "$command"
+    return
+  end
+  if test $command_status -eq 0
+    command close-enough daemon request --operation post-success --shell fish --session "$fish_pid" --ensure=false --command "$command" >/dev/null 2>/dev/null
+    return
+  end
+  if test $command_status -ne 0
     set -l output (command close-enough check --stage post --format plain --command "$command" 2>/dev/null | string collect)
     if test -n "$output"; and test "$output" != "no suggestion"; and _close_enough_allow_diagnostic
       printf '%s\n' "$output"
@@ -298,7 +331,7 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   $command = $line
-  $record = & close-enough check --stage pre --format json --command $command 2>$null
+  $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --command $command 2>$null
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { return }
   try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { return }
   if ($decision.version -ne 1) { return }
@@ -308,15 +341,20 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
       return
     }
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
+    Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
     return
   }
   if ($decision.action -eq 'hint') {
-    if (Allow-CloseEnoughSuggestion $decision.suggestion) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)" }
+    if (Allow-CloseEnoughSuggestion $decision.suggestion) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
+    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    return
+  }
+  if ($decision.action -eq 'submit') {
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
   if ($decision.action -eq 'interrupt') {
-    Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)"
+    Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))"
     return
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
@@ -342,6 +380,10 @@ function global:Restore-CloseEnoughEnterHandler {
 function global:prompt {
   $status = $?
   $entry = Get-History -Count 1
+  if ($status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
+    $global:CloseEnoughLastHistoryId = $entry.Id
+    & close-enough daemon request --operation post-success --shell powershell --session $PID --ensure=false --command $entry.CommandLine 2>$null | Out-Null
+  }
   if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
     $global:CloseEnoughLastHistoryId = $entry.Id
     $output = (& close-enough check --stage post --format plain --command $entry.CommandLine 2>$null | Out-String).Trim()

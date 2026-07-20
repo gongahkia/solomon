@@ -9,6 +9,7 @@ from stonks_cli.config import ProfileConfig, config_path, load_profile, profile_
 from stonks_cli.errors import EncryptedStorageError, KeyFileError
 from stonks_cli.storage import (
     EncryptedLedger,
+    atomic_write,
     decrypt,
     encrypt,
     export_backup,
@@ -47,6 +48,23 @@ def test_key_file_rejects_non_256_bit_content(tmp_path: Path) -> None:
     path.chmod(0o600)
     with pytest.raises(KeyFileError, match="32 raw bytes"):
         read_key_file(path)
+
+
+def test_atomic_write_preserves_existing_file_when_replacement_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def replace_error(_: str, __: str) -> None:
+        raise OSError
+
+    path = tmp_path / "nested" / "ledger.sqlite.enc"
+    atomic_write(path, b"old")
+    monkeypatch.setattr("stonks_cli.storage.os.replace", replace_error)
+    with pytest.raises(OSError):
+        atomic_write(path, b"new")
+    assert path.read_bytes() == b"old"
+    assert path.stat().st_mode & 0o077 == 0
+    assert path.parent.stat().st_mode & 0o077 == 0
+    assert not list(path.parent.glob(".ledger.sqlite.enc.*"))
 
 
 def test_profile_directory_layout_uses_expected_paths(

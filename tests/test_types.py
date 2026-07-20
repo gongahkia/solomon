@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from stonks_cli.types import Currency, decimal
+from stonks_cli.types import Currency, Instrument, decimal
 
 
 def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
@@ -17,3 +17,16 @@ def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
 def test_money_rejects_non_finite_or_invalid_values(value: str) -> None:
     with pytest.raises(ValueError):
         decimal(value)
+
+
+def test_instrument_identity_is_trimmed_and_canonicalized() -> None:
+    instrument = Instrument(" spy ", " us ", Currency.USD, "S&P 500 ETF")
+    assert instrument.symbol == "SPY"
+    assert instrument.market == "US"
+    assert instrument.key == "US:SPY"
+
+
+@pytest.mark.parametrize("symbol,market", (("", "US"), ("SPY", " ")))
+def test_instrument_identity_requires_symbol_and_market(symbol: str, market: str) -> None:
+    with pytest.raises(ValueError, match="required"):
+        Instrument(symbol, market, Currency.USD)

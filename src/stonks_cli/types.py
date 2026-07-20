@@ -46,8 +46,12 @@ class Instrument:
     name: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.symbol.strip() or not self.market.strip():
+        symbol = self.symbol.strip().upper()
+        market = self.market.strip().upper()
+        if not symbol or not market:
             raise ValueError("instrument symbol and market are required")
+        object.__setattr__(self, "symbol", symbol)
+        object.__setattr__(self, "market", market)
 
     @property
     def key(self) -> str:

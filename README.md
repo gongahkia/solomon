@@ -12,7 +12,7 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 
 - Profiles and imports: `init-profile`, `import-csv`, `import-prices`
 - Portfolio reports: `portfolio`, `transactions`, `performance`
-- Profile maintenance: `backup-profile`, `rotate-key`
+- Profile maintenance: `backup-profile`, `restore-profile`, `rotate-key`
 - Research and operator utilities: `backtest-csv`, `schedule-render`, `notify-local`
 - Integrations and metadata: `plugins`, `moomoo-accounts`, `version`
 

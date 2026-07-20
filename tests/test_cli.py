@@ -18,6 +18,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "transactions",
         "performance",
         "backup-profile",
+        "restore-profile",
         "rotate-key",
         "backtest-csv",
         "schedule-render",
@@ -46,6 +47,29 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     )
     result = runner.invoke(app, ["import-csv", "personal", str(source)])
     assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["portfolio", "personal", "--json"])
+    assert result.exit_code == 0, result.output
+    assert '"event_count": 1' in result.output
+
+
+def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:
+    source_home = tmp_path / "source-home"
+    monkeypatch.setenv("STONKS_CLI_HOME", str(source_home))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    source = tmp_path / "events.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100\n"
+    )
+    assert runner.invoke(app, ["import-csv", "personal", str(source)]).exit_code == 0
+    backup = tmp_path / "backup"
+    assert runner.invoke(app, ["backup-profile", "personal", str(backup)]).exit_code == 0
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "restore-home"))
+    result = runner.invoke(app, ["restore-profile", str(backup)])
+    assert result.exit_code == 0, result.output
+    assert '"profile": "personal"' in result.output
     result = runner.invoke(app, ["portfolio", "personal", "--json"])
     assert result.exit_code == 0, result.output
     assert '"event_count": 1' in result.output

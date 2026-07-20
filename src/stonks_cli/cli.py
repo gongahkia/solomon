@@ -18,7 +18,13 @@ from stonks_cli.market_data import import_daily_prices_csv, latest_prices
 from stonks_cli.moomoo import MoomooReadOnlyProvider, OpenDConnection
 from stonks_cli.operator import ScheduleDefinition, notify_local, render_schedule
 from stonks_cli.plugins import discover
-from stonks_cli.storage import EncryptedLedger, export_backup, generate_key_file, rotate_key
+from stonks_cli.storage import (
+    EncryptedLedger,
+    export_backup,
+    generate_key_file,
+    restore_backup,
+    rotate_key,
+)
 from stonks_cli.strategy import run_csv_backtest
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -133,6 +139,12 @@ def backup_profile(
 ) -> None:
     path = export_backup(_profile(profile, key_file), destination)
     console.print_json(json.dumps({"profile": profile, "backup": str(path)}))
+
+
+@app.command("restore-profile")
+def restore_profile(source: Path = typer.Argument(..., exists=True, file_okay=False)) -> None:
+    config = restore_backup(source)
+    console.print_json(json.dumps({"profile": config.name, "status": "restored"}))
 
 
 @app.command("rotate-key")

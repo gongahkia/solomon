@@ -12,6 +12,12 @@ func TestRequestValidation(t *testing.T) {
 	if err := (Request{Version: ProtocolVersion, Operation: "network"}).Validate(); err == nil {
 		t.Fatal("Validate() accepted an unknown operation")
 	}
+	if err := (Request{Version: ProtocolVersion, Operation: PostFailureOperation, FailureOutput: "fatal: missing\n\tat line 1"}).Validate(); err != nil {
+		t.Fatalf("Validate() rejected multiline failure output: %v", err)
+	}
+	if err := (Request{Version: ProtocolVersion, Operation: PostFailureOperation, FailureOutput: "fatal:\x1b]8;;https://example.invalid\a"}).Validate(); err == nil {
+		t.Fatal("Validate() accepted terminal control injection")
+	}
 }
 
 func TestResponseValidation(t *testing.T) {

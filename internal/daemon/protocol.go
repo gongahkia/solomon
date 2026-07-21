@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -62,7 +63,19 @@ func (r Request) Validate() error {
 	if strings.IndexByte(r.Session, 0) >= 0 || strings.IndexByte(r.Token, 0) >= 0 {
 		return errors.New("daemon request contains invalid token data")
 	}
+	if containsUnsafeControl(r.FailureOutput) {
+		return errors.New("daemon failure output contains control characters")
+	}
 	return nil
+}
+
+func containsUnsafeControl(value string) bool {
+	for _, character := range value {
+		if unicode.IsControl(character) && character != '\n' && character != '\r' && character != '\t' {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Response) Validate() error {

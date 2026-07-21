@@ -29,7 +29,17 @@ class Capability(StrEnum):
     MARKET_DATA = "market_data.read"
 
 
-_FORBIDDEN = frozenset({"orders.write", "orders.read", "trade.unlock", "execution"})
+_EXECUTION_CAPABILITIES = frozenset(
+    {
+        "execution",
+        "orders.cancel",
+        "orders.modify",
+        "orders.place",
+        "orders.read",
+        "orders.write",
+        "trade.unlock",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -132,11 +142,9 @@ def compatible_api_version(value: str) -> bool:
 def validate_manifest(manifest: PluginManifest) -> None:
     if not compatible_api_version(manifest.api_version):
         raise ProviderError("incompatible plugin API version")
-    if any(
-        not isinstance(capability, Capability) or capability.value in _FORBIDDEN
-        for capability in manifest.capabilities
-    ):
-        raise ExecutionDeniedError("execution capabilities are prohibited")
+    _reject_execution_capabilities(manifest.capabilities)
+    if any(not isinstance(capability, Capability) for capability in manifest.capabilities):
+        raise ProviderError("plugin capability is invalid")
 
 
 def provider_entry_points() -> tuple[metadata.EntryPoint, ...]:
@@ -174,6 +182,7 @@ def _manifest_from_entry_point(entry: metadata.EntryPoint) -> PluginManifest:
         or not all(isinstance(capability, str) for capability in capabilities)
     ):
         raise ProviderError(f"plugin manifest metadata is invalid:{entry.name}")
+    _reject_execution_capabilities(capabilities)
     try:
         manifest = PluginManifest(
             identifier, api_version, frozenset(Capability(capability) for capability in capabilities)
@@ -183,6 +192,14 @@ def _manifest_from_entry_point(entry: metadata.EntryPoint) -> PluginManifest:
     if manifest.identifier != entry.name:
         raise ProviderError(f"plugin manifest identifier does not match entry point:{entry.name}")
     return manifest
+
+
+def _reject_execution_capabilities(capabilities: object) -> None:
+    if isinstance(capabilities, (frozenset, list)) and any(
+        isinstance(capability, str) and capability in _EXECUTION_CAPABILITIES
+        for capability in capabilities
+    ):
+        raise ExecutionDeniedError("execution capabilities are prohibited")
 
 
 def validate_provider_compatibility(provider: ProviderPlugin, expected: PluginManifest) -> None:

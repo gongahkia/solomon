@@ -52,9 +52,27 @@ def test_manifest_schema_rejects_invalid_values(
         PluginManifest(identifier, api_version, capabilities)
 
 
-def test_manifest_rejects_non_capability_value() -> None:
-    manifest = PluginManifest("unsafe", "1.0.0", frozenset({"execution"}))  # type: ignore[arg-type]
+@pytest.mark.parametrize(
+    "capability",
+    (
+        "execution",
+        "orders.cancel",
+        "orders.modify",
+        "orders.place",
+        "orders.read",
+        "orders.write",
+        "trade.unlock",
+    ),
+)
+def test_manifest_rejects_execution_capability(capability: str) -> None:
+    manifest = PluginManifest("unsafe", "1.0.0", frozenset({capability}))  # type: ignore[arg-type]
     with pytest.raises(ExecutionDeniedError):
+        validate_manifest(manifest)
+
+
+def test_manifest_rejects_unknown_capability() -> None:
+    manifest = PluginManifest("unknown", "1.0.0", frozenset({"unknown.read"}))  # type: ignore[arg-type]
+    with pytest.raises(ProviderError, match="capability"):
         validate_manifest(manifest)
 
 
@@ -194,6 +212,23 @@ def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -
     assert discover_manifests() == (
         PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS})),
     )
+
+
+def test_manifest_discovery_rejects_execution_capability_without_import(monkeypatch) -> None:
+    entries = (
+        _ManifestEntryPoint(
+            "unsafe",
+            {
+                "identifier": "unsafe",
+                "api_version": "1.0.0",
+                "capabilities": ["orders.place"],
+            },
+        ),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    with pytest.raises(ExecutionDeniedError):
+        discover()
 
 
 def test_provider_compatibility_rejects_runtime_manifest_mismatch(monkeypatch) -> None:

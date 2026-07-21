@@ -30,6 +30,7 @@ from stonks_cli.plugins import (
     validate_manifest,
     validate_provider_compatibility,
     validate_provider_configuration,
+    validate_provider_contract,
 )
 from stonks_cli.types import Account, Currency, Instrument
 
@@ -113,6 +114,9 @@ def test_capability_registry_rejects_duplicate_provider_identifiers() -> None:
 class _FixturePlugin:
     def __init__(self, identifier: str) -> None:
         self.manifest = PluginManifest(identifier, "1.0.0", frozenset({Capability.ACCOUNTS}))
+
+    def accounts(self) -> tuple[Account, ...]:
+        return (Account(self.manifest.identifier, "1"),)
 
 
 class _AccountFixturePlugin(_FixturePlugin):
@@ -222,7 +226,19 @@ def test_fixture_provider_package_discovers_as_read_only_plugin(monkeypatch) -> 
     assert discovery.diagnostics == ()
     provider = dict(discovery.providers)["fixture"]
     assert isinstance(provider, ReadOnlyAccountProvider)
+    assert isinstance(provider, TransactionSourceProvider)
+    assert isinstance(provider, CorporateActionProvider)
+    assert isinstance(provider, MarketDataProvider)
+    assert validate_provider_contract(provider) == provider.manifest
     assert provider.accounts() == (Account("fixture", "account-1"),)
+
+
+def test_provider_contract_rejects_missing_declared_capability_method() -> None:
+    class IncompleteProvider:
+        manifest = PluginManifest("incomplete", "1.0.0", frozenset({Capability.ACCOUNTS}))
+
+    with pytest.raises(ProviderError, match="capability contract:accounts.read"):
+        validate_provider_contract(IncompleteProvider())
 
 
 def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -> None:

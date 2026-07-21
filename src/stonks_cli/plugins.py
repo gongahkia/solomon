@@ -162,6 +162,23 @@ def validate_manifest(manifest: PluginManifest) -> None:
         raise ProviderError("plugin capability is invalid")
 
 
+def validate_provider_contract(provider: ProviderPlugin) -> PluginManifest:
+    manifest = getattr(provider, "manifest", None)
+    if not isinstance(manifest, PluginManifest):
+        raise ProviderError("plugin missing manifest")
+    validate_manifest(manifest)
+    contracts = (
+        (Capability.ACCOUNTS, ReadOnlyAccountProvider),
+        (Capability.TRANSACTIONS, TransactionSourceProvider),
+        (Capability.CORPORATE_ACTIONS, CorporateActionProvider),
+        (Capability.MARKET_DATA, MarketDataProvider),
+    )
+    for capability, contract in contracts:
+        if capability in manifest.capabilities and not isinstance(provider, contract):
+            raise ProviderError(f"plugin does not satisfy capability contract:{capability.value}")
+    return manifest
+
+
 def register_builtin_provider(provider_type: type[ProviderPlugin]) -> None:
     manifest = getattr(provider_type, "manifest", None)
     if not isinstance(manifest, PluginManifest):
@@ -255,10 +272,7 @@ def _reject_execution_capabilities(capabilities: object) -> None:
 
 
 def validate_provider_compatibility(provider: ProviderPlugin, expected: PluginManifest) -> None:
-    manifest = getattr(provider, "manifest", None)
-    if not isinstance(manifest, PluginManifest):
-        raise ProviderError(f"plugin missing manifest:{expected.identifier}")
-    validate_manifest(manifest)
+    manifest = validate_provider_contract(provider)
     if manifest != expected:
         raise ProviderError(f"plugin manifest does not match static metadata:{expected.identifier}")
 

@@ -560,6 +560,40 @@ func TestZshEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestZshRestoresPreexistingEnterBinding(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "bindings")
+	harness := `current=existing-widget; zle() { :; }; bindkey() { if [[ "$#" == 3 ]]; then print '"^M" '$current; else current="$4"; print -r -- "$current" >> "$CAPTURE"; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _close_enough_restore_enter; print -r -- "$current"`
+	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
+	command.Env = append(os.Environ(), "CAPTURE="+capture)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh harness: %v\n%s", err, output)
+	}
+	if got := string(output); got != "existing-widget\n" {
+		t.Fatalf("restored binding = %q", got)
+	}
+	bindings, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(bindings); got != "_close_enough_accept_line\nexisting-widget\n" {
+		t.Fatalf("binding changes = %q", got)
+	}
+}
+
 func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {

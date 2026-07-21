@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"syscall"
 	"time"
 )
 
@@ -99,6 +100,14 @@ func removeStaleSocket(path string) error {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		return errors.New("daemon endpoint is not a socket")
+	}
+	connection, err := net.DialTimeout("unix", path, requestDeadline)
+	if err == nil {
+		connection.Close()
+		return ErrAlreadyRunning
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return err
 	}
 	return os.Remove(path)
 }

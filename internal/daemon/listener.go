@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"syscall"
 )
 
 type Handler func(context.Context, Request) (Response, error)
@@ -40,6 +41,9 @@ func (s *Server) Listen() error {
 	}
 	listener, err := net.Listen(s.endpoint.Network, s.endpoint.Address)
 	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return errors.Join(ErrAlreadyRunning, err)
+		}
 		return err
 	}
 	if s.endpoint.Network == "unix" {

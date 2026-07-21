@@ -125,9 +125,20 @@ def append(ledger: EncryptedLedger, event: LedgerEvent) -> bool:
 
 
 def ingest_events(ledger: EncryptedLedger, events: Iterable[LedgerEvent]) -> tuple[int, int]:
+    events = tuple(events)
     inserted = skipped = 0
     with ledger.connection() as connection:
         initialize(connection)
+        known_fingerprints = {
+            row["fingerprint"] for row in connection.execute("SELECT fingerprint FROM ledger_events")
+        }
+        known_fingerprints.update(event.fingerprint for event in events)
+        for event in events:
+            if (
+                event.lifecycle is not EventLifecycle.POSTED
+                and event.corrects_fingerprint not in known_fingerprints
+            ):
+                raise LedgerError("correction target event was not imported")
         for event in events:
             if _insert_event(connection, event).rowcount == 1:
                 inserted += 1
@@ -324,6 +335,11 @@ def event_from_csv_row(row: dict[str, str | None], *, source_hash: str, line: in
     source = SourceProvenance("csv", source_hash, str(line))
     fingerprint = import_fingerprint(source, row)
     kind = EventKind((row["kind"] or "").strip().lower())
+    try:
+        lifecycle = EventLifecycle((row.get("lifecycle") or "posted").strip().lower())
+    except ValueError as error:
+        raise LedgerError(f"CSV row {line} invalid lifecycle") from error
+    corrects_fingerprint = (row.get("corrects_fingerprint") or "").strip() or None
     symbol = (row.get("symbol") or "").strip()
     market = (row.get("market") or "").strip()
     instrument = None
@@ -341,6 +357,8 @@ def event_from_csv_row(row: dict[str, str | None], *, source_hash: str, line: in
         account=Account("csv", (row["account_id"] or "").strip()),
         occurred_at=datetime.fromisoformat((row["occurred_at"] or "").strip()),
         kind=kind,
+        lifecycle=lifecycle,
+        corrects_fingerprint=corrects_fingerprint,
         currency=Currency((row["currency"] or "").upper()),
         amount=decimal(row["amount"] or "0"),
         quantity=decimal(row.get("quantity") or "0"),

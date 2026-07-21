@@ -12,6 +12,7 @@ from stonks_cli.errors import LedgerError
 from stonks_cli.ledger import (
     append,
     cash_balances,
+    event_from_csv_row,
     import_csv,
     import_fingerprint,
     ingest_events,
@@ -172,6 +173,73 @@ def test_ingest_events_skips_conflicting_source_records(tmp_path: Path, monkeypa
 
     assert ingest_events(ledger, (event, conflicting)) == (1, 1)
     assert list_events(ledger) == [event]
+
+
+def test_csv_correction_and_reversal_rows_reference_prior_events(tmp_path: Path, monkeypatch) -> None:
+    original = event_from_csv_row(
+        {
+            "account_id": "main",
+            "occurred_at": "2026-01-01T00:00:00+00:00",
+            "kind": "cash_deposit",
+            "currency": "USD",
+            "amount": "100",
+        },
+        source_hash="a" * 64,
+        line=2,
+    )
+    correction = event_from_csv_row(
+        {
+            "account_id": "main",
+            "occurred_at": "2026-01-02T00:00:00+00:00",
+            "kind": "cash_deposit",
+            "currency": "USD",
+            "amount": "125",
+            "lifecycle": "correction",
+            "corrects_fingerprint": original.fingerprint,
+        },
+        source_hash="b" * 64,
+        line=2,
+    )
+    reversal = event_from_csv_row(
+        {
+            "account_id": "main",
+            "occurred_at": "2026-01-03T00:00:00+00:00",
+            "kind": "cash_withdrawal",
+            "currency": "USD",
+            "amount": "125",
+            "lifecycle": "reversal",
+            "corrects_fingerprint": correction.fingerprint,
+        },
+        source_hash="c" * 64,
+        line=2,
+    )
+
+    assert correction.lifecycle is EventLifecycle.CORRECTION
+    assert correction.corrects_fingerprint == original.fingerprint
+    assert reversal.lifecycle is EventLifecycle.REVERSAL
+    assert reversal.corrects_fingerprint == correction.fingerprint
+    ledger = _ledger(tmp_path, monkeypatch)
+    assert ingest_events(ledger, (original, correction, reversal)) == (3, 0)
+    assert list_events(ledger) == [original, correction, reversal]
+
+
+def test_ingest_events_rejects_corrections_without_the_target(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    correction = LedgerEvent(
+        fingerprint="missing-target-correction",
+        source=SourceProvenance("test", "0" * 64, "missing-target-correction"),
+        account=Account("test", "main"),
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint="missing",
+    )
+
+    with pytest.raises(LedgerError, match="target event"):
+        ingest_events(ledger, (correction,))
+    assert list_events(ledger) == []
 
 
 def test_legacy_persisted_event_ids_are_read_as_canonical_identities(tmp_path: Path, monkeypatch) -> None:

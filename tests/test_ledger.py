@@ -6,7 +6,15 @@ from pathlib import Path
 
 from stonks_cli.accounting import fifo_lots
 from stonks_cli.config import ProfileConfig
-from stonks_cli.ledger import append, cash_balances, import_csv, initialize, list_events, positions
+from stonks_cli.ledger import (
+    append,
+    cash_balances,
+    import_csv,
+    import_fingerprint,
+    initialize,
+    list_events,
+    positions,
+)
 from stonks_cli.storage import EncryptedLedger, generate_key_file
 from stonks_cli.types import Account, Currency, EventKind, Instrument, LedgerEvent, SourceProvenance
 
@@ -43,6 +51,19 @@ def test_events_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> Non
     assert append(ledger, event) is False
     assert list_events(ledger) == [event]
     assert b"cash_deposit" not in ledger.path.read_bytes()
+
+
+def test_import_fingerprint_is_canonical_and_source_specific() -> None:
+    source = SourceProvenance("csv", "a" * 64, "2")
+    record = {"amount": "100", "kind": "cash_deposit"}
+
+    assert import_fingerprint(source, record) == "aa86d4ac08452c7cd6d45d4b9083785e312372a73ad45ab9c6d07ba0fea608fa"
+    assert import_fingerprint(source, record) == import_fingerprint(
+        source, {"kind": "cash_deposit", "amount": "100"}
+    )
+    assert import_fingerprint(source, record) != import_fingerprint(
+        SourceProvenance("csv", "a" * 64, "3"), record
+    )
 
 
 def test_cash_and_positions_follow_trade_events(tmp_path: Path, monkeypatch) -> None:

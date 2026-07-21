@@ -6,9 +6,11 @@ import io
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from stonks_cli.errors import LedgerError
 from stonks_cli.storage import EncryptedLedger
@@ -75,6 +77,22 @@ def append(ledger: EncryptedLedger, event: LedgerEvent) -> bool:
             ),
         )
         return cursor.rowcount == 1
+
+
+def import_fingerprint(source: SourceProvenance, record: Mapping[str, Any]) -> str:
+    payload = {
+        "source": {
+            "provider_id": source.provider_id,
+            "source_hash": source.source_hash,
+            "record_id": source.record_id,
+        },
+        "record": record,
+    }
+    try:
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise LedgerError("import record must be JSON serializable") from error
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def list_events(ledger: EncryptedLedger) -> list[LedgerEvent]:
@@ -183,8 +201,8 @@ def event_from_csv_row(row: dict[str, str | None], *, source_hash: str, line: in
     missing = [name for name in required if not (row.get(name) or "").strip()]
     if missing:
         raise LedgerError(f"CSV row {line} missing:{','.join(missing)}")
-    raw = json.dumps(row, sort_keys=True, separators=(",", ":"))
-    fingerprint = hashlib.sha256(f"{source_hash}:{line}:{raw}".encode()).hexdigest()
+    source = SourceProvenance("csv", source_hash, str(line))
+    fingerprint = import_fingerprint(source, row)
     kind = EventKind((row["kind"] or "").strip().lower())
     symbol = (row.get("symbol") or "").strip()
     market = (row.get("market") or "").strip()
@@ -199,7 +217,7 @@ def event_from_csv_row(row: dict[str, str | None], *, source_hash: str, line: in
         )
     return LedgerEvent(
         fingerprint=fingerprint,
-        source=SourceProvenance("csv", source_hash, str(line)),
+        source=source,
         account=Account("csv", (row["account_id"] or "").strip()),
         occurred_at=datetime.fromisoformat((row["occurred_at"] or "").strip()),
         kind=kind,

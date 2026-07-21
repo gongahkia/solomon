@@ -1447,6 +1447,46 @@ func TestFishSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	}
 }
 
+func TestFishHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish unavailable")
+	}
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.fish")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "calls")
+	state := filepath.Join(directory, "state")
+	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
+	harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTE_COUNT (math $EXECUTE_COUNT + 1); end; end; source "$argv[1]"; set -g BUFFER 'git push --force'; set -g EXECUTE_COUNT 0; _close_enough_accept_line; _close_enough_accept_line; printf '%s|%s\n' "$BUFFER" "$EXECUTE_COUNT"`
+	command := exec.Command(fish, "-c", harness, adapter)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish harness: %v\n%s", err, output)
+	}
+	if got := string(output); !strings.HasSuffix(got, "git push --force|1\n") {
+		t.Fatalf("confirmation flow = %q", got)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "daemon request"); got != 3 {
+		t.Fatalf("daemon requests = %d, want 3: %q", got, calls)
+	}
+}
+
 func TestFishInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	expect, err := exec.LookPath("expect")
 	if err != nil {

@@ -206,6 +206,21 @@ func TestServiceDoesNotAttachGitFailureEvidenceToOtherCommands(t *testing.T) {
 	}
 }
 
+func TestServiceDoesNotAttachIncompatibleFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "git statsu", FailureOutput: "npm error Missing script: \"statsu\"\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "hint" || response.Suggestion != "git status" || len(response.Evidence) != 0 {
+		t.Fatalf("response attached incompatible evidence: %#v", response)
+	}
+}
+
 func TestServiceAttachesPackageManagerFailureEvidenceToRepair(t *testing.T) {
 	resolver, err := packs.NewBundledRuntimeResolver()
 	if err != nil {

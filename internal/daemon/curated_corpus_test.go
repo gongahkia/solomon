@@ -11,7 +11,16 @@ import (
 )
 
 func TestDaemonCoreGitCorpus(t *testing.T) {
-	pack, err := packs.Load(filepath.Join("..", "..", "packs", "core-git.json"))
+	testDaemonPackCorpus(t, "core-git.json", []string{"git-subcommand-typos", "git-flag-repairs", "git-path-repairs", "git-conceptual-misuse"})
+}
+
+func TestDaemonPackageManagerCorpus(t *testing.T) {
+	testDaemonPackCorpus(t, "package-managers.json", []string{"package-manager-subcommand-typos", "package-manager-flag-repairs", "package-manager-path-repairs", "package-manager-conceptual-misuse"})
+}
+
+func testDaemonPackCorpus(t *testing.T, packName string, corpusNames []string) {
+	t.Helper()
+	pack, err := packs.Load(filepath.Join("..", "..", "packs", packName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +35,7 @@ func TestDaemonCoreGitCorpus(t *testing.T) {
 		rules[rule.ID] = rule
 	}
 	seen := make(map[string]struct{}, len(rules))
-	for _, name := range []string{"git-subcommand-typos", "git-flag-repairs", "git-path-repairs", "git-conceptual-misuse"} {
+	for _, name := range corpusNames {
 		corpus, err := packs.LoadFixtureCorpus(filepath.Join("..", "..", "packs", "corpus", name))
 		if err != nil {
 			t.Fatal(err)

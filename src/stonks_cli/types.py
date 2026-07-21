@@ -110,8 +110,8 @@ class SourceProvenance:
 @dataclass(frozen=True)
 class LedgerEvent:
     fingerprint: str
-    source_id: str
-    account_id: str
+    source: SourceProvenance
+    account: Account
     occurred_at: datetime
     kind: EventKind
     currency: Currency
@@ -122,10 +122,11 @@ class LedgerEvent:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        account_id = self.account_id.strip()
-        if not self.fingerprint or not self.source_id or not account_id:
-            raise ValueError("fingerprint, source_id, and account_id are required")
-        object.__setattr__(self, "account_id", account_id)
+        if not isinstance(self.fingerprint, str) or not (fingerprint := self.fingerprint.strip()):
+            raise ValueError("fingerprint is required")
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        object.__setattr__(self, "fingerprint", fingerprint)
         object.__setattr__(self, "occurred_at", utc(self.occurred_at))
         object.__setattr__(self, "amount", decimal(self.amount))
         object.__setattr__(self, "quantity", decimal(self.quantity))
@@ -140,11 +141,27 @@ class LedgerEvent:
             if self.instrument is None or self.quantity <= 0:
                 raise ValueError("splits require an instrument and positive ratio")
 
+    @property
+    def source_id(self) -> str:
+        return self.source.key
+
+    @property
+    def account_id(self) -> str:
+        return self.account.key
+
     def to_data(self) -> dict[str, Any]:
         return {
             "fingerprint": self.fingerprint,
-            "source_id": self.source_id,
-            "account_id": self.account_id,
+            "source": {
+                "provider_id": self.source.provider_id,
+                "source_hash": self.source.source_hash,
+                "record_id": self.source.record_id,
+            },
+            "account": {
+                "provider_id": self.account.provider_id,
+                "account_id": self.account.account_id,
+                "name": self.account.name,
+            },
             "occurred_at": self.occurred_at.isoformat(),
             "kind": self.kind.value,
             "currency": self.currency.value,

@@ -12,7 +12,15 @@ from pathlib import Path
 
 from stonks_cli.errors import LedgerError
 from stonks_cli.storage import EncryptedLedger
-from stonks_cli.types import Currency, EventKind, Instrument, LedgerEvent, decimal
+from stonks_cli.types import (
+    Account,
+    Currency,
+    EventKind,
+    Instrument,
+    LedgerEvent,
+    SourceProvenance,
+    decimal,
+)
 
 
 def initialize(connection: sqlite3.Connection) -> None:
@@ -89,8 +97,8 @@ def _event_from_row(row: sqlite3.Row) -> LedgerEvent:
         )
     return LedgerEvent(
         fingerprint=row["fingerprint"],
-        source_id=row["source_id"],
-        account_id=row["account_id"],
+        source=_source_from_key(row["source_id"]),
+        account=_account_from_key(row["account_id"]),
         occurred_at=datetime.fromisoformat(row["occurred_at"]),
         kind=EventKind(row["kind"]),
         currency=Currency(row["currency"]),
@@ -100,6 +108,22 @@ def _event_from_row(row: sqlite3.Row) -> LedgerEvent:
         fee=Decimal(row["fee"]),
         metadata=json.loads(row["metadata"]),
     )
+
+
+def _account_from_key(value: str) -> Account:
+    provider_id, separator, account_id = value.partition(":")
+    if separator:
+        return Account(provider_id, account_id)
+    return Account("legacy", value)
+
+
+def _source_from_key(value: str) -> SourceProvenance:
+    parts = value.split(":", maxsplit=2)
+    if len(parts) == 3:
+        return SourceProvenance(*parts)
+    if len(parts) == 2:
+        return SourceProvenance("legacy", *parts)
+    return SourceProvenance("legacy", hashlib.sha256(value.encode()).hexdigest(), value)
 
 
 def cash_balances(events: list[LedgerEvent]) -> dict[tuple[str, Currency], Decimal]:
@@ -175,8 +199,8 @@ def event_from_csv_row(row: dict[str, str | None], *, source_hash: str, line: in
         )
     return LedgerEvent(
         fingerprint=fingerprint,
-        source_id=f"{source_hash}:{line}",
-        account_id=(row["account_id"] or "").strip(),
+        source=SourceProvenance("csv", source_hash, str(line)),
+        account=Account("csv", (row["account_id"] or "").strip()),
         occurred_at=datetime.fromisoformat((row["occurred_at"] or "").strip()),
         kind=kind,
         currency=Currency((row["currency"] or "").upper()),

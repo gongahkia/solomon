@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
-from stonks_cli.types import Account, Currency, Instrument, SourceProvenance, decimal
+from stonks_cli.types import (
+    Account,
+    Currency,
+    EventKind,
+    Instrument,
+    LedgerEvent,
+    SourceProvenance,
+    decimal,
+)
 
 
 def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
@@ -59,3 +68,51 @@ def test_source_provenance_is_immutable_and_canonicalized() -> None:
 def test_source_provenance_requires_sha256_digest(source_hash: str) -> None:
     with pytest.raises(ValueError, match="SHA-256"):
         SourceProvenance("csv", source_hash, "line-1")
+
+
+def test_ledger_event_uses_canonical_source_and_account_identities() -> None:
+    source = SourceProvenance(" CSV ", "A" * 64, " row-1 ")
+    account = Account(" Moomoo ", " 123 ", "Personal")
+    event = LedgerEvent(
+        fingerprint=" event-1 ",
+        source=source,
+        account=account,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+    )
+
+    assert event.fingerprint == "event-1"
+    assert event.source_id == f"csv:{'a' * 64}:row-1"
+    assert event.account_id == "moomoo:123"
+    assert event.to_data()["source"] == {
+        "provider_id": "csv",
+        "source_hash": "a" * 64,
+        "record_id": "row-1",
+    }
+    assert event.to_data()["account"] == {
+        "provider_id": "moomoo",
+        "account_id": "123",
+        "name": "Personal",
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "account"),
+    (
+        (None, Account("csv", "1")),
+        (SourceProvenance("csv", "a" * 64, "1"), None),
+    ),
+)
+def test_ledger_event_requires_canonical_source_and_account(source, account) -> None:
+    with pytest.raises(ValueError, match="source and account"):
+        LedgerEvent(
+            fingerprint="event-1",
+            source=source,
+            account=account,
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=EventKind.CASH_DEPOSIT,
+            currency=Currency.USD,
+            amount=Decimal("100"),
+        )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -11,6 +12,7 @@ from stonks_cli.plugins import (
     PluginManifest,
     ProviderCapabilityRegistry,
     ReadOnlyAccountProvider,
+    TransactionSourceProvider,
     compatible_api_version,
     discover,
     discover_manifests,
@@ -85,10 +87,24 @@ class _AccountFixturePlugin(_FixturePlugin):
         return (Account("fixture", "1"),)
 
 
+class _TransactionFixturePlugin(_FixturePlugin):
+    def transaction_records(self, account: Account, start: datetime, end: datetime):
+        return ({"account": account.key, "start": start.isoformat(), "end": end.isoformat()},)
+
+
 def test_read_only_account_provider_protocol_requires_account_reader() -> None:
     provider = _AccountFixturePlugin("fixture")
     assert isinstance(provider, ReadOnlyAccountProvider)
     assert provider.accounts() == (Account("fixture", "1"),)
+
+
+def test_transaction_source_provider_protocol_requires_bounded_record_reader() -> None:
+    provider = _TransactionFixturePlugin("fixture")
+    account = Account("fixture", "1")
+    assert isinstance(provider, TransactionSourceProvider)
+    assert provider.transaction_records(
+        account, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)
+    )[0]["account"] == "fixture:1"
 
 
 class _FixtureEntryPoint:

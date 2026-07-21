@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from importlib import metadata
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 from stonks_cli.types import Account
@@ -86,6 +88,13 @@ class ProviderPlugin(Protocol):
 @runtime_checkable
 class ReadOnlyAccountProvider(ProviderPlugin, Protocol):
     def accounts(self) -> tuple[Account, ...]: ...
+
+
+@runtime_checkable
+class TransactionSourceProvider(ProviderPlugin, Protocol):
+    def transaction_records(
+        self, account: Account, start: datetime, end: datetime
+    ) -> tuple[Mapping[str, Any], ...]: ...
 
 
 def _api_version(value: str) -> tuple[int, int, int] | None:

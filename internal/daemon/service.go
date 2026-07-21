@@ -41,6 +41,8 @@ type failure struct {
 	created time.Time
 }
 
+const maxFailureOutputBytes = 8 << 10
+
 func (s *Service) Handle(ctx context.Context, request Request) (Response, error) {
 	switch request.Operation {
 	case HandshakeOperation:
@@ -126,8 +128,8 @@ func (s *Service) rememberFailure(request Request) {
 		return
 	}
 	output, _ := redact.Text(request.FailureOutput)
-	if len(output) > 8<<10 {
-		output = output[:8<<10]
+	if len(output) > maxFailureOutputBytes {
+		output = output[:maxFailureOutputBytes]
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

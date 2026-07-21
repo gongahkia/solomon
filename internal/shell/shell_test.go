@@ -138,7 +138,7 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		interruptEnd string
 		post         string
 	}{
-		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
 		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
 		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
 		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
@@ -1591,13 +1591,13 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 	branch := script[precmdStart : precmdStart+end]
 	consume := "_CLOSE_ENOUGH_LAST_COMMAND=''"
-	trigger := `--stage post --format plain --command "$command"`
-	if !strings.Contains(branch, `local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ $status -eq 0 || -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	trigger := `daemon request --operation post-failure --shell zsh --session "$$" --format record --command "$command"`
+	if !strings.Contains(branch, `local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("zsh post-failure trigger does not consume command safely: %q", branch)
 	}
 }
 
-func TestZshPropagatesModeAndDisplayConfiguration(t *testing.T) {
+func TestZshUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	contract, err := ContractFor("zsh")
 	if err != nil {
 		t.Fatal(err)
@@ -1609,8 +1609,8 @@ func TestZshPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
-		t.Fatalf("zsh script does not delegate mode and display configuration: %q", script)
+	if !strings.Contains(script, "daemon request --operation pre-send --shell zsh") || !strings.Contains(script, "daemon request --operation post-failure --shell zsh") {
+		t.Fatalf("zsh script does not delegate both stages to the daemon: %q", script)
 	}
 }
 

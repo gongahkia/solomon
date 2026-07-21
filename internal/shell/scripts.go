@@ -88,17 +88,26 @@ _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
 function _close_enough_precmd {
-  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" output
+  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" record version action risk confidence cause suggestion suggestion_key
+  local -a fields
   _CLOSE_ENOUGH_LAST_COMMAND=''
   [[ -z "$command" ]] && return
   if [[ $status -eq 0 ]]; then
     command close-enough daemon request --operation post-success --shell zsh --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
     return
   fi
-  output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
-  [[ -z "$output" || "$output" == "no suggestion" ]] && return
-  _close_enough_allow_diagnostic || return
-  print -r -- "$output"
+  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --format record --command "$command" 2>/dev/null)" || return
+  fields=("${(@ps:\t:)record}")
+  (( ${#fields} == 7 )) || return
+  version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" suggestion="${fields[7]}"
+  [[ "$version" == "1" && "$action" != none ]] || return
+  suggestion_key="$suggestion"
+  suggestion="$(_close_enough_decode "$suggestion")" || return
+  cause="$(_close_enough_decode "$cause")" || cause=''
+  [[ -n "$suggestion" ]] || return
+  if _close_enough_allow_suggestion "$suggestion_key"; then
+    print -r -- "close-enough [$risk/$confidence]: $suggestion ($cause)"
+  fi
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec _close_enough_preexec

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/close-enough/internal/localstate"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
 
@@ -126,6 +128,80 @@ func TestChecksumCommandGeneratesAndVerifiesManifest(t *testing.T) {
 	}
 	if err := run([]string{"checksum", "verify", "--file", artifact, "--manifest", manifest}, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLearnCommandDisablesRemovesAndPurgesRules(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if err := run([]string{"config", "set", "local_learning_enabled", "true"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := daemon.StateDirectory(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := localstate.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range localstate.DraftEvidenceThreshold {
+		if _, err := store.RecordLearningPair(context.Background(), localstate.Observation{Session: "shell", FailedCommand: "git sttaus", CorrectedCommand: "git status"}); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+	}
+	drafts, err := store.ListReviewableDrafts(context.Background())
+	if err != nil || len(drafts) != 1 {
+		store.Close()
+		t.Fatalf("drafts = %#v, %v", drafts, err)
+	}
+	rule, err := store.ActivateDraft(context.Background(), drafts[0].ID, "hint")
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(rule.ID, 10)
+	if err := run([]string{"learn", "disable", id}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var disabled struct {
+		Drafts []localstate.Draft       `json:"drafts"`
+		Rules  []localstate.LearnedRule `json:"rules"`
+	}
+	var output strings.Builder
+	if err := run([]string{"learn", "list"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(output.String()), &disabled); err != nil {
+		t.Fatal(err)
+	}
+	if len(disabled.Drafts) != 1 || len(disabled.Rules) != 0 {
+		t.Fatalf("disabled learning state = %#v", disabled)
+	}
+	if err := run([]string{"learn", "remove", id}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"learn", "purge", "--confirm=PURGE"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := run([]string{"learn", "list"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var purged struct {
+		Drafts []localstate.Draft       `json:"drafts"`
+		Rules  []localstate.LearnedRule `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(output.String()), &purged); err != nil {
+		t.Fatal(err)
+	}
+	if len(purged.Drafts) != 0 || len(purged.Rules) != 0 {
+		t.Fatalf("purged learning state = %#v", purged)
 	}
 }
 

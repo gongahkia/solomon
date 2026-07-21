@@ -276,9 +276,18 @@ def _source_from_key(value: str) -> SourceProvenance:
     return SourceProvenance("legacy", hashlib.sha256(value.encode()).hexdigest(), value)
 
 
+def effective_events(events: list[LedgerEvent]) -> tuple[LedgerEvent, ...]:
+    corrected_fingerprints = {
+        event.corrects_fingerprint
+        for event in events
+        if event.lifecycle is EventLifecycle.CORRECTION
+    }
+    return tuple(event for event in events if event.fingerprint not in corrected_fingerprints)
+
+
 def cash_balances(events: list[LedgerEvent]) -> dict[tuple[str, Currency], Decimal]:
     balances: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
-    for event in events:
+    for event in effective_events(events):
         delta = Decimal("0")
         if event.kind in {EventKind.CASH_DEPOSIT, EventKind.DIVIDEND}:
             delta = event.amount

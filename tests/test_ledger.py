@@ -12,6 +12,7 @@ from stonks_cli.errors import LedgerError
 from stonks_cli.ledger import (
     append,
     cash_balances,
+    effective_events,
     event_from_csv_row,
     import_csv,
     import_fingerprint,
@@ -110,6 +111,35 @@ def test_cash_and_positions_follow_trade_events(tmp_path: Path, monkeypatch) -> 
     events = list_events(ledger)
     assert cash_balances(events)[("test:main", Currency.USD)] == Decimal("79")
     assert positions(events)[("test:main", "US:SPY")] == Decimal("2")
+
+
+def test_cash_balances_apply_corrections_and_compensating_reversals() -> None:
+    original = _event(EventKind.CASH_DEPOSIT, amount="100")
+    correction = LedgerEvent(
+        fingerprint="corrected-deposit",
+        source=SourceProvenance("test", "0" * 64, "corrected-deposit"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("125"),
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint=original.fingerprint,
+    )
+    reversal = LedgerEvent(
+        fingerprint="reversed-deposit",
+        source=SourceProvenance("test", "0" * 64, "reversed-deposit"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        kind=EventKind.CASH_WITHDRAWAL,
+        currency=Currency.USD,
+        amount=Decimal("125"),
+        lifecycle=EventLifecycle.REVERSAL,
+        corrects_fingerprint=correction.fingerprint,
+    )
+
+    assert effective_events([original, correction, reversal]) == (correction, reversal)
+    assert cash_balances([original, correction, reversal]) == {("test:main", Currency.USD): Decimal("0")}
 
 
 def test_csv_import_archives_and_deduplicates(tmp_path: Path, monkeypatch) -> None:

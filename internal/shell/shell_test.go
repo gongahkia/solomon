@@ -2234,6 +2234,59 @@ expect {
 	}
 }
 
+func TestPowerShellInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER\r"
+expect_regex {PS .*?> }
+send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
+expect_regex {PS .*?> }
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("daemon failure did not submit buffered command: %v\n%s", err, output)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

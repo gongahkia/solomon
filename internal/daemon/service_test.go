@@ -206,6 +206,22 @@ func TestServiceDoesNotAttachGitFailureEvidenceToOtherCommands(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesPackageManagerFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "npm instal", FailureOutput: "npm error Missing script: \"instal\"\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "npm-missing-script", Value: "instal"}}
+	if response.Action != "hint" || response.Suggestion != "npm install" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

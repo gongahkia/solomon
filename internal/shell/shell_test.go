@@ -139,7 +139,7 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		post         string
 	}{
 		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
-		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "output=\"$(command close-enough check --stage post"},
+		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell bash"},
 		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
 		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
 	} {
@@ -893,13 +893,13 @@ func TestBashPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 	branch := script[start:]
 	consume := "_close_enough_last_command=''"
-	trigger := `--stage post --format plain --command "$command"`
-	if !strings.Contains(script, "_close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	trigger := `daemon request --operation post-failure --shell bash --session "$$" --format record --command "$command"`
+	if !strings.Contains(script, "_close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("bash post-failure hook does not consume command safely: %q", branch)
 	}
 }
 
-func TestBashPropagatesModeAndDisplayConfiguration(t *testing.T) {
+func TestBashUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	contract, err := ContractFor("bash")
 	if err != nil {
 		t.Fatal(err)
@@ -911,8 +911,8 @@ func TestBashPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
-		t.Fatalf("bash script does not delegate mode and display configuration: %q", script)
+	if !strings.Contains(script, "daemon request --operation pre-send --shell bash") || !strings.Contains(script, "daemon request --operation post-failure --shell bash") {
+		t.Fatalf("bash script does not delegate both stages to the daemon: %q", script)
 	}
 }
 

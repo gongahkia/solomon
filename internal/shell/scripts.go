@@ -220,17 +220,28 @@ _close_enough_last_command=''
 _close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }
 trap _close_enough_debug DEBUG
 _close_enough_prompt() {
-  local status=$? command="$_close_enough_last_command" output
+  local status=$? command="$_close_enough_last_command" record version action risk confidence cause suggestion suggestion_key separator
+  local -a fields
   _close_enough_last_command=''
   [ -n "$command" ] || return
   if [ "$status" -eq 0 ]; then
     command close-enough daemon request --operation post-success --shell bash --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
     return
   fi
-  output="$(command close-enough check --stage post --format plain --command "$command" 2>/dev/null)" || return
-  [ -n "$output" ] && [ "$output" != "no suggestion" ] || return
-  _close_enough_allow_diagnostic || return
-  printf '%s\n' "$output"
+  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --format record --command "$command" 2>/dev/null)" || return
+  separator=$'\034'
+  record="${record//$'\t'/$separator}"
+  IFS="$separator" read -r -a fields <<< "$record"
+  [ "${#fields[@]}" -eq 7 ] || return
+  version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" confidence="${fields[3]}" cause="${fields[4]}" suggestion="${fields[6]}"
+  [ "$version" = 1 ] && [ "$action" != none ] || return
+  suggestion_key="$suggestion"
+  suggestion="$(_close_enough_decode "$suggestion")" || return
+  cause="$(_close_enough_decode "$cause")" || cause=''
+  [ -n "$suggestion" ] || return
+  if _close_enough_allow_suggestion "$suggestion_key"; then
+    printf '\nclose-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause"
+  fi
 }
 PROMPT_COMMAND="_close_enough_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 fi

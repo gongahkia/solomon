@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/gongahkia/close-enough/internal/credential"
-	"github.com/gongahkia/close-enough/internal/featuregate"
 	"github.com/gongahkia/close-enough/internal/filesystem"
 	"github.com/gongahkia/close-enough/internal/history"
 	"github.com/gongahkia/close-enough/internal/securetemp"
@@ -36,8 +35,6 @@ type Config struct {
 	Display                  Display         `json:"display"`
 	AutoApplySafe            bool            `json:"auto_apply_safe"`
 	LocalHistoryEnabled      bool            `json:"local_history_enabled"`
-	RegistryEnabled          bool            `json:"registry_enabled"`
-	AutoUpdateEnabled        bool            `json:"auto_update_enabled"`
 	CuratedAutoCorrect       bool            `json:"curated_auto_correct"`
 	RiskInterrupt            bool            `json:"risk_interrupt"`
 	LocalLearningEnabled     bool            `json:"local_learning_enabled"`
@@ -169,10 +166,6 @@ func (c Config) HistoryKeys(store credential.Store) credential.HistoryKeys {
 	return credential.NewHistoryKeys(c.LocalHistoryEnabled, store)
 }
 
-func (c Config) Features() featuregate.Gates {
-	return featuregate.New(c.RegistryEnabled, c.AutoUpdateEnabled)
-}
-
 func (c Config) HistoryRanker(store history.Store) history.Ranker {
 	return history.New(c.LocalHistoryEnabled, store)
 }
@@ -230,8 +223,6 @@ var sessionOverrideKeys = map[string]string{
 	"CLOSE_ENOUGH_MODE":                   "mode",
 	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":        "auto_apply_safe",
 	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED":  "local_history_enabled",
-	"CLOSE_ENOUGH_REGISTRY_ENABLED":       "registry_enabled",
-	"CLOSE_ENOUGH_AUTO_UPDATE_ENABLED":    "auto_update_enabled",
 	"CLOSE_ENOUGH_CURATED_AUTO_CORRECT":   "curated_auto_correct",
 	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
 	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
@@ -249,6 +240,9 @@ func sessionValues(paths Paths) (map[string]string, error) {
 	for _, entry := range paths.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || !strings.HasPrefix(key, "CLOSE_ENOUGH_") {
+			continue
+		}
+		if key == "CLOSE_ENOUGH_REGISTRY_ENABLED" || key == "CLOSE_ENOUGH_AUTO_UPDATE_ENABLED" {
 			continue
 		}
 		if _, exists := values[key]; exists {
@@ -358,6 +352,13 @@ func decode(data []byte, base Config) (Config, error) {
 	if fields == nil {
 		return Config{}, errors.New("parse config: configuration must be a JSON object")
 	}
+	delete(fields, "registry_enabled")
+	delete(fields, "auto_update_enabled")
+	filtered, err := json.Marshal(fields)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	data = filtered
 	version := 0
 	if value, ok := fields["schema_version"]; ok {
 		if bytes.Equal(value, []byte("null")) {
@@ -430,7 +431,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "registry_enabled", "auto_update_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "local_history_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -440,10 +441,6 @@ func (c *Config) Set(key, value string) error {
 			c.AutoApplySafe = parsed
 		case "local_history_enabled":
 			c.LocalHistoryEnabled = parsed
-		case "registry_enabled":
-			c.RegistryEnabled = parsed
-		case "auto_update_enabled":
-			c.AutoUpdateEnabled = parsed
 		case "curated_auto_correct":
 			c.CuratedAutoCorrect = parsed
 		case "risk_interrupt":

@@ -28,7 +28,7 @@ Adapters also suppress repeated hint suggestions within a loaded shell session.
 
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
-Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_REGISTRY_ENABLED`, and `CLOSE_ENOUGH_AUTO_UPDATE_ENABLED`; booleans must be `true` or `false`.
+Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_CURATED_AUTO_CORRECT`, `CLOSE_ENOUGH_RISK_INTERRUPT`, and `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`; booleans must be `true` or `false`.
 
 Session overrides affect only the invoking process and never modify configuration files.
 
@@ -65,8 +65,6 @@ Use `close-enough pack uninstall <id> <version>` to remove that exact managed pa
 Pack signature verification uses detached Ed25519 signatures over exact pack bytes.
 
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
-
-Registry and auto-update features are disabled by default; auto-update requires explicit registry enablement as well.
 
 Optional local-history encryption keys use an injected OS credential-store backend only; no file fallback is provided.
 

@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/credential"
-	"github.com/gongahkia/close-enough/internal/featuregate"
 	"github.com/gongahkia/close-enough/internal/history"
 )
 
@@ -96,15 +95,38 @@ func TestDefaultIsNonBlocking(t *testing.T) {
 	}
 }
 
-func TestFeatureGatesRequireExplicitRegistryEnablement(t *testing.T) {
-	cfg := Default()
-	cfg.AutoUpdateEnabled = true
-	if cfg.Features().Enabled(featuregate.AutoUpdate) {
-		t.Fatal("auto-update must remain disabled without registry opt-in")
+func TestRemovedRegistrySettingsAreIgnoredOnDiskAndRejectedBySet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"schema_version":2,"registry_enabled":true,"auto_update_enabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	cfg.RegistryEnabled = true
-	if !cfg.Features().Enabled(featuregate.Registry) || !cfg.Features().Enabled(featuregate.AutoUpdate) {
-		t.Fatal("explicitly enabled features must be available")
+	cfg, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"registry_enabled", "auto_update_enabled"} {
+		if err := cfg.Set(key, "true"); err == nil {
+			t.Fatalf("accepted removed setting %q", key)
+		}
+	}
+	if err := Write(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "registry_enabled") || strings.Contains(string(data), "auto_update_enabled") {
+		t.Fatalf("removed settings persisted: %s", data)
+	}
+}
+
+func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
+	values, err := sessionValues(Paths{Environ: func() []string {
+		return []string{"CLOSE_ENOUGH_REGISTRY_ENABLED=true", "CLOSE_ENOUGH_AUTO_UPDATE_ENABLED=true"}
+	}})
+	if err != nil || len(values) != 0 {
+		t.Fatalf("session values = %#v, %v", values, err)
 	}
 }
 

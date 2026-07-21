@@ -1027,6 +1027,40 @@ func TestBashEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestBashRestoresPreexistingEnterBinding(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "bindings")
+	harness := `current=accept-line; bind() { case "$1" in -p) printf '"\C-m": %s\n' "$current" ;; -x) current=_close_enough_accept_line; printf '%s\n' "$current" >> "$CAPTURE" ;; -X) test "$current" = _close_enough_accept_line && printf '"\C-m": _close_enough_accept_line\n' ;; *) current=accept-line; printf '%s\n' "$current" >> "$CAPTURE" ;; esac; }; source "$1"; _close_enough_restore_enter; printf '%s\n' "$current"`
+	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
+	command.Env = append(os.Environ(), "CAPTURE="+capture)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash harness: %v\n%s", err, output)
+	}
+	if got := string(output); got != "accept-line\n" {
+		t.Fatalf("restored binding = %q", got)
+	}
+	bindings, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(bindings); got != "_close_enough_accept_line\naccept-line\n" {
+		t.Fatalf("binding changes = %q", got)
+	}
+}
+
 func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {

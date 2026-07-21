@@ -115,6 +115,33 @@ func TestServiceLearnsFailureThenSuccessfulCorrection(t *testing.T) {
 	}
 }
 
+func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
+	store, err := localstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.Default()
+	cfg.LocalLearningEnabled = true
+	service := Service{Config: cfg, Store: store, Engine: diagnose.New(diagnose.Options{Config: cfg, Path: t.TempDir(), CWD: t.TempDir()})}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "first", Operation: PostFailureOperation, Command: "git sttaus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "second", Operation: PostSuccessOperation, Command: "git status"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DraftFor(context.Background(), "git sttaus", "git status"); err == nil {
+		t.Fatal("cross-session correction created learning evidence")
+	}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "first", Operation: PostSuccessOperation, Command: "git status"}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := store.DraftFor(context.Background(), "git sttaus", "git status")
+	if err != nil || draft.EvidenceCount != 1 {
+		t.Fatalf("draft = %#v, %v", draft, err)
+	}
+}
+
 func TestServiceAppliesLearnedRuleWithinGlobalCeiling(t *testing.T) {
 	cfg := config.Default()
 	cfg.LocalLearningEnabled = true

@@ -222,6 +222,22 @@ func TestServiceAttachesPackageManagerFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesJavaScriptFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "node --verison", FailureOutput: "node: bad option: --verison\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "node-unknown-option", Value: "--verison"}}
+	if response.Action != "hint" || response.Suggestion != "node --version" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

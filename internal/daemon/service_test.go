@@ -270,6 +270,22 @@ func TestServiceAttachesRustFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesGoFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "go buid", FailureOutput: "go buid: unknown command\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "go-unknown-subcommand", Value: "buid"}}
+	if response.Action != "hint" || response.Suggestion != "go build" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

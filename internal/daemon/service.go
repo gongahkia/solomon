@@ -68,13 +68,13 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 			return Response{}, err
 		}
 		if ok {
-			return s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))))), nil
+			return s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))), nil
 		}
 		response, err = s.decision(ctx, request.Command, "post")
 		if err != nil {
 			return Response{}, err
 		}
-		return s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))))), nil
+		return s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))), nil
 	case PostSuccessOperation:
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
@@ -203,6 +203,17 @@ func (s *Service) attachRustFailureEvidence(request Request, response Response) 
 	return response
 }
 
+func (s *Service) attachGoFailureEvidence(request Request, response Response) Response {
+	if response.Action == "none" || response.Suggestion == "" || !isGoCommand(firstCommandWord(request.Command)) {
+		return response
+	}
+	evidence, err := packs.ExtractGoFailureEvidence(safeFailureOutput(request.FailureOutput))
+	if err == nil {
+		response.Evidence = evidence
+	}
+	return response
+}
+
 func isPackageManagerCommand(command string) bool {
 	switch command {
 	case "brew", "npm", "pnpm", "yarn":
@@ -233,6 +244,15 @@ func isPythonCommand(command string) bool {
 func isRustCommand(command string) bool {
 	switch command {
 	case "cargo", "rustc", "rustup":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGoCommand(command string) bool {
+	switch command {
+	case "go", "gofmt":
 		return true
 	default:
 		return false

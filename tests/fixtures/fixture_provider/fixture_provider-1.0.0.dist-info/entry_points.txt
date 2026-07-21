@@ -1,0 +1,2 @@
+[stonks_cli.providers]
+fixture = fixture_provider:provider

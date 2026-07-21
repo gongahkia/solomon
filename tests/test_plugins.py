@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from importlib import invalidate_caches
+from pathlib import Path
 
 import pytest
 
@@ -208,6 +210,19 @@ def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatc
 
     assert tuple(entry.name for entry in provider_entry_points()) == ("accounts", "prices")
     assert list(discover()) == ["accounts", "prices"]
+
+
+def test_fixture_provider_package_discovers_as_read_only_plugin(monkeypatch) -> None:
+    fixture_root = Path(__file__).parent / "fixtures" / "fixture_provider"
+    monkeypatch.syspath_prepend(str(fixture_root))
+    invalidate_caches()
+
+    discovery = discover_with_diagnostics()
+
+    assert discovery.diagnostics == ()
+    provider = dict(discovery.providers)["fixture"]
+    assert isinstance(provider, ReadOnlyAccountProvider)
+    assert provider.accounts() == (Account("fixture", "account-1"),)
 
 
 def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -> None:

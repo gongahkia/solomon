@@ -443,6 +443,7 @@ $global:CloseEnoughDiagnosticCount = 0
 $global:CloseEnoughDiagnosticLimit = 5
 $global:CloseEnoughDaemonReady = $false
 $global:CloseEnoughPendingRewrite = $null
+$global:CloseEnoughPendingConfirmation = $null
 $global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 $global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
@@ -459,11 +460,14 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     }
     $global:CloseEnoughPendingRewrite = $null
   }
+  if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingConfirmation) -and $command -ne $global:CloseEnoughPendingConfirmation) {
+    $global:CloseEnoughPendingConfirmation = $null
+  }
   if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
   $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command 2>$null
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
-  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
-  if ($decision.version -ne 1) { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  if ($decision.version -ne 1) { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
   if ($decision.action -eq 'rewrite') {
     if ($decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) {
       Write-Host "close-enough: refused unsafe rewrite"
@@ -480,11 +484,13 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     return
   }
   if ($decision.action -eq 'submit') {
+    $global:CloseEnoughPendingConfirmation = $null
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
   if ($decision.action -eq 'interrupt') {
     Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))"
+    $global:CloseEnoughPendingConfirmation = $command
     return
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()

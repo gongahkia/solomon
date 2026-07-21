@@ -154,6 +154,27 @@ def test_fee_events_reject_non_fee_payloads(amount: str, quantity: str, fee: str
 
 
 @pytest.mark.parametrize(
+    ("amount", "instrument", "fee"),
+    (("0", Instrument("SPY", "US", Currency.USD), "0"), ("3", None, "0"), ("3", Instrument("SPY", "US", Currency.USD), "1")),
+)
+def test_dividend_events_require_instrument_cash_payload(
+    amount: str, instrument: Instrument | None, fee: str
+) -> None:
+    with pytest.raises(ValueError, match="dividend"):
+        LedgerEvent(
+            fingerprint="dividend-event",
+            source=SourceProvenance("csv", "a" * 64, "dividend"),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=EventKind.DIVIDEND,
+            currency=Currency.USD,
+            amount=Decimal(amount),
+            instrument=instrument,
+            fee=Decimal(fee),
+        )
+
+
+@pytest.mark.parametrize(
     ("source", "account"),
     (
         (None, Account("csv", "1")),

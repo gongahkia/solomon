@@ -165,6 +165,11 @@ class LedgerEvent:
                 raise ValueError("fee events require a positive amount")
             if self.instrument is not None or self.quantity != 0 or self.fee != 0:
                 raise ValueError("fee events cannot include instrument, quantity, or fee")
+        if self.kind is EventKind.DIVIDEND:
+            if self.amount <= 0 or self.instrument is None:
+                raise ValueError("dividends require an instrument and positive amount")
+            if self.fee != 0:
+                raise ValueError("dividend events cannot include a fee")
         if self.kind in {EventKind.BUY, EventKind.SELL}:
             if self.instrument is None or self.quantity <= 0:
                 raise ValueError("trades require an instrument and positive quantity")

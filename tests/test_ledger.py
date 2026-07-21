@@ -174,6 +174,22 @@ def test_csv_imports_fee_events(tmp_path: Path, monkeypatch) -> None:
     assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("95")
 
 
+def test_csv_imports_dividend_events(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    source = tmp_path / "dividends.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount,symbol,market\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,\n"
+        "main,2026-01-02T00:00:00+00:00,dividend,USD,3,SPY,US\n"
+    )
+
+    assert import_csv(ledger, source)[:2] == (2, 0)
+    events = list_events(ledger)
+    assert events[1].kind is EventKind.DIVIDEND
+    assert events[1].instrument == Instrument("SPY", "US", Currency.USD)
+    assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("103")
+
+
 def test_csv_import_does_not_archive_or_persist_a_partial_file(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source = tmp_path / "events.csv"

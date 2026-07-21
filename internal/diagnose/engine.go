@@ -221,12 +221,29 @@ func validRisk(value Risk) bool {
 }
 
 type Options struct {
-	Config config.Config
-	Path   string
-	CWD    string
-	Limits Limits
-	Clock  func() time.Time
-	Cache  *Cache
+	Config           config.Config
+	Path             string
+	CWD              string
+	SemanticResolver SemanticResolver
+	Limits           Limits
+	Clock            func() time.Time
+	Cache            *Cache
+}
+
+type SemanticMatch struct {
+	PackID      string
+	RuleID      string
+	Suggestion  string
+	Cause       string
+	Risk        Risk
+	Rationale   string
+	Original    string
+	Replacement string
+	Occurrence  int
+}
+
+type SemanticResolver interface {
+	MatchWords([]string) (SemanticMatch, bool)
 }
 
 type Limits struct {
@@ -308,7 +325,7 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 	} else if decision.Suggestion != "" {
 		return e.finish(ctx, decision, line, stage, started, limits)
 	}
-	if decision, err := semanticDecision(ctx, words); err != nil {
+	if decision, err := e.semanticDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
 		return e.finish(ctx, decision, line, stage, started, limits)
@@ -359,7 +376,7 @@ func (e Engine) finish(ctx context.Context, decision Decision, line, stage strin
 		return noDecision(), ErrOutputLimit
 	}
 	decision = e.applyMode(decision, stage)
-	if decision.Action == "rewrite" {
+	if decision.Action == "rewrite" && decision.original != "" && decision.replacement != "" {
 		buffer, ok := replaceTokenOccurrence(line, decision.original, decision.replacement, decision.occurrence)
 		if !ok {
 			return noDecision(), nil
@@ -467,31 +484,29 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 	return Decision{}, nil
 }
 
-func semanticDecision(ctx context.Context, words []string) (Decision, error) {
-	known := []string{"add", "branch", "checkout", "clone", "commit", "diff", "fetch", "init", "log", "merge", "pull", "push", "rebase", "restore", "status", "switch"}
-	for _, position := range commandPositions(words) {
-		if err := ctx.Err(); err != nil {
-			return Decision{}, err
-		}
-		if words[position] != "git" || position+1 >= len(words) || isCompoundOperator(words[position+1]) {
-			continue
-		}
-		best, distance := nearest(words[position+1], known)
-		if best == "" || distance > maxDistance(words[position+1]) {
-			continue
-		}
-		confidence := confidence(words[position+1], best)
-		if !meetsConfidenceThreshold(RepairClassSemantic, confidence) {
-			continue
-		}
-		replaced := append([]string{}, words...)
-		replaced[position+1] = best
-		suggestion, containsSecret := redact.Command(replaced)
-		template, _ := consequenceFor(RepairClassSemantic)
-		assessment := assessRisk(replaced, containsSecret)
-		return Decision{Version: AdapterProtocolVersion, Cause: defaultMessages[template.cause], CauseKey: template.cause, Consequence: defaultMessages[template.consequence], ConsequenceKey: template.consequence, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: collectEvidence(RepairClassSemantic, "core-git", distance, confidence), Confidence: confidence, Risk: assessment.risk, RiskRationale: defaultMessages[assessment.rationale], RiskRationaleKey: assessment.rationale, Trace: []string{"pack:core-git", "distance:" + fmt.Sprint(distance)}, original: words[position+1], replacement: best, occurrence: tokenOccurrence(words, position+1)}, nil
+func (e Engine) semanticDecision(ctx context.Context, words []string) (Decision, error) {
+	if err := ctx.Err(); err != nil {
+		return Decision{}, err
 	}
-	return Decision{}, nil
+	if e.options.SemanticResolver == nil {
+		return Decision{}, nil
+	}
+	match, ok := e.options.SemanticResolver.MatchWords(words)
+	if !ok || match.PackID == "" || match.RuleID == "" || match.Suggestion == "" || !validRisk(match.Risk) {
+		return Decision{}, nil
+	}
+	suggestedWords, err := tokenize(match.Suggestion)
+	if err != nil || len(suggestedWords) == 0 || hasUnsupportedShellSyntax(suggestedWords) {
+		return Decision{}, nil
+	}
+	suggestion, containsSecret := redact.Command(suggestedWords)
+	risk, rationale, rationaleKey := match.Risk, match.Rationale, MessageKey("")
+	if containsSecret {
+		risk = RiskHigh
+		rationale = defaultMessages[MessageRiskSecret]
+		rationaleKey = MessageRiskSecret
+	}
+	return Decision{Version: AdapterProtocolVersion, Cause: match.Cause, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: []Evidence{{Kind: "resolver", Value: "curated"}, {Kind: "pack", Value: match.PackID}, {Kind: "rule", Value: match.RuleID}}, Confidence: 1, Risk: risk, RiskRationale: rationale, RiskRationaleKey: rationaleKey, Trace: []string{"pack:" + match.PackID, "rule:" + match.RuleID}, original: match.Original, replacement: match.Replacement, occurrence: match.Occurrence}, nil
 }
 
 func (e Engine) pathDecision(ctx context.Context, words []string) (Decision, error) {

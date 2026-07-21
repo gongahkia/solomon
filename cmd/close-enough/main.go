@@ -311,7 +311,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 				return clierr.Wrap(clierr.Configuration, err)
 			}
 		}
-		service := daemon.Service{Engine: diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd()}), Config: cfg, Packs: resolver, Store: store, LearnedRules: learnedRules}
+		service := daemon.Service{Engine: diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd(), SemanticResolver: resolver}), Config: cfg, Packs: resolver, Store: store, LearnedRules: learnedRules}
 		server, err := daemon.NewServer(endpoint, service.Handle)
 		if err != nil {
 			return clierr.Wrap(clierr.Operation, err)
@@ -580,7 +580,11 @@ func checkCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Configuration, err)
 	}
-	decision, err := diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd()}).Check(*command, *stage)
+	engine, err := bundledDiagnosticEngine(cfg)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	decision, err := engine.Check(*command, *stage)
 	if err != nil {
 		return clierr.Wrap(clierr.Input, err)
 	}
@@ -618,6 +622,14 @@ func checkCommand(args []string, stdout io.Writer) error {
 	}
 }
 
+func bundledDiagnosticEngine(cfg config.Config) (diagnose.Engine, error) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		return diagnose.Engine{}, err
+	}
+	return diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd(), SemanticResolver: resolver}), nil
+}
+
 func inspectDecisionCommand(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("inspect-decision", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -636,7 +648,11 @@ func inspectDecisionCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Configuration, err)
 	}
-	decision, err := diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd()}).Check(*command, *stage)
+	engine, err := bundledDiagnosticEngine(cfg)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	decision, err := engine.Check(*command, *stage)
 	if err != nil {
 		return clierr.Wrap(clierr.Input, err)
 	}

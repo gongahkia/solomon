@@ -3,6 +3,8 @@ package packs
 import (
 	"errors"
 	"strings"
+
+	"github.com/gongahkia/close-enough/internal/diagnose"
 )
 
 type RuntimeMatch struct {
@@ -38,20 +40,42 @@ func (r RuntimeResolver) MatchLine(line string) (RuntimeMatch, bool) {
 	if !simpleCommandLine(line) {
 		return RuntimeMatch{}, false
 	}
-	words := strings.Fields(line)
-	if len(words) < 2 {
+	match, ok := r.MatchWords(strings.Fields(line))
+	if !ok {
 		return RuntimeMatch{}, false
+	}
+	return RuntimeMatch{PackID: match.PackID, RuleID: match.RuleID, Suggestion: match.Suggestion, Cause: match.Cause, Risk: string(match.Risk), Rationale: match.Rationale}, true
+}
+
+func (r RuntimeResolver) MatchWords(words []string) (diagnose.SemanticMatch, bool) {
+	if len(words) < 2 {
+		return diagnose.SemanticMatch{}, false
 	}
 	command := words[0]
 	value := strings.Join(words[1:], " ")
 	for _, pack := range r.packs {
 		rule, ok := pack.Match(command, value)
-		if !ok {
-			continue
+		if ok {
+			return runtimeSemanticMatch(pack, rule, words, nil), true
 		}
-		return RuntimeMatch{PackID: pack.Pack.ID, RuleID: rule.ID, Suggestion: command + " " + rule.Replacement, Cause: rule.Cause, Risk: string(rule.Risk), Rationale: rule.RiskRationale}, true
+		rule, ok = pack.Match(command, words[1])
+		if ok {
+			return runtimeSemanticMatch(pack, rule, words, words[2:]), true
+		}
 	}
-	return RuntimeMatch{}, false
+	return diagnose.SemanticMatch{}, false
+}
+
+func runtimeSemanticMatch(pack CompiledPack, rule Rule, words, suffix []string) diagnose.SemanticMatch {
+	replacement := rule.Replacement
+	if len(suffix) > 0 {
+		replacement += " " + strings.Join(suffix, " ")
+	}
+	match := diagnose.SemanticMatch{PackID: pack.Pack.ID, RuleID: rule.ID, Suggestion: words[0] + " " + replacement, Cause: rule.Cause, Risk: rule.Risk, Rationale: rule.RiskRationale}
+	if len(words) >= 2 && !strings.ContainsRune(rule.Replacement, ' ') {
+		match.Original, match.Replacement, match.Occurrence = words[1], rule.Replacement, 1
+	}
+	return match
 }
 
 func simpleCommandLine(line string) bool {

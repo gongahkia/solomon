@@ -31,6 +31,28 @@ type decisionContractCase struct {
 	Risk       Risk   `json:"risk"`
 }
 
+type testSemanticResolver struct{}
+
+func (testSemanticResolver) MatchWords(words []string) (SemanticMatch, bool) {
+	if len(words) < 2 || words[0] != "git" {
+		return SemanticMatch{}, false
+	}
+	replacement, ok := map[string]string{"sttaus": "status", "statsu": "status"}[words[1]]
+	if !ok {
+		return SemanticMatch{}, false
+	}
+	suggestion := "git " + replacement
+	if len(words) > 2 {
+		suggestion += " " + strings.Join(words[2:], " ")
+	}
+	return SemanticMatch{PackID: "core-git", RuleID: "git-status-" + words[1], Suggestion: suggestion, Cause: "Git subcommand typo", Risk: RiskSafe, Rationale: "read-only status query", Original: words[1], Replacement: replacement, Occurrence: 1}, true
+}
+
+func testEngine(options Options) Engine {
+	options.SemanticResolver = testSemanticResolver{}
+	return New(options)
+}
+
 func TestV1DecisionContractCorpus(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "v1_decision_contract.json"))
 	if err != nil {
@@ -45,7 +67,7 @@ func TestV1DecisionContractCorpus(t *testing.T) {
 			cfg := config.Default()
 			cfg.Mode = test.Mode
 			cfg.AutoApplySafe = test.AutoApply
-			decision, err := New(Options{Config: cfg}).Check(test.Command, test.Stage)
+			decision, err := testEngine(Options{Config: cfg}).Check(test.Command, test.Stage)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,7 +95,7 @@ func TestDiagnosticLimitsBoundInputOutputAndAnalysis(t *testing.T) {
 	if _, err := engine.Check(strings.Repeat("x", MaxInputBytes+1), "pre"); !errors.Is(err, ErrInputLimit) {
 		t.Fatalf("input limit error = %v", err)
 	}
-	if _, err := New(Options{Config: config.Default(), Limits: Limits{OutputBytes: 1}}).Check("git sttaus", "pre"); !errors.Is(err, ErrOutputLimit) {
+	if _, err := testEngine(Options{Config: config.Default(), Limits: Limits{OutputBytes: 1}}).Check("git sttaus", "pre"); !errors.Is(err, ErrOutputLimit) {
 		t.Fatalf("output limit error = %v", err)
 	}
 	start := time.Unix(0, 0)
@@ -84,7 +106,7 @@ func TestDiagnosticLimitsBoundInputOutputAndAnalysis(t *testing.T) {
 		index++
 		return value
 	}
-	if _, err := New(Options{Config: config.Default(), Limits: Limits{AnalysisTime: time.Nanosecond}, Clock: clock}).Check("git sttaus", "pre"); !errors.Is(err, ErrAnalysisLimit) {
+	if _, err := testEngine(Options{Config: config.Default(), Limits: Limits{AnalysisTime: time.Nanosecond}, Clock: clock}).Check("git sttaus", "pre"); !errors.Is(err, ErrAnalysisLimit) {
 		t.Fatalf("analysis limit error = %v", err)
 	}
 }
@@ -208,12 +230,19 @@ func TestInspectionIncludesSafeDiffs(t *testing.T) {
 }
 
 func TestGitSubcommandTypo(t *testing.T) {
-	decision, err := New(Options{Config: config.Default()}).Check("git sttaus", "pre")
+	decision, err := testEngine(Options{Config: config.Default()}).Check("git sttaus", "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Suggestion != "git status" || decision.Cause != "unknown Git subcommand" || decision.CauseKey != MessageCauseUnknownGitSubcommand || decision.ConsequenceKey != MessageConsequenceGitExits {
+	if decision.Suggestion != "git status" || decision.Cause != "Git subcommand typo" || decision.Trace[0] != "pack:core-git" {
 		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestEngineRequiresSemanticResolverForCuratedRepairs(t *testing.T) {
+	decision, err := New(Options{Config: config.Default()}).Check("git sttaus", "pre")
+	if err != nil || decision.Action != "none" || decision.Suggestion != "" {
+		t.Fatalf("unresolved semantic decision = %#v, %v", decision, err)
 	}
 }
 
@@ -260,7 +289,7 @@ func TestDefaultMessageRejectsUnknownKey(t *testing.T) {
 
 func TestCommandDiffPreservesShellQuotingAndRedactsSecrets(t *testing.T) {
 	line := `git "sttaus" --message 'keep quote'`
-	decision, err := New(Options{Config: config.Default()}).Check(line, "pre")
+	decision, err := testEngine(Options{Config: config.Default()}).Check(line, "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +363,7 @@ func TestEvidenceCollectorUsesLocalDecisionFacts(t *testing.T) {
 func TestRepairClassesApplyTheirConfidenceThresholds(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")
-	engine := New(Options{Config: config.Default(), Path: dir, CWD: dir})
+	engine := testEngine(Options{Config: config.Default(), Path: dir, CWD: dir})
 
 	decision, err := engine.Check("gti status", "pre")
 	if err != nil || decision.Class != RepairClassCommand || len(decision.Evidence) == 0 {
@@ -374,7 +403,7 @@ func TestRewriteNeedsVeryHighConfidence(t *testing.T) {
 	cfg := config.Default()
 	cfg.Mode = "rewrite"
 	cfg.AutoApplySafe = true
-	decision, err := New(Options{Config: cfg}).Check("git statsu", "pre")
+	decision, err := testEngine(Options{Config: cfg}).Check("git statsu", "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +416,7 @@ func TestRewriteSuggestionPreservesBufferQuoting(t *testing.T) {
 	cfg := config.Default()
 	cfg.Mode, cfg.AutoApplySafe = "rewrite", true
 	line := `git "statsu" --message 'keep quote'`
-	decision, err := New(Options{Config: cfg}).Check(line, "pre")
+	decision, err := testEngine(Options{Config: cfg}).Check(line, "pre")
 	if err != nil {
 		t.Fatal(err)
 	}

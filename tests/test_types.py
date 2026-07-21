@@ -135,6 +135,25 @@ def test_trade_fills_require_positive_consideration(kind: EventKind) -> None:
 
 
 @pytest.mark.parametrize(
+    ("amount", "quantity", "fee"),
+    (("0", "0", "0"), ("5", "1", "0"), ("5", "0", "1")),
+)
+def test_fee_events_reject_non_fee_payloads(amount: str, quantity: str, fee: str) -> None:
+    with pytest.raises(ValueError, match="fee events"):
+        LedgerEvent(
+            fingerprint="fee-event",
+            source=SourceProvenance("csv", "a" * 64, "fee"),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=EventKind.FEE,
+            currency=Currency.USD,
+            amount=Decimal(amount),
+            quantity=Decimal(quantity),
+            fee=Decimal(fee),
+        )
+
+
+@pytest.mark.parametrize(
     ("source", "account"),
     (
         (None, Account("csv", "1")),

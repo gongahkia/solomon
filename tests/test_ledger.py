@@ -159,6 +159,21 @@ def test_csv_imports_buy_and_sell_fills(tmp_path: Path, monkeypatch) -> None:
     assert positions(events)[("csv:main", "US:SPY")] == Decimal("1")
 
 
+def test_csv_imports_fee_events(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    source = tmp_path / "fees.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100\n"
+        "main,2026-01-02T00:00:00+00:00,fee,USD,5\n"
+    )
+
+    assert import_csv(ledger, source)[:2] == (2, 0)
+    events = list_events(ledger)
+    assert events[1].kind is EventKind.FEE
+    assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("95")
+
+
 def test_csv_import_does_not_archive_or_persist_a_partial_file(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source = tmp_path / "events.csv"

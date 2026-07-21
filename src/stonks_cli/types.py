@@ -160,6 +160,11 @@ class LedgerEvent:
                 raise ValueError("cash transfers require a positive amount")
             if self.instrument is not None or self.quantity != 0 or self.fee != 0:
                 raise ValueError("cash transfers cannot include instrument, quantity, or fee")
+        if self.kind is EventKind.FEE:
+            if self.amount <= 0:
+                raise ValueError("fee events require a positive amount")
+            if self.instrument is not None or self.quantity != 0 or self.fee != 0:
+                raise ValueError("fee events cannot include instrument, quantity, or fee")
         if self.kind in {EventKind.BUY, EventKind.SELL}:
             if self.instrument is None or self.quantity <= 0:
                 raise ValueError("trades require an instrument and positive quantity")

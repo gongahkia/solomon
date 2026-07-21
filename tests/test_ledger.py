@@ -17,6 +17,7 @@ from stonks_cli.ledger import (
     import_csv,
     import_fingerprint,
     ingest_events,
+    integrity_errors,
     list_events,
     list_position_snapshots,
     positions,
@@ -220,6 +221,65 @@ def test_positions_apply_corrections_reversals_and_event_order() -> None:
     )
 
     assert positions([reversal, correction, original]) == {}
+
+
+def test_ledger_integrity_checks_relational_and_position_invariants() -> None:
+    original = _event(EventKind.BUY, quantity="2", amount="20")
+    missing_target = LedgerEvent(
+        fingerprint="missing-target",
+        source=SourceProvenance("test", "0" * 64, "missing-target"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("20"),
+        quantity=Decimal("2"),
+        instrument=original.instrument,
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint="not-imported",
+    )
+    cycle_a = LedgerEvent(
+        fingerprint="cycle-a",
+        source=SourceProvenance("test", "0" * 64, "cycle-a"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("20"),
+        quantity=Decimal("2"),
+        instrument=original.instrument,
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint="cycle-b",
+    )
+    cycle_b = LedgerEvent(
+        fingerprint="cycle-b",
+        source=SourceProvenance("test", "0" * 64, "cycle-b"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("20"),
+        quantity=Decimal("2"),
+        instrument=original.instrument,
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint="cycle-a",
+    )
+    oversell = LedgerEvent(
+        fingerprint="oversell",
+        source=SourceProvenance("test", "0" * 64, "oversell"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 4, tzinfo=UTC),
+        kind=EventKind.SELL,
+        currency=Currency.USD,
+        amount=Decimal("50"),
+        quantity=Decimal("5"),
+        instrument=original.instrument,
+    )
+
+    assert integrity_errors([original]) == ()
+    assert integrity_errors([missing_target]) == ("missing lifecycle target:not-imported",)
+    assert integrity_errors([cycle_a, cycle_b]) == ("correction cycle:cycle-a,cycle-b",)
+    assert integrity_errors([oversell]) == ("negative position:test:main:US:SPY",)
 
 
 def test_csv_import_archives_and_deduplicates(tmp_path: Path, monkeypatch) -> None:

@@ -411,6 +411,52 @@ def effective_events(events: list[LedgerEvent]) -> tuple[LedgerEvent, ...]:
     return tuple(event for event in events if event.fingerprint not in corrected_fingerprints)
 
 
+def integrity_errors(events: list[LedgerEvent]) -> tuple[str, ...]:
+    errors: list[str] = []
+    fingerprints = {event.fingerprint for event in events}
+    if len(fingerprints) != len(events):
+        errors.append("duplicate event fingerprints")
+    if len({event.source.key for event in events}) != len(events):
+        errors.append("duplicate source records")
+    missing_targets = sorted(
+        {
+            event.corrects_fingerprint
+            for event in events
+            if event.lifecycle is not EventLifecycle.POSTED
+            and event.corrects_fingerprint is not None
+            and event.corrects_fingerprint not in fingerprints
+        }
+    )
+    errors.extend(f"missing lifecycle target:{target}" for target in missing_targets)
+    corrections = {
+        event.fingerprint: event.corrects_fingerprint
+        for event in events
+        if event.lifecycle is EventLifecycle.CORRECTION
+    }
+    checked: set[str] = set()
+    for start in sorted(corrections):
+        chain: list[str] = []
+        positions_by_fingerprint: dict[str, int] = {}
+        current = start
+        while current in corrections and current not in checked:
+            if current in positions_by_fingerprint:
+                cycle = sorted(chain[positions_by_fingerprint[current] :])
+                errors.append(f"correction cycle:{','.join(cycle)}")
+                break
+            positions_by_fingerprint[current] = len(chain)
+            chain.append(current)
+            target = corrections[current]
+            if target is None:
+                break
+            current = target
+        checked.update(chain)
+    try:
+        positions(events)
+    except LedgerError as error:
+        errors.append(str(error))
+    return tuple(errors)
+
+
 def cash_balances(events: list[LedgerEvent]) -> dict[tuple[str, Currency], Decimal]:
     balances: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
     for event in effective_events(events):

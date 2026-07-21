@@ -238,6 +238,22 @@ func TestServiceAttachesJavaScriptFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesPythonFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "python ./src/maine.py", FailureOutput: "FileNotFoundError: [Errno 2] No such file or directory: './src/maine.py'\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "python-path-not-found", Value: "./src/maine.py"}}
+	if response.Action != "hint" || response.Suggestion != "python ./src/main.py" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

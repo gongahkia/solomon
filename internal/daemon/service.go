@@ -68,13 +68,13 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 			return Response{}, err
 		}
 		if ok {
-			return s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))), nil
+			return s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))), nil
 		}
 		response, err = s.decision(ctx, request.Command, "post")
 		if err != nil {
 			return Response{}, err
 		}
-		return s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))), nil
+		return s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))), nil
 	case PostSuccessOperation:
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
@@ -181,6 +181,17 @@ func (s *Service) attachJavaScriptFailureEvidence(request Request, response Resp
 	return response
 }
 
+func (s *Service) attachPythonFailureEvidence(request Request, response Response) Response {
+	if response.Action == "none" || response.Suggestion == "" || !isPythonCommand(firstCommandWord(request.Command)) {
+		return response
+	}
+	evidence, err := packs.ExtractPythonFailureEvidence(safeFailureOutput(request.FailureOutput))
+	if err == nil {
+		response.Evidence = evidence
+	}
+	return response
+}
+
 func isPackageManagerCommand(command string) bool {
 	switch command {
 	case "brew", "npm", "pnpm", "yarn":
@@ -193,6 +204,15 @@ func isPackageManagerCommand(command string) bool {
 func isJavaScriptCommand(command string) bool {
 	switch command {
 	case "bun", "deno", "node":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPythonCommand(command string) bool {
+	switch command {
+	case "pip", "pytest", "python", "uv":
 		return true
 	default:
 		return false

@@ -1356,6 +1356,40 @@ func TestFishEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 }
 
+func TestFishRestoresPreexistingEnterBinding(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish unavailable")
+	}
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.fish")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "bindings")
+	harness := `set -g CURRENT 'bind --preset enter execute'; function bind; if test (count $argv) -eq 1; echo $CURRENT; else if test "$argv[1]" = --erase; set -g CURRENT 'bind --preset enter execute'; echo erase >> "$CAPTURE"; else set -g CURRENT "bind $argv[1] $argv[2]"; echo $argv[2] >> "$CAPTURE"; end; end; source "$argv[1]"; _close_enough_restore_enter; echo $CURRENT`
+	command := exec.Command(fish, "-c", harness, adapter)
+	command.Env = append(os.Environ(), "CAPTURE="+capture)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish harness: %v\n%s", err, output)
+	}
+	if got := string(output); got != "bind --preset enter execute\n" {
+		t.Fatalf("restored binding = %q", got)
+	}
+	bindings, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(bindings); got != "_close_enough_accept_line\nerase\n" {
+		t.Fatalf("binding changes = %q", got)
+	}
+}
+
 func TestFishAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	fish, err := exec.LookPath("fish")
 	if err != nil {

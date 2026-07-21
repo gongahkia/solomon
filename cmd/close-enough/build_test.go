@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -250,32 +251,6 @@ func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowPublishesTUFRegistryMetadata(t *testing.T) {
-	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, marker := range []string{
-		"tuf-registry:",
-		"needs: [bundled-packs, update-manifest]",
-		"TUF_ROOT_PRIVATE_KEY",
-		"TUF_TARGETS_PRIVATE_KEY",
-		"TUF_SNAPSHOT_PRIVATE_KEY",
-		"TUF_TIMESTAMP_PRIVATE_KEY",
-		"test -n \"$TUF_ROOT_PRIVATE_KEY\"",
-		"go run ./cmd/tuf-metadata",
-		"--targets-expires",
-		"--snapshot-expires",
-		"--timestamp-expires",
-		"name: tuf-registry-",
-		"path: dist/tuf/*.json",
-	} {
-		if !strings.Contains(string(workflow), marker) {
-			t.Fatalf("release workflow lacks TUF registry marker %q", marker)
-		}
-	}
-}
-
 func TestReleaseWorkflowPublishesUpdateManifest(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {
@@ -290,7 +265,6 @@ func TestReleaseWorkflowPublishesUpdateManifest(t *testing.T) {
 		"cosign sign-blob --yes --bundle",
 		"name: update-manifest-",
 		"name: update-manifest-signature-",
-		"needs: [bundled-packs, update-manifest]",
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release workflow lacks update manifest marker %q", marker)
@@ -334,38 +308,31 @@ func TestReleaseDryRunWorkflow(t *testing.T) {
 		"scripts/release-smoke-test.sh",
 		"scripts/release-pack-bundle.sh",
 		"cmd/update-manifest",
-		"TestGenerateProducesVerifiableTUFMetadata",
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release dry-run workflow lacks marker %q", marker)
 		}
 	}
-	if strings.Contains(string(workflow), "cosign sign-blob") || strings.Contains(string(workflow), "TUF_ROOT_PRIVATE_KEY") {
+	if strings.Contains(string(workflow), "cosign sign-blob") || strings.Contains(string(workflow), "TUF_") {
 		t.Fatal("release dry-run workflow performs production signing")
 	}
 }
 
-func TestReleaseRevocationWorkflowRequiresConfirmation(t *testing.T) {
-	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release-revocation.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, marker := range []string{
-		"workflow_dispatch:",
-		"confirm:",
-		"enter REVOKE to publish",
-		"environment: release",
-		"group: release-revocation",
-		"test \"$REVOCATION_CONFIRM\" = REVOKE",
-		"cmd/release-revocation",
-		"cosign sign-blob --yes --bundle",
-		"go run ./cmd/tuf-metadata",
-		"name: release-revocation-",
-		"name: release-revocation-tuf-",
-	} {
-		if !strings.Contains(string(workflow), marker) {
-			t.Fatalf("release revocation workflow lacks marker %q", marker)
+func TestReleaseWorkflowsOmitTUFRegistry(t *testing.T) {
+	for _, name := range []string{"release.yml", "release-dry-run.yml"} {
+		workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
 		}
+		for _, marker := range []string{"TUF_", "tuf-", "tuf-metadata"} {
+			if strings.Contains(string(workflow), marker) {
+				t.Fatalf("%s retains TUF registry marker %q", name, marker)
+			}
+		}
+	}
+	_, err := os.Stat(filepath.Join("..", "..", ".github", "workflows", "release-revocation.yml"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("release revocation workflow exists: %v", err)
 	}
 }
 

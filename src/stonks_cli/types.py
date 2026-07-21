@@ -155,6 +155,11 @@ class LedgerEvent:
         object.__setattr__(self, "fee", decimal(self.fee))
         if self.amount < 0 or self.fee < 0:
             raise ValueError("amount and fee must be non-negative")
+        if self.kind in {EventKind.CASH_DEPOSIT, EventKind.CASH_WITHDRAWAL}:
+            if self.amount <= 0:
+                raise ValueError("cash transfers require a positive amount")
+            if self.instrument is not None or self.quantity != 0 or self.fee != 0:
+                raise ValueError("cash transfers cannot include instrument, quantity, or fee")
         if self.kind in {EventKind.BUY, EventKind.SELL} and (
             self.instrument is None or self.quantity <= 0
         ):

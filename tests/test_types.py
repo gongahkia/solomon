@@ -100,6 +100,25 @@ def test_ledger_event_uses_canonical_source_and_account_identities() -> None:
 
 
 @pytest.mark.parametrize(
+    ("amount", "quantity", "fee"),
+    (("0", "0", "0"), ("100", "1", "0"), ("100", "0", "1")),
+)
+def test_cash_transfers_reject_non_cash_payloads(amount: str, quantity: str, fee: str) -> None:
+    with pytest.raises(ValueError, match="cash transfers"):
+        LedgerEvent(
+            fingerprint="event-1",
+            source=SourceProvenance("csv", "a" * 64, "1"),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=EventKind.CASH_DEPOSIT,
+            currency=Currency.USD,
+            amount=Decimal(amount),
+            quantity=Decimal(quantity),
+            fee=Decimal(fee),
+        )
+
+
+@pytest.mark.parametrize(
     ("source", "account"),
     (
         (None, Account("csv", "1")),

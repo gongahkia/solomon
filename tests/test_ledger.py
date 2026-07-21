@@ -123,6 +123,21 @@ def test_csv_import_archives_and_deduplicates(tmp_path: Path, monkeypatch) -> No
     assert import_csv(ledger, source)[:2] == (0, 1)
 
 
+def test_csv_imports_cash_deposits_and_withdrawals(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    source = tmp_path / "transfers.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100\n"
+        "main,2026-01-02T00:00:00+00:00,cash_withdrawal,USD,25\n"
+    )
+
+    assert import_csv(ledger, source)[:2] == (2, 0)
+    events = list_events(ledger)
+    assert [event.kind for event in events] == [EventKind.CASH_DEPOSIT, EventKind.CASH_WITHDRAWAL]
+    assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("75")
+
+
 def test_csv_import_does_not_archive_or_persist_a_partial_file(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source = tmp_path / "events.csv"

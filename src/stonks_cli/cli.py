@@ -17,7 +17,7 @@ from stonks_cli.ledger import cash_balances, import_csv, list_events, positions
 from stonks_cli.market_data import import_daily_prices_csv, latest_prices
 from stonks_cli.moomoo import MoomooReadOnlyProvider, OpenDConnection
 from stonks_cli.operator import ScheduleDefinition, notify_local, render_schedule
-from stonks_cli.plugins import discover_with_diagnostics
+from stonks_cli.plugins import builtin_provider_manifests, discover_with_diagnostics
 from stonks_cli.storage import (
     EncryptedLedger,
     export_backup,
@@ -205,7 +205,10 @@ def plugins_command() -> None:
         json.dumps(
             {
                 "installed": [identifier for identifier, _ in discovery.providers],
-                "built_in": ["csv", "moomoo"],
+                "built_in": [
+                    "csv",
+                    *(manifest.identifier for manifest in builtin_provider_manifests()),
+                ],
                 "diagnostics": [
                     {"entry_point": item.entry_point, "error": item.error}
                     for item in discovery.diagnostics

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -67,8 +68,11 @@ def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:
     result = CliRunner().invoke(app, ["plugins"])
 
     assert result.exit_code == 0, result.output
-    assert '"entry_point": "broken"' in result.output
-    assert '"error": "RuntimeError: fixture load failed"' in result.output
+    payload = json.loads(result.output)
+    assert payload["built_in"] == ["csv", "moomoo"]
+    assert payload["diagnostics"] == [
+        {"entry_point": "broken", "error": "RuntimeError: fixture load failed"}
+    ]
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

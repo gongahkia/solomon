@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
-from importlib import metadata
+from importlib import import_module, metadata
 from typing import Any, Protocol, runtime_checkable
 
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
@@ -96,6 +96,9 @@ class ProviderPlugin(Protocol):
     manifest: PluginManifest
 
 
+_BUILTIN_PROVIDER_TYPES: dict[str, type[ProviderPlugin]] = {}
+
+
 @dataclass(frozen=True)
 class PluginLoadDiagnostic:
     entry_point: str
@@ -157,6 +160,23 @@ def validate_manifest(manifest: PluginManifest) -> None:
     _reject_execution_capabilities(manifest.capabilities)
     if any(not isinstance(capability, Capability) for capability in manifest.capabilities):
         raise ProviderError("plugin capability is invalid")
+
+
+def register_builtin_provider(provider_type: type[ProviderPlugin]) -> None:
+    manifest = getattr(provider_type, "manifest", None)
+    if not isinstance(manifest, PluginManifest):
+        raise ProviderError("built-in provider missing manifest")
+    validate_manifest(manifest)
+    if manifest.identifier in _BUILTIN_PROVIDER_TYPES:
+        raise ProviderError(f"duplicate built-in provider:{manifest.identifier}")
+    _BUILTIN_PROVIDER_TYPES[manifest.identifier] = provider_type
+
+
+def builtin_provider_manifests() -> tuple[PluginManifest, ...]:
+    import_module("stonks_cli.moomoo")
+    return ProviderCapabilityRegistry(
+        tuple(provider.manifest for provider in _BUILTIN_PROVIDER_TYPES.values())
+    ).manifests
 
 
 def provider_entry_points() -> tuple[metadata.EntryPoint, ...]:

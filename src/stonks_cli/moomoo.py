@@ -6,7 +6,7 @@ from importlib import import_module, metadata, util
 from typing import Any
 
 from stonks_cli.errors import ProviderError
-from stonks_cli.plugins import Capability, PluginManifest
+from stonks_cli.plugins import Capability, PluginManifest, register_builtin_provider
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -126,6 +126,9 @@ class MoomooReadOnlyProvider:
             if not callable(close):
                 raise ProviderError("Moomoo context cannot be closed")
             close()
+
+
+register_builtin_provider(MoomooReadOnlyProvider)
 
 
 def _records(value: Any) -> Sequence[dict[str, Any]]:

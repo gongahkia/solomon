@@ -9,6 +9,7 @@ import pytest
 from stonks_cli import plugins
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 from stonks_cli.market_data import DailyPrice
+from stonks_cli.moomoo import MoomooReadOnlyProvider
 from stonks_cli.plugins import (
     Capability,
     CorporateActionProvider,
@@ -18,6 +19,7 @@ from stonks_cli.plugins import (
     ProviderCapabilityRegistry,
     ReadOnlyAccountProvider,
     TransactionSourceProvider,
+    builtin_provider_manifests,
     compatible_api_version,
     discover,
     discover_manifests,
@@ -31,6 +33,10 @@ from stonks_cli.types import Account, Currency, Instrument
 
 def test_read_only_manifest_is_valid() -> None:
     validate_manifest(PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS})))
+
+
+def test_builtin_providers_are_registered_through_the_plugin_api() -> None:
+    assert builtin_provider_manifests() == (MoomooReadOnlyProvider.manifest,)
 
 
 def test_manifest_schema_canonicalizes_identifier_and_accepts_future_revision() -> None:

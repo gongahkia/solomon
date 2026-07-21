@@ -37,6 +37,12 @@ def initialize(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS ledger_events_time ON ledger_events(occurred_at, fingerprint)"
     )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ledger_events_source_record
+        ON ledger_events(source_provider_id, source_hash, source_record_id)
+        """
+    )
 
 
 _CANONICAL_EVENT_COLUMNS = {

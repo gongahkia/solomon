@@ -157,6 +157,23 @@ def test_ingest_events_rolls_back_on_a_late_storage_failure(tmp_path: Path, monk
     assert list_events(ledger) == []
 
 
+def test_ingest_events_skips_conflicting_source_records(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    event = _event(EventKind.CASH_DEPOSIT, amount="100")
+    conflicting = LedgerEvent(
+        fingerprint="conflicting-source-record",
+        source=event.source,
+        account=event.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("200"),
+    )
+
+    assert ingest_events(ledger, (event, conflicting)) == (1, 1)
+    assert list_events(ledger) == [event]
+
+
 def test_legacy_persisted_event_ids_are_read_as_canonical_identities(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source_hash = "a" * 64

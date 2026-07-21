@@ -210,6 +210,25 @@ func TestReleaseWorkflowSmokeTestsEveryArchive(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesGitHubAssets(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"contents: write",
+		"publish:",
+		"needs: [build, smoke]",
+		"pattern: release-${{ github.ref_name }}-*",
+		"gh release create \"$GITHUB_REF_NAME\" --verify-tag --generate-notes",
+		"dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks GitHub asset publication marker %q", marker)
+		}
+	}
+}
+
 func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {

@@ -18,6 +18,20 @@ func TestDaemonPackageManagerCorpus(t *testing.T) {
 	testDaemonPackCorpus(t, "package-managers.json", []string{"package-manager-subcommand-typos", "package-manager-flag-repairs", "package-manager-path-repairs", "package-manager-conceptual-misuse"})
 }
 
+func TestDaemonLanguagePackCorpora(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		pack    string
+		corpora []string
+	}{
+		{name: "javascript", pack: "javascript.json", corpora: []string{"javascript-subcommand-typos", "javascript-flag-repairs", "javascript-path-repairs", "javascript-conceptual-misuse"}},
+		{name: "python", pack: "python.json", corpora: []string{"python-subcommand-typos", "python-flag-repairs", "python-path-repairs", "python-conceptual-misuse"}},
+		{name: "rust", pack: "rust.json", corpora: []string{"rust-subcommand-typos", "rust-flag-repairs", "rust-path-repairs", "rust-conceptual-misuse"}},
+	} {
+		t.Run(test.name, func(t *testing.T) { testDaemonPackCorpus(t, test.pack, test.corpora) })
+	}
+}
+
 func testDaemonPackCorpus(t *testing.T, packName string, corpusNames []string) {
 	t.Helper()
 	pack, err := packs.Load(filepath.Join("..", "..", "packs", packName))
@@ -51,8 +65,10 @@ func testDaemonPackCorpus(t *testing.T, packName string, corpusNames []string) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					wantAction := "rewrite"
-					if rule.Risk == diagnose.RiskHigh {
+					wantAction := "hint"
+					if rule.Risk == diagnose.RiskSafe {
+						wantAction = "rewrite"
+					} else if rule.Risk == diagnose.RiskHigh {
 						wantAction = "interrupt"
 					}
 					if response.Action != wantAction || response.PackID != pack.ID || response.RuleID != rule.ID {

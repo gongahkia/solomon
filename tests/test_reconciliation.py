@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from stonks_cli.reconciliation import ReconciliationDifference, reconcile, reconcile_positions
+from stonks_cli.reconciliation import (
+    ReconciliationDifference,
+    reconcile,
+    reconcile_cash,
+    reconcile_positions,
+)
 from stonks_cli.types import (
     Account,
     BrokerPositionSnapshot,
@@ -59,3 +64,19 @@ def test_position_reconciliation_uses_latest_broker_snapshot() -> None:
 
     differences = reconcile_positions([event], snapshots)
     assert differences == (ReconciliationDifference("position:moomoo:123:US:SPY", Decimal("2"), Decimal("1")),)
+
+
+def test_cash_reconciliation_uses_canonical_ledger_cash() -> None:
+    account = Account("moomoo", "123")
+    event = LedgerEvent(
+        fingerprint="deposit-1",
+        source=SourceProvenance("moomoo", "a" * 64, "deposit-1"),
+        account=account,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+    )
+
+    differences = reconcile_cash([event], {(account.key, Currency.USD): Decimal("99")})
+    assert differences == (ReconciliationDifference("cash:moomoo:123:USD", Decimal("100"), Decimal("99")),)

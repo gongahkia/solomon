@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from stonks_cli.ledger import positions
+from stonks_cli.ledger import cash_balances, positions
 from stonks_cli.types import BrokerPositionSnapshot, Currency, LedgerEvent
 
 
@@ -69,3 +69,9 @@ def reconcile_positions(
     events: list[LedgerEvent], snapshots: list[BrokerPositionSnapshot]
 ) -> tuple[ReconciliationDifference, ...]:
     return reconcile({}, {}, positions(events), broker_positions(snapshots))
+
+
+def reconcile_cash(
+    events: list[LedgerEvent], observed: dict[tuple[str, Currency], Decimal]
+) -> tuple[ReconciliationDifference, ...]:
+    return reconcile(cash_balances(events), observed, {}, {})

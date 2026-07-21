@@ -504,8 +504,11 @@ function global:prompt {
   }
   if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
     $global:CloseEnoughLastHistoryId = $entry.Id
-    $output = (& close-enough check --stage post --format plain --command $entry.CommandLine 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($output) -and $output -ne 'no suggestion' -and (Allow-CloseEnoughDiagnostic)) { Write-Host $output }
+    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --format json --command $entry.CommandLine 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($record)) {
+      try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $decision = $null }
+      if ($null -ne $decision -and $decision.version -eq 1 -and $decision.action -ne 'none' -and -not [string]::IsNullOrEmpty($decision.suggestion) -and (Allow-CloseEnoughSuggestion $decision.suggestion)) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
+    }
   }
   if ($null -ne $global:CloseEnoughPreviousPrompt) { & $global:CloseEnoughPreviousPrompt }
 }

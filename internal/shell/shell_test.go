@@ -141,7 +141,7 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
 		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell bash"},
 		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "daemon request --operation post-failure --shell fish"},
-		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
+		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "daemon request --operation post-failure --shell powershell"},
 	} {
 		t.Run(test.shell, func(t *testing.T) {
 			script, err := Script(test.shell)
@@ -1711,12 +1711,12 @@ func TestPowerShellPostFailureConsumesHistoryEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `--stage post --format plain --command $entry.CommandLine`) {
+	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `daemon request --operation post-failure --shell powershell --session $PID --format json --command $entry.CommandLine`) || strings.Contains(script, "close-enough check --stage post") {
 		t.Fatalf("PowerShell post-failure hook is missing or unsafe: %q", script)
 	}
 }
 
-func TestPowerShellPropagatesModeAndDisplayConfiguration(t *testing.T) {
+func TestPowerShellUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	contract, err := ContractFor("pwsh")
 	if err != nil {
 		t.Fatal(err)
@@ -1728,8 +1728,8 @@ func TestPowerShellPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "--stage pre --format json") || !strings.Contains(script, "--stage post --format plain") {
-		t.Fatalf("PowerShell script does not delegate mode and display configuration: %q", script)
+	if !strings.Contains(script, "daemon request --operation pre-send --shell powershell") || !strings.Contains(script, "daemon request --operation post-failure --shell powershell") {
+		t.Fatalf("PowerShell script does not delegate both stages to the daemon: %q", script)
 	}
 }
 

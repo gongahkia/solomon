@@ -36,7 +36,7 @@ func TestServiceMapsDecisionToProtocolResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Version != ProtocolVersion || response.Action != "none" {
+	if response.Version != ProtocolVersion || response.Action != "none" || response.Source != "heuristic" {
 		t.Fatalf("response = %+v", response)
 	}
 }

@@ -213,6 +213,7 @@ func (s *Service) decision(ctx context.Context, command, stage string) (Response
 		Explanation: decision.Cause,
 		Confidence:  strconv.FormatFloat(decision.Confidence, 'f', 2, 64),
 		Risk:        string(decision.Risk),
+		Source:      "heuristic",
 	}
 	if response.Action == "" {
 		response.Action = "none"

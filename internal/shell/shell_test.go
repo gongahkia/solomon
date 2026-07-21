@@ -575,7 +575,7 @@ func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
@@ -1611,6 +1611,31 @@ func TestZshUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	}
 	if !strings.Contains(script, "daemon request --operation pre-send --shell zsh") || !strings.Contains(script, "daemon request --operation post-failure --shell zsh") {
 		t.Fatalf("zsh script does not delegate both stages to the daemon: %q", script)
+	}
+}
+
+func TestZshHandshakeFailsOpen(t *testing.T) {
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshake := "function _close_enough_handshake {"
+	check := "function _close_enough_check {"
+	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
+	if handshakeStart < 0 || checkStart < handshakeStart {
+		t.Fatalf("zsh handshake is missing: %q", script)
+	}
+	handshakeBody := script[handshakeStart:checkStart]
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[[ "$version" == "1" && "$action" == ready ]] || return 1`) || !strings.Contains(handshakeBody, "_CLOSE_ENOUGH_DAEMON_READY=1") {
+		t.Fatalf("zsh handshake contract = %q", handshakeBody)
+	}
+	checkEnd := strings.Index(script[checkStart:], "function _close_enough_accept_line {")
+	if checkEnd < 0 {
+		t.Fatalf("zsh check function is unterminated: %q", script)
+	}
+	checkBody := script[checkStart : checkStart+checkEnd]
+	if !strings.Contains(checkBody, "_close_enough_handshake || return 0") || !strings.Contains(checkBody, `--operation pre-send --shell zsh --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_CLOSE_ENOUGH_DAEMON_READY=0; return 0") {
+		t.Fatalf("zsh handshake fallback = %q", checkBody)
 	}
 }
 

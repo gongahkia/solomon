@@ -12,6 +12,7 @@ function _close_enough_decode {
 }
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
+typeset -gi _CLOSE_ENOUGH_DAEMON_READY=0
 typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic {
   (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
@@ -23,11 +24,23 @@ function _close_enough_allow_suggestion {
   _close_enough_allow_diagnostic || return 1
   _CLOSE_ENOUGH_SEEN_SUGGESTIONS[$1]=1
 }
+function _close_enough_handshake {
+  (( _CLOSE_ENOUGH_DAEMON_READY )) && return 0
+  local record version action
+  local -a fields
+  record="$(command close-enough daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record 2>/dev/null)" || return 1
+  fields=("${(@ps:\t:)record}")
+  (( ${#fields} == 7 )) || return 1
+  version="${fields[1]}" action="${fields[2]}"
+  [[ "$version" == "1" && "$action" == ready ]] || return 1
+  _CLOSE_ENOUGH_DAEMON_READY=1
+}
 function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion suggestion_key
   local -a fields
   command="$BUFFER"
-  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --format record --command "$command" 2>/dev/null)" || return 0
+  _close_enough_handshake || return 0
+  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return 0
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"

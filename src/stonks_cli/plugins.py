@@ -97,6 +97,13 @@ class TransactionSourceProvider(ProviderPlugin, Protocol):
     ) -> tuple[Mapping[str, Any], ...]: ...
 
 
+@runtime_checkable
+class CorporateActionProvider(ProviderPlugin, Protocol):
+    def corporate_actions(
+        self, account: Account, start: datetime, end: datetime
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
+
 def _api_version(value: str) -> tuple[int, int, int] | None:
     match = _SEMVER.fullmatch(value)
     return (

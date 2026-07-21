@@ -9,6 +9,7 @@ from stonks_cli import plugins
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 from stonks_cli.plugins import (
     Capability,
+    CorporateActionProvider,
     PluginManifest,
     ProviderCapabilityRegistry,
     ReadOnlyAccountProvider,
@@ -92,6 +93,11 @@ class _TransactionFixturePlugin(_FixturePlugin):
         return ({"account": account.key, "start": start.isoformat(), "end": end.isoformat()},)
 
 
+class _CorporateActionFixturePlugin(_FixturePlugin):
+    def corporate_actions(self, account: Account, start: datetime, end: datetime):
+        return ({"account": account.key, "start": start.isoformat(), "end": end.isoformat()},)
+
+
 def test_read_only_account_provider_protocol_requires_account_reader() -> None:
     provider = _AccountFixturePlugin("fixture")
     assert isinstance(provider, ReadOnlyAccountProvider)
@@ -103,6 +109,15 @@ def test_transaction_source_provider_protocol_requires_bounded_record_reader() -
     account = Account("fixture", "1")
     assert isinstance(provider, TransactionSourceProvider)
     assert provider.transaction_records(
+        account, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)
+    )[0]["account"] == "fixture:1"
+
+
+def test_corporate_action_provider_protocol_requires_bounded_record_reader() -> None:
+    provider = _CorporateActionFixturePlugin("fixture")
+    account = Account("fixture", "1")
+    assert isinstance(provider, CorporateActionProvider)
+    assert provider.corporate_actions(
         account, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)
     )[0]["account"] == "fixture:1"
 

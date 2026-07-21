@@ -18,7 +18,7 @@ func TestServiceUsesCuratedSafeRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Action != "rewrite" || response.Suggestion != "git status" || response.Source != "curated" || response.RuleID != "git-status-sttaus" {
+	if response.Action != "rewrite" || response.Suggestion != "git status" || response.Source != "curated" || response.PackID != "core-git" || response.RuleID != "git-status-sttaus" {
 		t.Fatalf("response = %+v", response)
 	}
 }

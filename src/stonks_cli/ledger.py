@@ -6,7 +6,7 @@ import io
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -114,9 +114,20 @@ def _migrate_legacy_event_table(connection: sqlite3.Connection) -> None:
 
 
 def append(ledger: EncryptedLedger, event: LedgerEvent) -> bool:
+    inserted, _ = ingest_events(ledger, (event,))
+    return inserted == 1
+
+
+def ingest_events(ledger: EncryptedLedger, events: Iterable[LedgerEvent]) -> tuple[int, int]:
+    inserted = skipped = 0
     with ledger.connection() as connection:
         initialize(connection)
-        return _insert_event(connection, event).rowcount == 1
+        for event in events:
+            if _insert_event(connection, event).rowcount == 1:
+                inserted += 1
+            else:
+                skipped += 1
+    return inserted, skipped
 
 
 def _insert_event(connection: sqlite3.Connection, event: LedgerEvent) -> sqlite3.Cursor:
@@ -283,20 +294,19 @@ def positions(events: list[LedgerEvent]) -> dict[tuple[str, str], Decimal]:
 
 def import_csv(ledger: EncryptedLedger, path: Path) -> tuple[int, int, str]:
     content = path.read_bytes()
-    source_hash = ledger.archive_source(content)
+    source_hash = hashlib.sha256(content).hexdigest()
     try:
         rows = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
     except UnicodeDecodeError as error:
         raise LedgerError("CSV must be UTF-8") from error
     if rows.fieldnames is None:
         raise LedgerError("CSV header is required")
-    inserted = skipped = 0
-    for index, row in enumerate(rows, start=2):
-        event = event_from_csv_row(row, source_hash=source_hash, line=index)
-        if append(ledger, event):
-            inserted += 1
-        else:
-            skipped += 1
+    events = [
+        event_from_csv_row(row, source_hash=source_hash, line=index)
+        for index, row in enumerate(rows, start=2)
+    ]
+    ledger.archive_source(content)
+    inserted, skipped = ingest_events(ledger, events)
     return inserted, skipped, source_hash
 
 

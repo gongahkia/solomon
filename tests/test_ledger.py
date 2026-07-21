@@ -4,13 +4,17 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from stonks_cli.accounting import fifo_lots
 from stonks_cli.config import ProfileConfig
+from stonks_cli.errors import LedgerError
 from stonks_cli.ledger import (
     append,
     cash_balances,
     import_csv,
     import_fingerprint,
+    ingest_events,
     list_events,
     positions,
 )
@@ -116,6 +120,41 @@ def test_csv_import_archives_and_deduplicates(tmp_path: Path, monkeypatch) -> No
     )
     assert import_csv(ledger, source)[:2] == (1, 0)
     assert import_csv(ledger, source)[:2] == (0, 1)
+
+
+def test_csv_import_does_not_archive_or_persist_a_partial_file(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    source = tmp_path / "events.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,fee\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,,,0\n"
+        "main,2026-01-02T00:00:00+00:00,,USD,100,,,,0\n"
+    )
+
+    with pytest.raises(LedgerError, match="missing:kind"):
+        import_csv(ledger, source)
+
+    assert list_events(ledger) == []
+    assert not ledger.sources.exists()
+
+
+def test_ingest_events_rolls_back_on_a_late_storage_failure(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    valid = _event(EventKind.CASH_DEPOSIT, amount="100")
+    invalid = LedgerEvent(
+        fingerprint="invalid",
+        source=SourceProvenance("test", "0" * 64, "invalid"),
+        account=Account("test", "main"),
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+        metadata={"not_json": object()},
+    )
+
+    with pytest.raises(TypeError, match="JSON serializable"):
+        ingest_events(ledger, (valid, invalid))
+    assert list_events(ledger) == []
 
 
 def test_legacy_persisted_event_ids_are_read_as_canonical_identities(tmp_path: Path, monkeypatch) -> None:

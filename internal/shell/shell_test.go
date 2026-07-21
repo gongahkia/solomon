@@ -2118,6 +2118,122 @@ expect {
 	}
 }
 
+func TestPowerShellInteractivePTYRestoresDefaultEnterBinding(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"none\"}\\n' ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS .*?> }
+send -- "Restore-CloseEnoughEnterHandler; (Get-PSReadLineKeyHandler -Chord Enter).Function\r"
+expect_text {AcceptLine}
+expect_regex {PS .*?> }
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+}
+
+func TestPowerShellInteractivePTYPreservesCustomEnterBinding(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS.*>}
+send -- "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock { Write-Host CE_CUSTOM_ENTER; \[Microsoft.PowerShell.PSConsoleReadLine\]::AcceptLine() }\r"
+expect_text {CE_CUSTOM_ENTER}
+expect_regex {PS.*>}
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_CUSTOM_ENTER}
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS.*>}
+send -- "Restore-CloseEnoughEnterHandler; Write-Output CE_CUSTOM_RESTORED\r"
+expect_text {CE_CUSTOM_ENTER}
+expect_text {CE_CUSTOM_RESTORED}
+expect_regex {PS.*>}
+send -- "exit\r"
+expect_text {CE_CUSTOM_ENTER}
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "ADAPTER="+adapter)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+}
+
 func TestZshRewriteRequiresSafeNonemptySuggestion(t *testing.T) {
 	script, err := Script("zsh")
 	if err != nil {

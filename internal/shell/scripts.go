@@ -282,6 +282,7 @@ if not set -q _CLOSE_ENOUGH_FISH_LOADED
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
 set -g _CLOSE_ENOUGH_DAEMON_READY 0
+set -g _CLOSE_ENOUGH_PENDING_REWRITE
 set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic
   if test $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT -ge $_CLOSE_ENOUGH_DIAGNOSTIC_LIMIT
@@ -322,6 +323,14 @@ function _close_enough_handshake
 end
 function _close_enough_accept_line
   set -l command (commandline -b)
+  if set -q _CLOSE_ENOUGH_PENDING_REWRITE; and test -n "$_CLOSE_ENOUGH_PENDING_REWRITE"
+    if test "$command" = "$_CLOSE_ENOUGH_PENDING_REWRITE"
+      set -e _CLOSE_ENOUGH_PENDING_REWRITE
+      commandline -f execute
+      return
+    end
+    set -e _CLOSE_ENOUGH_PENDING_REWRITE
+  end
   _close_enough_handshake; or return
   set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record --command "$command" 2>/dev/null)
   if test $status -ne 0
@@ -349,6 +358,7 @@ function _close_enough_accept_line
       return
     end
     commandline -r "$suggestion"
+    set -g _CLOSE_ENOUGH_PENDING_REWRITE "$suggestion"
     echo "close-enough corrected: $suggestion ($cause; press Enter again)" >&2
     return
   end

@@ -1,6 +1,10 @@
 package packs
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+)
 
 func TestRuntimeResolverMatchesBundledRule(t *testing.T) {
 	resolver, err := NewBundledRuntimeResolver()
@@ -24,6 +28,18 @@ func TestRuntimeResolverMatchesTokenizedSubcommandWithSuffix(t *testing.T) {
 	match, ok := resolver.MatchWords([]string{"git", "sttaus", "--token=secret"})
 	if !ok || match.PackID != "core-git" || match.RuleID != "git-status-sttaus" || match.Suggestion != "git status --token=secret" || match.Original != "sttaus" || match.Replacement != "status" || match.Occurrence != 1 {
 		t.Fatalf("match = %#v, ok = %t", match, ok)
+	}
+}
+
+func TestRuntimeResolverPropagatesCancellation(t *testing.T) {
+	resolver, err := NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := resolver.MatchWordsContext(ctx, []string{"git", "sttaus"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("MatchWordsContext cancellation error = %v", err)
 	}
 }
 

@@ -1,6 +1,9 @@
 package packs
 
-import "regexp"
+import (
+	"context"
+	"regexp"
+)
 
 type CompiledRule struct {
 	Rule
@@ -28,10 +31,21 @@ func Compile(pack Pack) (CompiledPack, error) {
 }
 
 func (p CompiledPack) Match(command, value string) (Rule, bool) {
+	rule, ok, _ := p.MatchContext(context.Background(), command, value)
+	return rule, ok
+}
+
+func (p CompiledPack) MatchContext(ctx context.Context, command, value string) (Rule, bool, error) {
 	for _, rule := range p.Rules {
+		if err := ctx.Err(); err != nil {
+			return Rule{}, false, err
+		}
 		if rule.Command == command && rule.pattern.MatchString(value) {
-			return rule.Rule, true
+			if err := ctx.Err(); err != nil {
+				return Rule{}, false, err
+			}
+			return rule.Rule, true, nil
 		}
 	}
-	return Rule{}, false
+	return Rule{}, false, nil
 }

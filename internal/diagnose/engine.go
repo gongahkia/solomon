@@ -243,7 +243,7 @@ type SemanticMatch struct {
 }
 
 type SemanticResolver interface {
-	MatchWords([]string) (SemanticMatch, bool)
+	MatchWordsContext(context.Context, []string) (SemanticMatch, bool, error)
 }
 
 type Limits struct {
@@ -491,7 +491,13 @@ func (e Engine) semanticDecision(ctx context.Context, words []string) (Decision,
 	if e.options.SemanticResolver == nil {
 		return Decision{}, nil
 	}
-	match, ok := e.options.SemanticResolver.MatchWords(words)
+	match, ok, err := e.options.SemanticResolver.MatchWordsContext(ctx, words)
+	if err != nil {
+		return Decision{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Decision{}, err
+	}
 	if !ok || match.PackID == "" || match.RuleID == "" || match.Suggestion == "" || !validRisk(match.Risk) {
 		return Decision{}, nil
 	}

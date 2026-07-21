@@ -33,19 +33,25 @@ type decisionContractCase struct {
 
 type testSemanticResolver struct{}
 
-func (testSemanticResolver) MatchWords(words []string) (SemanticMatch, bool) {
+type semanticResolverFunc func(context.Context, []string) (SemanticMatch, bool, error)
+
+func (resolver semanticResolverFunc) MatchWordsContext(ctx context.Context, words []string) (SemanticMatch, bool, error) {
+	return resolver(ctx, words)
+}
+
+func (testSemanticResolver) MatchWordsContext(_ context.Context, words []string) (SemanticMatch, bool, error) {
 	if len(words) < 2 || words[0] != "git" {
-		return SemanticMatch{}, false
+		return SemanticMatch{}, false, nil
 	}
 	replacement, ok := map[string]string{"sttaus": "status", "statsu": "status"}[words[1]]
 	if !ok {
-		return SemanticMatch{}, false
+		return SemanticMatch{}, false, nil
 	}
 	suggestion := "git " + replacement
 	if len(words) > 2 {
 		suggestion += " " + strings.Join(words[2:], " ")
 	}
-	return SemanticMatch{PackID: "core-git", RuleID: "git-status-" + words[1], Suggestion: suggestion, Cause: "Git subcommand typo", Risk: RiskSafe, Rationale: "read-only status query", Original: words[1], Replacement: replacement, Occurrence: 1}, true
+	return SemanticMatch{PackID: "core-git", RuleID: "git-status-" + words[1], Suggestion: suggestion, Cause: "Git subcommand typo", Risk: RiskSafe, Rationale: "read-only status query", Original: words[1], Replacement: replacement, Occurrence: 1}, true, nil
 }
 
 func testEngine(options Options) Engine {
@@ -243,6 +249,18 @@ func TestEngineRequiresSemanticResolverForCuratedRepairs(t *testing.T) {
 	decision, err := New(Options{Config: config.Default()}).Check("git sttaus", "pre")
 	if err != nil || decision.Action != "none" || decision.Suggestion != "" {
 		t.Fatalf("unresolved semantic decision = %#v, %v", decision, err)
+	}
+}
+
+func TestSemanticResolverCancellationPropagates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine := New(Options{Config: config.Default(), SemanticResolver: semanticResolverFunc(func(context.Context, []string) (SemanticMatch, bool, error) {
+		cancel()
+		return SemanticMatch{}, false, nil
+	})})
+	if _, err := engine.CheckContext(ctx, "git sttaus", "pre"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("semantic resolver cancellation error = %v", err)
 	}
 }
 

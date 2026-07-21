@@ -50,7 +50,11 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 	case StatusOperation:
 		return Response{Version: ProtocolVersion, Action: "ready"}, nil
 	case PreSendOperation:
-		if response, ok := s.curatedDecision(request.Command, request.Session, "pre"); ok {
+		response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "pre")
+		if err != nil {
+			return Response{}, err
+		}
+		if ok {
 			return response, nil
 		}
 		if response, ok := s.learnedDecision(request.Command, "pre"); ok {
@@ -59,7 +63,11 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 		return s.decision(ctx, request.Command, "pre")
 	case PostFailureOperation:
 		s.rememberFailure(request)
-		if response, ok := s.curatedDecision(request.Command, request.Session, "post"); ok {
+		response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "post")
+		if err != nil {
+			return Response{}, err
+		}
+		if ok {
 			return response, nil
 		}
 		return s.decision(ctx, request.Command, "post")
@@ -171,34 +179,37 @@ func normalizedLearningCommand(command string) (string, bool) {
 	return value, !containsSecret
 }
 
-func (s *Service) curatedDecision(command, session, stage string) (Response, bool) {
-	match, ok := s.Packs.MatchLine(command)
+func (s *Service) curatedDecision(ctx context.Context, command, session, stage string) (Response, bool, error) {
+	match, ok, err := s.Packs.MatchLineContext(ctx, command)
+	if err != nil {
+		return Response{}, false, err
+	}
 	if !ok {
-		return Response{}, false
+		return Response{}, false, nil
 	}
 	action := "hint"
 	response := Response{Version: ProtocolVersion, Action: action, Suggestion: match.Suggestion, Explanation: match.Cause, Confidence: "high", Risk: match.Risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
 	if stage == "pre" && match.Risk == string(diagnose.RiskHigh) && s.Config.RiskInterrupt {
 		if session == "" {
-			return response, true
+			return response, true, nil
 		}
 		if s.consumeConfirmation(session, command) {
 			response.Action = "submit"
-			return response, true
+			return response, true, nil
 		}
 		token, err := newConfirmationToken()
 		if err != nil {
-			return Response{}, false
+			return Response{}, false, nil
 		}
 		s.storeConfirmation(session, command, token)
 		response.Action = "interrupt"
 		response.ConfirmationToken = token
-		return response, true
+		return response, true, nil
 	}
 	if stage == "pre" && match.Risk == string(diagnose.RiskSafe) && s.Config.CuratedAutoCorrect {
 		response.Action = "rewrite"
 	}
-	return response, true
+	return response, true, nil
 }
 
 func (s *Service) decision(ctx context.Context, command, stage string) (Response, error) {

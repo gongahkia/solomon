@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import metadata
@@ -8,6 +9,7 @@ from typing import Protocol, runtime_checkable
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 
 PLUGIN_API_VERSION = 1
+_IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 
 
 class Capability(StrEnum):
@@ -29,8 +31,21 @@ class PluginManifest:
     capabilities: frozenset[Capability]
 
     def __post_init__(self) -> None:
-        if not self.identifier or self.api_version != PLUGIN_API_VERSION:
-            raise ProviderError("incompatible plugin manifest")
+        if not isinstance(self.identifier, str) or not (
+            identifier := self.identifier.strip().lower()
+        ):
+            raise ProviderError("plugin identifier is required")
+        if not _IDENTIFIER.fullmatch(identifier):
+            raise ProviderError("plugin identifier is invalid")
+        if (
+            not isinstance(self.api_version, int)
+            or isinstance(self.api_version, bool)
+            or self.api_version < 1
+        ):
+            raise ProviderError("plugin API version is invalid")
+        if not isinstance(self.capabilities, frozenset) or not self.capabilities:
+            raise ProviderError("plugin capabilities are required")
+        object.__setattr__(self, "identifier", identifier)
 
 
 @runtime_checkable

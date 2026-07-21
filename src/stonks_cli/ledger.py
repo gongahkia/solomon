@@ -16,6 +16,7 @@ from stonks_cli.errors import LedgerError
 from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
     Account,
+    BrokerPositionSnapshot,
     Currency,
     EventKind,
     EventLifecycle,
@@ -43,6 +44,7 @@ def initialize(connection: sqlite3.Connection) -> None:
         ON ledger_events(source_provider_id, source_hash, source_record_id)
         """
     )
+    _initialize_position_snapshots(connection)
 
 
 _CANONICAL_EVENT_COLUMNS = {
@@ -103,6 +105,34 @@ def _create_canonical_event_table(connection: sqlite3.Connection) -> None:
             ),
             CHECK(corrects_fingerprint IS NULL OR corrects_fingerprint != fingerprint)
         )
+        """
+    )
+
+
+def _initialize_position_snapshots(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_position_snapshots (
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            account_provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            account_name TEXT,
+            instrument_symbol TEXT NOT NULL,
+            instrument_market TEXT NOT NULL,
+            instrument_currency TEXT NOT NULL,
+            instrument_name TEXT,
+            quantity TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            PRIMARY KEY(source_provider_id, source_hash, source_record_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS broker_position_snapshots_time
+        ON broker_position_snapshots(observed_at, source_provider_id, source_hash, source_record_id)
         """
     )
 
@@ -183,6 +213,36 @@ def _insert_event(connection: sqlite3.Connection, event: LedgerEvent) -> sqlite3
     )
 
 
+def store_position_snapshot(ledger: EncryptedLedger, snapshot: BrokerPositionSnapshot) -> bool:
+    with ledger.connection() as connection:
+        initialize(connection)
+        return _insert_position_snapshot(connection, snapshot).rowcount == 1
+
+
+def _insert_position_snapshot(
+    connection: sqlite3.Connection, snapshot: BrokerPositionSnapshot
+) -> sqlite3.Cursor:
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO broker_position_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            snapshot.source.provider_id,
+            snapshot.source.source_hash,
+            snapshot.source.record_id,
+            snapshot.account.provider_id,
+            snapshot.account.account_id,
+            snapshot.account.name,
+            snapshot.instrument.symbol,
+            snapshot.instrument.market,
+            snapshot.instrument.currency.value,
+            snapshot.instrument.name,
+            str(snapshot.quantity),
+            snapshot.observed_at.isoformat(),
+        ),
+    )
+
+
 def import_fingerprint(source: SourceProvenance, record: Mapping[str, Any]) -> str:
     payload = {
         "source": {
@@ -206,6 +266,35 @@ def list_events(ledger: EncryptedLedger) -> list[LedgerEvent]:
             "SELECT * FROM ledger_events ORDER BY occurred_at, fingerprint"
         ).fetchall()
     return [_event_from_row(row) for row in rows]
+
+
+def list_position_snapshots(ledger: EncryptedLedger) -> list[BrokerPositionSnapshot]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM broker_position_snapshots
+            ORDER BY observed_at, source_provider_id, source_hash, source_record_id
+            """
+        ).fetchall()
+    return [_position_snapshot_from_row(row) for row in rows]
+
+
+def _position_snapshot_from_row(row: sqlite3.Row) -> BrokerPositionSnapshot:
+    return BrokerPositionSnapshot(
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        instrument=Instrument(
+            row["instrument_symbol"],
+            row["instrument_market"],
+            Currency(row["instrument_currency"]),
+            row["instrument_name"],
+        ),
+        quantity=Decimal(row["quantity"]),
+        observed_at=datetime.fromisoformat(row["observed_at"]),
+    )
 
 
 def _event_from_row(row: sqlite3.Row) -> LedgerEvent:

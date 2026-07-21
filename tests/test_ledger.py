@@ -18,11 +18,14 @@ from stonks_cli.ledger import (
     import_fingerprint,
     ingest_events,
     list_events,
+    list_position_snapshots,
     positions,
+    store_position_snapshot,
 )
 from stonks_cli.storage import EncryptedLedger, generate_key_file
 from stonks_cli.types import (
     Account,
+    BrokerPositionSnapshot,
     Currency,
     EventKind,
     EventLifecycle,
@@ -64,6 +67,22 @@ def test_events_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> Non
     assert append(ledger, event) is False
     assert list_events(ledger) == [event]
     assert b"cash_deposit" not in ledger.path.read_bytes()
+
+
+def test_broker_position_snapshots_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    snapshot = BrokerPositionSnapshot(
+        source=SourceProvenance("moomoo", "a" * 64, "position-1"),
+        account=Account("moomoo", "123", "Personal"),
+        instrument=Instrument("SPY", "US", Currency.USD),
+        quantity=Decimal("2"),
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert store_position_snapshot(ledger, snapshot) is True
+    assert store_position_snapshot(ledger, snapshot) is False
+    assert list_position_snapshots(ledger) == [snapshot]
+    assert b"position-1" not in ledger.path.read_bytes()
 
 
 def test_canonical_event_schema_round_trips_lifecycle_and_identities(tmp_path: Path, monkeypatch) -> None:

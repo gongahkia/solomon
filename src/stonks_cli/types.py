@@ -114,6 +114,26 @@ class SourceProvenance:
 
 
 @dataclass(frozen=True)
+class BrokerPositionSnapshot:
+    source: SourceProvenance
+    account: Account
+    instrument: Instrument
+    quantity: Decimal
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        if not isinstance(self.instrument, Instrument):
+            raise ValueError("instrument is required")
+        quantity = decimal(self.quantity)
+        if quantity < 0:
+            raise ValueError("snapshot quantity must be non-negative")
+        object.__setattr__(self, "quantity", quantity)
+        object.__setattr__(self, "observed_at", utc(self.observed_at))
+
+
+@dataclass(frozen=True)
 class LedgerEvent:
     fingerprint: str
     source: SourceProvenance

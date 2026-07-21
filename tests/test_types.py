@@ -7,6 +7,7 @@ import pytest
 
 from stonks_cli.types import (
     Account,
+    BrokerPositionSnapshot,
     Currency,
     EventKind,
     EventLifecycle,
@@ -69,6 +70,29 @@ def test_source_provenance_is_immutable_and_canonicalized() -> None:
 def test_source_provenance_requires_sha256_digest(source_hash: str) -> None:
     with pytest.raises(ValueError, match="SHA-256"):
         SourceProvenance("csv", source_hash, "line-1")
+
+
+def test_broker_position_snapshot_normalizes_quantity_and_time() -> None:
+    snapshot = BrokerPositionSnapshot(
+        source=SourceProvenance("moomoo", "a" * 64, "position-1"),
+        account=Account("moomoo", "123"),
+        instrument=Instrument("SPY", "US", Currency.USD),
+        quantity="2.0",
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    assert snapshot.quantity == Decimal("2.0")
+    assert snapshot.observed_at == datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def test_broker_position_snapshot_rejects_negative_quantity() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        BrokerPositionSnapshot(
+            source=SourceProvenance("moomoo", "a" * 64, "position-1"),
+            account=Account("moomoo", "123"),
+            instrument=Instrument("SPY", "US", Currency.USD),
+            quantity=Decimal("-1"),
+            observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
 
 
 def test_ledger_event_uses_canonical_source_and_account_identities() -> None:

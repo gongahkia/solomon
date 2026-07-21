@@ -46,7 +46,8 @@ case "$archive" in
 esac
 [ -f "$temporary/$binary" ]
 [ ! -L "$temporary/$binary" ]
-output=$("$temporary/$binary" version)
+binary_path="$temporary/$binary"
+output=$("$binary_path" version)
 prefix="close-enough $version ("
 commit=${output#"$prefix"}
 [ "$commit" != "$output" ]
@@ -59,3 +60,12 @@ commit=${commit%)}
 case "$commit" in
   *[!0-9a-f]*|'') exit 1 ;;
 esac
+runtime="$temporary/runtime"
+mkdir -p "$runtime"
+export XDG_RUNTIME_DIR="$runtime"
+handshake=$("$binary_path" daemon request --operation handshake --shell smoke --session release-smoke --format json)
+case "$handshake" in
+  *'"version":1'*'"action":"ready"'*) ;;
+  *) exit 1 ;;
+esac
+"$binary_path" daemon stop >/dev/null

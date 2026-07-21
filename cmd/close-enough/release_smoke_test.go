@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestReleaseSmokeTestScript(t *testing.T) {
 		t.Run(target.goos, func(t *testing.T) {
 			directory := t.TempDir()
 			binary := filepath.Join(directory, "close-enough")
-			if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf 'close-enough v1.2.3 (0123456789012345678901234567890123456789)\\n'\n"), 0o700); err != nil {
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\nif [ \"$1\" = version ]; then\n  printf 'close-enough v1.2.3 (0123456789012345678901234567890123456789)\\n'\nelse\n  printf '{\"version\":1,\"action\":\"ready\"}\\n'\nfi\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			root := "close-enough_v1.2.3_" + target.goos + "_" + target.goarch
@@ -54,5 +55,23 @@ func TestReleaseSmokeTestScriptRejectsUnexpectedArchiveContents(t *testing.T) {
 	}
 	if data, err := exec.Command("sh", "../../scripts/release-smoke-test.sh", archive, "linux", "amd64", "v1.2.3").CombinedOutput(); err == nil {
 		t.Fatalf("unexpected archive contents passed smoke test: %s", data)
+	}
+}
+
+func TestReleaseSmokeTestScriptChecksDaemonEnabledBinary(t *testing.T) {
+	directory := t.TempDir()
+	binary := filepath.Join(directory, "close-enough")
+	commit := strings.Repeat("a", 40)
+	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit="+commit, "-o", binary, ".")
+	if data, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build daemon-enabled release binary: %v\n%s", err, data)
+	}
+	root := "close-enough_v1.2.3_linux_amd64"
+	archive := filepath.Join(directory, root+".tar.gz")
+	if data, err := exec.Command("sh", "../../scripts/release-archive.sh", binary, archive, root).CombinedOutput(); err != nil {
+		t.Fatalf("create release archive: %v\n%s", err, data)
+	}
+	if data, err := exec.Command("sh", "../../scripts/release-smoke-test.sh", archive, "linux", "amd64", "v1.2.3").CombinedOutput(); err != nil {
+		t.Fatalf("smoke daemon-enabled release archive: %v\n%s", err, data)
 	}
 }

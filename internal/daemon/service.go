@@ -64,7 +64,12 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 	case PostSuccessOperation:
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
-	case UndoOperation, ConfirmOperation:
+	case ConfirmOperation:
+		if s.consumeConfirmationToken(request.Session, request.Command, request.Token) {
+			return Response{Version: ProtocolVersion, Action: "submit"}, nil
+		}
+		return Response{Version: ProtocolVersion, Action: "none"}, nil
+	case UndoOperation:
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
 	case StopOperation:
 		return Response{Version: ProtocolVersion, Action: "stopping"}, nil
@@ -222,6 +227,27 @@ func (s *Service) consumeConfirmation(session, command string) bool {
 	}
 	delete(s.confirmations, session)
 	return pending.command == command && s.currentTime().Before(pending.expires)
+}
+
+func (s *Service) consumeConfirmationToken(session, command, token string) bool {
+	if session == "" || command == "" || token == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.confirmations[session]
+	if !ok {
+		return false
+	}
+	if !s.currentTime().Before(pending.expires) {
+		delete(s.confirmations, session)
+		return false
+	}
+	if pending.command != command || pending.token != token {
+		return false
+	}
+	delete(s.confirmations, session)
+	return true
 }
 
 func (s *Service) storeConfirmation(session, command, token string) {

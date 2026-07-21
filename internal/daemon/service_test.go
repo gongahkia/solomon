@@ -43,6 +43,37 @@ func TestServiceInterruptsCuratedHighRiskRule(t *testing.T) {
 	}
 }
 
+func TestServiceConfirmEndpointRequiresMatchingToken(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	preSend := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
+	response, err := service.Handle(context.Background(), preSend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "interrupt" || response.ConfirmationToken == "" {
+		t.Fatalf("pre-send response = %+v", response)
+	}
+	token := response.ConfirmationToken
+	confirm := Request{Version: ProtocolVersion, Operation: ConfirmOperation, Session: "shell", Command: "git push --force", Token: "wrong"}
+	response, err = service.Handle(context.Background(), confirm)
+	if err != nil || response.Action != "none" {
+		t.Fatalf("wrong-token response = %+v, %v", response, err)
+	}
+	confirm.Token = token
+	response, err = service.Handle(context.Background(), confirm)
+	if err != nil || response.Action != "submit" {
+		t.Fatalf("confirm response = %+v, %v", response, err)
+	}
+	response, err = service.Handle(context.Background(), confirm)
+	if err != nil || response.Action != "none" {
+		t.Fatalf("replayed response = %+v, %v", response, err)
+	}
+}
+
 func TestServiceLearnsFailureThenSuccessfulCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

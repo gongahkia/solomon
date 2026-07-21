@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -388,6 +389,7 @@ func daemonRecord(response daemon.Response) string {
 }
 
 var startDaemonProcess = startDaemonProcessDefault
+var daemonStartMu sync.Mutex
 
 func requestDaemon(parent context.Context, endpoint daemon.Endpoint, request daemon.Request, ensure bool) (daemon.Response, error) {
 	ctx, cancel := context.WithTimeout(parent, 95*time.Millisecond)
@@ -395,6 +397,12 @@ func requestDaemon(parent context.Context, endpoint daemon.Endpoint, request dae
 	client := daemon.Client{Endpoint: endpoint, Timeout: 15 * time.Millisecond}
 	response, err := client.Request(ctx, request)
 	if err == nil || !ensure || !errors.Is(err, daemon.ErrUnavailable) {
+		return response, err
+	}
+	daemonStartMu.Lock()
+	defer daemonStartMu.Unlock()
+	response, err = client.Request(ctx, request)
+	if err == nil || !errors.Is(err, daemon.ErrUnavailable) {
 		return response, err
 	}
 	if err := startDaemonProcess(); err != nil {

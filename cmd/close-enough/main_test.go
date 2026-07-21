@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
@@ -583,5 +586,62 @@ func TestRequestDaemonStartsUnavailableDaemon(t *testing.T) {
 	response, err := requestDaemon(context.Background(), endpoint, daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation}, true)
 	if err != nil || response.Action != string(daemon.StatusOperation) {
 		t.Fatalf("requestDaemon() = %#v, %v", response, err)
+	}
+}
+
+func TestRequestDaemonCoordinatesConcurrentStarts(t *testing.T) {
+	endpoint, err := daemon.LocalEndpoint(filepath.Join(t.TempDir(), "runtime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := startDaemonProcess
+	var server *daemon.Server
+	var starts atomic.Int32
+	startDaemonProcess = func() error {
+		starts.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		var err error
+		server, err = daemon.NewServer(endpoint, func(_ context.Context, request daemon.Request) (daemon.Response, error) {
+			return daemon.Response{Version: daemon.ProtocolVersion, Action: string(request.Operation)}, nil
+		})
+		if err != nil {
+			return err
+		}
+		if err := server.Listen(); err != nil {
+			return err
+		}
+		go server.Serve(context.Background())
+		return nil
+	}
+	t.Cleanup(func() {
+		startDaemonProcess = original
+		if server != nil {
+			_ = server.Close()
+		}
+	})
+	start := make(chan struct{})
+	failures := make(chan error, 8)
+	var group sync.WaitGroup
+	for range 8 {
+		group.Go(func() {
+			<-start
+			response, err := requestDaemon(context.Background(), endpoint, daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation}, true)
+			if err != nil {
+				failures <- err
+				return
+			}
+			if response.Action != string(daemon.StatusOperation) {
+				failures <- errors.New("unexpected daemon response")
+			}
+		})
+	}
+	close(start)
+	group.Wait()
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("daemon starts = %d, want 1", starts.Load())
 	}
 }

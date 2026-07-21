@@ -1733,6 +1733,35 @@ func TestPowerShellUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	}
 }
 
+func TestPowerShellHandshakeFailsOpen(t *testing.T) {
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshake := "function global:Test-CloseEnoughDaemonHandshake {"
+	handshakeStart := strings.Index(script, handshake)
+	if handshakeStart < 0 {
+		t.Fatalf("PowerShell handshake is missing: %q", script)
+	}
+	handshakeEnd := strings.Index(script[handshakeStart:], "function global:Allow-CloseEnoughDiagnostic")
+	if handshakeEnd < 0 {
+		t.Fatalf("PowerShell handshake function is unterminated: %q", script)
+	}
+	handshakeBody := script[handshakeStart : handshakeStart+handshakeEnd]
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json`) || !strings.Contains(handshakeBody, `$decision.version -ne 1 -or $decision.action -ne 'ready'`) || !strings.Contains(handshakeBody, "$global:CloseEnoughDaemonReady = $true") {
+		t.Fatalf("PowerShell handshake contract = %q", handshakeBody)
+	}
+	handlerStart := strings.Index(script, "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {")
+	handlerEnd := strings.Index(script[handlerStart:], "function global:Test-CloseEnoughDaemonHandshake")
+	if handlerStart < 0 || handlerEnd < 0 {
+		t.Fatalf("PowerShell Enter handler is missing: %q", script)
+	}
+	handler := script[handlerStart : handlerStart+handlerEnd]
+	if !strings.Contains(handler, "if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }") || !strings.Contains(handler, `--operation pre-send --shell powershell --session $PID --ensure=false`) || strings.Count(handler, "[Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return") < 4 {
+		t.Fatalf("PowerShell handshake fallback = %q", handler)
+	}
+}
+
 func TestPowerShellProtocolDecodingFailsOpenOnMalformedJSON(t *testing.T) {
 	script, err := Script("pwsh")
 	if err != nil {

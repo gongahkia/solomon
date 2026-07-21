@@ -441,6 +441,7 @@ $global:CloseEnoughAdapterLoaded = $true
 $global:CloseEnoughLastHistoryId = 0
 $global:CloseEnoughDiagnosticCount = 0
 $global:CloseEnoughDiagnosticLimit = 5
+$global:CloseEnoughDaemonReady = $false
 $global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 $global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
@@ -449,10 +450,11 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   $command = $line
-  $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --command $command 2>$null
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { return }
-  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { return }
-  if ($decision.version -ne 1) { return }
+  if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  if ($decision.version -ne 1) { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
   if ($decision.action -eq 'rewrite') {
     if ($decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) {
       Write-Host "close-enough: refused unsafe rewrite"
@@ -477,6 +479,15 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
+}
+function global:Test-CloseEnoughDaemonHandshake {
+  if ($global:CloseEnoughDaemonReady) { return $true }
+  $record = & close-enough daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { return $false }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
+  if ($decision.version -ne 1 -or $decision.action -ne 'ready') { return $false }
+  $global:CloseEnoughDaemonReady = $true
+  return $true
 }
 function global:Allow-CloseEnoughDiagnostic {
   if ($global:CloseEnoughDiagnosticCount -ge $global:CloseEnoughDiagnosticLimit) { return $false }

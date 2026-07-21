@@ -286,6 +286,22 @@ func TestServiceAttachesGoFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesContainerFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "docker bulid", FailureOutput: "docker: unknown command: docker bulid\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "container-unknown-command", Value: "bulid"}}
+	if response.Action != "hint" || response.Suggestion != "docker build" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

@@ -32,6 +32,20 @@ func TestDaemonLanguagePackCorpora(t *testing.T) {
 	}
 }
 
+func TestDaemonSystemsPackCorpora(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		pack    string
+		corpora []string
+	}{
+		{name: "go", pack: "go.json", corpora: []string{"go-subcommand-typos", "go-flag-repairs", "go-path-repairs", "go-conceptual-misuse"}},
+		{name: "containers", pack: "containers.json", corpora: []string{"containers-subcommand-typos", "containers-flag-repairs", "containers-path-repairs", "containers-conceptual-misuse"}},
+		{name: "kubernetes-cloud", pack: "kubernetes-cloud.json", corpora: []string{"kubernetes-cloud-subcommand-typos", "kubernetes-cloud-flag-repairs", "kubernetes-cloud-path-repairs", "kubernetes-cloud-conceptual-misuse"}},
+	} {
+		t.Run(test.name, func(t *testing.T) { testDaemonPackCorpus(t, test.pack, test.corpora) })
+	}
+}
+
 func testDaemonPackCorpus(t *testing.T, packName string, corpusNames []string) {
 	t.Helper()
 	pack, err := packs.Load(filepath.Join("..", "..", "packs", packName))

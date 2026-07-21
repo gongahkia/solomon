@@ -8,6 +8,7 @@ from stonks_cli.reconciliation import (
     reconcile,
     reconcile_cash,
     reconcile_positions,
+    render_discrepancy_report,
 )
 from stonks_cli.types import (
     Account,
@@ -80,3 +81,15 @@ def test_cash_reconciliation_uses_canonical_ledger_cash() -> None:
 
     differences = reconcile_cash([event], {(account.key, Currency.USD): Decimal("99")})
     assert differences == (ReconciliationDifference("cash:moomoo:123:USD", Decimal("100"), Decimal("99")),)
+
+
+def test_discrepancy_report_is_deterministic_and_handles_clean_state() -> None:
+    differences = (
+        ReconciliationDifference("cash:moomoo:123:USD", Decimal("100"), Decimal("99")),
+    )
+    assert render_discrepancy_report(differences) == (
+        "reconciliation discrepancies\n"
+        "subject | expected | observed | delta\n"
+        "cash:moomoo:123:USD | 100 | 99 | -1"
+    )
+    assert render_discrepancy_report(()) == "reconciliation: clean"

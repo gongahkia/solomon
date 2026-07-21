@@ -75,3 +75,14 @@ def reconcile_cash(
     events: list[LedgerEvent], observed: dict[tuple[str, Currency], Decimal]
 ) -> tuple[ReconciliationDifference, ...]:
     return reconcile(cash_balances(events), observed, {}, {})
+
+
+def render_discrepancy_report(differences: tuple[ReconciliationDifference, ...]) -> str:
+    if not differences:
+        return "reconciliation: clean"
+    rows = ["reconciliation discrepancies", "subject | expected | observed | delta"]
+    rows.extend(
+        f"{item.subject} | {item.expected} | {item.observed} | {item.delta}"
+        for item in differences
+    )
+    return "\n".join(rows)

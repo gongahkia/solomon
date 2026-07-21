@@ -25,6 +25,12 @@ class EventKind(StrEnum):
     SPLIT = "split"
 
 
+class EventLifecycle(StrEnum):
+    POSTED = "posted"
+    CORRECTION = "correction"
+    REVERSAL = "reversal"
+
+
 def decimal(value: Decimal | str | int | float) -> Decimal:
     try:
         result = Decimal(str(value))
@@ -119,6 +125,8 @@ class LedgerEvent:
     quantity: Decimal = Decimal("0")
     instrument: Instrument | None = None
     fee: Decimal = Decimal("0")
+    lifecycle: EventLifecycle = EventLifecycle.POSTED
+    corrects_fingerprint: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -126,7 +134,21 @@ class LedgerEvent:
             raise ValueError("fingerprint is required")
         if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
             raise ValueError("source and account are required")
+        if not isinstance(self.lifecycle, EventLifecycle):
+            raise ValueError("lifecycle is required")
         object.__setattr__(self, "fingerprint", fingerprint)
+        corrects_fingerprint = self.corrects_fingerprint
+        if self.lifecycle is EventLifecycle.POSTED:
+            if corrects_fingerprint is not None:
+                raise ValueError("posted events cannot correct another event")
+        else:
+            if not isinstance(corrects_fingerprint, str) or not (
+                corrects_fingerprint := corrects_fingerprint.strip()
+            ):
+                raise ValueError("corrections require a target fingerprint")
+            if corrects_fingerprint == fingerprint:
+                raise ValueError("events cannot correct themselves")
+            object.__setattr__(self, "corrects_fingerprint", corrects_fingerprint)
         object.__setattr__(self, "occurred_at", utc(self.occurred_at))
         object.__setattr__(self, "amount", decimal(self.amount))
         object.__setattr__(self, "quantity", decimal(self.quantity))
@@ -164,6 +186,8 @@ class LedgerEvent:
             },
             "occurred_at": self.occurred_at.isoformat(),
             "kind": self.kind.value,
+            "lifecycle": self.lifecycle.value,
+            "corrects_fingerprint": self.corrects_fingerprint,
             "currency": self.currency.value,
             "amount": str(self.amount),
             "quantity": str(self.quantity),

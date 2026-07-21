@@ -9,6 +9,7 @@ from stonks_cli.types import (
     Account,
     Currency,
     EventKind,
+    EventLifecycle,
     Instrument,
     LedgerEvent,
     SourceProvenance,
@@ -115,4 +116,60 @@ def test_ledger_event_requires_canonical_source_and_account(source, account) -> 
             kind=EventKind.CASH_DEPOSIT,
             currency=Currency.USD,
             amount=Decimal("100"),
+        )
+
+
+def test_ledger_event_models_immutable_corrections_and_reversals() -> None:
+    source = SourceProvenance("csv", "a" * 64, "row-2")
+    account = Account("csv", "main")
+    correction = LedgerEvent(
+        fingerprint="event-2",
+        source=source,
+        account=account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint=" event-1 ",
+    )
+    reversal = LedgerEvent(
+        fingerprint="event-3",
+        source=source,
+        account=account,
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        kind=EventKind.CASH_WITHDRAWAL,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+        lifecycle=EventLifecycle.REVERSAL,
+        corrects_fingerprint="event-2",
+    )
+
+    assert correction.corrects_fingerprint == "event-1"
+    assert correction.to_data()["lifecycle"] == "correction"
+    assert reversal.lifecycle is EventLifecycle.REVERSAL
+
+
+@pytest.mark.parametrize(
+    ("lifecycle", "corrects_fingerprint", "error"),
+    (
+        (EventLifecycle.POSTED, "event-1", "posted events"),
+        (EventLifecycle.CORRECTION, None, "target fingerprint"),
+        (EventLifecycle.REVERSAL, "event-1", "cannot correct themselves"),
+    ),
+)
+def test_ledger_event_rejects_invalid_lifecycle_transitions(
+    lifecycle: EventLifecycle, corrects_fingerprint: str | None, error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        LedgerEvent(
+            fingerprint="event-1",
+            source=SourceProvenance("csv", "a" * 64, "row-2"),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+            kind=EventKind.CASH_DEPOSIT,
+            currency=Currency.USD,
+            amount=Decimal("100"),
+            lifecycle=lifecycle,
+            corrects_fingerprint=corrects_fingerprint,
         )

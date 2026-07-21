@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from stonks_cli.types import Currency
+from stonks_cli.ledger import positions
+from stonks_cli.types import BrokerPositionSnapshot, Currency, LedgerEvent
 
 
 @dataclass(frozen=True)
@@ -47,3 +48,24 @@ def reconcile(
                 )
             )
     return tuple(differences)
+
+
+def broker_positions(
+    snapshots: list[BrokerPositionSnapshot],
+) -> dict[tuple[str, str], Decimal]:
+    latest: dict[tuple[str, str], BrokerPositionSnapshot] = {}
+    for snapshot in snapshots:
+        key = (snapshot.account.key, snapshot.instrument.key)
+        current = latest.get(key)
+        if current is None or (snapshot.observed_at, snapshot.source.key) > (
+            current.observed_at,
+            current.source.key,
+        ):
+            latest[key] = snapshot
+    return {key: snapshot.quantity for key, snapshot in latest.items()}
+
+
+def reconcile_positions(
+    events: list[LedgerEvent], snapshots: list[BrokerPositionSnapshot]
+) -> tuple[ReconciliationDifference, ...]:
+    return reconcile({}, {}, positions(events), broker_positions(snapshots))

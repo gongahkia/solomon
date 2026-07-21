@@ -658,6 +658,46 @@ func TestZshSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	}
 }
 
+func TestZshHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "calls")
+	state := filepath.Join(directory, "state")
+	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER='git push --force'; _close_enough_check; first=$?; _close_enough_check; second=$?; print -r -- "$first|$second|$BUFFER"`
+	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh harness: %v\n%s", err, output)
+	}
+	if got := string(output); got != "1|0|git push --force\n" {
+		t.Fatalf("confirmation flow = %q", got)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "daemon request"); got != 3 {
+		t.Fatalf("daemon requests = %d, want 3: %q", got, calls)
+	}
+}
+
 func TestZshInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	expect, err := exec.LookPath("expect")
 	if err != nil {

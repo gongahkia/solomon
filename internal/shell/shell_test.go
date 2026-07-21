@@ -1311,6 +1311,31 @@ func TestFishUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	}
 }
 
+func TestFishHandshakeFailsOpen(t *testing.T) {
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshake := "function _close_enough_handshake"
+	check := "function _close_enough_accept_line"
+	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
+	if handshakeStart < 0 || checkStart < handshakeStart {
+		t.Fatalf("fish handshake is missing: %q", script)
+	}
+	handshakeBody := script[handshakeStart:checkStart]
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell fish --session "$fish_pid" --ensure=true --format record`) || !strings.Contains(handshakeBody, `if test (count $fields) -lt 2`) || !strings.Contains(handshakeBody, `if test "$fields[1]" != 1; or test "$fields[2]" != ready`) || !strings.Contains(handshakeBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 1") {
+		t.Fatalf("fish handshake contract = %q", handshakeBody)
+	}
+	checkEnd := strings.Index(script[checkStart:], "function _close_enough_bind_enter")
+	if checkEnd < 0 {
+		t.Fatalf("fish accept-line function is unterminated: %q", script)
+	}
+	checkBody := script[checkStart : checkStart+checkEnd]
+	if !strings.Contains(checkBody, "_close_enough_handshake; or return") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
+		t.Fatalf("fish handshake fallback = %q", checkBody)
+	}
+}
+
 func TestFishProtocolDecodingValidatesFixedFields(t *testing.T) {
 	script, err := Script("fish")
 	if err != nil {
@@ -1346,7 +1371,7 @@ func TestFishAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ name, input, action, want string }{

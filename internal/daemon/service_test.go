@@ -254,6 +254,22 @@ func TestServiceAttachesPythonFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesRustFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "cargo buid", FailureOutput: "error: no such command: `buid`\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "cargo-unknown-subcommand", Value: "buid"}}
+	if response.Action != "hint" || response.Suggestion != "cargo build" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

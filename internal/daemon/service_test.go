@@ -302,6 +302,22 @@ func TestServiceAttachesContainerFailureEvidenceToRepair(t *testing.T) {
 	}
 }
 
+func TestServiceAttachesKubernetesCloudFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "kubectl aply", FailureOutput: "error: unknown command \"aply\" for \"kubectl\"\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "kubectl-unknown-subcommand", Value: "aply"}}
+	if response.Action != "hint" || response.Suggestion != "kubectl apply" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
 func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

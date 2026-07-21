@@ -68,13 +68,13 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 			return Response{}, err
 		}
 		if ok {
-			return s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))))))), nil
+			return s.attachKubernetesCloudFailureEvidence(request, s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))))), nil
 		}
 		response, err = s.decision(ctx, request.Command, "post")
 		if err != nil {
 			return Response{}, err
 		}
-		return s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response))))))), nil
+		return s.attachKubernetesCloudFailureEvidence(request, s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))))), nil
 	case PostSuccessOperation:
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
@@ -225,6 +225,17 @@ func (s *Service) attachContainerFailureEvidence(request Request, response Respo
 	return response
 }
 
+func (s *Service) attachKubernetesCloudFailureEvidence(request Request, response Response) Response {
+	if response.Action == "none" || response.Suggestion == "" || !isKubernetesCloudCommand(firstCommandWord(request.Command)) {
+		return response
+	}
+	evidence, err := packs.ExtractKubernetesCloudFailureEvidence(safeFailureOutput(request.FailureOutput))
+	if err == nil {
+		response.Evidence = evidence
+	}
+	return response
+}
+
 func isPackageManagerCommand(command string) bool {
 	switch command {
 	case "brew", "npm", "pnpm", "yarn":
@@ -273,6 +284,15 @@ func isGoCommand(command string) bool {
 func isContainerCommand(command string) bool {
 	switch command {
 	case "docker", "podman":
+		return true
+	default:
+		return false
+	}
+}
+
+func isKubernetesCloudCommand(command string) bool {
+	switch command {
+	case "aws", "helm", "kubectl", "terraform":
 		return true
 	default:
 		return false

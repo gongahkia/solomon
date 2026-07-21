@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 
 from stonks_cli import plugins
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
+from stonks_cli.market_data import DailyPrice
 from stonks_cli.plugins import (
     Capability,
     CorporateActionProvider,
+    MarketDataProvider,
     PluginManifest,
     ProviderCapabilityRegistry,
     ReadOnlyAccountProvider,
@@ -21,7 +24,7 @@ from stonks_cli.plugins import (
     validate_manifest,
     validate_provider_compatibility,
 )
-from stonks_cli.types import Account
+from stonks_cli.types import Account, Currency, Instrument
 
 
 def test_read_only_manifest_is_valid() -> None:
@@ -98,6 +101,11 @@ class _CorporateActionFixturePlugin(_FixturePlugin):
         return ({"account": account.key, "start": start.isoformat(), "end": end.isoformat()},)
 
 
+class _MarketDataFixturePlugin(_FixturePlugin):
+    def daily_prices(self, instruments: tuple[Instrument, ...], start: date, end: date):
+        return tuple(DailyPrice(item, start, Decimal("100"), "a" * 64) for item in instruments)
+
+
 def test_read_only_account_provider_protocol_requires_account_reader() -> None:
     provider = _AccountFixturePlugin("fixture")
     assert isinstance(provider, ReadOnlyAccountProvider)
@@ -120,6 +128,13 @@ def test_corporate_action_provider_protocol_requires_bounded_record_reader() -> 
     assert provider.corporate_actions(
         account, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)
     )[0]["account"] == "fixture:1"
+
+
+def test_market_data_provider_protocol_requires_daily_price_reader() -> None:
+    provider = _MarketDataFixturePlugin("fixture")
+    instrument = Instrument("SPY", "US", Currency.USD)
+    assert isinstance(provider, MarketDataProvider)
+    assert provider.daily_prices((instrument,), date(2026, 1, 1), date(2026, 1, 2))[0].close == Decimal("100")
 
 
 class _FixtureEntryPoint:

@@ -4,13 +4,14 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from importlib import metadata
 from typing import Any, Protocol, runtime_checkable
 
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
-from stonks_cli.types import Account
+from stonks_cli.market_data import DailyPrice
+from stonks_cli.types import Account, Instrument
 
 PLUGIN_API_VERSION = "1.0.0"
 _ENTRY_POINT_GROUP = "stonks_cli.providers"
@@ -102,6 +103,13 @@ class CorporateActionProvider(ProviderPlugin, Protocol):
     def corporate_actions(
         self, account: Account, start: datetime, end: datetime
     ) -> tuple[Mapping[str, Any], ...]: ...
+
+
+@runtime_checkable
+class MarketDataProvider(ProviderPlugin, Protocol):
+    def daily_prices(
+        self, instruments: tuple[Instrument, ...], start: date, end: date
+    ) -> tuple[DailyPrice, ...]: ...
 
 
 def _api_version(value: str) -> tuple[int, int, int] | None:

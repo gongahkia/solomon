@@ -748,7 +748,7 @@ func TestZshInteractivePTYInterruptPreventsExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '1\\tinterrupt\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\tinterrupt\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -793,7 +793,7 @@ func TestZshInteractivePTYHintSubmitsCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -817,6 +817,55 @@ expect eof`
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
+	}
+}
+
+func TestZshInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	capture := filepath.Join(directory, "calls")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+spawn -noecho zsh -f
+expect -re {[%#] $}
+send -- "PROMPT='CE> '\r"
+expect "CE> "
+send -- "source \$ADAPTER\r"
+expect "CE> "
+send -- "touch \$MARKER\r"
+expect "CE> "
+send -- "exit\r"
+expect eof`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker, "CAPTURE="+capture)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("daemon failure did not submit buffered command: %v\n%s", err, output)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "--operation handshake") {
+		t.Fatalf("adapter did not invoke the daemon handshake: %q", calls)
 	}
 }
 

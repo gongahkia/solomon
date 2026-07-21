@@ -442,6 +442,7 @@ $global:CloseEnoughLastHistoryId = 0
 $global:CloseEnoughDiagnosticCount = 0
 $global:CloseEnoughDiagnosticLimit = 5
 $global:CloseEnoughDaemonReady = $false
+$global:CloseEnoughPendingRewrite = $null
 $global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
 $global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
@@ -450,6 +451,14 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   $command = $line
+  if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite)) {
+    if ($command -eq $global:CloseEnoughPendingRewrite) {
+      $global:CloseEnoughPendingRewrite = $null
+      [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+      return
+    }
+    $global:CloseEnoughPendingRewrite = $null
+  }
   if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
   $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command 2>$null
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:CloseEnoughDaemonReady = $false; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
@@ -461,6 +470,7 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
       return
     }
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
+    $global:CloseEnoughPendingRewrite = $decision.suggestion
     Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
     return
   }

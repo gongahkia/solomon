@@ -1869,7 +1869,7 @@ func TestPowerShellInteractivePTYInterruptPreventsExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '{\"version\":1,\"action\":\"interrupt\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"interrupt\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -1926,7 +1926,7 @@ func TestPowerShellInteractivePTYHintSubmitsCommand(t *testing.T) {
 	}
 	checker := filepath.Join(directory, "close-enough")
 	checked := filepath.Join(directory, "checked")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\nprintf '{\"version\":1,\"action\":\"hint\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"hint\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -1972,6 +1972,77 @@ expect {
 	}
 	if _, err := os.Stat(checked); err != nil {
 		t.Fatalf("hint did not invoke checker: %v\n%s", err, output)
+	}
+}
+
+func TestPowerShellInteractivePTYSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("pwsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.ps1")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	capture := filepath.Join(directory, "calls")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *\"--command gti\"*) printf '{\"version\":1,\"action\":\"rewrite\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"Set-Content -NoNewline -Path $env:MARKER -Value executed\",\"explanation\":\"fixed\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"submit\"}\\n' ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+proc expect_regex {pattern} {
+  expect {
+    -re $pattern {}
+    timeout { puts stderr "timed out waiting for: $pattern"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $pattern"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb pwsh -NoLogo -NoProfile
+stty rows 24 columns 80 < $spawn_out(slave,name)
+expect_before {
+  -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
+}
+expect_regex {PS .*?> }
+send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
+expect_text {CE_ADAPTER_READY}
+expect_regex {PS .*?> }
+send -- "gti\r"
+expect_text {close-enough corrected: Set-Content -NoNewline -Path $env:MARKER -Value executed (fixed; press Enter again)}
+send -- "\r"
+expect_regex {PS .*?> }
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "CAPTURE="+capture, "MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("PowerShell PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("safe rewrite did not submit on second Enter: %v\n%s", err, output)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "--operation pre-send"); got != 2 {
+		t.Fatalf("pre-send requests = %d, want 2: %q", got, calls)
 	}
 }
 

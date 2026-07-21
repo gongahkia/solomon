@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/diagnose"
@@ -90,6 +91,25 @@ func TestServiceConfirmEndpointRequiresMatchingToken(t *testing.T) {
 	response, err = service.Handle(context.Background(), confirm)
 	if err != nil || response.Action != "none" {
 		t.Fatalf("replayed response = %+v, %v", response, err)
+	}
+}
+
+func TestServiceConfirmationTokenExpires(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 21, 0, 0, 0, 0, time.UTC)
+	service := Service{Config: config.Default(), Packs: resolver, now: func() time.Time { return now }}
+	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
+	response, err := service.Handle(context.Background(), request)
+	if err != nil || response.Action != "interrupt" || response.ConfirmationToken == "" {
+		t.Fatalf("pre-send response = %#v, %v", response, err)
+	}
+	now = now.Add(5*time.Second + time.Nanosecond)
+	response, err = service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: ConfirmOperation, Session: request.Session, Command: request.Command, Token: response.ConfirmationToken})
+	if err != nil || response.Action != "none" {
+		t.Fatalf("expired confirmation response = %#v, %v", response, err)
 	}
 }
 

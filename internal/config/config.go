@@ -18,10 +18,12 @@ import (
 )
 
 const (
-	CurrentSchemaVersion         = 2
+	CurrentSchemaVersion         = 3
 	maxRuleExceptionCommandBytes = 8 << 10
 	defaultLearningRetentionDays = 30
 	maxLearningRetentionDays     = 90
+	defaultUndoTTLSeconds        = 30
+	maxUndoTTLSeconds            = 300
 )
 
 type RuleException struct {
@@ -40,6 +42,8 @@ type Config struct {
 	LocalLearningEnabled     bool            `json:"local_learning_enabled"`
 	LearningRetentionDays    int             `json:"learning_retention_days"`
 	LearnedRuleActionCeiling string          `json:"learned_rule_action_ceiling"`
+	UndoEnabled              bool            `json:"undo_enabled"`
+	UndoTTLSeconds           int             `json:"undo_ttl_seconds"`
 	RuleExceptions           []RuleException `json:"rule_exceptions,omitempty"`
 }
 
@@ -60,7 +64,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", UndoEnabled: true, UndoTTLSeconds: defaultUndoTTLSeconds, Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
 }
 
 func (c Config) HasRuleException(command string) bool {
@@ -226,6 +230,8 @@ var sessionOverrideKeys = map[string]string{
 	"CLOSE_ENOUGH_CURATED_AUTO_CORRECT":   "curated_auto_correct",
 	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
 	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
+	"CLOSE_ENOUGH_UNDO_ENABLED":           "undo_enabled",
+	"CLOSE_ENOUGH_UNDO_TTL_SECONDS":       "undo_ttl_seconds",
 }
 
 func sessionValues(paths Paths) (map[string]string, error) {
@@ -268,7 +274,7 @@ func ApplySessionOverrides(cfg Config, values map[string]string) (Config, error)
 		if value == "" {
 			continue
 		}
-		if setting != "mode" && value != "true" && value != "false" {
+		if setting != "mode" && setting != "undo_ttl_seconds" && value != "true" && value != "false" {
 			return Config{}, fmt.Errorf("invalid %s %q: must be true or false", key, value)
 		}
 		if err := cfg.Set(setting, value); err != nil {
@@ -387,6 +393,9 @@ func decode(data []byte, base Config) (Config, error) {
 	if base.LearningRetentionDays < 1 || base.LearningRetentionDays > maxLearningRetentionDays {
 		return Config{}, fmt.Errorf("learning retention days must be between 1 and %d", maxLearningRetentionDays)
 	}
+	if base.UndoTTLSeconds < 1 || base.UndoTTLSeconds > maxUndoTTLSeconds {
+		return Config{}, fmt.Errorf("undo ttl seconds must be between 1 and %d", maxUndoTTLSeconds)
+	}
 	if err := validateRuleExceptions(base.RuleExceptions); err != nil {
 		return Config{}, err
 	}
@@ -409,6 +418,9 @@ func migrate(cfg Config, version int) (Config, error) {
 			cfg.RiskInterrupt = cfg.Mode == "interrupt"
 			cfg.SchemaVersion = 2
 			version = 2
+		case 2:
+			cfg.SchemaVersion = 3
+			version = 3
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}
@@ -431,7 +443,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "local_history_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "undo_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -447,6 +459,8 @@ func (c *Config) Set(key, value string) error {
 			c.RiskInterrupt = parsed
 		case "local_learning_enabled":
 			c.LocalLearningEnabled = parsed
+		case "undo_enabled":
+			c.UndoEnabled = parsed
 		case "display.cause":
 			c.Display.Cause = parsed
 		case "display.change":
@@ -466,6 +480,12 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("learning_retention_days must be between 1 and %d", maxLearningRetentionDays)
 		}
 		c.LearningRetentionDays = parsed
+	case "undo_ttl_seconds":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > maxUndoTTLSeconds {
+			return fmt.Errorf("undo_ttl_seconds must be between 1 and %d", maxUndoTTLSeconds)
+		}
+		c.UndoTTLSeconds = parsed
 	case "learned_rule_action_ceiling":
 		if !validLearnedRuleAction(value) {
 			return errors.New("learned_rule_action_ceiling must be off, hint, or rewrite")

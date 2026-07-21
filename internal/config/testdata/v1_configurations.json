@@ -2,21 +2,21 @@
   {
     "name": "safe-rewrite",
     "input": {"schema_version": 1, "mode": "rewrite", "auto_apply_safe": true},
-    "want": {"mode": "rewrite", "curated_auto_correct": true, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint"}
+    "want": {"mode": "rewrite", "curated_auto_correct": true, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint", "undo_enabled": true, "undo_ttl_seconds": 30}
   },
   {
     "name": "unsafe-rewrite",
     "input": {"schema_version": 1, "mode": "rewrite", "auto_apply_safe": false},
-    "want": {"mode": "rewrite", "curated_auto_correct": false, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint"}
+    "want": {"mode": "rewrite", "curated_auto_correct": false, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint", "undo_enabled": true, "undo_ttl_seconds": 30}
   },
   {
     "name": "interrupt",
     "input": {"schema_version": 1, "mode": "interrupt"},
-    "want": {"mode": "interrupt", "curated_auto_correct": false, "risk_interrupt": true, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint"}
+    "want": {"mode": "interrupt", "curated_auto_correct": false, "risk_interrupt": true, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint", "undo_enabled": true, "undo_ttl_seconds": 30}
   },
   {
     "name": "hint",
     "input": {"schema_version": 1, "mode": "hint"},
-    "want": {"mode": "hint", "curated_auto_correct": false, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint"}
+    "want": {"mode": "hint", "curated_auto_correct": false, "risk_interrupt": false, "local_learning_enabled": false, "learning_retention_days": 30, "learned_rule_action_ceiling": "hint", "undo_enabled": true, "undo_ttl_seconds": 30}
   }
 ]

@@ -132,7 +132,7 @@ func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
 
 func TestDefaultV1PolicySettings(t *testing.T) {
 	cfg := Default()
-	if !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" {
+	if !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
@@ -145,12 +145,14 @@ func TestSetV1PolicySettings(t *testing.T) {
 		"local_learning_enabled":      "true",
 		"learning_retention_days":     "45",
 		"learned_rule_action_ceiling": "rewrite",
+		"undo_enabled":                "false",
+		"undo_ttl_seconds":            "45",
 	} {
 		if err := cfg.Set(key, value); err != nil {
 			t.Fatalf("Set(%q, %q) = %v", key, value, err)
 		}
 	}
-	if cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" {
+	if cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
 		t.Fatalf("unexpected configured policy: %#v", cfg)
 	}
 	if err := cfg.Set("learning_retention_days", "91"); err == nil {
@@ -158,6 +160,9 @@ func TestSetV1PolicySettings(t *testing.T) {
 	}
 	if err := cfg.Set("learned_rule_action_ceiling", "interrupt"); err == nil {
 		t.Fatal("accepted unsupported learned-rule action")
+	}
+	if err := cfg.Set("undo_ttl_seconds", "301"); err == nil {
+		t.Fatal("accepted excessive undo ttl")
 	}
 }
 
@@ -243,20 +248,23 @@ func TestApplySessionOverridesUsesStrictAllowlist(t *testing.T) {
 		"CLOSE_ENOUGH_MODE":                  "rewrite",
 		"CLOSE_ENOUGH_AUTO_APPLY_SAFE":       "true",
 		"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED": "true",
+		"CLOSE_ENOUGH_UNDO_ENABLED":          "false",
+		"CLOSE_ENOUGH_UNDO_TTL_SECONDS":      "45",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "rewrite" || !cfg.AutoApplySafe || !cfg.LocalHistoryEnabled {
+	if cfg.Mode != "rewrite" || !cfg.AutoApplySafe || !cfg.LocalHistoryEnabled || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
 		t.Fatalf("unexpected override result: %#v", cfg)
 	}
 }
 
 func TestApplySessionOverridesRejectsUnknownAndInvalidValues(t *testing.T) {
 	for name, values := range map[string]map[string]string{
-		"unknown": {"CLOSE_ENOUGH_UNSAFE": "true"},
-		"boolean": {"CLOSE_ENOUGH_AUTO_APPLY_SAFE": "1"},
-		"mode":    {"CLOSE_ENOUGH_MODE": "unsafe"},
+		"unknown":  {"CLOSE_ENOUGH_UNSAFE": "true"},
+		"boolean":  {"CLOSE_ENOUGH_AUTO_APPLY_SAFE": "1"},
+		"mode":     {"CLOSE_ENOUGH_MODE": "unsafe"},
+		"undo ttl": {"CLOSE_ENOUGH_UNDO_TTL_SECONDS": "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ApplySessionOverrides(Default(), values); err == nil {
@@ -639,6 +647,7 @@ func TestDecodeValidatesGlobalConfigurationSchema(t *testing.T) {
 		`{"schema_version":null}`,
 		`{"schema_version":"1"}`,
 		`{"auto_apply_safe":"true"}`,
+		`{"undo_ttl_seconds":0}`,
 		`{"unexpected":true}`,
 		`{"display":{"unexpected":true}}`,
 		`{"rule_exceptions":[{"id":"Invalid","command":"git status"}]}`,

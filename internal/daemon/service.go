@@ -25,6 +25,7 @@ type Service struct {
 	LearnedRules  []localstate.LearnedRule
 	mu            sync.Mutex
 	confirmations map[string]confirmation
+	undos         map[string]pendingUndo
 	failures      map[string]failure
 	now           func() time.Time
 }
@@ -41,6 +42,12 @@ type failure struct {
 	created time.Time
 }
 
+type pendingUndo struct {
+	session string
+	command string
+	expires time.Time
+}
+
 const maxFailureOutputBytes = 8 << 10
 const learningPairWindow = 5 * time.Minute
 
@@ -51,18 +58,14 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 	case StatusOperation:
 		return Response{Version: ProtocolVersion, Action: "ready"}, nil
 	case PreSendOperation:
-		response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "pre")
+		s.clearPendingUndo(request.Session)
+		response, err := s.preSend(ctx, request)
 		if err != nil {
 			return Response{}, err
 		}
-		if ok {
-			return response, nil
-		}
-		if response, ok := s.learnedDecision(request.Command, "pre"); ok {
-			return response, nil
-		}
-		return s.decision(ctx, request.Command, "pre")
+		return s.issueUndoToken(request, response), nil
 	case PostFailureOperation:
+		s.clearPendingUndo(request.Session)
 		s.rememberFailure(request)
 		response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "post")
 		if err != nil {
@@ -77,6 +80,7 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 		}
 		return s.attachKubernetesCloudFailureEvidence(request, s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))))), nil
 	case PostSuccessOperation:
+		s.clearPendingUndo(request.Session)
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
 	case ConfirmOperation:
@@ -85,12 +89,44 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 		}
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
 	case UndoOperation:
+		if s.Config.UndoEnabled {
+			if pending, ok := s.consumeUndoToken(request.Session, request.Token); ok {
+				return Response{Version: ProtocolVersion, Action: "edit-in-buffer", Suggestion: pending.command, Risk: string(diagnose.RiskSafe), Source: "undo"}, nil
+			}
+		}
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
 	case StopOperation:
 		return Response{Version: ProtocolVersion, Action: "stopping"}, nil
 	default:
 		return Response{}, fmt.Errorf("unsupported daemon operation %q", request.Operation)
 	}
+}
+
+func (s *Service) preSend(ctx context.Context, request Request) (Response, error) {
+	response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "pre")
+	if err != nil {
+		return Response{}, err
+	}
+	if ok {
+		return response, nil
+	}
+	if response, ok := s.learnedDecision(request.Command, "pre"); ok {
+		return response, nil
+	}
+	return s.decision(ctx, request.Command, "pre")
+}
+
+func (s *Service) issueUndoToken(request Request, response Response) Response {
+	if !s.Config.UndoEnabled || response.Action != "rewrite" || request.Session == "" || request.Command == "" {
+		return response
+	}
+	token, err := newConfirmationToken()
+	if err != nil {
+		return response
+	}
+	s.storeUndoToken(token, request.Session, request.Command)
+	response.UndoToken = token
+	return response
 }
 
 func (s *Service) learnedDecision(command, stage string) (Response, bool) {
@@ -461,6 +497,59 @@ func (s *Service) storeConfirmation(session, command, token string) {
 		s.confirmations = map[string]confirmation{}
 	}
 	s.confirmations[session] = confirmation{command: command, token: token, expires: s.currentTime().Add(5 * time.Second)}
+}
+
+func (s *Service) storeUndoToken(token, session, command string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.undos == nil {
+		s.undos = map[string]pendingUndo{}
+	}
+	now := s.currentTime()
+	s.removeExpiredUndos(now)
+	for existingToken, pending := range s.undos {
+		if pending.session == session {
+			delete(s.undos, existingToken)
+		}
+	}
+	s.undos[token] = pendingUndo{session: session, command: command, expires: now.Add(time.Duration(s.Config.UndoTTLSeconds) * time.Second)}
+}
+
+func (s *Service) consumeUndoToken(session, token string) (pendingUndo, bool) {
+	if session == "" || token == "" {
+		return pendingUndo{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.currentTime()
+	s.removeExpiredUndos(now)
+	pending, ok := s.undos[token]
+	if !ok || pending.session != session {
+		return pendingUndo{}, false
+	}
+	delete(s.undos, token)
+	return pending, true
+}
+
+func (s *Service) clearPendingUndo(session string) {
+	if session == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, pending := range s.undos {
+		if pending.session == session {
+			delete(s.undos, token)
+		}
+	}
+}
+
+func (s *Service) removeExpiredUndos(now time.Time) {
+	for token, pending := range s.undos {
+		if !now.Before(pending.expires) {
+			delete(s.undos, token)
+		}
+	}
 }
 
 func (s *Service) currentTime() time.Time {

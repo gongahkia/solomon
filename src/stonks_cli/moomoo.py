@@ -31,7 +31,7 @@ class MoomooAccount:
 class MoomooReadOnlyProvider:
     manifest = PluginManifest(
         "moomoo",
-        1,
+        "1.0.0",
         frozenset(
             {
                 Capability.ACCOUNTS,

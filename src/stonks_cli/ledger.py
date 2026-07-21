@@ -24,6 +24,7 @@ from stonks_cli.types import (
     LedgerEvent,
     SourceProvenance,
     decimal,
+    utc,
 )
 
 
@@ -265,6 +266,42 @@ def list_events(ledger: EncryptedLedger) -> list[LedgerEvent]:
         rows = connection.execute(
             "SELECT * FROM ledger_events ORDER BY occurred_at, fingerprint"
         ).fetchall()
+    return [_event_from_row(row) for row in rows]
+
+
+def query_audit_trail(
+    ledger: EncryptedLedger,
+    *,
+    account: Account | None = None,
+    instrument: Instrument | None = None,
+    from_at: datetime | None = None,
+    to_at: datetime | None = None,
+) -> list[LedgerEvent]:
+    clauses: list[str] = []
+    parameters: list[str] = []
+    if account is not None:
+        clauses.extend(("account_provider_id = ?", "account_id = ?"))
+        parameters.extend((account.provider_id, account.account_id))
+    if instrument is not None:
+        clauses.extend(("instrument_symbol = ?", "instrument_market = ?"))
+        parameters.extend((instrument.symbol, instrument.market))
+    start = None if from_at is None else utc(from_at)
+    end = None if to_at is None else utc(to_at)
+    if start is not None and end is not None and start > end:
+        raise ValueError("audit query start must not be after end")
+    if start is not None:
+        clauses.append("occurred_at >= ?")
+        parameters.append(start.isoformat())
+    if end is not None:
+        clauses.append("occurred_at <= ?")
+        parameters.append(end.isoformat())
+    query = "SELECT * FROM ledger_events"
+    if clauses:
+        query += f" WHERE {' AND '.join(clauses)}"
+    query += " ORDER BY occurred_at, fingerprint"
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(query, parameters).fetchall()
     return [_event_from_row(row) for row in rows]
 
 

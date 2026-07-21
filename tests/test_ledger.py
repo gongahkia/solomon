@@ -20,6 +20,7 @@ from stonks_cli.ledger import (
     list_events,
     list_position_snapshots,
     positions,
+    query_audit_trail,
     store_position_snapshot,
 )
 from stonks_cli.storage import EncryptedLedger, generate_key_file
@@ -83,6 +84,34 @@ def test_broker_position_snapshots_are_idempotent_and_encrypted(tmp_path: Path, 
     assert store_position_snapshot(ledger, snapshot) is False
     assert list_position_snapshots(ledger) == [snapshot]
     assert b"position-1" not in ledger.path.read_bytes()
+
+
+def test_audit_trail_queries_immutable_events_by_identity_and_time(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    deposit = _event(EventKind.CASH_DEPOSIT, amount="100")
+    buy = LedgerEvent(
+        fingerprint="audit-buy",
+        source=SourceProvenance("test", "0" * 64, "audit-buy"),
+        account=deposit.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("20"),
+        quantity=Decimal("2"),
+        instrument=Instrument("SPY", "US", Currency.USD),
+    )
+    assert append(ledger, deposit) is True
+    assert append(ledger, buy) is True
+
+    assert query_audit_trail(ledger, account=deposit.account) == [deposit, buy]
+    assert query_audit_trail(ledger, instrument=buy.instrument) == [buy]
+    assert query_audit_trail(ledger, from_at=datetime(2026, 1, 2, tzinfo=UTC)) == [buy]
+    with pytest.raises(ValueError, match="start"):
+        query_audit_trail(
+            ledger,
+            from_at=datetime(2026, 1, 3, tzinfo=UTC),
+            to_at=datetime(2026, 1, 2, tzinfo=UTC),
+        )
 
 
 def test_canonical_event_schema_round_trips_lifecycle_and_identities(tmp_path: Path, monkeypatch) -> None:

@@ -118,6 +118,22 @@ def test_cash_transfers_reject_non_cash_payloads(amount: str, quantity: str, fee
         )
 
 
+@pytest.mark.parametrize("kind", (EventKind.BUY, EventKind.SELL))
+def test_trade_fills_require_positive_consideration(kind: EventKind) -> None:
+    with pytest.raises(ValueError, match="positive amount"):
+        LedgerEvent(
+            fingerprint=f"{kind.value}-event",
+            source=SourceProvenance("csv", "a" * 64, kind.value),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=kind,
+            currency=Currency.USD,
+            amount=Decimal("0"),
+            quantity=Decimal("1"),
+            instrument=Instrument("SPY", "US", Currency.USD),
+        )
+
+
 @pytest.mark.parametrize(
     ("source", "account"),
     (

@@ -138,6 +138,27 @@ def test_csv_imports_cash_deposits_and_withdrawals(tmp_path: Path, monkeypatch) 
     assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("75")
 
 
+def test_csv_imports_buy_and_sell_fills(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    source = tmp_path / "fills.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,fee\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,,,0\n"
+        "main,2026-01-02T00:00:00+00:00,buy,USD,20,2,SPY,US,1\n"
+        "main,2026-01-03T00:00:00+00:00,sell,USD,15,1,SPY,US,1\n"
+    )
+
+    assert import_csv(ledger, source)[:2] == (3, 0)
+    events = list_events(ledger)
+    assert [event.kind for event in events] == [
+        EventKind.CASH_DEPOSIT,
+        EventKind.BUY,
+        EventKind.SELL,
+    ]
+    assert cash_balances(events)[("csv:main", Currency.USD)] == Decimal("93")
+    assert positions(events)[("csv:main", "US:SPY")] == Decimal("1")
+
+
 def test_csv_import_does_not_archive_or_persist_a_partial_file(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source = tmp_path / "events.csv"

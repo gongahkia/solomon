@@ -8,6 +8,7 @@ from importlib import metadata
 from typing import Protocol, runtime_checkable
 
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
+from stonks_cli.types import Account
 
 PLUGIN_API_VERSION = "1.0.0"
 _ENTRY_POINT_GROUP = "stonks_cli.providers"
@@ -80,6 +81,11 @@ class ProviderCapabilityRegistry:
 @runtime_checkable
 class ProviderPlugin(Protocol):
     manifest: PluginManifest
+
+
+@runtime_checkable
+class ReadOnlyAccountProvider(ProviderPlugin, Protocol):
+    def accounts(self) -> tuple[Account, ...]: ...
 
 
 def _api_version(value: str) -> tuple[int, int, int] | None:

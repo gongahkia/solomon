@@ -10,6 +10,7 @@ from stonks_cli.plugins import (
     Capability,
     PluginManifest,
     ProviderCapabilityRegistry,
+    ReadOnlyAccountProvider,
     compatible_api_version,
     discover,
     discover_manifests,
@@ -17,6 +18,7 @@ from stonks_cli.plugins import (
     validate_manifest,
     validate_provider_compatibility,
 )
+from stonks_cli.types import Account
 
 
 def test_read_only_manifest_is_valid() -> None:
@@ -76,6 +78,17 @@ def test_capability_registry_rejects_duplicate_provider_identifiers() -> None:
 class _FixturePlugin:
     def __init__(self, identifier: str) -> None:
         self.manifest = PluginManifest(identifier, "1.0.0", frozenset({Capability.ACCOUNTS}))
+
+
+class _AccountFixturePlugin(_FixturePlugin):
+    def accounts(self) -> tuple[Account, ...]:
+        return (Account("fixture", "1"),)
+
+
+def test_read_only_account_provider_protocol_requires_account_reader() -> None:
+    provider = _AccountFixturePlugin("fixture")
+    assert isinstance(provider, ReadOnlyAccountProvider)
+    assert provider.accounts() == (Account("fixture", "1"),)
 
 
 class _FixtureEntryPoint:

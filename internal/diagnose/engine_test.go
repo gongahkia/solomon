@@ -768,6 +768,29 @@ func TestIncompleteInputNeverEmitsRepair(t *testing.T) {
 	}
 }
 
+func TestUnsupportedShellSyntaxNeverEmitsRepair(t *testing.T) {
+	directory := t.TempDir()
+	writeExecutable(t, directory, "git")
+	engine := New(Options{Config: config.Default(), Path: directory, CWD: directory})
+	decision, err := engine.Check("gti status", "pre")
+	if err != nil || decision.Suggestion != "git status" {
+		t.Fatalf("simple decision = %#v, %v", decision, err)
+	}
+	for _, line := range []string{
+		"gti status && echo done",
+		"gti status | cat",
+		"gti status >output",
+		"gti $HOME",
+		"gti *",
+		"gti $(pwd)",
+	} {
+		decision, err := engine.Check(line, "pre")
+		if err != nil || decision.Action != "none" || decision.Suggestion != "" || decision.Incomplete {
+			t.Fatalf("unsupported syntax decision for %q = %#v, %v", line, decision, err)
+		}
+	}
+}
+
 func TestTokenizePlainQuotedAndEscapedWords(t *testing.T) {
 	words, err := tokenize(`git commit -m "fix bug" path\ with\ spaces ''`)
 	if err != nil {
@@ -874,7 +897,7 @@ func TestCommandPositionsResolveCompoundCommandStarts(t *testing.T) {
 	}
 }
 
-func TestCompoundCommandSuggestionsAndNonCommandArguments(t *testing.T) {
+func TestCompoundCommandSyntaxDoesNotInterveneAndNonCommandArguments(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")
 	engine := New(Options{Config: config.Default(), Path: dir, CWD: dir})
@@ -882,15 +905,15 @@ func TestCompoundCommandSuggestionsAndNonCommandArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Suggestion != "echo gti && git status" {
-		t.Fatalf("unexpected command suggestion: %#v", decision)
+	if decision.Action != "none" || decision.Suggestion != "" {
+		t.Fatalf("compound command intervention: %#v", decision)
 	}
 	decision, err = engine.Check("echo ready; git sttaus", "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Suggestion != "echo ready ; git status" {
-		t.Fatalf("unexpected semantic suggestion: %#v", decision)
+	if decision.Action != "none" || decision.Suggestion != "" {
+		t.Fatalf("compound semantic intervention: %#v", decision)
 	}
 	decision, err = engine.Check("echo gti", "pre")
 	if err != nil {

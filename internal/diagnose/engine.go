@@ -300,6 +300,9 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 	if len(words) == 0 || e.options.Config.Mode == "off" {
 		return noDecision(), nil
 	}
+	if hasUnsupportedShellSyntax(words) {
+		return noDecision(), nil
+	}
 	if decision, err := e.commandDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
@@ -770,6 +773,15 @@ func commandPositions(words []string) []int {
 
 func isCompoundOperator(value string) bool {
 	return value == ";" || value == "&" || value == "&&" || value == "|" || value == "|&" || value == "||" || value == "(" || value == ")"
+}
+
+func hasUnsupportedShellSyntax(words []string) bool {
+	for _, word := range words {
+		if isCompoundOperator(word) || strings.ContainsAny(word, "<>`$*?[]{}") {
+			return true
+		}
+	}
+	return false
 }
 
 func assignmentWord(value string) bool {

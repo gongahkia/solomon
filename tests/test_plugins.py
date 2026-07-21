@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import pytest
 
+from stonks_cli import plugins
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 from stonks_cli.plugins import (
     Capability,
     PluginManifest,
     ProviderCapabilityRegistry,
     compatible_api_version,
+    discover,
+    provider_entry_points,
     validate_manifest,
 )
 
@@ -64,6 +67,31 @@ def test_capability_registry_rejects_duplicate_provider_identifiers() -> None:
     manifest = PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS}))
     with pytest.raises(ProviderError, match="duplicate"):
         ProviderCapabilityRegistry((manifest, manifest))
+
+
+class _FixturePlugin:
+    def __init__(self, identifier: str) -> None:
+        self.manifest = PluginManifest(identifier, "1.0.0", frozenset({Capability.ACCOUNTS}))
+
+
+class _FixtureEntryPoint:
+    def __init__(self, name: str, provider: _FixturePlugin) -> None:
+        self.name = name
+        self.provider = provider
+
+    def load(self) -> _FixturePlugin:
+        return self.provider
+
+
+def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatch) -> None:
+    entries = (
+        _FixtureEntryPoint("zeta-entry", _FixturePlugin("accounts")),
+        _FixtureEntryPoint("alpha-entry", _FixturePlugin("prices")),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    assert tuple(entry.name for entry in provider_entry_points()) == ("alpha-entry", "zeta-entry")
+    assert list(discover()) == ["accounts", "prices"]
 
 
 @pytest.mark.parametrize("version", ("1.0.0", "1.0.99"))

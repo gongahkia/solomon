@@ -9,6 +9,7 @@ from typing import Protocol, runtime_checkable
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
 
 PLUGIN_API_VERSION = "1.0.0"
+_ENTRY_POINT_GROUP = "stonks_cli.providers"
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 
@@ -106,10 +107,13 @@ def validate_manifest(manifest: PluginManifest) -> None:
         raise ExecutionDeniedError("execution capabilities are prohibited")
 
 
+def provider_entry_points() -> tuple[metadata.EntryPoint, ...]:
+    return tuple(sorted(metadata.entry_points(group=_ENTRY_POINT_GROUP), key=lambda entry: entry.name))
+
+
 def discover() -> dict[str, ProviderPlugin]:
-    selected = metadata.entry_points(group="stonks_cli.providers")
     providers: dict[str, ProviderPlugin] = {}
-    for entry in selected:
+    for entry in provider_entry_points():
         provider = entry.load()
         manifest = getattr(provider, "manifest", None)
         if not isinstance(manifest, PluginManifest):
@@ -118,4 +122,4 @@ def discover() -> dict[str, ProviderPlugin]:
         if manifest.identifier in providers:
             raise ProviderError(f"duplicate plugin:{manifest.identifier}")
         providers[manifest.identifier] = provider
-    return providers
+    return dict(sorted(providers.items()))

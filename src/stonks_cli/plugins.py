@@ -45,6 +45,35 @@ class PluginManifest:
         object.__setattr__(self, "identifier", identifier)
 
 
+@dataclass(frozen=True)
+class ProviderCapabilityRegistry:
+    manifests: tuple[PluginManifest, ...]
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(manifest, PluginManifest) for manifest in self.manifests):
+            raise ProviderError("capability registry contains an invalid manifest")
+        if len({manifest.identifier for manifest in self.manifests}) != len(self.manifests):
+            raise ProviderError("capability registry contains duplicate providers")
+        for manifest in self.manifests:
+            validate_manifest(manifest)
+        object.__setattr__(
+            self, "manifests", tuple(sorted(self.manifests, key=lambda item: item.identifier))
+        )
+
+    def providers_for(self, capability: Capability) -> tuple[str, ...]:
+        if not isinstance(capability, Capability):
+            raise ProviderError("provider capability is invalid")
+        return tuple(
+            manifest.identifier for manifest in self.manifests if capability in manifest.capabilities
+        )
+
+    def capabilities_for(self, identifier: str) -> frozenset[Capability]:
+        for manifest in self.manifests:
+            if manifest.identifier == identifier:
+                return manifest.capabilities
+        raise ProviderError("provider is not registered")
+
+
 @runtime_checkable
 class ProviderPlugin(Protocol):
     manifest: PluginManifest

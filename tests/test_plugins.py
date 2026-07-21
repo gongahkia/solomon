@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from stonks_cli.errors import ExecutionDeniedError, ProviderError
-from stonks_cli.plugins import Capability, PluginManifest, compatible_api_version, validate_manifest
+from stonks_cli.plugins import (
+    Capability,
+    PluginManifest,
+    ProviderCapabilityRegistry,
+    compatible_api_version,
+    validate_manifest,
+)
 
 
 def test_read_only_manifest_is_valid() -> None:
@@ -35,6 +41,29 @@ def test_manifest_rejects_non_capability_value() -> None:
     manifest = PluginManifest("unsafe", "1.0.0", frozenset({"execution"}))  # type: ignore[arg-type]
     with pytest.raises(ExecutionDeniedError):
         validate_manifest(manifest)
+
+
+def test_capability_registry_is_typed_and_deterministic() -> None:
+    registry = ProviderCapabilityRegistry(
+        (
+            PluginManifest("prices", "1.0.0", frozenset({Capability.MARKET_DATA})),
+            PluginManifest(
+                "accounts", "1.0.0", frozenset({Capability.ACCOUNTS, Capability.POSITIONS})
+            ),
+        )
+    )
+
+    assert registry.providers_for(Capability.ACCOUNTS) == ("accounts",)
+    assert registry.providers_for(Capability.MARKET_DATA) == ("prices",)
+    assert registry.capabilities_for("accounts") == frozenset(
+        {Capability.ACCOUNTS, Capability.POSITIONS}
+    )
+
+
+def test_capability_registry_rejects_duplicate_provider_identifiers() -> None:
+    manifest = PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS}))
+    with pytest.raises(ProviderError, match="duplicate"):
+        ProviderCapabilityRegistry((manifest, manifest))
 
 
 @pytest.mark.parametrize("version", ("1.0.0", "1.0.99"))

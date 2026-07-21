@@ -383,6 +383,19 @@ func TestRewriteNeedsVeryHighConfidence(t *testing.T) {
 	}
 }
 
+func TestRewriteSuggestionPreservesBufferQuoting(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mode, cfg.AutoApplySafe = "rewrite", true
+	line := `git "statsu" --message 'keep quote'`
+	decision, err := New(Options{Config: cfg}).Check(line, "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != "rewrite" || decision.Suggestion != `git "status" --message 'keep quote'` {
+		t.Fatalf("quoted rewrite = %#v", decision)
+	}
+}
+
 func TestSafeAutoApplyPolicy(t *testing.T) {
 	base := Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe}
 	for _, test := range []struct {

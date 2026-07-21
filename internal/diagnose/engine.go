@@ -306,17 +306,17 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 	if decision, err := e.commandDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, stage, started, limits)
+		return e.finish(ctx, decision, line, stage, started, limits)
 	}
 	if decision, err := semanticDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, stage, started, limits)
+		return e.finish(ctx, decision, line, stage, started, limits)
 	}
 	if decision, err := e.pathDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, stage, started, limits)
+		return e.finish(ctx, decision, line, stage, started, limits)
 	}
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
@@ -348,7 +348,7 @@ func (e Engine) now() time.Time {
 	return time.Now()
 }
 
-func (e Engine) finish(ctx context.Context, decision Decision, stage string, started time.Time, limits Limits) (Decision, error) {
+func (e Engine) finish(ctx context.Context, decision Decision, line, stage string, started time.Time, limits Limits) (Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
 	}
@@ -358,7 +358,18 @@ func (e Engine) finish(ctx context.Context, decision Decision, stage string, sta
 	if decisionOutputSize(decision) > limits.OutputBytes {
 		return noDecision(), ErrOutputLimit
 	}
-	return e.applyMode(decision, stage), nil
+	decision = e.applyMode(decision, stage)
+	if decision.Action == "rewrite" {
+		buffer, ok := replaceTokenOccurrence(line, decision.original, decision.replacement, decision.occurrence)
+		if !ok {
+			return noDecision(), nil
+		}
+		decision.Suggestion = buffer
+		if decisionOutputSize(decision) > limits.OutputBytes {
+			return noDecision(), ErrOutputLimit
+		}
+	}
+	return decision, nil
 }
 
 func decisionOutputSize(decision Decision) int {

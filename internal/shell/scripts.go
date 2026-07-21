@@ -149,6 +149,7 @@ _close_enough_decode() {
 }
 _close_enough_diagnostic_count=0
 _close_enough_diagnostic_limit=5
+_close_enough_daemon_ready=0
 _close_enough_seen_suggestions=$'\n'
 _close_enough_allow_diagnostic() {
   [ "$_close_enough_diagnostic_count" -lt "$_close_enough_diagnostic_limit" ] || return 1
@@ -161,11 +162,25 @@ _close_enough_allow_suggestion() {
   _close_enough_allow_diagnostic || return 1
   _close_enough_seen_suggestions+="$key"$'\n'
 }
+_close_enough_handshake() {
+  [ "$_close_enough_daemon_ready" = 1 ] && return 0
+  local record version action separator
+  local -a fields
+  record="$(command close-enough daemon request --operation handshake --shell bash --session "$$" --ensure=true --format record 2>/dev/null)" || return 1
+  separator=$'\034'
+  record="${record//$'\t'/$separator}"
+  IFS="$separator" read -r -a fields <<< "$record"
+  [ "${#fields[@]}" -ge 2 ] || return 1
+  version="${fields[0]}" action="${fields[1]}"
+  [ "$version" = 1 ] && [ "$action" = ready ] || return 1
+  _close_enough_daemon_ready=1
+}
 _close_enough_accept_line() {
   local command record version action risk confidence cause consequence suggestion suggestion_key separator
   local -a fields
   command="$READLINE_LINE"
-  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --format record --command "$command" 2>/dev/null)" || return
+  _close_enough_handshake || return
+  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; return; }
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"

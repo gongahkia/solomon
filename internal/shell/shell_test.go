@@ -916,6 +916,31 @@ func TestBashUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	}
 }
 
+func TestBashHandshakeFailsOpen(t *testing.T) {
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshake := "_close_enough_handshake() {"
+	check := "_close_enough_accept_line() {"
+	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
+	if handshakeStart < 0 || checkStart < handshakeStart {
+		t.Fatalf("bash handshake is missing: %q", script)
+	}
+	handshakeBody := script[handshakeStart:checkStart]
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell bash --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[ "${#fields[@]}" -ge 2 ] || return 1`) || !strings.Contains(handshakeBody, `[ "$version" = 1 ] && [ "$action" = ready ] || return 1`) || !strings.Contains(handshakeBody, "_close_enough_daemon_ready=1") {
+		t.Fatalf("bash handshake contract = %q", handshakeBody)
+	}
+	checkEnd := strings.Index(script[checkStart:], "_close_enough_enter_binding=")
+	if checkEnd < 0 {
+		t.Fatalf("bash accept-line function is unterminated: %q", script)
+	}
+	checkBody := script[checkStart : checkStart+checkEnd]
+	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0; return") {
+		t.Fatalf("bash handshake fallback = %q", checkBody)
+	}
+}
+
 func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
 	script, err := Script("bash")
 	if err != nil {
@@ -1017,7 +1042,7 @@ func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ name, input, action, want string }{

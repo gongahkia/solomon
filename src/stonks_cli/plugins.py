@@ -96,6 +96,18 @@ class ProviderPlugin(Protocol):
     manifest: PluginManifest
 
 
+@dataclass(frozen=True)
+class PluginLoadDiagnostic:
+    entry_point: str
+    error: str
+
+
+@dataclass(frozen=True)
+class PluginDiscovery:
+    providers: tuple[tuple[str, ProviderPlugin], ...]
+    diagnostics: tuple[PluginLoadDiagnostic, ...]
+
+
 @runtime_checkable
 class ReadOnlyAccountProvider(ProviderPlugin, Protocol):
     def accounts(self) -> tuple[Account, ...]: ...
@@ -212,14 +224,39 @@ def validate_provider_compatibility(provider: ProviderPlugin, expected: PluginMa
 
 
 def discover() -> dict[str, ProviderPlugin]:
-    expected = {
-        manifest.identifier: manifest
-        for manifest in ProviderCapabilityRegistry(discover_manifests()).manifests
-    }
-    providers: dict[str, ProviderPlugin] = {}
+    return dict(discover_with_diagnostics().providers)
+
+
+def discover_with_diagnostics() -> PluginDiscovery:
+    diagnostics: list[PluginLoadDiagnostic] = []
+    candidates: list[tuple[metadata.EntryPoint, PluginManifest]] = []
     for entry in provider_entry_points():
-        provider = entry.load()
-        manifest = expected[entry.name]
-        validate_provider_compatibility(provider, manifest)
-        providers[manifest.identifier] = provider
-    return dict(sorted(providers.items()))
+        try:
+            candidates.append((entry, _manifest_from_entry_point(entry)))
+        except Exception as error:
+            diagnostics.append(_plugin_load_diagnostic(entry.name, error))
+    counts: dict[str, int] = {}
+    for _, manifest in candidates:
+        counts[manifest.identifier] = counts.get(manifest.identifier, 0) + 1
+    providers: list[tuple[str, ProviderPlugin]] = []
+    for entry, manifest in candidates:
+        if counts[manifest.identifier] > 1:
+            diagnostics.append(
+                PluginLoadDiagnostic(entry.name, f"ProviderError: duplicate provider:{manifest.identifier}")
+            )
+            continue
+        try:
+            provider = entry.load()
+            validate_provider_compatibility(provider, manifest)
+        except Exception as error:
+            diagnostics.append(_plugin_load_diagnostic(entry.name, error))
+            continue
+        providers.append((manifest.identifier, provider))
+    return PluginDiscovery(
+        tuple(sorted(providers)),
+        tuple(sorted(diagnostics, key=lambda diagnostic: diagnostic.entry_point)),
+    )
+
+
+def _plugin_load_diagnostic(entry_point: str, error: Exception) -> PluginLoadDiagnostic:
+    return PluginLoadDiagnostic(entry_point, f"{type(error).__name__}: {error}")

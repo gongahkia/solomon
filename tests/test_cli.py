@@ -4,7 +4,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from stonks_cli import cli
 from stonks_cli.cli import app
+from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
 
 
 def test_cli_public_command_contract_excludes_execution() -> None:
@@ -50,6 +52,23 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     result = runner.invoke(app, ["portfolio", "personal", "--json"])
     assert result.exit_code == 0, result.output
     assert '"event_count": 1' in result.output
+
+
+def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "discover_with_diagnostics",
+        lambda: PluginDiscovery(
+            (),
+            (PluginLoadDiagnostic("broken", "RuntimeError: fixture load failed"),),
+        ),
+    )
+
+    result = CliRunner().invoke(app, ["plugins"])
+
+    assert result.exit_code == 0, result.output
+    assert '"entry_point": "broken"' in result.output
+    assert '"error": "RuntimeError: fixture load failed"' in result.output
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

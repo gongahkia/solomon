@@ -13,6 +13,7 @@ from stonks_cli.plugins import (
     Capability,
     CorporateActionProvider,
     MarketDataProvider,
+    PluginLoadDiagnostic,
     PluginManifest,
     ProviderCapabilityRegistry,
     ReadOnlyAccountProvider,
@@ -20,6 +21,7 @@ from stonks_cli.plugins import (
     compatible_api_version,
     discover,
     discover_manifests,
+    discover_with_diagnostics,
     provider_entry_points,
     validate_manifest,
     validate_provider_compatibility,
@@ -185,6 +187,11 @@ class _ManifestEntryPoint:
         raise AssertionError("manifest discovery must not import providers")
 
 
+class _FailingEntryPoint(_FixtureEntryPoint):
+    def load(self) -> _FixturePlugin:
+        raise RuntimeError("fixture load failed")
+
+
 def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatch) -> None:
     entries = (
         _FixtureEntryPoint("prices", _FixturePlugin("prices")),
@@ -228,7 +235,54 @@ def test_manifest_discovery_rejects_execution_capability_without_import(monkeypa
     monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
 
     with pytest.raises(ExecutionDeniedError):
-        discover()
+        discover_manifests()
+
+
+def test_discovery_isolates_manifest_errors_without_import(monkeypatch) -> None:
+    entries = (
+        _FixtureEntryPoint("accounts", _FixturePlugin("accounts")),
+        _ManifestEntryPoint("invalid", {"identifier": "invalid"}),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    discovery = discover_with_diagnostics()
+
+    assert tuple(identifier for identifier, _ in discovery.providers) == ("accounts",)
+    assert discovery.diagnostics == (
+        PluginLoadDiagnostic("invalid", "ProviderError: plugin manifest metadata is invalid:invalid"),
+    )
+
+
+def test_discovery_isolates_load_errors_and_reports_diagnostics(monkeypatch) -> None:
+    entries = (
+        _FailingEntryPoint("broken", _FixturePlugin("broken")),
+        _FixtureEntryPoint("accounts", _FixturePlugin("accounts")),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    discovery = discover_with_diagnostics()
+
+    assert tuple(identifier for identifier, _ in discovery.providers) == ("accounts",)
+    assert discovery.diagnostics == (
+        PluginLoadDiagnostic("broken", "RuntimeError: fixture load failed"),
+    )
+    assert list(discover()) == ["accounts"]
+
+
+def test_discovery_reports_duplicate_provider_diagnostics(monkeypatch) -> None:
+    entries = (
+        _FixtureEntryPoint("fixture", _FixturePlugin("fixture")),
+        _FixtureEntryPoint("fixture", _FixturePlugin("fixture")),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    discovery = discover_with_diagnostics()
+
+    assert discovery.providers == ()
+    assert discovery.diagnostics == (
+        PluginLoadDiagnostic("fixture", "ProviderError: duplicate provider:fixture"),
+        PluginLoadDiagnostic("fixture", "ProviderError: duplicate provider:fixture"),
+    )
 
 
 def test_provider_compatibility_rejects_runtime_manifest_mismatch(monkeypatch) -> None:
@@ -242,8 +296,13 @@ def test_provider_compatibility_rejects_runtime_manifest_mismatch(monkeypatch) -
     )
     monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: (entry,))
 
-    with pytest.raises(ProviderError, match="does not match"):
-        discover()
+    discovery = discover_with_diagnostics()
+    assert discovery.providers == ()
+    assert discovery.diagnostics == (
+        PluginLoadDiagnostic(
+            "fixture", "ProviderError: plugin manifest does not match static metadata:fixture"
+        ),
+    )
     with pytest.raises(ProviderError, match="does not match"):
         validate_provider_compatibility(
             _FixturePlugin("fixture"),

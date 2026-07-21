@@ -936,7 +936,7 @@ func TestBashHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("bash accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0; return") {
+	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, "_close_enough_pending_confirmation=''; return") {
 		t.Fatalf("bash handshake fallback = %q", checkBody)
 	}
 }
@@ -1115,6 +1115,46 @@ func TestBashSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	}
 	if got := strings.Count(string(calls), "daemon request"); got != 2 {
 		t.Fatalf("daemon requests = %d, want 2: %q", got, calls)
+	}
+}
+
+func TestBashHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "calls")
+	state := filepath.Join(directory, "state")
+	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
+	harness := `source "$1"; READLINE_LINE='git push --force'; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash harness: %v\n%s", err, output)
+	}
+	if got := string(output); !strings.HasSuffix(got, "1|git push --force|0|git push --force\n") {
+		t.Fatalf("confirmation flow = %q", got)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "daemon request"); got != 3 {
+		t.Fatalf("daemon requests = %d, want 3: %q", got, calls)
 	}
 }
 

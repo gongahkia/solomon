@@ -151,6 +151,7 @@ _close_enough_diagnostic_count=0
 _close_enough_diagnostic_limit=5
 _close_enough_daemon_ready=0
 _close_enough_pending_rewrite=''
+_close_enough_pending_confirmation=''
 _close_enough_seen_suggestions=$'\n'
 _close_enough_allow_diagnostic() {
   [ "$_close_enough_diagnostic_count" -lt "$_close_enough_diagnostic_limit" ] || return 1
@@ -187,8 +188,11 @@ _close_enough_accept_line() {
     fi
     _close_enough_pending_rewrite=''
   fi
+  if [ -n "$_close_enough_pending_confirmation" ] && [ "$command" != "$_close_enough_pending_confirmation" ]; then
+    _close_enough_pending_confirmation=''
+  fi
   _close_enough_handshake || return
-  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; return; }
+  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; _close_enough_pending_confirmation=''; return; }
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
@@ -200,6 +204,7 @@ _close_enough_accept_line() {
   suggestion="$(_close_enough_decode "$suggestion")" || return
   cause="$(_close_enough_decode "$cause")" || cause=''
   if [ "$action" = submit ]; then
+    _close_enough_pending_confirmation=''
     return
   fi
   if [ "$action" = rewrite ]; then
@@ -221,7 +226,7 @@ _close_enough_accept_line() {
   fi
   if [ "$action" = interrupt ]; then
     printf '\nclose-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause" >&2
-    READLINE_LINE=':'
+    _close_enough_pending_confirmation="$command"
     return 1
   fi
 }

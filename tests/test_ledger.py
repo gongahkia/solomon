@@ -5,9 +5,9 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from conftest import encrypted_ledger
 
 from stonks_cli.accounting import fifo_lots
-from stonks_cli.config import ProfileConfig
 from stonks_cli.errors import LedgerError
 from stonks_cli.ledger import (
     append,
@@ -24,7 +24,7 @@ from stonks_cli.ledger import (
     query_audit_trail,
     store_position_snapshot,
 )
-from stonks_cli.storage import EncryptedLedger, generate_key_file
+from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
     Account,
     BrokerPositionSnapshot,
@@ -38,10 +38,7 @@ from stonks_cli.types import (
 
 
 def _ledger(tmp_path: Path, monkeypatch) -> EncryptedLedger:
-    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
-    key = tmp_path / "key"
-    generate_key_file(key)
-    return EncryptedLedger(ProfileConfig("personal", str(key)))
+    return encrypted_ledger(tmp_path, monkeypatch)
 
 
 def _event(kind: EventKind, *, quantity: str = "0", amount: str = "0") -> LedgerEvent:

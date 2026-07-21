@@ -474,8 +474,9 @@ func TestFishInterruptPreventsExecution(t *testing.T) {
 		t.Fatalf("fish interrupt branch is missing: %q", script)
 	}
 	branch := script[interrupt:]
-	execute := strings.Index(branch, "commandline -f execute")
-	if execute < 0 || !strings.Contains(branch[:execute], "commandline -f repaint") || !strings.Contains(branch[:execute], "return") {
+	repaint := strings.Index(branch, "commandline -f repaint")
+	execute := strings.Index(branch[repaint:], "commandline -f execute")
+	if repaint < 0 || execute < 0 || !strings.Contains(branch[:repaint], "echo \"close-enough") || !strings.Contains(branch[repaint:repaint+execute], "return") {
 		t.Fatalf("fish interrupt does not precede execution: %q", script)
 	}
 }
@@ -1250,7 +1251,7 @@ func TestFishPreExecutionUsesCapturedBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := "set -l command (commandline -b)"
-	check := `--stage pre --format record --command "$command"`
+	check := `daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record --command "$command"`
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
 		t.Fatalf("fish pre-execution check does not use a captured buffer: %q", script)
 	}
@@ -1331,7 +1332,7 @@ func TestFishHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("fish accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake; or return") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
+	if !strings.Contains(checkBody, "_close_enough_handshake; or begin\n    commandline -f execute") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
 		t.Fatalf("fish handshake fallback = %q", checkBody)
 	}
 }
@@ -1536,7 +1537,7 @@ func TestFishInteractivePTYInterruptPreventsExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '1\\tinterrupt\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\tinterrupt\\tsafe\\t1\\tY2hlY2s=\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -1564,7 +1565,7 @@ send -- "source \$ADAPTER\r"
 expect_text "source \$ADAPTER\r\n"
 expect_text {CE> }
 send -- "touch \$MARKER\r"
-expect_text {close-enough [safe/1]: keep buffer}
+expect_text {close-enough [safe/1]: keep buffer (check)}
 close`
 	command := exec.Command(expect, "-c", pty)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
@@ -1592,7 +1593,7 @@ func TestFishInteractivePTYHintSubmitsCommand(t *testing.T) {
 	}
 	checker := filepath.Join(directory, "close-enough")
 	checked := filepath.Join(directory, "checked")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\nprintf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(directory, "executed")
@@ -1642,6 +1643,71 @@ expect {
 	}
 	if _, err := os.Stat(checked); err != nil {
 		t.Fatalf("hint did not invoke checker: %v\n%s", err, output)
+	}
+}
+
+func TestFishInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.fish")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	capture := filepath.Join(directory, "calls")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+proc expect_text {text} {
+  expect {
+    -exact $text {}
+    timeout { puts stderr "timed out waiting for: $text"; exit 1 }
+    eof { puts stderr "unexpected EOF waiting for: $text"; exit 1 }
+  }
+}
+spawn -noecho env TERM=dumb fish --no-config
+expect {
+  -re {> } {}
+  timeout { puts stderr "timed out waiting for initial prompt"; exit 1 }
+}
+send -- "function fish_prompt; echo -n 'CE> '; end\r"
+expect_text "function fish_prompt; echo -n 'CE> '; end\r\n"
+expect_text {CE> }
+send -- "source \$ADAPTER\r"
+expect_text "source \$ADAPTER\r\n"
+expect_text {CE> }
+send -- "touch \$MARKER\r"
+expect_text "touch \$MARKER\r\n"
+expect_text {CE> }
+send -- "exit\r"
+expect {
+  eof {}
+  timeout { puts stderr "timed out waiting for EOF"; exit 1 }
+}`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker, "CAPTURE="+capture)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("daemon failure did not submit buffered command: %v\n%s", err, output)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "--operation handshake") {
+		t.Fatalf("adapter did not invoke the daemon handshake: %q", calls)
 	}
 }
 

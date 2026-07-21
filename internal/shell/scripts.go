@@ -331,17 +331,23 @@ function _close_enough_accept_line
     end
     set -e _CLOSE_ENOUGH_PENDING_REWRITE
   end
-  _close_enough_handshake; or return
+  _close_enough_handshake; or begin
+    commandline -f execute
+    return
+  end
   set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record --command "$command" 2>/dev/null)
   if test $status -ne 0
     set -g _CLOSE_ENOUGH_DAEMON_READY 0
+    commandline -f execute
     return
   end
   set -l fields (string split \t -- $record)
   if test (count $fields) -ne 7
+    commandline -f execute
     return
   end
   if test "$fields[1]" != 1
+    commandline -f execute
     return
   end
   if test "$fields[2]" = submit
@@ -349,9 +355,14 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = rewrite
-    set -l suggestion (_close_enough_decode "$fields[7]")
-    set -l cause (_close_enough_decode "$fields[5]")
-    or return
+    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+      commandline -f execute
+      return
+    end
+    set -l cause (_close_enough_decode "$fields[5]"); or begin
+      commandline -f execute
+      return
+    end
     if test "$fields[3]" != safe; or test -z "$suggestion"
       echo "close-enough: refused unsafe rewrite" >&2
       commandline -f repaint
@@ -364,9 +375,14 @@ function _close_enough_accept_line
   end
   if test "$fields[2]" = hint
     set -l suggestion_key "$fields[7]"
-    set -l suggestion (_close_enough_decode "$fields[7]")
-    set -l cause (_close_enough_decode "$fields[5]")
-    or return
+    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+      commandline -f execute
+      return
+    end
+    set -l cause (_close_enough_decode "$fields[5]"); or begin
+      commandline -f execute
+      return
+    end
     if _close_enough_allow_suggestion "$suggestion_key"
       echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     end
@@ -374,9 +390,14 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = interrupt
-    set -l suggestion (_close_enough_decode "$fields[7]")
-    set -l cause (_close_enough_decode "$fields[5]")
-    or return
+    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+      commandline -f execute
+      return
+    end
+    set -l cause (_close_enough_decode "$fields[5]"); or begin
+      commandline -f execute
+      return
+    end
     echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     commandline -f repaint
     return

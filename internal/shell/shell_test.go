@@ -35,6 +35,12 @@ type adapterProtocolFixture struct {
 	Record  bool   `json:"record"`
 }
 
+type safeRewriteFixture struct {
+	Name       string `json:"name"`
+	Input      string `json:"input"`
+	Suggestion string `json:"suggestion"`
+}
+
 func TestResolveAction(t *testing.T) {
 	tests := []struct {
 		name, action, risk, suggestion string
@@ -462,6 +468,91 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 
 func commandInjectionRecord(action, risk, payload string) string {
 	return "1\t" + action + "\t" + risk + "\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
+}
+
+func TestSafeRewriteSecondEnterCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/safe_rewrite_second_enter.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []safeRewriteFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("safe rewrite corpus is empty")
+	}
+	for _, shellName := range []string{"zsh", "bash", "fish"} {
+		shellPath, err := exec.LookPath(shellName)
+		if err != nil {
+			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
+			continue
+		}
+		for _, fixture := range fixtures {
+			t.Run(shellName+"/"+fixture.Name, func(t *testing.T) {
+				if fixture.Name == "" || fixture.Input == "" || fixture.Suggestion == "" {
+					t.Fatalf("invalid safe rewrite fixture: %#v", fixture)
+				}
+				runSafeRewriteSecondEnterFixture(t, shellName, shellPath, fixture)
+			})
+		}
+	}
+}
+
+func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string, fixture safeRewriteFixture) {
+	t.Helper()
+	script, err := Script(shellName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter."+shellName)
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \" $* \" in *\" --operation handshake \"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\" --operation pre-send \"*) printf '%s\\n' \"$RECORD\" ;; *) exit 1 ;; esac\n"
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture, result := filepath.Join(directory, "calls"), filepath.Join(directory, "result")
+	environment := append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+commandInjectionRecord("rewrite", "safe", fixture.Suggestion), "RESULT="+result)
+	var command *exec.Cmd
+	switch shellName {
+	case "zsh":
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
+		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Input)
+	case "bash":
+		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_buffer="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_buffer|$second|$READLINE_LINE" > "$RESULT"`
+		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Input)
+	case "fish":
+		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
+		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Input)
+	default:
+		t.Fatalf("unsupported shell %q", shellName)
+	}
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%s harness: %v\n%s", shellName, err, output)
+	}
+	data, err := os.ReadFile(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shellName == "fish" {
+		if got, want := string(data), fixture.Suggestion+"|"+fixture.Suggestion+"|1"; got != want {
+			t.Fatalf("rewrite flow = %q, want %q", got, want)
+		}
+	} else if got, want := string(data), "1|"+fixture.Suggestion+"|0|"+fixture.Suggestion; got != want {
+		t.Fatalf("rewrite flow = %q, want %q", got, want)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "--operation"); got != 2 || strings.Count(string(calls), "--operation pre-send") != 1 || !strings.Contains(string(calls), fixture.Input) {
+		t.Fatalf("daemon calls = %q", calls)
+	}
 }
 
 func TestFishInterruptPreventsExecution(t *testing.T) {

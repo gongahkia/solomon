@@ -1,0 +1,4 @@
+[
+  {"name":"git-subcommand","input":"git statsu","suggestion":"git status"},
+  {"name":"quoted-buffer","input":"git \"statsu\" --message 'keep quote'","suggestion":"git \"status\" --message 'keep quote'"}
+]

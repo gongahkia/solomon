@@ -1079,6 +1079,45 @@ func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	}
 }
 
+func TestBashSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "calls")
+	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
+	harness := `source "$1"; READLINE_LINE=gti; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash harness: %v\n%s", err, output)
+	}
+	if got := string(output); !strings.HasSuffix(got, "1|git status|0|git status\n") {
+		t.Fatalf("rewrite flow = %q", got)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "daemon request"); got != 2 {
+		t.Fatalf("daemon requests = %d, want 2: %q", got, calls)
+	}
+}
+
 func TestBashInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	expect, err := exec.LookPath("expect")
 	if err != nil {

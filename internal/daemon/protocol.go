@@ -40,6 +40,7 @@ type Request struct {
 type Response struct {
 	Version           int                 `json:"version"`
 	Action            string              `json:"action"`
+	RewriteEligible   bool                `json:"rewrite_eligible"`
 	Suggestion        string              `json:"suggestion,omitempty"`
 	Explanation       string              `json:"explanation,omitempty"`
 	Confidence        string              `json:"confidence,omitempty"`

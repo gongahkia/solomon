@@ -106,6 +106,7 @@ func DefaultMessage(key MessageKey) (string, bool) {
 type Decision struct {
 	Version          int         `json:"version"`
 	Action           string      `json:"action"`
+	RewriteEligible  bool        `json:"rewrite_eligible"`
 	Cause            string      `json:"cause,omitempty"`
 	CauseKey         MessageKey  `json:"cause_key,omitempty"`
 	Consequence      string      `json:"consequence,omitempty"`
@@ -128,6 +129,7 @@ type Event struct {
 	Version          int         `json:"version"`
 	Stage            string      `json:"stage"`
 	Action           string      `json:"action"`
+	RewriteEligible  bool        `json:"rewrite_eligible"`
 	Cause            string      `json:"cause,omitempty"`
 	CauseKey         MessageKey  `json:"cause_key,omitempty"`
 	Consequence      string      `json:"consequence,omitempty"`
@@ -150,7 +152,7 @@ type Inspection struct {
 }
 
 func (d Decision) Event(stage string) Event {
-	return Event{Version: d.Version, Stage: stage, Action: d.Action, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, RiskRationale: d.RiskRationale, RiskRationaleKey: d.RiskRationaleKey, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
+	return Event{Version: d.Version, Stage: stage, Action: d.Action, RewriteEligible: d.RewriteEligible, Cause: d.Cause, CauseKey: d.CauseKey, Consequence: d.Consequence, ConsequenceKey: d.ConsequenceKey, Suggestion: d.Suggestion, Class: d.Class, Evidence: append([]Evidence(nil), d.Evidence...), Confidence: d.Confidence, Risk: d.Risk, RiskRationale: d.RiskRationale, RiskRationaleKey: d.RiskRationaleKey, Incomplete: d.Incomplete, Trace: append([]string(nil), d.Trace...)}
 }
 
 func (d Decision) Inspect(stage, command string) (Inspection, error) {
@@ -410,6 +412,7 @@ func consequenceFor(class RepairClass) (consequenceTemplate, bool) {
 }
 
 func (e Engine) applyMode(decision Decision, stage string) Decision {
+	decision.RewriteEligible = intrinsicRewriteEligible(decision)
 	if stage == "pre" {
 		if rewritten, ok := e.evaluateRewriteBuffer(decision); ok {
 			return rewritten
@@ -426,7 +429,11 @@ func (e Engine) applyMode(decision Decision, stage string) Decision {
 func (e Engine) safeAutoApply(decision Decision) bool {
 	return e.options.Config.Mode == "rewrite" &&
 		e.options.Config.AutoApplySafe &&
-		decision.Suggestion != "" &&
+		intrinsicRewriteEligible(decision)
+}
+
+func intrinsicRewriteEligible(decision Decision) bool {
+	return decision.Suggestion != "" &&
 		!decision.Incomplete &&
 		decision.Risk == RiskSafe &&
 		decision.Confidence >= 0.80 &&

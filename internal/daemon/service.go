@@ -371,9 +371,14 @@ func (s *Service) curatedDecision(ctx context.Context, command, session, stage s
 	if !ok {
 		return Response{}, false, nil
 	}
+	suggestion, containsSecret := redact.Command(strings.Fields(match.Suggestion))
+	risk := match.Risk
+	if containsSecret {
+		risk = string(diagnose.RiskHigh)
+	}
 	action := "hint"
-	response := Response{Version: ProtocolVersion, Action: action, Suggestion: match.Suggestion, Explanation: match.Cause, Confidence: "high", Risk: match.Risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
-	if stage == "pre" && match.Risk == string(diagnose.RiskHigh) && s.Config.RiskInterrupt {
+	response := Response{Version: ProtocolVersion, Action: action, RewriteEligible: suggestion != "" && risk == string(diagnose.RiskSafe), Suggestion: suggestion, Explanation: match.Cause, Confidence: "high", Risk: risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
+	if stage == "pre" && response.Risk == string(diagnose.RiskHigh) && s.Config.RiskInterrupt {
 		if session == "" {
 			return response, true, nil
 		}
@@ -390,7 +395,7 @@ func (s *Service) curatedDecision(ctx context.Context, command, session, stage s
 		response.ConfirmationToken = token
 		return response, true, nil
 	}
-	if stage == "pre" && match.Risk == string(diagnose.RiskSafe) && s.Config.CuratedAutoCorrect {
+	if stage == "pre" && response.RewriteEligible && s.Config.CuratedAutoCorrect {
 		response.Action = "rewrite"
 	}
 	return response, true, nil
@@ -402,13 +407,14 @@ func (s *Service) decision(ctx context.Context, command, stage string) (Response
 		return Response{}, err
 	}
 	response := Response{
-		Version:     ProtocolVersion,
-		Action:      decision.Action,
-		Suggestion:  decision.Suggestion,
-		Explanation: decision.Cause,
-		Confidence:  strconv.FormatFloat(decision.Confidence, 'f', 2, 64),
-		Risk:        string(decision.Risk),
-		Source:      "heuristic",
+		Version:         ProtocolVersion,
+		Action:          decision.Action,
+		RewriteEligible: decision.RewriteEligible,
+		Suggestion:      decision.Suggestion,
+		Explanation:     decision.Cause,
+		Confidence:      strconv.FormatFloat(decision.Confidence, 'f', 2, 64),
+		Risk:            string(decision.Risk),
+		Source:          "heuristic",
 	}
 	if response.Action == "" {
 		response.Action = "none"

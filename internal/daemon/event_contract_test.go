@@ -39,12 +39,12 @@ func TestDaemonEventContractRedactsRequestSecrets(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"version", "action", "suggestion", "explanation", "confidence", "risk", "source"} {
+	for _, field := range []string{"version", "action", "rewrite_eligible", "suggestion", "explanation", "confidence", "risk", "source"} {
 		if _, ok := event[field]; !ok {
 			t.Fatalf("daemon event omitted %q: %s", field, data)
 		}
 	}
-	if response.Suggestion != "git --token=[REDACTED]" || response.Action == "rewrite" || response.Risk != "high" || response.Source != "heuristic" {
+	if response.Suggestion != "git --token=[REDACTED]" || response.Action == "rewrite" || response.RewriteEligible || response.Risk != "high" || response.Source != "heuristic" {
 		t.Fatalf("redacted daemon response = %#v", response)
 	}
 }

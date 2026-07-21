@@ -192,7 +192,7 @@ func TestRecordEncoderIsBinarySafeAndRejectsInvalidControlFields(t *testing.T) {
 }
 
 func TestJSONProtocolEncoderCompatibility(t *testing.T) {
-	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", Cause: "unknown command", CauseKey: MessageCauseCommandNotFound, Consequence: "shell rejects it", ConsequenceKey: MessageConsequenceCommandRejects, Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.75, Risk: RiskSafe, RiskRationale: "is a recognized read-only command", RiskRationaleKey: MessageRiskRecognizedSafe}
+	decision := Decision{Version: AdapterProtocolVersion, Action: "hint", RewriteEligible: true, Cause: "unknown command", CauseKey: MessageCauseCommandNotFound, Consequence: "shell rejects it", ConsequenceKey: MessageConsequenceCommandRejects, Suggestion: "git status", Class: RepairClassCommand, Evidence: []Evidence{{Kind: "resolver", Value: "path"}}, Confidence: 0.90, Risk: RiskSafe, RiskRationale: "is a recognized read-only command", RiskRationaleKey: MessageRiskRecognizedSafe}
 	data, err := decision.JSON("pre")
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestJSONProtocolEncoderCompatibility(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || event.Risk != RiskSafe || event.Suggestion != "git status" || event.CauseKey != MessageCauseCommandNotFound || event.ConsequenceKey != MessageConsequenceCommandRejects || event.RiskRationaleKey != MessageRiskRecognizedSafe || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
+	if event.Version != AdapterProtocolVersion || event.Stage != "pre" || event.Action != "hint" || !event.RewriteEligible || event.Risk != RiskSafe || event.Suggestion != "git status" || event.CauseKey != MessageCauseCommandNotFound || event.ConsequenceKey != MessageConsequenceCommandRejects || event.RiskRationaleKey != MessageRiskRecognizedSafe || event.Class != RepairClassCommand || !slices.Equal(event.Evidence, decision.Evidence) {
 		t.Fatalf("incompatible event: %#v", event)
 	}
 	var fields map[string]json.RawMessage
@@ -240,7 +240,7 @@ func TestGitSubcommandTypo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Suggestion != "git status" || decision.Cause != "Git subcommand typo" || decision.Trace[0] != "pack:core-git" {
+	if decision.Suggestion != "git status" || !decision.RewriteEligible || decision.Cause != "Git subcommand typo" || decision.Trace[0] != "pack:core-git" {
 		t.Fatalf("unexpected decision: %#v", decision)
 	}
 }
@@ -468,6 +468,40 @@ func TestSafeAutoApplyPolicy(t *testing.T) {
 				t.Fatalf("safeAutoApply() = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestRewriteEligibilityIsIndependentOfActionPolicy(t *testing.T) {
+	decision := Decision{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe}
+	for _, test := range []struct {
+		name    string
+		mode    string
+		enabled bool
+		action  string
+	}{
+		{name: "rewrite enabled", mode: "rewrite", enabled: true, action: "rewrite"},
+		{name: "rewrite disabled", mode: "rewrite", action: "hint"},
+		{name: "hint", mode: "hint", enabled: true, action: "hint"},
+		{name: "interrupt", mode: "interrupt", enabled: true, action: "interrupt"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Mode, cfg.AutoApplySafe = test.mode, test.enabled
+			got := New(Options{Config: cfg}).applyMode(decision, "pre")
+			if got.Action != test.action || !got.RewriteEligible {
+				t.Fatalf("applyMode() = %#v, want action %q and rewrite eligibility", got, test.action)
+			}
+		})
+	}
+	for _, unsafe := range []Decision{
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskHigh},
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskUnknown},
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.90, Risk: RiskSafe, Incomplete: true},
+		{Suggestion: "git status", Class: RepairClassSemantic, Confidence: 0.79, Risk: RiskSafe},
+	} {
+		if intrinsicRewriteEligible(unsafe) {
+			t.Fatalf("unsafe rewrite eligibility = %#v", unsafe)
+		}
 	}
 }
 
@@ -1128,7 +1162,7 @@ func TestSecretBearingSuggestionIsRedactedAndNeverRewritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action == "rewrite" || decision.Risk != RiskHigh || decision.Suggestion != "git --token=[REDACTED]" {
+	if decision.Action == "rewrite" || decision.RewriteEligible || decision.Risk != RiskHigh || decision.Suggestion != "git --token=[REDACTED]" {
 		t.Fatalf("unsafe decision: %#v", decision)
 	}
 	data, err := decision.JSON("pre")

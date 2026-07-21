@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from stonks_cli import plugins
@@ -10,6 +12,7 @@ from stonks_cli.plugins import (
     ProviderCapabilityRegistry,
     compatible_api_version,
     discover,
+    discover_manifests,
     provider_entry_points,
     validate_manifest,
 )
@@ -83,6 +86,20 @@ class _FixtureEntryPoint:
         return self.provider
 
 
+class _FixtureDistribution:
+    def __init__(self, manifest: dict[str, object]) -> None:
+        self.metadata = {"Stonks-Cli-Provider-Manifest": json.dumps(manifest)}
+
+
+class _ManifestEntryPoint:
+    def __init__(self, name: str, manifest: dict[str, object]) -> None:
+        self.name = name
+        self.dist = _FixtureDistribution(manifest)
+
+    def load(self) -> None:
+        raise AssertionError("manifest discovery must not import providers")
+
+
 def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatch) -> None:
     entries = (
         _FixtureEntryPoint("zeta-entry", _FixturePlugin("accounts")),
@@ -92,6 +109,24 @@ def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatc
 
     assert tuple(entry.name for entry in provider_entry_points()) == ("alpha-entry", "zeta-entry")
     assert list(discover()) == ["accounts", "prices"]
+
+
+def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -> None:
+    entries = (
+        _ManifestEntryPoint(
+            "fixture",
+            {
+                "identifier": "fixture",
+                "api_version": "1.0.0",
+                "capabilities": ["accounts.read"],
+            },
+        ),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    assert discover_manifests() == (
+        PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS})),
+    )
 
 
 @pytest.mark.parametrize("version", ("1.0.0", "1.0.99"))

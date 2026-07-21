@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -10,6 +11,7 @@ from stonks_cli.errors import ExecutionDeniedError, ProviderError
 
 PLUGIN_API_VERSION = "1.0.0"
 _ENTRY_POINT_GROUP = "stonks_cli.providers"
+_MANIFEST_HEADER = "Stonks-Cli-Provider-Manifest"
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 
@@ -109,6 +111,48 @@ def validate_manifest(manifest: PluginManifest) -> None:
 
 def provider_entry_points() -> tuple[metadata.EntryPoint, ...]:
     return tuple(sorted(metadata.entry_points(group=_ENTRY_POINT_GROUP), key=lambda entry: entry.name))
+
+
+def discover_manifests() -> tuple[PluginManifest, ...]:
+    manifests = tuple(_manifest_from_entry_point(entry) for entry in provider_entry_points())
+    if len({manifest.identifier for manifest in manifests}) != len(manifests):
+        raise ProviderError("duplicate plugin manifest identifier")
+    return tuple(sorted(manifests, key=lambda manifest: manifest.identifier))
+
+
+def _manifest_from_entry_point(entry: metadata.EntryPoint) -> PluginManifest:
+    distribution = entry.dist
+    if distribution is None:
+        raise ProviderError(f"plugin distribution is unavailable:{entry.name}")
+    try:
+        raw = distribution.metadata[_MANIFEST_HEADER]
+    except KeyError:
+        raise ProviderError(f"plugin manifest metadata is missing:{entry.name}")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ProviderError(f"plugin manifest metadata is invalid:{entry.name}") from error
+    if not isinstance(payload, dict):
+        raise ProviderError(f"plugin manifest metadata is invalid:{entry.name}")
+    identifier = payload.get("identifier")
+    api_version = payload.get("api_version")
+    capabilities = payload.get("capabilities")
+    if (
+        not isinstance(identifier, str)
+        or not isinstance(api_version, str)
+        or not isinstance(capabilities, list)
+        or not all(isinstance(capability, str) for capability in capabilities)
+    ):
+        raise ProviderError(f"plugin manifest metadata is invalid:{entry.name}")
+    try:
+        manifest = PluginManifest(
+            identifier, api_version, frozenset(Capability(capability) for capability in capabilities)
+        )
+    except (ProviderError, ValueError) as error:
+        raise ProviderError(f"plugin manifest metadata is invalid:{entry.name}") from error
+    if manifest.identifier != entry.name:
+        raise ProviderError(f"plugin manifest identifier does not match entry point:{entry.name}")
+    return manifest
 
 
 def discover() -> dict[str, ProviderPlugin]:

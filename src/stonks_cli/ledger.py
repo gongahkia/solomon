@@ -303,7 +303,7 @@ def cash_balances(events: list[LedgerEvent]) -> dict[tuple[str, Currency], Decim
 
 def positions(events: list[LedgerEvent]) -> dict[tuple[str, str], Decimal]:
     values: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
-    for event in events:
+    for event in sorted(effective_events(events), key=lambda item: (item.occurred_at, item.fingerprint)):
         if event.instrument is None:
             continue
         key = (event.account_id, event.instrument.key)
@@ -315,7 +315,7 @@ def positions(events: list[LedgerEvent]) -> dict[tuple[str, str], Decimal]:
             values[key] *= event.quantity
         if values[key] < 0:
             raise LedgerError(f"negative position:{event.account_id}:{event.instrument.key}")
-    return dict(values)
+    return {key: quantity for key, quantity in values.items() if quantity != 0}
 
 
 def import_csv(ledger: EncryptedLedger, path: Path) -> tuple[int, int, str]:

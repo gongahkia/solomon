@@ -142,6 +142,38 @@ def test_cash_balances_apply_corrections_and_compensating_reversals() -> None:
     assert cash_balances([original, correction, reversal]) == {("test:main", Currency.USD): Decimal("0")}
 
 
+def test_positions_apply_corrections_reversals_and_event_order() -> None:
+    original = _event(EventKind.BUY, quantity="2", amount="20")
+    correction = LedgerEvent(
+        fingerprint="corrected-buy",
+        source=SourceProvenance("test", "0" * 64, "corrected-buy"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("30"),
+        quantity=Decimal("3"),
+        instrument=original.instrument,
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint=original.fingerprint,
+    )
+    reversal = LedgerEvent(
+        fingerprint="reversed-buy",
+        source=SourceProvenance("test", "0" * 64, "reversed-buy"),
+        account=original.account,
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        kind=EventKind.SELL,
+        currency=Currency.USD,
+        amount=Decimal("30"),
+        quantity=Decimal("3"),
+        instrument=original.instrument,
+        lifecycle=EventLifecycle.REVERSAL,
+        corrects_fingerprint=correction.fingerprint,
+    )
+
+    assert positions([reversal, correction, original]) == {}
+
+
 def test_csv_import_archives_and_deduplicates(tmp_path: Path, monkeypatch) -> None:
     ledger = _ledger(tmp_path, monkeypatch)
     source = tmp_path / "events.csv"

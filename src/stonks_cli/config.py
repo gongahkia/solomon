@@ -7,7 +7,7 @@ from pathlib import Path
 
 from platformdirs import user_data_path
 
-from stonks_cli.errors import ProfileError
+from stonks_cli.errors import ProfileError, ProviderError
 
 _PROFILE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
@@ -39,6 +39,13 @@ class ProfileConfig:
         validate_profile_name(self.name)
         if not Path(self.key_file).is_absolute():
             raise ProfileError("key_file must be absolute")
+        try:
+            from stonks_cli.plugins import validate_provider_configuration
+
+            providers = validate_provider_configuration(self.providers)
+        except ProviderError as error:
+            raise ProfileError(str(error)) from error
+        object.__setattr__(self, "providers", providers)
 
 
 def profile_dir(name: str) -> Path:

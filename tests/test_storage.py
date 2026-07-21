@@ -125,6 +125,30 @@ def test_profile_config_schema_round_trips_versioned_fields(
     }
 
 
+def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: Path) -> None:
+    config = ProfileConfig(
+        "personal", str(tmp_path / "personal.key"), providers=(" CSV ", " Moomoo ")
+    )
+
+    assert config.providers == ("csv", "moomoo")
+
+
+@pytest.mark.parametrize(
+    ("providers", "error"),
+    (
+        ((), "at least one"),
+        (("csv", "CSV"), "duplicates"),
+        (("unknown",), "unavailable"),
+        ((" ",), "identifier"),
+    ),
+)
+def test_profile_config_rejects_invalid_provider_configuration(
+    tmp_path: Path, providers: tuple[str, ...], error: str
+) -> None:
+    with pytest.raises(ProfileError, match=error):
+        ProfileConfig("personal", str(tmp_path / "personal.key"), providers=providers)
+
+
 def test_aes_gcm_envelope_has_versioned_header_and_rejects_truncation() -> None:
     key = b"x" * 32
     payload = encrypt(key, b"secret", profile="personal", label="ledger")

@@ -179,6 +179,26 @@ def builtin_provider_manifests() -> tuple[PluginManifest, ...]:
     ).manifests
 
 
+def validate_provider_configuration(provider_ids: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(provider_ids, tuple) or not provider_ids:
+        raise ProviderError("at least one provider must be configured")
+    if not all(isinstance(provider_id, str) for provider_id in provider_ids):
+        raise ProviderError("provider identifiers must be strings")
+    identifiers = tuple(provider_id.strip().lower() for provider_id in provider_ids)
+    if not all(_IDENTIFIER.fullmatch(identifier) for identifier in identifiers):
+        raise ProviderError("provider identifier is invalid")
+    if len(set(identifiers)) != len(identifiers):
+        raise ProviderError("provider configuration contains duplicates")
+    available = {"csv", *(manifest.identifier for manifest in builtin_provider_manifests())}
+    unresolved = set(identifiers) - available
+    if unresolved:
+        available.update(manifest.identifier for manifest in discover_manifests())
+    unknown = sorted(set(identifiers) - available)
+    if unknown:
+        raise ProviderError(f"provider is unavailable:{','.join(unknown)}")
+    return identifiers
+
+
 def provider_entry_points() -> tuple[metadata.EntryPoint, ...]:
     return tuple(sorted(metadata.entry_points(group=_ENTRY_POINT_GROUP), key=lambda entry: entry.name))
 

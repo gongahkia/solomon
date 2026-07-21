@@ -27,6 +27,7 @@ from stonks_cli.plugins import (
     provider_entry_points,
     validate_manifest,
     validate_provider_compatibility,
+    validate_provider_configuration,
 )
 from stonks_cli.types import Account, Currency, Instrument
 
@@ -225,6 +226,22 @@ def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -
     assert discover_manifests() == (
         PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS})),
     )
+
+
+def test_provider_configuration_accepts_static_external_provider_without_import(monkeypatch) -> None:
+    entries = (
+        _ManifestEntryPoint(
+            "fixture",
+            {
+                "identifier": "fixture",
+                "api_version": "1.0.0",
+                "capabilities": ["accounts.read"],
+            },
+        ),
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
+
+    assert validate_provider_configuration(("fixture",)) == ("fixture",)
 
 
 def test_manifest_discovery_rejects_execution_capability_without_import(monkeypatch) -> None:

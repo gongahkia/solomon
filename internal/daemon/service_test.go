@@ -113,6 +113,28 @@ func TestServiceConfirmationTokenExpires(t *testing.T) {
 	}
 }
 
+func TestServiceConfirmationTokenBindsExactCommand(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
+	response, err := service.Handle(context.Background(), request)
+	if err != nil || response.Action != "interrupt" || response.ConfirmationToken == "" {
+		t.Fatalf("pre-send response = %#v, %v", response, err)
+	}
+	token := response.ConfirmationToken
+	response, err = service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: ConfirmOperation, Session: request.Session, Command: "git reset --hard", Token: token})
+	if err != nil || response.Action != "none" {
+		t.Fatalf("modified confirmation response = %#v, %v", response, err)
+	}
+	response, err = service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: ConfirmOperation, Session: request.Session, Command: request.Command, Token: token})
+	if err != nil || response.Action != "submit" {
+		t.Fatalf("exact confirmation response = %#v, %v", response, err)
+	}
+}
+
 func TestServiceLearnsFailureThenSuccessfulCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

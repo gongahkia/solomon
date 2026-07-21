@@ -15,6 +15,7 @@ from stonks_cli.plugins import (
     discover_manifests,
     provider_entry_points,
     validate_manifest,
+    validate_provider_compatibility,
 )
 
 
@@ -81,6 +82,13 @@ class _FixtureEntryPoint:
     def __init__(self, name: str, provider: _FixturePlugin) -> None:
         self.name = name
         self.provider = provider
+        self.dist = _FixtureDistribution(
+            {
+                "identifier": provider.manifest.identifier,
+                "api_version": provider.manifest.api_version,
+                "capabilities": [capability.value for capability in provider.manifest.capabilities],
+            }
+        )
 
     def load(self) -> _FixturePlugin:
         return self.provider
@@ -102,12 +110,12 @@ class _ManifestEntryPoint:
 
 def test_entry_point_discovery_loads_providers_in_deterministic_order(monkeypatch) -> None:
     entries = (
-        _FixtureEntryPoint("zeta-entry", _FixturePlugin("accounts")),
-        _FixtureEntryPoint("alpha-entry", _FixturePlugin("prices")),
+        _FixtureEntryPoint("prices", _FixturePlugin("prices")),
+        _FixtureEntryPoint("accounts", _FixturePlugin("accounts")),
     )
     monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: entries)
 
-    assert tuple(entry.name for entry in provider_entry_points()) == ("alpha-entry", "zeta-entry")
+    assert tuple(entry.name for entry in provider_entry_points()) == ("accounts", "prices")
     assert list(discover()) == ["accounts", "prices"]
 
 
@@ -127,6 +135,26 @@ def test_manifest_discovery_does_not_import_provider_entry_points(monkeypatch) -
     assert discover_manifests() == (
         PluginManifest("fixture", "1.0.0", frozenset({Capability.ACCOUNTS})),
     )
+
+
+def test_provider_compatibility_rejects_runtime_manifest_mismatch(monkeypatch) -> None:
+    entry = _FixtureEntryPoint("fixture", _FixturePlugin("fixture"))
+    entry.dist = _FixtureDistribution(
+        {
+            "identifier": "fixture",
+            "api_version": "1.0.0",
+            "capabilities": ["market_data.read"],
+        }
+    )
+    monkeypatch.setattr(plugins.metadata, "entry_points", lambda *, group: (entry,))
+
+    with pytest.raises(ProviderError, match="does not match"):
+        discover()
+    with pytest.raises(ProviderError, match="does not match"):
+        validate_provider_compatibility(
+            _FixturePlugin("fixture"),
+            PluginManifest("fixture", "1.0.0", frozenset({Capability.MARKET_DATA})),
+        )
 
 
 @pytest.mark.parametrize("version", ("1.0.0", "1.0.99"))

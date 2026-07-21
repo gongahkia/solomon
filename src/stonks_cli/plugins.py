@@ -155,15 +155,24 @@ def _manifest_from_entry_point(entry: metadata.EntryPoint) -> PluginManifest:
     return manifest
 
 
+def validate_provider_compatibility(provider: ProviderPlugin, expected: PluginManifest) -> None:
+    manifest = getattr(provider, "manifest", None)
+    if not isinstance(manifest, PluginManifest):
+        raise ProviderError(f"plugin missing manifest:{expected.identifier}")
+    validate_manifest(manifest)
+    if manifest != expected:
+        raise ProviderError(f"plugin manifest does not match static metadata:{expected.identifier}")
+
+
 def discover() -> dict[str, ProviderPlugin]:
+    expected = {
+        manifest.identifier: manifest
+        for manifest in ProviderCapabilityRegistry(discover_manifests()).manifests
+    }
     providers: dict[str, ProviderPlugin] = {}
     for entry in provider_entry_points():
         provider = entry.load()
-        manifest = getattr(provider, "manifest", None)
-        if not isinstance(manifest, PluginManifest):
-            raise ProviderError(f"plugin missing manifest:{entry.name}")
-        validate_manifest(manifest)
-        if manifest.identifier in providers:
-            raise ProviderError(f"duplicate plugin:{manifest.identifier}")
+        manifest = expected[entry.name]
+        validate_provider_compatibility(provider, manifest)
         providers[manifest.identifier] = provider
     return dict(sorted(providers.items()))

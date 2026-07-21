@@ -376,13 +376,17 @@ func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Wri
 }
 
 func daemonRecord(response daemon.Response) string {
+	var evidence []byte
+	if len(response.Evidence) > 0 {
+		evidence, _ = json.Marshal(response.Evidence)
+	}
 	fields := []string{
 		strconv.Itoa(response.Version),
 		response.Action,
 		response.Risk,
 		response.Confidence,
 		base64.RawStdEncoding.EncodeToString([]byte(response.Explanation)),
-		base64.RawStdEncoding.EncodeToString(nil),
+		base64.RawStdEncoding.EncodeToString(evidence),
 		base64.RawStdEncoding.EncodeToString([]byte(response.Suggestion)),
 	}
 	return strings.Join(fields, "\t") + "\n"

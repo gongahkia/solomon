@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/gongahkia/close-enough/internal/diagnose"
 )
 
 const (
@@ -36,18 +38,19 @@ type Request struct {
 }
 
 type Response struct {
-	Version           int    `json:"version"`
-	Action            string `json:"action"`
-	Suggestion        string `json:"suggestion,omitempty"`
-	Explanation       string `json:"explanation,omitempty"`
-	Confidence        string `json:"confidence,omitempty"`
-	Risk              string `json:"risk,omitempty"`
-	Source            string `json:"source,omitempty"`
-	PackID            string `json:"pack_id,omitempty"`
-	RuleID            string `json:"rule_id,omitempty"`
-	ConfirmationToken string `json:"confirmation_token,omitempty"`
-	UndoToken         string `json:"undo_token,omitempty"`
-	Error             string `json:"error,omitempty"`
+	Version           int                 `json:"version"`
+	Action            string              `json:"action"`
+	Suggestion        string              `json:"suggestion,omitempty"`
+	Explanation       string              `json:"explanation,omitempty"`
+	Confidence        string              `json:"confidence,omitempty"`
+	Risk              string              `json:"risk,omitempty"`
+	Source            string              `json:"source,omitempty"`
+	PackID            string              `json:"pack_id,omitempty"`
+	RuleID            string              `json:"rule_id,omitempty"`
+	Evidence          []diagnose.Evidence `json:"evidence,omitempty"`
+	ConfirmationToken string              `json:"confirmation_token,omitempty"`
+	UndoToken         string              `json:"undo_token,omitempty"`
+	Error             string              `json:"error,omitempty"`
 }
 
 func (r Request) Validate() error {

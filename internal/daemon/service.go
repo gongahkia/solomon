@@ -68,9 +68,13 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 			return Response{}, err
 		}
 		if ok {
-			return response, nil
+			return s.attachGitFailureEvidence(request, response), nil
 		}
-		return s.decision(ctx, request.Command, "post")
+		response, err = s.decision(ctx, request.Command, "post")
+		if err != nil {
+			return Response{}, err
+		}
+		return s.attachGitFailureEvidence(request, response), nil
 	case PostSuccessOperation:
 		s.recordSuccess(ctx, request)
 		return Response{Version: ProtocolVersion, Action: "none"}, nil
@@ -135,16 +139,40 @@ func (s *Service) rememberFailure(request Request) {
 	if !ok {
 		return
 	}
-	output, _ := redact.Text(request.FailureOutput)
-	if len(output) > maxFailureOutputBytes {
-		output = output[:maxFailureOutputBytes]
-	}
+	output := safeFailureOutput(request.FailureOutput)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failures == nil {
 		s.failures = map[string]failure{}
 	}
 	s.failures[request.Session] = failure{command: command, output: output, created: s.currentTime()}
+}
+
+func (s *Service) attachGitFailureEvidence(request Request, response Response) Response {
+	if response.Action == "none" || response.Suggestion == "" || firstCommandWord(request.Command) != "git" {
+		return response
+	}
+	evidence, err := packs.ExtractGitFailureEvidence(safeFailureOutput(request.FailureOutput))
+	if err == nil {
+		response.Evidence = evidence
+	}
+	return response
+}
+
+func safeFailureOutput(output string) string {
+	output, _ = redact.Text(output)
+	if len(output) > maxFailureOutputBytes {
+		return output[:maxFailureOutputBytes]
+	}
+	return output
+}
+
+func firstCommandWord(command string) string {
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return ""
+	}
+	return words[0]
 }
 
 func (s *Service) recordSuccess(ctx context.Context, request Request) {

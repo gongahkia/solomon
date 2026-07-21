@@ -689,7 +689,15 @@ func TestDoctorIncludesRuntimeReport(t *testing.T) {
 func TestDaemonRecordIsAdapterCompatible(t *testing.T) {
 	record := daemonRecord(daemon.Response{Version: daemon.ProtocolVersion, Action: "rewrite", Risk: "safe", Confidence: "high", Explanation: "typo", Suggestion: "git status"})
 	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
-	if len(fields) != 7 || fields[0] != "1" || fields[1] != "rewrite" || fields[2] != "safe" || fields[3] != "high" || fields[6] != "Z2l0IHN0YXR1cw" {
+	if len(fields) != 7 || fields[0] != "1" || fields[1] != "rewrite" || fields[2] != "safe" || fields[3] != "high" || fields[5] != "" || fields[6] != "Z2l0IHN0YXR1cw" {
+		t.Fatalf("record = %q", record)
+	}
+}
+
+func TestDaemonRecordIncludesFailureEvidence(t *testing.T) {
+	record := daemonRecord(daemon.Response{Version: daemon.ProtocolVersion, Action: "hint", Evidence: []diagnose.Evidence{{Kind: "git-unknown-subcommand", Value: "statsu"}}})
+	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
+	if len(fields) != 7 || fields[5] != "W3sia2luZCI6ImdpdC11bmtub3duLXN1YmNvbW1hbmQiLCJ2YWx1ZSI6InN0YXRzdSJ9XQ" {
 		t.Fatalf("record = %q", record)
 	}
 }

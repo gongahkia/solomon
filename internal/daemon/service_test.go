@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +176,33 @@ func TestServiceLearnsFailureThenSuccessfulCorrection(t *testing.T) {
 	draft, err := store.DraftFor(context.Background(), "git sttaus", "git status")
 	if err != nil || draft.EvidenceCount != 1 {
 		t.Fatalf("draft = %#v, %v", draft, err)
+	}
+}
+
+func TestServiceAttachesGitFailureEvidenceToRepair(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "git statsu", FailureOutput: "git: 'statsu' is not a git command.\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []diagnose.Evidence{{Kind: "git-unknown-subcommand", Value: "statsu"}}
+	if response.Action != "hint" || response.Suggestion != "git status" || !slices.Equal(response.Evidence, want) {
+		t.Fatalf("response = %#v, want evidence %#v", response, want)
+	}
+}
+
+func TestServiceDoesNotAttachGitFailureEvidenceToOtherCommands(t *testing.T) {
+	service := Service{Engine: diagnose.New(diagnose.Options{Config: config.Default(), Path: t.TempDir(), CWD: t.TempDir()})}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PostFailureOperation, Command: "echo git", FailureOutput: "git: 'statsu' is not a git command.\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Evidence) != 0 {
+		t.Fatalf("response attached incompatible evidence: %#v", response)
 	}
 }
 

@@ -1,0 +1,6 @@
+[
+  {"name":"semantic-hint","command":"git sttaus","stage":"pre","mode":"hint","auto_apply":false,"action":"hint","suggestion":"git status","class":"semantic","risk":"safe"},
+  {"name":"safe-rewrite","command":"git statsu","stage":"pre","mode":"rewrite","auto_apply":true,"action":"rewrite","suggestion":"git status","class":"semantic","risk":"safe"},
+  {"name":"post-stage-hint","command":"git statsu","stage":"post","mode":"rewrite","auto_apply":true,"action":"hint","suggestion":"git status","class":"semantic","risk":"safe"},
+  {"name":"low-confidence-none","command":"git stzzus","stage":"pre","mode":"rewrite","auto_apply":true,"action":"none","risk":"safe"}
+]

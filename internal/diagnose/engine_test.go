@@ -19,6 +19,43 @@ import (
 	"github.com/gongahkia/close-enough/internal/config"
 )
 
+type decisionContractCase struct {
+	Name       string `json:"name"`
+	Command    string `json:"command"`
+	Stage      string `json:"stage"`
+	Mode       string `json:"mode"`
+	AutoApply  bool   `json:"auto_apply"`
+	Action     string `json:"action"`
+	Suggestion string `json:"suggestion"`
+	Class      string `json:"class"`
+	Risk       Risk   `json:"risk"`
+}
+
+func TestV1DecisionContractCorpus(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "v1_decision_contract.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []decisionContractCase
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range cases {
+		t.Run(test.Name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Mode = test.Mode
+			cfg.AutoApplySafe = test.AutoApply
+			decision, err := New(Options{Config: cfg}).Check(test.Command, test.Stage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.Version != AdapterProtocolVersion || decision.Action != test.Action || decision.Suggestion != test.Suggestion || string(decision.Class) != test.Class || decision.Risk != test.Risk {
+				t.Fatalf("decision = %#v", decision)
+			}
+		})
+	}
+}
+
 func TestCommandTypoProducesHint(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutable(t, dir, "git")

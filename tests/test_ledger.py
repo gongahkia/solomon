@@ -11,12 +11,19 @@ from stonks_cli.ledger import (
     cash_balances,
     import_csv,
     import_fingerprint,
-    initialize,
     list_events,
     positions,
 )
 from stonks_cli.storage import EncryptedLedger, generate_key_file
-from stonks_cli.types import Account, Currency, EventKind, Instrument, LedgerEvent, SourceProvenance
+from stonks_cli.types import (
+    Account,
+    Currency,
+    EventKind,
+    EventLifecycle,
+    Instrument,
+    LedgerEvent,
+    SourceProvenance,
+)
 
 
 def _ledger(tmp_path: Path, monkeypatch) -> EncryptedLedger:
@@ -51,6 +58,31 @@ def test_events_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> Non
     assert append(ledger, event) is False
     assert list_events(ledger) == [event]
     assert b"cash_deposit" not in ledger.path.read_bytes()
+
+
+def test_canonical_event_schema_round_trips_lifecycle_and_identities(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    posted = _event(EventKind.CASH_DEPOSIT, amount="100")
+    correction = LedgerEvent(
+        fingerprint="corrected-deposit",
+        source=SourceProvenance("csv", "0" * 64, "corrected-deposit"),
+        account=Account("test", "main", "Personal"),
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("125"),
+        lifecycle=EventLifecycle.CORRECTION,
+        corrects_fingerprint=posted.fingerprint,
+    )
+    assert append(ledger, posted) is True
+    assert append(ledger, correction) is True
+
+    with ledger.connection() as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(ledger_events)")}
+        assert {"source_provider_id", "source_hash", "account_provider_id", "lifecycle"} <= columns
+        assert "source_id" not in columns
+
+    assert list_events(ledger) == [posted, correction]
 
 
 def test_import_fingerprint_is_canonical_and_source_specific() -> None:
@@ -90,7 +122,26 @@ def test_legacy_persisted_event_ids_are_read_as_canonical_identities(tmp_path: P
     ledger = _ledger(tmp_path, monkeypatch)
     source_hash = "a" * 64
     with ledger.connection() as connection:
-        initialize(connection)
+        connection.execute(
+            """
+            CREATE TABLE ledger_events (
+                fingerprint TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                amount TEXT NOT NULL,
+                quantity TEXT NOT NULL,
+                instrument_symbol TEXT,
+                instrument_market TEXT,
+                instrument_currency TEXT,
+                instrument_name TEXT,
+                fee TEXT NOT NULL,
+                metadata TEXT NOT NULL
+            )
+            """
+        )
         connection.execute(
             "INSERT INTO ledger_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -114,6 +165,8 @@ def test_legacy_persisted_event_ids_are_read_as_canonical_identities(tmp_path: P
     event = list_events(ledger)[0]
     assert event.source == SourceProvenance("legacy", source_hash, "2")
     assert event.account == Account("legacy", "main")
+    with ledger.connection() as connection:
+        assert "source_id" not in {row["name"] for row in connection.execute("PRAGMA table_info(ledger_events)")}
 
 
 def test_fifo_lots_calculates_realized_profit(tmp_path: Path, monkeypatch) -> None:

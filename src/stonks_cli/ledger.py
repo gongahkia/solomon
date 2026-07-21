@@ -18,6 +18,7 @@ from stonks_cli.types import (
     Account,
     Currency,
     EventKind,
+    EventLifecycle,
     Instrument,
     LedgerEvent,
     SourceProvenance,
@@ -26,14 +27,61 @@ from stonks_cli.types import (
 
 
 def initialize(connection: sqlite3.Connection) -> None:
+    columns = _columns(connection, "ledger_events")
+    if not columns:
+        _create_canonical_event_table(connection)
+    elif "source_provider_id" not in columns:
+        _migrate_legacy_event_table(connection)
+    elif not _CANONICAL_EVENT_COLUMNS <= columns:
+        raise LedgerError("unsupported ledger event schema")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ledger_events_time ON ledger_events(occurred_at, fingerprint)"
+    )
+
+
+_CANONICAL_EVENT_COLUMNS = {
+    "fingerprint",
+    "source_provider_id",
+    "source_hash",
+    "source_record_id",
+    "account_provider_id",
+    "account_id",
+    "account_name",
+    "occurred_at",
+    "kind",
+    "lifecycle",
+    "corrects_fingerprint",
+    "currency",
+    "amount",
+    "quantity",
+    "instrument_symbol",
+    "instrument_market",
+    "instrument_currency",
+    "instrument_name",
+    "fee",
+    "metadata",
+}
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def _create_canonical_event_table(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
-        CREATE TABLE IF NOT EXISTS ledger_events (
+        CREATE TABLE ledger_events (
             fingerprint TEXT PRIMARY KEY,
-            source_id TEXT NOT NULL,
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            account_provider_id TEXT NOT NULL,
             account_id TEXT NOT NULL,
+            account_name TEXT,
             occurred_at TEXT NOT NULL,
             kind TEXT NOT NULL,
+            lifecycle TEXT NOT NULL CHECK(lifecycle IN ('posted', 'correction', 'reversal')),
+            corrects_fingerprint TEXT,
             currency TEXT NOT NULL,
             amount TEXT NOT NULL,
             quantity TEXT NOT NULL,
@@ -42,41 +90,69 @@ def initialize(connection: sqlite3.Connection) -> None:
             instrument_currency TEXT,
             instrument_name TEXT,
             fee TEXT NOT NULL,
-            metadata TEXT NOT NULL
+            metadata TEXT NOT NULL,
+            CHECK(
+                (lifecycle = 'posted' AND corrects_fingerprint IS NULL)
+                OR (lifecycle IN ('correction', 'reversal') AND corrects_fingerprint IS NOT NULL)
+            ),
+            CHECK(corrects_fingerprint IS NULL OR corrects_fingerprint != fingerprint)
         )
         """
     )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS ledger_events_time ON ledger_events(occurred_at, fingerprint)"
-    )
+
+
+def _migrate_legacy_event_table(connection: sqlite3.Connection) -> None:
+    legacy_columns = _columns(connection, "ledger_events")
+    if not {"fingerprint", "source_id", "account_id"} <= legacy_columns:
+        raise LedgerError("unsupported ledger event schema")
+    rows = connection.execute("SELECT * FROM ledger_events ORDER BY occurred_at, fingerprint").fetchall()
+    connection.execute("ALTER TABLE ledger_events RENAME TO legacy_ledger_events")
+    _create_canonical_event_table(connection)
+    for row in rows:
+        _insert_event(connection, _event_from_legacy_row(row))
+    connection.execute("DROP TABLE legacy_ledger_events")
 
 
 def append(ledger: EncryptedLedger, event: LedgerEvent) -> bool:
     with ledger.connection() as connection:
         initialize(connection)
-        instrument = event.instrument
-        cursor = connection.execute(
-            """
-            INSERT OR IGNORE INTO ledger_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                event.fingerprint,
-                event.source_id,
-                event.account_id,
-                event.occurred_at.isoformat(),
-                event.kind.value,
-                event.currency.value,
-                str(event.amount),
-                str(event.quantity),
-                None if instrument is None else instrument.symbol,
-                None if instrument is None else instrument.market,
-                None if instrument is None else instrument.currency.value,
-                None if instrument is None else instrument.name,
-                str(event.fee),
-                json.dumps(event.metadata, sort_keys=True, separators=(",", ":")),
-            ),
-        )
-        return cursor.rowcount == 1
+        return _insert_event(connection, event).rowcount == 1
+
+
+def _insert_event(connection: sqlite3.Connection, event: LedgerEvent) -> sqlite3.Cursor:
+    instrument = event.instrument
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO ledger_events (
+            fingerprint, source_provider_id, source_hash, source_record_id, account_provider_id,
+            account_id, account_name, occurred_at, kind, lifecycle, corrects_fingerprint, currency,
+            amount, quantity, instrument_symbol, instrument_market, instrument_currency, instrument_name,
+            fee, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event.fingerprint,
+            event.source.provider_id,
+            event.source.source_hash,
+            event.source.record_id,
+            event.account.provider_id,
+            event.account.account_id,
+            event.account.name,
+            event.occurred_at.isoformat(),
+            event.kind.value,
+            event.lifecycle.value,
+            event.corrects_fingerprint,
+            event.currency.value,
+            str(event.amount),
+            str(event.quantity),
+            None if instrument is None else instrument.symbol,
+            None if instrument is None else instrument.market,
+            None if instrument is None else instrument.currency.value,
+            None if instrument is None else instrument.name,
+            str(event.fee),
+            json.dumps(event.metadata, sort_keys=True, separators=(",", ":")),
+        ),
+    )
 
 
 def import_fingerprint(source: SourceProvenance, record: Mapping[str, Any]) -> str:
@@ -105,6 +181,34 @@ def list_events(ledger: EncryptedLedger) -> list[LedgerEvent]:
 
 
 def _event_from_row(row: sqlite3.Row) -> LedgerEvent:
+    instrument = None
+    if row["instrument_symbol"] is not None:
+        instrument = Instrument(
+            row["instrument_symbol"],
+            row["instrument_market"],
+            Currency(row["instrument_currency"]),
+            row["instrument_name"],
+        )
+    return LedgerEvent(
+        fingerprint=row["fingerprint"],
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        occurred_at=datetime.fromisoformat(row["occurred_at"]),
+        kind=EventKind(row["kind"]),
+        lifecycle=EventLifecycle(row["lifecycle"]),
+        corrects_fingerprint=row["corrects_fingerprint"],
+        currency=Currency(row["currency"]),
+        amount=Decimal(row["amount"]),
+        quantity=Decimal(row["quantity"]),
+        instrument=instrument,
+        fee=Decimal(row["fee"]),
+        metadata=json.loads(row["metadata"]),
+    )
+
+
+def _event_from_legacy_row(row: sqlite3.Row) -> LedgerEvent:
     instrument = None
     if row["instrument_symbol"] is not None:
         instrument = Instrument(

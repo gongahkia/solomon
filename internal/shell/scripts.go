@@ -13,6 +13,7 @@ function _close_enough_decode {
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
 typeset -gi _CLOSE_ENOUGH_DAEMON_READY=0
+typeset -g _CLOSE_ENOUGH_PENDING_REWRITE=''
 typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic {
   (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
@@ -39,6 +40,13 @@ function _close_enough_check {
   local command record version action risk confidence cause consequence suggestion suggestion_key
   local -a fields
   command="$BUFFER"
+  if [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
+    if [[ "$command" == "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
+      _CLOSE_ENOUGH_PENDING_REWRITE=''
+      return 0
+    fi
+    _CLOSE_ENOUGH_PENDING_REWRITE=''
+  fi
   _close_enough_handshake || return 0
   record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
   fields=("${(@ps:\t:)record}")
@@ -58,6 +66,7 @@ function _close_enough_check {
       return 1
     fi
     BUFFER="$suggestion"
+    _CLOSE_ENOUGH_PENDING_REWRITE="$suggestion"
     zle -M "close-enough corrected: $suggestion ($cause; press Enter again)"
     zle -R
     return 1
@@ -99,7 +108,7 @@ function _close_enough_restore_enter {
 }
 _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
-function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }
+function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1"; _CLOSE_ENOUGH_PENDING_REWRITE='' }
 function _close_enough_precmd {
   local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" record version action risk confidence cause suggestion suggestion_key
   local -a fields

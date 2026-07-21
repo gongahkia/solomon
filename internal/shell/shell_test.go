@@ -619,6 +619,45 @@ func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	}
 }
 
+func TestZshSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(directory, "calls")
+	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER=gti; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -r -- "$first|$first_buffer|$second|$BUFFER"`
+	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh harness: %v\n%s", err, output)
+	}
+	if got := string(output); got != "1|git status|0|git status\n" {
+		t.Fatalf("rewrite flow = %q", got)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "daemon request"); got != 2 {
+		t.Fatalf("daemon requests = %d, want 2: %q", got, calls)
+	}
+}
+
 func TestZshInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	expect, err := exec.LookPath("expect")
 	if err != nil {
@@ -1579,7 +1618,7 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preexec := `function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1" }`
+	preexec := `function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1"; _CLOSE_ENOUGH_PENDING_REWRITE='' }`
 	precmd := "function _close_enough_precmd {"
 	preexecStart, precmdStart := strings.Index(script, preexec), strings.Index(script, precmd)
 	if preexecStart < 0 || precmdStart < preexecStart {

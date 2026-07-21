@@ -42,6 +42,7 @@ type failure struct {
 }
 
 const maxFailureOutputBytes = 8 << 10
+const learningPairWindow = 5 * time.Minute
 
 func (s *Service) Handle(ctx context.Context, request Request) (Response, error) {
 	switch request.Operation {
@@ -145,7 +146,9 @@ func (s *Service) rememberFailure(request Request) {
 	if s.failures == nil {
 		s.failures = map[string]failure{}
 	}
-	s.failures[request.Session] = failure{command: command, output: output, created: s.currentTime()}
+	now := s.currentTime()
+	s.removeExpiredFailures(now)
+	s.failures[failureKey(request.Session, request.Token)] = failure{command: command, output: output, created: now}
 }
 
 func (s *Service) attachGitFailureEvidence(request Request, response Response) Response {
@@ -324,15 +327,28 @@ func (s *Service) recordSuccess(ctx context.Context, request Request) {
 		return
 	}
 	s.mu.Lock()
-	pending, exists := s.failures[request.Session]
+	now := s.currentTime()
+	s.removeExpiredFailures(now)
+	key := failureKey(request.Session, request.Token)
+	pending, exists := s.failures[key]
 	if exists {
-		delete(s.failures, request.Session)
+		delete(s.failures, key)
 	}
 	s.mu.Unlock()
-	if !exists || pending.command == correction || s.currentTime().Sub(pending.created) > 5*time.Minute {
+	if !exists || pending.command == correction {
 		return
 	}
-	_, _ = s.Store.RecordLearningPair(ctx, localstate.Observation{Session: request.Session, FailedCommand: pending.command, CorrectedCommand: correction, FailureOutput: pending.output, CreatedAt: s.currentTime().UTC()})
+	_, _ = s.Store.RecordLearningPair(ctx, localstate.Observation{Session: request.Session, FailedCommand: pending.command, CorrectedCommand: correction, FailureOutput: pending.output, CreatedAt: now.UTC()})
+}
+
+func failureKey(session, token string) string { return session + "\x00" + token }
+
+func (s *Service) removeExpiredFailures(now time.Time) {
+	for key, pending := range s.failures {
+		if now.After(pending.created.Add(learningPairWindow)) {
+			delete(s.failures, key)
+		}
+	}
 }
 
 func normalizedLearningCommand(command string) (string, bool) {

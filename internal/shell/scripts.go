@@ -13,7 +13,11 @@ function _close_enough_decode {
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
 typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
 typeset -gi _CLOSE_ENOUGH_DAEMON_READY=0
+typeset -gi _CLOSE_ENOUGH_FAILURE_SEQUENCE=0
 typeset -g _CLOSE_ENOUGH_PENDING_REWRITE=''
+typeset -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
+typeset -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=''
+typeset -g _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
 typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic {
   (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
@@ -43,9 +47,11 @@ function _close_enough_check {
   if [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
     if [[ "$command" == "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
       _CLOSE_ENOUGH_PENDING_REWRITE=''
+      _CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"
       return 0
     fi
     _CLOSE_ENOUGH_PENDING_REWRITE=''
+    _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
   fi
   _close_enough_handshake || return 0
   record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
@@ -108,17 +114,31 @@ function _close_enough_restore_enter {
 }
 _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
-function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1"; _CLOSE_ENOUGH_PENDING_REWRITE='' }
+function _close_enough_preexec {
+  _CLOSE_ENOUGH_LAST_COMMAND="$1"
+  _CLOSE_ENOUGH_PENDING_REWRITE=''
+  if [[ "$1" == "$_CLOSE_ENOUGH_AUTOMATIC_REWRITE" ]]; then
+    _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
+  else
+    _CLOSE_ENOUGH_LAST_COMMAND_TOKEN="${_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN:-none}"
+    _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=''
+  fi
+  _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
+}
 function _close_enough_precmd {
-  local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" record version action risk confidence cause suggestion suggestion_key
+  local exit_status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" token="$_CLOSE_ENOUGH_LAST_COMMAND_TOKEN" record version action risk confidence cause suggestion suggestion_key
   local -a fields
   _CLOSE_ENOUGH_LAST_COMMAND=''
+  _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
   [[ -z "$command" ]] && return
-  if [[ $status -eq 0 ]]; then
-    command close-enough daemon request --operation post-success --shell zsh --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
+  if [[ $exit_status -eq 0 ]]; then
+    command close-enough daemon request --operation post-success --shell zsh --session "$$" --token "$token" --ensure=false --command "$command" >/dev/null 2>&1
     return
   fi
-  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --format record --command "$command" 2>/dev/null)" || return
+  (( ++_CLOSE_ENOUGH_FAILURE_SEQUENCE ))
+  token="failure-$$-${_CLOSE_ENOUGH_FAILURE_SEQUENCE}"
+  _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN="$token"
+  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" 2>/dev/null)" || return
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" suggestion="${fields[7]}"
@@ -150,7 +170,11 @@ _close_enough_decode() {
 _close_enough_diagnostic_count=0
 _close_enough_diagnostic_limit=5
 _close_enough_daemon_ready=0
+_close_enough_failure_sequence=0
 _close_enough_pending_rewrite=''
+_close_enough_automatic_rewrite=''
+_close_enough_pending_failure_token=''
+_close_enough_last_command_token=none
 _close_enough_pending_confirmation=''
 _close_enough_seen_suggestions=$'\n'
 _close_enough_allow_diagnostic() {
@@ -184,9 +208,11 @@ _close_enough_accept_line() {
   if [ -n "$_close_enough_pending_rewrite" ]; then
     if [ "$command" = "$_close_enough_pending_rewrite" ]; then
       _close_enough_pending_rewrite=''
+      _close_enough_automatic_rewrite="$command"
       return
     fi
     _close_enough_pending_rewrite=''
+    _close_enough_automatic_rewrite=''
   fi
   if [ -n "$_close_enough_pending_confirmation" ] && [ "$command" != "$_close_enough_pending_confirmation" ]; then
     _close_enough_pending_confirmation=''
@@ -246,18 +272,31 @@ _close_enough_restore_enter() {
 }
 _close_enough_bind_enter
 _close_enough_last_command=''
-_close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }
+_close_enough_debug() {
+  _close_enough_last_command=$BASH_COMMAND
+  if [ "$BASH_COMMAND" = "$_close_enough_automatic_rewrite" ]; then
+    _close_enough_last_command_token=none
+  else
+    _close_enough_last_command_token=${_close_enough_pending_failure_token:-none}
+    _close_enough_pending_failure_token=''
+  fi
+  _close_enough_automatic_rewrite=''
+}
 trap _close_enough_debug DEBUG
 _close_enough_prompt() {
-  local status=$? command="$_close_enough_last_command" record version action risk confidence cause suggestion suggestion_key separator
+  local status=$? command="$_close_enough_last_command" token="$_close_enough_last_command_token" record version action risk confidence cause suggestion suggestion_key separator
   local -a fields
   _close_enough_last_command=''
+  _close_enough_last_command_token=none
   [ -n "$command" ] || return
   if [ "$status" -eq 0 ]; then
-    command close-enough daemon request --operation post-success --shell bash --session "$$" --ensure=false --command "$command" >/dev/null 2>&1
+    command close-enough daemon request --operation post-success --shell bash --session "$$" --token "$token" --ensure=false --command "$command" >/dev/null 2>&1
     return
   fi
-  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --format record --command "$command" 2>/dev/null)" || return
+  _close_enough_failure_sequence=$((_close_enough_failure_sequence + 1))
+  token="failure-$$-${_close_enough_failure_sequence}"
+  _close_enough_pending_failure_token=$token
+  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" 2>/dev/null)" || return
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
@@ -282,7 +321,10 @@ if not set -q _CLOSE_ENOUGH_FISH_LOADED
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0
 set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
 set -g _CLOSE_ENOUGH_DAEMON_READY 0
+set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE 0
 set -g _CLOSE_ENOUGH_PENDING_REWRITE
+set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
+set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN
 set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS
 function _close_enough_allow_diagnostic
   if test $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT -ge $_CLOSE_ENOUGH_DIAGNOSTIC_LIMIT
@@ -326,10 +368,12 @@ function _close_enough_accept_line
   if set -q _CLOSE_ENOUGH_PENDING_REWRITE; and test -n "$_CLOSE_ENOUGH_PENDING_REWRITE"
     if test "$command" = "$_CLOSE_ENOUGH_PENDING_REWRITE"
       set -e _CLOSE_ENOUGH_PENDING_REWRITE
+      set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 1
       commandline -f execute
       return
     end
     set -e _CLOSE_ENOUGH_PENDING_REWRITE
+    set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
   end
   _close_enough_handshake; or begin
     commandline -f execute
@@ -425,15 +469,26 @@ _close_enough_bind_enter
 function _close_enough_post_failure --on-event fish_postexec
   set -l command_status $status
   set -l command $argv[1]
+  set -l token none
   if test -z "$command"
     return
   end
+  if test "$_CLOSE_ENOUGH_AUTOMATIC_REWRITE" != 1
+    if set -q _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN; and test -n "$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"
+      set token "$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"
+      set -e _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN
+    end
+  end
+  set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
   if test $command_status -eq 0
-    command close-enough daemon request --operation post-success --shell fish --session "$fish_pid" --ensure=false --command "$command" >/dev/null 2>/dev/null
+    command close-enough daemon request --operation post-success --shell fish --session "$fish_pid" --token "$token" --ensure=false --command "$command" >/dev/null 2>/dev/null
     return
   end
   if test $command_status -ne 0
-    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --format record --command "$command" 2>/dev/null)
+    set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE (math $_CLOSE_ENOUGH_FAILURE_SEQUENCE + 1)
+    set token "failure-$fish_pid-$_CLOSE_ENOUGH_FAILURE_SEQUENCE"
+    set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN "$token"
+    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command" 2>/dev/null)
     if test $status -ne 0
       return
     end
@@ -463,7 +518,10 @@ $global:CloseEnoughLastHistoryId = 0
 $global:CloseEnoughDiagnosticCount = 0
 $global:CloseEnoughDiagnosticLimit = 5
 $global:CloseEnoughDaemonReady = $false
+$global:CloseEnoughFailureSequence = 0
 $global:CloseEnoughPendingRewrite = $null
+$global:CloseEnoughAutomaticRewrite = $false
+$global:CloseEnoughPendingFailureToken = $null
 $global:CloseEnoughPendingConfirmation = $null
 $global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
 $global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
@@ -476,10 +534,12 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite)) {
     if ($command -eq $global:CloseEnoughPendingRewrite) {
       $global:CloseEnoughPendingRewrite = $null
+      $global:CloseEnoughAutomaticRewrite = $true
       [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
       return
     }
     $global:CloseEnoughPendingRewrite = $null
+    $global:CloseEnoughAutomaticRewrite = $false
   }
   if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingConfirmation) -and $command -ne $global:CloseEnoughPendingConfirmation) {
     $global:CloseEnoughPendingConfirmation = $null
@@ -546,13 +606,23 @@ function global:Restore-CloseEnoughEnterHandler {
 function global:prompt {
   $status = $?
   $entry = Get-History -Count 1
+  $token = 'none'
+  $automaticRewrite = $global:CloseEnoughAutomaticRewrite
+  $global:CloseEnoughAutomaticRewrite = $false
   if ($status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
     $global:CloseEnoughLastHistoryId = $entry.Id
-    & close-enough daemon request --operation post-success --shell powershell --session $PID --ensure=false --command $entry.CommandLine 2>$null | Out-Null
+    if (-not $automaticRewrite -and -not [string]::IsNullOrEmpty($global:CloseEnoughPendingFailureToken)) {
+      $token = $global:CloseEnoughPendingFailureToken
+      $global:CloseEnoughPendingFailureToken = $null
+    }
+    & close-enough daemon request --operation post-success --shell powershell --session $PID --token $token --ensure=false --command $entry.CommandLine 2>$null | Out-Null
   }
   if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
     $global:CloseEnoughLastHistoryId = $entry.Id
-    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --format json --command $entry.CommandLine 2>$null
+    $global:CloseEnoughFailureSequence += 1
+    $token = "failure-$PID-$($global:CloseEnoughFailureSequence)"
+    $global:CloseEnoughPendingFailureToken = $token
+    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($record)) {
       try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $decision = $null }
       if ($null -ne $decision -and $decision.version -eq 1 -and $decision.action -ne 'none' -and -not [string]::IsNullOrEmpty($decision.suggestion) -and (Allow-CloseEnoughSuggestion $decision.suggestion)) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }

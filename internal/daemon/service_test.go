@@ -360,6 +360,56 @@ func TestServiceRequiresSameSessionForLearningCorrection(t *testing.T) {
 	}
 }
 
+func TestServiceRequiresMatchingFailureTokenForLearningCorrection(t *testing.T) {
+	store, err := localstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.Default()
+	cfg.LocalLearningEnabled = true
+	service := Service{Config: cfg, Store: store, Engine: diagnose.New(diagnose.Options{Config: cfg, Path: t.TempDir(), CWD: t.TempDir()})}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "shell", Token: "failure-1", Operation: PostFailureOperation, Command: "git sttaus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "shell", Token: "failure-2", Operation: PostSuccessOperation, Command: "git status"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DraftFor(context.Background(), "git sttaus", "git status"); err == nil {
+		t.Fatal("mismatched failure token created learning evidence")
+	}
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: "shell", Token: "failure-1", Operation: PostSuccessOperation, Command: "git status"}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := store.DraftFor(context.Background(), "git sttaus", "git status")
+	if err != nil || draft.EvidenceCount != 1 {
+		t.Fatalf("draft = %#v, %v", draft, err)
+	}
+}
+
+func TestServiceExpiresFailureTokenBeforeLearningCorrection(t *testing.T) {
+	store, err := localstate.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.Default()
+	cfg.LocalLearningEnabled = true
+	now := time.Date(2026, time.July, 21, 0, 0, 0, 0, time.UTC)
+	service := Service{Config: cfg, Store: store, Engine: diagnose.New(diagnose.Options{Config: cfg, Path: t.TempDir(), CWD: t.TempDir()}), now: func() time.Time { return now }}
+	request := Request{Version: ProtocolVersion, Session: "shell", Token: "failure-1", Operation: PostFailureOperation, Command: "git sttaus"}
+	if _, err := service.Handle(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(learningPairWindow + time.Nanosecond)
+	if _, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Session: request.Session, Token: request.Token, Operation: PostSuccessOperation, Command: "git status"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DraftFor(context.Background(), "git sttaus", "git status"); err == nil {
+		t.Fatal("expired failure token created learning evidence")
+	}
+}
+
 func TestServiceAppliesLearnedRuleWithinGlobalCeiling(t *testing.T) {
 	cfg := config.Default()
 	cfg.LocalLearningEnabled = true

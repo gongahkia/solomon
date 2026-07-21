@@ -23,7 +23,7 @@ func TestServiceAcceptsPostFailureEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.mu.Lock()
-	pending, ok := service.failures["shell"]
+	pending, ok := service.failures[failureKey("shell", "")]
 	service.mu.Unlock()
 	if !ok || pending.command != "git sttaus" || pending.output != "fatal: failed" {
 		t.Fatalf("pending failure = %#v, exists = %t", pending, ok)
@@ -44,7 +44,7 @@ func TestServiceCapsPostFailureOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.mu.Lock()
-	pending := service.failures["shell"]
+	pending := service.failures[failureKey("shell", "")]
 	service.mu.Unlock()
 	if len(pending.output) != maxFailureOutputBytes {
 		t.Fatalf("failure output length = %d, want %d", len(pending.output), maxFailureOutputBytes)
@@ -64,7 +64,7 @@ func TestServiceRedactsPostFailureOutputBeforePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.mu.Lock()
-	pending := service.failures["shell"]
+	pending := service.failures[failureKey("shell", "")]
 	service.mu.Unlock()
 	if pending.output != "fatal: TOKEN=[REDACTED]" || strings.Contains(pending.output, "top-secret") {
 		t.Fatalf("persisted failure output = %q", pending.output)

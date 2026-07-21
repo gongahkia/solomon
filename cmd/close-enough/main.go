@@ -346,7 +346,7 @@ func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Wri
 	command := fs.String("command", "", "command line")
 	failureOutput := fs.String("failure-output", "", "failure output")
 	session := fs.String("session", "", "shell session")
-	token := fs.String("token", "", "confirmation or undo token")
+	token := fs.String("token", "", "confirmation, undo, or failure token")
 	format := fs.String("format", "json", "json or record")
 	ensure := fs.Bool("ensure", true, "start the local daemon when unavailable")
 	if err := fs.Parse(args); err != nil || *operation == "" || fs.NArg() != 0 {

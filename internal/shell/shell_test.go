@@ -179,6 +179,31 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 	}
 }
 
+func TestAdaptersAssociateFailuresWithNextManualSuccess(t *testing.T) {
+	tests := []struct {
+		shell   string
+		needles []string
+	}{
+		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", `_CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"`, `post-success --shell zsh --session "$$" --token "$token"`, `post-failure --shell zsh --session "$$" --token "$token"`}},
+		{"bash", []string{"_close_enough_pending_failure_token", `_close_enough_automatic_rewrite="$command"`, `post-success --shell bash --session "$$" --token "$token"`, `post-failure --shell bash --session "$$" --token "$token"`}},
+		{"fish", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", "_CLOSE_ENOUGH_AUTOMATIC_REWRITE 1", `post-success --shell fish --session "$fish_pid" --token "$token"`, `post-failure --shell fish --session "$fish_pid" --token "$token"`}},
+		{"pwsh", []string{"CloseEnoughPendingFailureToken", "CloseEnoughAutomaticRewrite = $true", "post-success --shell powershell --session $PID --token $token", "post-failure --shell powershell --session $PID --token $token"}},
+	}
+	for _, test := range tests {
+		t.Run(test.shell, func(t *testing.T) {
+			script, err := Script(test.shell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, needle := range test.needles {
+				if !strings.Contains(script, needle) {
+					t.Fatalf("script missing failure token lifecycle %q", needle)
+				}
+			}
+		})
+	}
+}
+
 func TestAdaptersSuppressRepeatedSuggestions(t *testing.T) {
 	for _, test := range []struct {
 		shell string
@@ -230,6 +255,95 @@ func TestZshSuppressesRepeatedSuggestions(t *testing.T) {
 	}
 	if got := strings.Count(string(output), "close-enough [safe/0.90]: git status"); got != 1 {
 		t.Fatalf("rendered hints = %d, want 1: %s", got, output)
+	}
+}
+
+func TestZshFailureTokenSurvivesManualSuccess(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh unavailable")
+	}
+	script, err := Script("zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.zsh")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(directory, "calls")
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\nprintf '1\\tnone\\t\\t\\t\\t\\t\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _close_enough_preexec 'git sttaus'; false; _close_enough_precmd; _close_enough_preexec 'git status'; true; _close_enough_precmd; _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=retained; _CLOSE_ENOUGH_AUTOMATIC_REWRITE='git status'; _close_enough_preexec 'git status'; true; _close_enough_precmd; print -r -- "pending=$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"`
+	command := exec.Command(zsh, "-fc", harness, "zsh", adapter)
+	command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CALLS="+calls)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh failure-token harness: %v: %s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != "pending=retained" {
+		t.Fatalf("automatic rewrite consumed pending token: %q", got)
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("read token calls: %v; output %s", err, output)
+	}
+	var failureToken string
+	var successTokens []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		fields := strings.Fields(line)
+		for index := range fields {
+			if fields[index] == "--token" && index+1 < len(fields) {
+				if strings.Contains(line, "--operation post-failure") {
+					failureToken = fields[index+1]
+				}
+				if strings.Contains(line, "--operation post-success") {
+					successTokens = append(successTokens, fields[index+1])
+				}
+			}
+		}
+	}
+	if failureToken == "" || len(successTokens) != 2 || successTokens[0] != failureToken || successTokens[1] != "none" {
+		t.Fatalf("failure token %q, success tokens %#v, calls %q", failureToken, successTokens, data)
+	}
+}
+
+func TestAdapterScriptsParse(t *testing.T) {
+	tests := []struct {
+		shell       string
+		interpreter string
+		args        func(string) []string
+	}{
+		{"zsh", "zsh", func(path string) []string { return []string{"-n", path} }},
+		{"bash", "bash", func(path string) []string { return []string{"-n", path} }},
+		{"fish", "fish", func(path string) []string { return []string{"-n", path} }},
+		{"pwsh", "pwsh", func(string) []string {
+			return []string{"-NoProfile", "-NonInteractive", "-Command", "[scriptblock]::Create([System.IO.File]::ReadAllText($env:ADAPTER_PATH)) | Out-Null"}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.shell, func(t *testing.T) {
+			interpreter, err := exec.LookPath(test.interpreter)
+			if err != nil {
+				t.Skipf("%s unavailable", test.interpreter)
+			}
+			script, err := Script(test.shell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "adapter")
+			if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			command := exec.Command(interpreter, test.args(path)...)
+			command.Env = append(os.Environ(), "ADAPTER_PATH="+path)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("adapter parse: %v: %s", err, output)
+			}
+		})
 	}
 }
 
@@ -1124,8 +1238,8 @@ func TestBashPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 	branch := script[start:]
 	consume := "_close_enough_last_command=''"
-	trigger := `daemon request --operation post-failure --shell bash --session "$$" --format record --command "$command"`
-	if !strings.Contains(script, "_close_enough_debug() { _close_enough_last_command=$BASH_COMMAND; }") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	trigger := `daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command"`
+	if !strings.Contains(script, "_close_enough_debug() {") || !strings.Contains(script, "_close_enough_last_command=$BASH_COMMAND") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("bash post-failure hook does not consume command safely: %q", branch)
 	}
 }
@@ -1520,7 +1634,7 @@ func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
 	}
 	hook := "function _close_enough_post_failure --on-event fish_postexec"
 	start := strings.Index(script, hook)
-	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `if test -z "$command"`) || !strings.Contains(script[start:], `if test $command_status -ne 0`) || !strings.Contains(script[start:], `daemon request --operation post-failure --shell fish --session "$fish_pid" --format record --command "$command"`) || strings.Contains(script[start:], "close-enough check --stage post") {
+	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `if test -z "$command"`) || !strings.Contains(script[start:], `if test $command_status -ne 0`) || !strings.Contains(script[start:], `daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command"`) || strings.Contains(script[start:], "close-enough check --stage post") {
 		t.Fatalf("fish post-failure hook is missing or unsafe: %q", script)
 	}
 }
@@ -2007,7 +2121,7 @@ func TestPowerShellPostFailureConsumesHistoryEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `daemon request --operation post-failure --shell powershell --session $PID --format json --command $entry.CommandLine`) || strings.Contains(script, "close-enough check --stage post") {
+	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine`) || strings.Contains(script, "close-enough check --stage post") {
 		t.Fatalf("PowerShell post-failure hook is missing or unsafe: %q", script)
 	}
 }
@@ -2605,10 +2719,10 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preexec := `function _close_enough_preexec { _CLOSE_ENOUGH_LAST_COMMAND="$1"; _CLOSE_ENOUGH_PENDING_REWRITE='' }`
+	preexec := "function _close_enough_preexec {"
 	precmd := "function _close_enough_precmd {"
 	preexecStart, precmdStart := strings.Index(script, preexec), strings.Index(script, precmd)
-	if preexecStart < 0 || precmdStart < preexecStart {
+	if preexecStart < 0 || precmdStart < preexecStart || !strings.Contains(script[preexecStart:precmdStart], `_CLOSE_ENOUGH_LAST_COMMAND="$1"`) || !strings.Contains(script[preexecStart:precmdStart], "_CLOSE_ENOUGH_PENDING_REWRITE=''") {
 		t.Fatalf("zsh post-failure hooks are missing: %q", script)
 	}
 	end := strings.Index(script[precmdStart:], "autoload -Uz add-zsh-hook")
@@ -2617,8 +2731,8 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	}
 	branch := script[precmdStart : precmdStart+end]
 	consume := "_CLOSE_ENOUGH_LAST_COMMAND=''"
-	trigger := `daemon request --operation post-failure --shell zsh --session "$$" --format record --command "$command"`
-	if !strings.Contains(branch, `local status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	trigger := `daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command"`
+	if !strings.Contains(branch, `local exit_status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("zsh post-failure trigger does not consume command safely: %q", branch)
 	}
 }

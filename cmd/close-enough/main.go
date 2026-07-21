@@ -419,6 +419,7 @@ func startDaemonProcessDefault() error {
 		return err
 	}
 	command := exec.Command(path, "daemon", "serve")
+	detachDaemonProcess(command)
 	if err := command.Start(); err != nil {
 		return err
 	}

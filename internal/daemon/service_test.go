@@ -135,6 +135,27 @@ func TestServiceConfirmationTokenBindsExactCommand(t *testing.T) {
 	}
 }
 
+func TestServiceInvalidatesConfirmationOnBufferModification(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: config.Default(), Packs: resolver}
+	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
+	response, err := service.Handle(context.Background(), request)
+	if err != nil || response.Action != "interrupt" {
+		t.Fatalf("initial response = %#v, %v", response, err)
+	}
+	response, err = service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: request.Session, Command: "git reset --hard"})
+	if err != nil || response.Action != "interrupt" {
+		t.Fatalf("modified response = %#v, %v", response, err)
+	}
+	response, err = service.Handle(context.Background(), request)
+	if err != nil || response.Action != "interrupt" {
+		t.Fatalf("restored response = %#v, %v", response, err)
+	}
+}
+
 func TestServiceLearnsFailureThenSuccessfulCorrection(t *testing.T) {
 	store, err := localstate.Open(t.TempDir())
 	if err != nil {

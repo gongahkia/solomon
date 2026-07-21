@@ -178,6 +178,8 @@ class LedgerEvent:
         if self.kind is EventKind.SPLIT:
             if self.instrument is None or self.quantity <= 0:
                 raise ValueError("splits require an instrument and positive ratio")
+            if self.amount != 0 or self.fee != 0:
+                raise ValueError("splits cannot include cash amount or fee")
 
     @property
     def source_id(self) -> str:

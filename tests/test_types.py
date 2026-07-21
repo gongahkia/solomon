@@ -174,6 +174,23 @@ def test_dividend_events_require_instrument_cash_payload(
         )
 
 
+@pytest.mark.parametrize(("amount", "fee"), (("1", "0"), ("0", "1")))
+def test_split_events_reject_cash_payloads(amount: str, fee: str) -> None:
+    with pytest.raises(ValueError, match="splits cannot"):
+        LedgerEvent(
+            fingerprint="split-event",
+            source=SourceProvenance("csv", "a" * 64, "split"),
+            account=Account("csv", "main"),
+            occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+            kind=EventKind.SPLIT,
+            currency=Currency.USD,
+            amount=Decimal(amount),
+            quantity=Decimal("2"),
+            instrument=Instrument("SPY", "US", Currency.USD),
+            fee=Decimal(fee),
+        )
+
+
 @pytest.mark.parametrize(
     ("source", "account"),
     (

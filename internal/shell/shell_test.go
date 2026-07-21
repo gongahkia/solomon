@@ -140,7 +140,7 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 	}{
 		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
 		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell bash"},
-		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "set -l output (command close-enough check --stage post"},
+		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "daemon request --operation post-failure --shell fish"},
 		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "$output = (& close-enough check --stage post"},
 	} {
 		t.Run(test.shell, func(t *testing.T) {
@@ -1289,12 +1289,12 @@ func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
 	}
 	hook := "function _close_enough_post_failure --on-event fish_postexec"
 	start := strings.Index(script, hook)
-	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `test $command_status -ne 0; and test -n "$command"`) || !strings.Contains(script[start:], `--stage post --format plain --command "$command"`) {
+	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `if test -z "$command"`) || !strings.Contains(script[start:], `if test $command_status -ne 0`) || !strings.Contains(script[start:], `daemon request --operation post-failure --shell fish --session "$fish_pid" --format record --command "$command"`) || strings.Contains(script[start:], "close-enough check --stage post") {
 		t.Fatalf("fish post-failure hook is missing or unsafe: %q", script)
 	}
 }
 
-func TestFishPropagatesModeAndDisplayConfiguration(t *testing.T) {
+func TestFishUsesDaemonForPreAndPostDecisions(t *testing.T) {
 	contract, err := ContractFor("fish")
 	if err != nil {
 		t.Fatal(err)
@@ -1306,8 +1306,8 @@ func TestFishPropagatesModeAndDisplayConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "--stage pre --format record") || !strings.Contains(script, "--stage post --format plain") {
-		t.Fatalf("fish script does not delegate mode and display configuration: %q", script)
+	if !strings.Contains(script, "daemon request --operation pre-send --shell fish") || !strings.Contains(script, "daemon request --operation post-failure --shell fish") {
+		t.Fatalf("fish script does not delegate both stages to the daemon: %q", script)
 	}
 }
 

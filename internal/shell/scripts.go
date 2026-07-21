@@ -379,9 +379,23 @@ function _close_enough_post_failure --on-event fish_postexec
     return
   end
   if test $command_status -ne 0
-    set -l output (command close-enough check --stage post --format plain --command "$command" 2>/dev/null | string collect)
-    if test -n "$output"; and test "$output" != "no suggestion"; and _close_enough_allow_diagnostic
-      printf '%s\n' "$output"
+    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --format record --command "$command" 2>/dev/null)
+    if test $status -ne 0
+      return
+    end
+    set -l fields (string split \t -- $record)
+    if test (count $fields) -ne 7
+      return
+    end
+    if test "$fields[1]" != 1; or test "$fields[2]" = none
+      return
+    end
+    set -l suggestion_key "$fields[7]"
+    set -l suggestion (_close_enough_decode "$fields[7]")
+    set -l cause (_close_enough_decode "$fields[5]")
+    or return
+    if test -n "$suggestion"; and _close_enough_allow_suggestion "$suggestion_key"
+      echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)"
     end
   end
 end

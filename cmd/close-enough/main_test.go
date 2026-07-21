@@ -21,6 +21,7 @@ import (
 	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/localstate"
+	"github.com/gongahkia/close-enough/internal/packs"
 	"github.com/gongahkia/close-enough/internal/runtimecheck"
 )
 
@@ -202,6 +203,74 @@ func TestLearnCommandDisablesRemovesAndPurgesRules(t *testing.T) {
 	}
 	if len(purged.Drafts) != 0 || len(purged.Rules) != 0 {
 		t.Fatalf("purged learning state = %#v", purged)
+	}
+}
+
+func TestLearnListExportsRedactedLearningState(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if err := run([]string{"config", "set", "local_learning_enabled", "true"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := daemon.StateDirectory(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := localstate.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.LocalLearningEnabled = true
+	service := daemon.Service{Config: cfg, Store: store, Packs: resolver, Engine: diagnose.New(diagnose.Options{Config: cfg, Path: t.TempDir(), CWD: t.TempDir()})}
+	for index := range localstate.DraftEvidenceThreshold {
+		session := "learning-export-" + strconv.Itoa(index)
+		if _, err := service.Handle(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.PostFailureOperation, Session: session, Command: "git sttaus", FailureOutput: "fatal: TOKEN=top-secret"}); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+		if _, err := service.Handle(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.PostSuccessOperation, Session: session, Command: "git status"}); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+	}
+	drafts, err := store.ListReviewableDrafts(context.Background())
+	if err != nil || len(drafts) != 1 {
+		store.Close()
+		t.Fatalf("drafts = %#v, %v", drafts, err)
+	}
+	if _, err := store.ActivateDraft(context.Background(), drafts[0].ID, "hint"); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	if err := run([]string{"learn", "list"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "top-secret") || strings.Contains(output.String(), "failure_output") {
+		t.Fatalf("learning export leaked failure evidence: %s", output.String())
+	}
+	var exported struct {
+		Drafts []localstate.Draft       `json:"drafts"`
+		Rules  []localstate.LearnedRule `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(output.String()), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported.Drafts) != 1 || exported.Drafts[0].NormalizedFailure != "git sttaus" || exported.Drafts[0].NormalizedCorrection != "git status" || exported.Drafts[0].EvidenceCount != localstate.DraftEvidenceThreshold {
+		t.Fatalf("draft export = %#v", exported.Drafts)
+	}
+	if len(exported.Rules) != 1 || exported.Rules[0].Failure != "git sttaus" || exported.Rules[0].Correction != "git status" || exported.Rules[0].Action != "hint" {
+		t.Fatalf("rule export = %#v", exported.Rules)
 	}
 }
 

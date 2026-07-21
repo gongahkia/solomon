@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/gongahkia/close-enough/internal/config"
@@ -9,6 +10,24 @@ import (
 	"github.com/gongahkia/close-enough/internal/localstate"
 	"github.com/gongahkia/close-enough/internal/packs"
 )
+
+func TestNormalizedLearningCommand(t *testing.T) {
+	for _, test := range []struct {
+		command string
+		want    string
+		ok      bool
+	}{
+		{command: "  git\t sttaus  ", want: "git sttaus", ok: true},
+		{command: "git status --token top-secret", want: "git status --token [REDACTED]"},
+		{command: " \t "},
+		{command: strings.Repeat("x", 8<<10+1)},
+	} {
+		got, ok := normalizedLearningCommand(test.command)
+		if got != test.want || ok != test.ok {
+			t.Fatalf("normalizedLearningCommand(%q) = %q, %t; want %q, %t", test.command, got, ok, test.want, test.ok)
+		}
+	}
+}
 
 func TestServiceMapsDecisionToProtocolResponse(t *testing.T) {
 	service := Service{Engine: diagnose.New(diagnose.Options{Config: config.Default(), Path: t.TempDir(), CWD: t.TempDir()})}

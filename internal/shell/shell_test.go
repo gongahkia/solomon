@@ -41,6 +41,11 @@ type safeRewriteFixture struct {
 	Suggestion string `json:"suggestion"`
 }
 
+type highRiskConfirmationFixture struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
 func TestResolveAction(t *testing.T) {
 	tests := []struct {
 		name, action, risk, suggestion string
@@ -551,6 +556,91 @@ func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string,
 		t.Fatal(err)
 	}
 	if got := strings.Count(string(calls), "--operation"); got != 2 || strings.Count(string(calls), "--operation pre-send") != 1 || !strings.Contains(string(calls), fixture.Input) {
+		t.Fatalf("daemon calls = %q", calls)
+	}
+}
+
+func TestHighRiskConfirmationCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/high_risk_confirmation.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []highRiskConfirmationFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("high-risk confirmation corpus is empty")
+	}
+	for _, shellName := range []string{"zsh", "bash", "fish"} {
+		shellPath, err := exec.LookPath(shellName)
+		if err != nil {
+			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
+			continue
+		}
+		for _, fixture := range fixtures {
+			t.Run(shellName+"/"+fixture.Name, func(t *testing.T) {
+				if fixture.Name == "" || fixture.Command == "" {
+					t.Fatalf("invalid high-risk confirmation fixture: %#v", fixture)
+				}
+				runHighRiskConfirmationFixture(t, shellName, shellPath, fixture)
+			})
+		}
+	}
+}
+
+func runHighRiskConfirmationFixture(t *testing.T, shellName, shellPath string, fixture highRiskConfirmationFixture) {
+	t.Helper()
+	script, err := Script(shellName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter."+shellName)
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \" $* \" in *\" --operation handshake \"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\" --operation pre-send \"*) if test -e \"$STATE\"; then printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; else : > \"$STATE\"; printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture, state, result := filepath.Join(directory, "calls"), filepath.Join(directory, "state"), filepath.Join(directory, "result")
+	environment := append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+base64.StdEncoding.EncodeToString([]byte("press Enter again")), "RESULT="+result)
+	var command *exec.Cmd
+	switch shellName {
+	case "zsh":
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
+		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Command)
+	case "bash":
+		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_line|$second|$READLINE_LINE" > "$RESULT"`
+		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Command)
+	case "fish":
+		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
+		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Command)
+	default:
+		t.Fatalf("unsupported shell %q", shellName)
+	}
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%s harness: %v\n%s", shellName, err, output)
+	}
+	data, err := os.ReadFile(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shellName == "fish" {
+		if got, want := string(data), fixture.Command+"|"+fixture.Command+"|1"; got != want {
+			t.Fatalf("confirmation flow = %q, want %q", got, want)
+		}
+	} else if got, want := string(data), "1|"+fixture.Command+"|0|"+fixture.Command; got != want {
+		t.Fatalf("confirmation flow = %q, want %q", got, want)
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "--operation"); got != 3 || strings.Count(string(calls), "--operation pre-send") != 2 || strings.Count(string(calls), fixture.Command) != 2 {
 		t.Fatalf("daemon calls = %q", calls)
 	}
 }

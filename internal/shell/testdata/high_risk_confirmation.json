@@ -1,0 +1,4 @@
+[
+  {"name":"git-force-push","command":"git push --force"},
+  {"name":"filesystem-mutation","command":"rm -rf target"}
+]

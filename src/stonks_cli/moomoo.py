@@ -55,7 +55,13 @@ class OpenDConnection:
     port: int = 11111
 
     def __post_init__(self) -> None:
-        if self.host.lower() not in _LOCAL_HOSTS or not 1 <= self.port <= 65535:
+        if (
+            not isinstance(self.host, str)
+            or self.host.lower() not in _LOCAL_HOSTS
+            or isinstance(self.port, bool)
+            or not isinstance(self.port, int)
+            or not 1 <= self.port <= 65535
+        ):
             raise ProviderError("Moomoo OpenD must be a valid loopback endpoint")
 
 

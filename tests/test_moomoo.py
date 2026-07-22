@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+import pytest
 from conftest import encrypted_ledger
 
+from stonks_cli.errors import ProviderError
 from stonks_cli.ledger import (
     list_cash_flows,
     list_cash_snapshots,
@@ -103,6 +105,17 @@ def test_moomoo_rejects_non_loopback_endpoint() -> None:
         assert "loopback" in str(error)
     else:
         raise AssertionError("non-loopback endpoint must be rejected")
+
+
+@pytest.mark.parametrize("port", (0, 65536, True, "11111"))
+def test_moomoo_rejects_invalid_loopback_ports(port: object) -> None:
+    with pytest.raises(ProviderError, match="loopback"):
+        OpenDConnection("localhost", port)  # type: ignore[arg-type]
+
+
+def test_moomoo_rejects_non_string_loopback_host() -> None:
+    with pytest.raises(ProviderError, match="loopback"):
+        OpenDConnection(None, 11111)  # type: ignore[arg-type]
 
 
 def test_moomoo_reads_documented_account_data_only() -> None:

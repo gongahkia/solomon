@@ -76,7 +76,6 @@ from stonks_cli.operator import (
     linux_schedule_status,
     macos_schedule_status,
     notify_local,
-    notify_telegram,
     render_schedule,
 )
 from stonks_cli.paper import (
@@ -112,6 +111,30 @@ from stonks_cli.strategy import (
     list_journal_entries,
     run_csv_backtest,
     store_artifact,
+)
+from stonks_cli.telegram_delivery import (
+    TelegramArtifact,
+    TelegramEventCategory,
+    TelegramMessageField,
+    TelegramSettings,
+)
+from stonks_cli.telegram_delivery import (
+    add_recipient as add_telegram_recipient,
+)
+from stonks_cli.telegram_delivery import (
+    configure as configure_telegram,
+)
+from stonks_cli.telegram_delivery import (
+    deliver as deliver_telegram,
+)
+from stonks_cli.telegram_delivery import (
+    delivery_records as telegram_delivery_records,
+)
+from stonks_cli.telegram_delivery import (
+    settings as telegram_settings,
+)
+from stonks_cli.telegram_delivery import (
+    settings_audit as telegram_settings_audit,
 )
 from stonks_cli.types import Account, Currency, DrawdownResponsePolicy, Instrument
 from stonks_cli.watchlist import (
@@ -1352,15 +1375,6 @@ def monitor(
     ledger = EncryptedLedger(_profile(profile, key_file))
     count, source_hash, instruments = _refresh_moomoo_watchlist(ledger, days, host, port)
     alerts = _scan_price_alerts(ledger, threshold)
-    chat_id = os.environ.get("STONKS_CLI_TELEGRAM_CHAT_ID")
-    token = os.environ.get("STONKS_CLI_TELEGRAM_TOKEN")
-    delivered = False
-    if alerts and chat_id and token:
-        message = "\n".join(
-            f"{item['instrument']}: {item['change_percent']}% as of {item['as_of']}"
-            for item in alerts
-        )
-        delivered = notify_telegram(token, chat_id, "stonks-cli market alerts", message)
     console.print_json(
         json.dumps(
             {
@@ -1369,7 +1383,7 @@ def monitor(
                 "prices": count,
                 "source_hash": source_hash,
                 "alerts": alerts,
-                "telegram_delivered": delivered,
+                "telegram_delivered": False,
                 "execution": "denied",
             }
         )
@@ -1427,13 +1441,225 @@ def notify(title: str, message: str) -> None:
         raise typer.Exit(1)
 
 
+@app.command("telegram-recipient-add")
+def telegram_recipient_add(
+    profile: str,
+    alias: str,
+    token_env: str = typer.Option("STONKS_CLI_TELEGRAM_TOKEN"),
+    recipient_env: str = typer.Option("STONKS_CLI_TELEGRAM_RECIPIENT"),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    token = os.environ.get(token_env)
+    recipient = os.environ.get(recipient_env)
+    if token is None or recipient is None:
+        raise typer.BadParameter("Telegram token and recipient environment variables are required")
+    try:
+        configured = add_telegram_recipient(
+            EncryptedLedger(_profile(profile, key_file)), alias, token, recipient, source="cli"
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(
+        json.dumps({"profile": profile, "recipient_count": len(configured.recipient_aliases)})
+    )
+
+
+@app.command("telegram-configure")
+def telegram_configure(
+    profile: str,
+    recipient_alias: list[str] = typer.Option(..., "--recipient"),
+    events: str = typer.Option("advisory,policy_conflict,job_failure"),
+    fields: str = typer.Option("instrument,action,rationale"),
+    enabled: bool = typer.Option(True, "--enable/--disable"),
+    scheduled_enabled: bool = typer.Option(False, "--enable-scheduled/--disable-scheduled"),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    try:
+        event_categories = tuple(
+            TelegramEventCategory(value.strip()) for value in events.split(",") if value.strip()
+        )
+        message_fields = tuple(
+            TelegramMessageField(value.strip()) for value in fields.split(",") if value.strip()
+        )
+        configured = configure_telegram(
+            EncryptedLedger(_profile(profile, key_file)),
+            enabled=enabled,
+            recipient_aliases=tuple(recipient_alias),
+            event_categories=event_categories,
+            message_fields=message_fields,
+            scheduled_enabled=scheduled_enabled,
+            source="cli",
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(json.dumps(_telegram_settings_data(profile, configured)))
+
+
+@app.command("telegram-settings")
+def telegram_settings_command(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    payload = _telegram_settings_data(profile, telegram_settings(ledger))
+    payload["configuration_audit"] = [
+        {
+            "created_at": record.created_at.isoformat(),
+            "version": record.version,
+            "source": record.source,
+            "recipient_count": record.recipient_count,
+            "scheduled_enabled": record.scheduled_enabled,
+        }
+        for record in telegram_settings_audit(ledger)
+    ]
+    console.print_json(json.dumps(payload))
+
+
+def _telegram_settings_data(profile: str, configured: TelegramSettings) -> dict[str, object]:
+    return {
+        "profile": profile,
+        "enabled": configured.enabled,
+        "recipient_count": len(configured.recipient_aliases),
+        "event_categories": configured.event_categories,
+        "message_fields": configured.message_fields,
+        "scheduled_enabled": configured.scheduled_enabled,
+        "version": configured.version,
+    }
+
+
+def _send_telegram_artifact(
+    profile: str,
+    artifact_id: str,
+    event_category: TelegramEventCategory,
+    instrument: str | None,
+    action: str | None,
+    rationale: str | None,
+    amounts: str | None,
+    quantities: str | None,
+    balances: str | None,
+    token_env: str | None,
+    recipient_env: str | None,
+    key_file: Path | None,
+) -> None:
+    if (token_env is None) != (recipient_env is None):
+        raise typer.BadParameter("Telegram environment overrides require token and recipient")
+    token = None if token_env is None else os.environ.get(token_env)
+    recipient = None if recipient_env is None else os.environ.get(recipient_env)
+    if token_env is not None and (token is None or recipient is None):
+        raise typer.BadParameter("Telegram override environment variables are required")
+    try:
+        records = deliver_telegram(
+            EncryptedLedger(_profile(profile, key_file)),
+            TelegramArtifact(
+                artifact_id,
+                event_category,
+                instrument,
+                action,
+                rationale,
+                amounts,
+                quantities,
+                balances,
+            ),
+            token_override=token,
+            chat_id_override=recipient,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if not records:
+        raise typer.BadParameter("Telegram delivery is disabled or the artifact event is not enabled")
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "attempted": len(records),
+                "delivered": sum(record.result == "delivered" for record in records),
+                "failed": sum(record.result == "failed" for record in records),
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("telegram-send")
+def telegram_send(
+    profile: str,
+    artifact_id: str,
+    event_category: TelegramEventCategory = typer.Option(...),
+    instrument: str | None = typer.Option(None),
+    action: str | None = typer.Option(None),
+    rationale: str | None = typer.Option(None),
+    amounts: str | None = typer.Option(None),
+    quantities: str | None = typer.Option(None),
+    balances: str | None = typer.Option(None),
+    token_env: str | None = typer.Option(None),
+    recipient_env: str | None = typer.Option(None),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    _send_telegram_artifact(
+        profile,
+        artifact_id,
+        event_category,
+        instrument,
+        action,
+        rationale,
+        amounts,
+        quantities,
+        balances,
+        token_env,
+        recipient_env,
+        key_file,
+    )
+
+
 @app.command("notify-telegram")
-def notify_telegram_command(title: str, message: str, chat_id: str = typer.Option(...)) -> None:
-    token = os.environ.get("STONKS_CLI_TELEGRAM_TOKEN")
-    if token is None:
-        raise typer.BadParameter("STONKS_CLI_TELEGRAM_TOKEN is required")
-    if not notify_telegram(token, chat_id, title, message):
-        raise typer.Exit(1)
+def notify_telegram_command(
+    profile: str,
+    artifact_id: str,
+    event_category: TelegramEventCategory = typer.Option(...),
+    instrument: str | None = typer.Option(None),
+    action: str | None = typer.Option(None),
+    rationale: str | None = typer.Option(None),
+    token_env: str | None = typer.Option(None),
+    recipient_env: str | None = typer.Option(None),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    _send_telegram_artifact(
+        profile,
+        artifact_id,
+        event_category,
+        instrument,
+        action,
+        rationale,
+        None,
+        None,
+        None,
+        token_env,
+        recipient_env,
+        key_file,
+    )
+
+
+@app.command("telegram-delivery-audit")
+def telegram_delivery_audit(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    records = telegram_delivery_records(EncryptedLedger(_profile(profile, key_file)))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "deliveries": [
+                    {
+                        "profile": record.profile,
+                        "artifact_id": record.artifact_id,
+                        "channel": record.channel,
+                        "attempted_at": record.attempted_at.isoformat(),
+                        "delivered_at": None
+                        if record.delivered_at is None
+                        else record.delivered_at.isoformat(),
+                        "result": record.result,
+                        "error_classification": record.error_classification,
+                    }
+                    for record in records
+                ],
+            }
+        )
+    )
 
 
 @app.command("plugins")

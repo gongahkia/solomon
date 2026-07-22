@@ -9,7 +9,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from typer.testing import CliRunner
 
-from stonks_cli import cli
+from stonks_cli import cli, telegram_delivery
 from stonks_cli.cli import app
 from stonks_cli.market_data import (
     DailyPrice,
@@ -73,6 +73,11 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "schedule-status",
         "notify-local",
         "notify-telegram",
+        "telegram-recipient-add",
+        "telegram-configure",
+        "telegram-settings",
+        "telegram-send",
+        "telegram-delivery-audit",
         "paper-deposit",
         "paper-open",
         "paper-close",
@@ -481,11 +486,34 @@ def test_cli_performance_attributes_dividends_and_fees_by_currency(tmp_path: Pat
     }
 
 
-def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:
+def test_cli_delivers_telegram_only_after_profile_configuration(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("STONKS_CLI_TELEGRAM_TOKEN", "token")
-    monkeypatch.setattr(cli, "notify_telegram", lambda token, chat_id, title, message: True)
+    monkeypatch.setenv("STONKS_CLI_TELEGRAM_RECIPIENT", "recipient")
+    monkeypatch.setattr(telegram_delivery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(telegram_delivery, "notify_telegram", lambda token, chat_id, title, message: True)
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    assert runner.invoke(app, ["telegram-recipient-add", "personal", "primary"]).exit_code == 0
+    assert runner.invoke(app, ["telegram-configure", "personal", "--recipient", "primary"]).exit_code == 0
 
-    result = CliRunner().invoke(app, ["notify-telegram", "Title", "Message", "--chat-id", "chat"])
+    result = runner.invoke(
+        app,
+        [
+            "notify-telegram",
+            "personal",
+            "advisory-1",
+            "--event-category",
+            "advisory",
+            "--instrument",
+            "US:SPY",
+            "--action",
+            "buy",
+            "--rationale",
+            "trend",
+        ],
+    )
 
     assert result.exit_code == 0, result.output
 
@@ -506,7 +534,7 @@ def test_cli_manages_a_paper_portfolio(tmp_path: Path, monkeypatch) -> None:
     assert json.loads(result.output)["positions"] == {"US:SPY": "2"}
 
 
-def test_monitor_refreshes_and_delivers_public_price_alerts(tmp_path: Path, monkeypatch) -> None:
+def test_monitor_refreshes_without_environment_telegram_delivery(tmp_path: Path, monkeypatch) -> None:
     class Provider:
         def daily_prices(self, instruments, start, end):
             return (
@@ -515,10 +543,7 @@ def test_monitor_refreshes_and_delivers_public_price_alerts(tmp_path: Path, monk
             )
 
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("STONKS_CLI_TELEGRAM_TOKEN", "token")
-    monkeypatch.setenv("STONKS_CLI_TELEGRAM_CHAT_ID", "chat")
     monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
-    monkeypatch.setattr(cli, "notify_telegram", lambda token, chat_id, title, message: True)
     runner = CliRunner()
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
@@ -529,7 +554,7 @@ def test_monitor_refreshes_and_delivers_public_price_alerts(tmp_path: Path, monk
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["alerts"][0]["instrument"] == "US:SPY"
-    assert payload["telegram_delivered"] is True
+    assert payload["telegram_delivered"] is False
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

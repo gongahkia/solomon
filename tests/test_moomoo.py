@@ -122,16 +122,42 @@ class InvalidTokenQuoteContext(QuoteContext):
 
 
 class SnapshotQuoteContext:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, object]] | None = None,
+        *,
+        response_code: int = 0,
+        market_state: dict[str, object] | None = None,
+    ) -> None:
         self.closed = False
         self.codes: list[list[str]] = []
+        self.subscribe_calls: list[tuple[object, ...]] = []
+        self.rows = rows
+        self.response_code = response_code
+        self.market_state = market_state or {}
 
     def get_market_snapshot(self, codes: list[str]):
         self.codes.append(codes)
-        return 0, [
-            {"code": code, "last_price": "100", "update_time": "2026-01-02 09:30:00"}
+        if self.rows is not None:
+            return self.response_code, self.rows
+        return self.response_code, [
+            {
+                "code": code,
+                "last_price": "100",
+                "update_time": "2026-01-02 09:30:00",
+                "quote_status": "ENTITLED",
+                "bid_price": "99.90",
+                "ask_price": "100.10",
+            }
             for code in codes
         ]
+
+    def get_global_state(self):
+        return 0, self.market_state
+
+    def subscribe(self, *args: object) -> tuple[int, object]:
+        self.subscribe_calls.append(args)
+        return 0, None
 
     def close(self) -> None:
         self.closed = True
@@ -321,7 +347,7 @@ def test_moomoo_synthetic_opend_fixture_suite() -> None:
     assert provider.historical_fills("900001", "2026-01-01", "2026-01-02") == ({"deal_id": "deal-001"},)
     assert provider.order_fees("900001", ("order-001",))[0]["fee_amount"] == "1.00"
     assert [price.close for price in provider.daily_prices((instrument,), date(2026, 1, 1), date(2026, 1, 2))] == [Decimal("100"), Decimal("101")]
-    assert provider.market_snapshots((instrument,), datetime(2026, 1, 2, tzinfo=UTC))[0].last_price == Decimal("101")
+    assert provider.market_snapshots((instrument,), datetime(2026, 1, 2, 21, 1, tzinfo=UTC))[0].last_price == Decimal("101")
     assert provider.corporate_splits(instrument)[0]["rate"] == "1->2"
     assert provider.corporate_dividends(instrument)[0]["process"] == "Proposed"
 
@@ -482,7 +508,7 @@ def test_moomoo_historical_pagination_enforces_page_and_row_bounds(monkeypatch) 
     assert row_contexts[0].closed is True
 
 
-def test_moomoo_market_snapshots_are_explicitly_unknown_quality() -> None:
+def test_moomoo_market_snapshots_capture_entitled_bid_ask_without_subscription() -> None:
     contexts: list[SnapshotQuoteContext] = []
 
     def quote_factory(_host: str, _port: int) -> SnapshotQuoteContext:
@@ -494,12 +520,135 @@ def test_moomoo_market_snapshots_are_explicitly_unknown_quality() -> None:
         OpenDConnection(), lambda _host, _port: Context(), quote_factory
     )
     snapshots = provider.market_snapshots(
-        (Instrument("SPY", "US", Currency.USD),), datetime(2026, 1, 2, tzinfo=UTC)
+        (Instrument("SPY", "US", Currency.USD),), datetime(2026, 1, 2, 14, 31, tzinfo=UTC)
     )
 
-    assert snapshots[0].quality.value == "unknown"
+    assert snapshots[0].quality.value == "real_time"
+    assert snapshots[0].status.value == "available"
+    assert snapshots[0].current_price == Decimal("100")
+    assert snapshots[0].spread == Decimal("0.20")
+    assert snapshots[0].subscription_mode == "none"
     assert contexts[0].codes == [["US.SPY"]]
+    assert contexts[0].subscribe_calls == []
     assert contexts[0].closed is True
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "instrument", "observed_at", "expected_status", "expected_current", "expected_book"),
+    (
+        (
+            "entitled_us",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "available",
+            Decimal("101"),
+            "snapshot",
+        ),
+        (
+            "entitled_sg",
+            Instrument("SYNTH", "SG", Currency.SGD),
+            datetime(2026, 1, 2, 12, 1, tzinfo=UTC),
+            "available",
+            Decimal("10"),
+            "snapshot",
+        ),
+        (
+            "delayed",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "delayed",
+            None,
+            "absent",
+        ),
+        (
+            "unentitled",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "unentitled",
+            None,
+            "absent",
+        ),
+        (
+            "stale",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, tzinfo=UTC),
+            "stale",
+            None,
+            "absent",
+        ),
+        (
+            "malformed",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "malformed",
+            None,
+            "malformed",
+        ),
+        (
+            "absent_order_book",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "available",
+            Decimal("101"),
+            "absent",
+        ),
+        (
+            "excessive_spread",
+            Instrument("SYNTH", "US", Currency.USD),
+            datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+            "excessive_spread",
+            None,
+            "snapshot",
+        ),
+    ),
+)
+def test_moomoo_quote_snapshot_fixtures_fail_closed(
+    fixture_name: str,
+    instrument: Instrument,
+    observed_at: datetime,
+    expected_status: str,
+    expected_current: Decimal | None,
+    expected_book: str,
+) -> None:
+    payload = _opend_fixture()
+    records = payload["quote_snapshots"]
+    assert isinstance(records, dict)
+    rows = records[fixture_name]
+    assert isinstance(rows, list)
+    context = SnapshotQuoteContext(rows, market_state={f"market_{instrument.market.lower()}": "REGULAR"})
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
+    )
+
+    snapshot = provider.market_snapshots((instrument,), observed_at)[0]
+
+    assert snapshot.status.value == expected_status
+    assert snapshot.current_price == expected_current
+    assert snapshot.order_book_status == expected_book
+    assert snapshot.market_session == ("unknown" if expected_status == "malformed" else "REGULAR")
+    assert snapshot.subscription_mode == "none"
+    assert context.subscribe_calls == []
+    assert context.closed is True
+
+
+def test_moomoo_quote_unavailable_response_is_persistable_status() -> None:
+    payload = _opend_fixture()
+    records = payload["quote_snapshots"]
+    assert isinstance(records, dict)
+    rows = records["unavailable"]
+    assert isinstance(rows, list)
+    context = SnapshotQuoteContext(rows, response_code=-1)
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
+    )
+
+    snapshot = provider.market_snapshots(
+        (Instrument("SYNTH", "US", Currency.USD),), datetime(2026, 1, 2, 15, tzinfo=UTC)
+    )[0]
+
+    assert snapshot.status.value == "unavailable"
+    assert snapshot.current_price is None
+    assert context.closed is True
 
 
 def test_moomoo_reads_paginated_stock_split_records() -> None:

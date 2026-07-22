@@ -4,7 +4,8 @@ import csv
 import io
 import json
 import sqlite3
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -34,26 +35,90 @@ class QuoteQuality(StrEnum):
     UNKNOWN = "unknown"
 
 
+class QuoteStatus(StrEnum):
+    AVAILABLE = "available"
+    DELAYED = "delayed"
+    UNAVAILABLE = "unavailable"
+    STALE = "stale"
+    UNENTITLED = "unentitled"
+    MALFORMED = "malformed"
+    EXCESSIVE_SPREAD = "excessive_spread"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class QuoteSnapshot:
     instrument: Instrument
-    last_price: Decimal
-    observed_at: datetime
+    last_price: Decimal | None
+    observed_at: datetime  # retrieval time
     quality: QuoteQuality
     source_hash: str
     vendor_time: str | None = None
+    status: QuoteStatus = QuoteStatus.UNKNOWN
+    as_of_at: datetime | None = None
+    bid_price: Decimal | None = None
+    ask_price: Decimal | None = None
+    midpoint: Decimal | None = None
+    spread: Decimal | None = None
+    order_book_as_of: datetime | None = None
+    order_book_status: str = "absent"
+    market_session: str = "unknown"
+    subscription_mode: str = "none"
+    provider_fingerprint: str | None = None
+    raw_payload: Mapping[str, object] | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "last_price", decimal(self.last_price))
-        if self.last_price <= 0:
-            raise ValueError("quote last price must be positive")
+        if self.last_price is not None:
+            object.__setattr__(self, "last_price", decimal(self.last_price))
+            if self.last_price <= 0:
+                raise ValueError("quote last price must be positive")
         if self.observed_at.tzinfo is None:
             raise ValueError("quote observation time must be timezone-aware")
         object.__setattr__(self, "observed_at", self.observed_at.astimezone(UTC))
         if not isinstance(self.quality, QuoteQuality):
             raise ValueError("quote quality is required")
+        if not isinstance(self.status, QuoteStatus):
+            raise ValueError("quote status is required")
         if len(self.source_hash) != 64:
             raise ValueError("quote source hash must be a SHA-256 digest")
+        for name in ("as_of_at", "order_book_as_of"):
+            value = getattr(self, name)
+            if value is not None:
+                if value.tzinfo is None:
+                    raise ValueError(f"quote {name} must be timezone-aware")
+                object.__setattr__(self, name, value.astimezone(UTC))
+        for name in ("bid_price", "ask_price", "midpoint", "spread"):
+            value = getattr(self, name)
+            if value is not None:
+                value = decimal(value)
+                if value < 0 or (name != "spread" and value == 0):
+                    raise ValueError(f"quote {name} must be non-negative")
+                object.__setattr__(self, name, value)
+        if (self.bid_price is None) != (self.ask_price is None):
+            raise ValueError("quote bid and ask must both be present or absent")
+        bid_price = self.bid_price
+        ask_price = self.ask_price
+        if bid_price is not None and ask_price is not None:
+            if bid_price > ask_price:
+                raise ValueError("quote bid must not exceed ask")
+            midpoint = (bid_price + ask_price) / Decimal("2")
+            spread = ask_price - bid_price
+            if self.midpoint != midpoint or self.spread != spread:
+                raise ValueError("quote midpoint and spread must match bid and ask")
+        elif self.midpoint is not None or self.spread is not None:
+            raise ValueError("quote midpoint and spread require bid and ask")
+        if not self.order_book_status.strip() or not self.market_session.strip() or not self.subscription_mode.strip():
+            raise ValueError("quote status fields must be non-empty")
+        fingerprint = self.provider_fingerprint or self.source_hash
+        if len(fingerprint) != 64:
+            raise ValueError("quote provider fingerprint must be a SHA-256 digest")
+        object.__setattr__(self, "provider_fingerprint", fingerprint)
+
+    @property
+    def current_price(self) -> Decimal | None:
+        if self.status is QuoteStatus.AVAILABLE and self.quality is QuoteQuality.REAL_TIME:
+            return self.last_price
+        return None
 
 
 @dataclass(frozen=True)
@@ -116,16 +181,58 @@ def _initialize(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    _initialize_quote_snapshots(connection)
+
+
+def _initialize_quote_snapshots(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(quote_snapshots)")}
+    if columns and "status" not in columns:
+        connection.execute("ALTER TABLE quote_snapshots RENAME TO quote_snapshots_legacy")
+        _create_quote_snapshots_table(connection)
+        connection.execute(
+            """
+            INSERT INTO quote_snapshots (
+                instrument_key, observed_at, as_of_at, last_price, currency, quality, status,
+                source_hash, provider_fingerprint, vendor_time, bid_price, ask_price, midpoint,
+                spread, order_book_as_of, order_book_status, market_session, subscription_mode
+            )
+            SELECT
+                instrument_key, observed_at, NULL, last_price, currency, quality, 'unknown',
+                source_hash, source_hash, vendor_time, NULL, NULL, NULL, NULL, NULL, 'absent',
+                'unknown', 'none'
+            FROM quote_snapshots_legacy
+            """
+        )
+        connection.execute("DROP TABLE quote_snapshots_legacy")
+    elif not columns:
+        _create_quote_snapshots_table(connection)
+
+
+def _create_quote_snapshots_table(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
-        CREATE TABLE IF NOT EXISTS quote_snapshots (
+        CREATE TABLE quote_snapshots (
             instrument_key TEXT NOT NULL,
             observed_at TEXT NOT NULL,
-            last_price TEXT NOT NULL,
+            as_of_at TEXT,
+            last_price TEXT,
             currency TEXT NOT NULL,
             quality TEXT NOT NULL CHECK(quality IN ('real_time', 'delayed', 'unknown')),
+            status TEXT NOT NULL CHECK(status IN (
+                'available', 'delayed', 'unavailable', 'stale', 'unentitled', 'malformed',
+                'excessive_spread', 'unknown'
+            )),
             source_hash TEXT NOT NULL,
+            provider_fingerprint TEXT NOT NULL,
             vendor_time TEXT,
+            bid_price TEXT,
+            ask_price TEXT,
+            midpoint TEXT,
+            spread TEXT,
+            order_book_as_of TEXT,
+            order_book_status TEXT NOT NULL,
+            market_session TEXT NOT NULL,
+            subscription_mode TEXT NOT NULL,
             PRIMARY KEY(instrument_key, observed_at, source_hash)
         )
         """
@@ -259,16 +366,33 @@ def store_quote_snapshots(ledger: EncryptedLedger, snapshots: tuple[QuoteSnapsho
         for snapshot in snapshots:
             cursor = connection.execute(
                 """
-                INSERT OR IGNORE INTO quote_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO quote_snapshots (
+                    instrument_key, observed_at, as_of_at, last_price, currency, quality, status,
+                    source_hash, provider_fingerprint, vendor_time, bid_price, ask_price, midpoint,
+                    spread, order_book_as_of, order_book_status, market_session, subscription_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot.instrument.key,
                     snapshot.observed_at.isoformat(),
-                    str(snapshot.last_price),
+                    snapshot.as_of_at.isoformat() if snapshot.as_of_at is not None else None,
+                    str(snapshot.last_price) if snapshot.last_price is not None else None,
                     snapshot.instrument.currency.value,
                     snapshot.quality.value,
+                    snapshot.status.value,
                     snapshot.source_hash,
+                    snapshot.provider_fingerprint,
                     snapshot.vendor_time,
+                    str(snapshot.bid_price) if snapshot.bid_price is not None else None,
+                    str(snapshot.ask_price) if snapshot.ask_price is not None else None,
+                    str(snapshot.midpoint) if snapshot.midpoint is not None else None,
+                    str(snapshot.spread) if snapshot.spread is not None else None,
+                    snapshot.order_book_as_of.isoformat()
+                    if snapshot.order_book_as_of is not None
+                    else None,
+                    snapshot.order_book_status,
+                    snapshot.market_session,
+                    snapshot.subscription_mode,
                 ),
             )
             inserted += cursor.rowcount
@@ -280,11 +404,14 @@ def archive_and_store_quote_snapshots(
 ) -> tuple[int, str]:
     content = json.dumps(
         [
-            {
+            snapshot.raw_payload
+            if snapshot.raw_payload is not None
+            else {
                 "instrument": snapshot.instrument.key,
-                "last_price": str(snapshot.last_price),
+                "last_price": str(snapshot.last_price) if snapshot.last_price is not None else None,
                 "observed_at": snapshot.observed_at.isoformat(),
                 "quality": snapshot.quality.value,
+                "status": snapshot.status.value,
                 "vendor_time": snapshot.vendor_time,
             }
             for snapshot in snapshots
@@ -315,11 +442,24 @@ def latest_quote_snapshots(ledger: EncryptedLedger) -> dict[str, QuoteSnapshot]:
     for row in rows:
         snapshot = QuoteSnapshot(
             _instrument_from_key(row["instrument_key"], Currency(row["currency"])),
-            Decimal(row["last_price"]),
+            Decimal(row["last_price"]) if row["last_price"] is not None else None,
             datetime.fromisoformat(row["observed_at"]),
             QuoteQuality(row["quality"]),
             row["source_hash"],
             row["vendor_time"],
+            QuoteStatus(row["status"]),
+            datetime.fromisoformat(row["as_of_at"]) if row["as_of_at"] is not None else None,
+            Decimal(row["bid_price"]) if row["bid_price"] is not None else None,
+            Decimal(row["ask_price"]) if row["ask_price"] is not None else None,
+            Decimal(row["midpoint"]) if row["midpoint"] is not None else None,
+            Decimal(row["spread"]) if row["spread"] is not None else None,
+            datetime.fromisoformat(row["order_book_as_of"])
+            if row["order_book_as_of"] is not None
+            else None,
+            row["order_book_status"],
+            row["market_session"],
+            row["subscription_mode"],
+            row["provider_fingerprint"],
         )
         snapshots[snapshot.instrument.key] = snapshot
     return snapshots

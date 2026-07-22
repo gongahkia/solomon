@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from importlib import import_module, metadata, util
 from typing import Any
@@ -22,7 +22,7 @@ from stonks_cli.ledger import (
     store_fee_record,
     store_position_snapshot,
 )
-from stonks_cli.market_data import DailyPrice, QuoteQuality, QuoteSnapshot
+from stonks_cli.market_data import DailyPrice, QuoteQuality, QuoteSnapshot, QuoteStatus
 from stonks_cli.plugins import Capability, PluginManifest, register_builtin_provider
 from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
@@ -58,6 +58,12 @@ _MAX_HISTORICAL_PAGES = 100
 _MAX_HISTORICAL_ROWS = 100_000
 _MAX_CORPORATE_ACTION_PAGES = 100
 _MAX_CORPORATE_ACTION_ROWS = 5_000
+_MAX_QUOTE_AGE = timedelta(minutes=5)
+_QUOTE_TIMEZONES = {"US": "America/New_York", "SG": "Asia/Singapore"}
+_ENTITLED_QUOTE_STATUSES = frozenset({"available", "entitled", "real_time", "realtime"})
+_DELAYED_QUOTE_STATUSES = frozenset({"delayed", "delay"})
+_UNAVAILABLE_QUOTE_STATUSES = frozenset({"unavailable", "unavailable_data"})
+_UNENTITLED_QUOTE_STATUSES = frozenset({"unentitled", "not_entitled", "no_permission"})
 _DIVIDEND_AMOUNT = re.compile(
     r"\bcash dividend\s*:\s*(?P<amount>[0-9]+(?:\.[0-9]+)?)\s+(?P<currency>CNY|HKD|SGD|USD)\b",
     re.IGNORECASE,
@@ -332,59 +338,82 @@ class MoomooReadOnlyProvider:
         return tuple(sorted(prices, key=lambda item: (item.instrument.key, item.session_date)))
 
     def market_snapshots(
-        self, instruments: tuple[Instrument, ...], observed_at: datetime
+        self,
+        instruments: tuple[Instrument, ...],
+        observed_at: datetime,
+        *,
+        maximum_age: timedelta = _MAX_QUOTE_AGE,
+        maximum_spread_bps: Decimal = Decimal("100"),
     ) -> tuple[QuoteSnapshot, ...]:
         if not instruments:
             return ()
+        if maximum_age < timedelta(0) or maximum_spread_bps < 0:
+            raise ProviderError("Moomoo quote limits must be non-negative")
         if self.quote_context_factory is None:
-            raise ProviderError("Moomoo quote context is unavailable")
+            return _unavailable_snapshots(instruments, observed_at, "quote_context_unavailable")
         observed_at = _utc_timestamp(observed_at)
         requested = {f"{item.market}.{item.symbol}": item for item in instruments}
         if len(requested) != len(instruments):
             raise ProviderError("Moomoo snapshot instruments are duplicated")
         rows: list[dict[str, Any]] = []
-        context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
+        market_state: dict[str, Any] = {}
+        failure: str | None = None
+        context: Any | None = None
         try:
+            context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
             call = getattr(context, "get_market_snapshot", None)
             if not callable(call):
-                raise ProviderError("Moomoo quote context does not support:get_market_snapshot")
-            for index in range(0, len(instruments), 400):
-                codes = [f"{item.market}.{item.symbol}" for item in instruments[index : index + 400]]
-                response = call(codes)
-                if not isinstance(response, tuple) or len(response) != 2 or response[0] != 0:
-                    raise ProviderError("Moomoo read failed:get_market_snapshot")
-                rows.extend(_records(response[1]))
-        except ProviderError:
-            raise
+                failure = "get_market_snapshot_unavailable"
+            else:
+                for index in range(0, len(instruments), 400):
+                    codes = [f"{item.market}.{item.symbol}" for item in instruments[index : index + 400]]
+                    self.quote_rate_limiter.acquire("get_market_snapshot")
+                    response = call(codes)
+                    if not isinstance(response, tuple) or len(response) != 2 or response[0] != 0:
+                        failure = "get_market_snapshot_failed"
+                        break
+                    rows.extend(_records(response[1]))
+                if failure is None:
+                    market_state = _quote_market_state(context)
         except Exception as error:
-            raise ProviderError("Moomoo read failed:get_market_snapshot") from error
+            failure = f"get_market_snapshot_error:{type(error).__name__}"
         finally:
-            close = getattr(context, "close", None)
-            if not callable(close):
-                raise ProviderError("Moomoo quote context cannot be closed")
-            close()
-        snapshots: list[QuoteSnapshot] = []
+            if context is not None:
+                close = getattr(context, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        failure = "quote_context_close_failed"
+                else:
+                    failure = "quote_context_close_unavailable"
+        if failure is not None:
+            return _unavailable_snapshots(instruments, observed_at, failure)
+        snapshots_by_code: dict[str, QuoteSnapshot] = {}
         for row in rows:
             try:
                 code = str(row["code"]).strip().upper()
-                instrument = requested.pop(code)
-                last_price = _positive_decimal(row["last_price"], "Moomoo snapshot price")
-            except (KeyError, ValueError) as error:
-                raise ProviderError("malformed Moomoo market snapshot") from error
-            source_hash = hashlib.sha256(_canonical_json(row)).hexdigest()
-            snapshots.append(
-                QuoteSnapshot(
-                    instrument,
-                    last_price,
-                    observed_at,
-                    QuoteQuality.UNKNOWN,
-                    source_hash,
-                    str(row.get("update_time", "")).strip() or None,
+                instrument = requested[code]
+            except (KeyError, ValueError):
+                continue
+            if code in snapshots_by_code:
+                snapshots_by_code[code] = _malformed_snapshot(
+                    instrument, observed_at, row, "duplicate_snapshot"
                 )
+                continue
+            snapshots_by_code[code] = _normalize_quote_snapshot(
+                instrument,
+                row,
+                observed_at,
+                market_state,
+                maximum_age,
+                maximum_spread_bps,
             )
-        if requested:
-            raise ProviderError("Moomoo market snapshot omitted requested instrument")
-        return tuple(sorted(snapshots, key=lambda item: item.instrument.key))
+        for code, instrument in requested.items():
+            snapshots_by_code.setdefault(
+                code, _unavailable_snapshot(instrument, observed_at, "snapshot_omitted")
+            )
+        return tuple(sorted(snapshots_by_code.values(), key=lambda item: item.instrument.key))
 
     def corporate_splits(self, instrument: Instrument) -> tuple[dict[str, Any], ...]:
         if self.quote_context_factory is None:
@@ -968,6 +997,192 @@ def _instrument_from_moomoo_row(row: dict[str, Any], market_field: str) -> Instr
             raise ValueError("Moomoo market has no configured currency") from error
     name = str(row.get("stock_name", "")).strip() or None
     return Instrument(symbol, market, currency, name)
+
+
+def _quote_market_state(context: Any) -> dict[str, Any]:
+    call = getattr(context, "get_global_state", None)
+    if not callable(call):
+        return {}
+    try:
+        response = call()
+    except Exception:
+        return {}
+    if (
+        not isinstance(response, tuple)
+        or len(response) != 2
+        or response[0] != 0
+        or not isinstance(response[1], dict)
+    ):
+        return {}
+    return response[1]
+
+
+def _quote_fingerprint(payload: object) -> str:
+    return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+
+def _unavailable_snapshots(
+    instruments: tuple[Instrument, ...], observed_at: datetime, reason: str
+) -> tuple[QuoteSnapshot, ...]:
+    return tuple(
+        _unavailable_snapshot(instrument, observed_at, reason)
+        for instrument in sorted(instruments, key=lambda item: item.key)
+    )
+
+
+def _unavailable_snapshot(
+    instrument: Instrument, observed_at: datetime, reason: str
+) -> QuoteSnapshot:
+    raw_payload: dict[str, object] = {
+        "code": f"{instrument.market}.{instrument.symbol}",
+        "error": reason,
+        "subscription_mode": "none",
+    }
+    fingerprint = _quote_fingerprint(raw_payload)
+    return QuoteSnapshot(
+        instrument,
+        None,
+        observed_at,
+        QuoteQuality.UNKNOWN,
+        fingerprint,
+        status=QuoteStatus.UNAVAILABLE,
+        order_book_status="unavailable",
+        market_session="unknown",
+        subscription_mode="none",
+        provider_fingerprint=fingerprint,
+        raw_payload=raw_payload,
+    )
+
+
+def _malformed_snapshot(
+    instrument: Instrument, observed_at: datetime, row: dict[str, Any], reason: str
+) -> QuoteSnapshot:
+    raw_payload: dict[str, object] = {
+        "snapshot": row,
+        "error": reason,
+        "subscription_mode": "none",
+    }
+    fingerprint = _quote_fingerprint(raw_payload)
+    return QuoteSnapshot(
+        instrument,
+        None,
+        observed_at,
+        QuoteQuality.UNKNOWN,
+        fingerprint,
+        status=QuoteStatus.MALFORMED,
+        order_book_status="malformed",
+        market_session="unknown",
+        subscription_mode="none",
+        provider_fingerprint=fingerprint,
+        raw_payload=raw_payload,
+    )
+
+
+def _quote_status(row: dict[str, Any]) -> tuple[QuoteStatus, QuoteQuality]:
+    value = _optional_text(row.get("quote_status") or row.get("data_status"))
+    normalized = value.lower().replace("-", "_").replace(" ", "_") if value else ""
+    if normalized in _ENTITLED_QUOTE_STATUSES:
+        return QuoteStatus.AVAILABLE, QuoteQuality.REAL_TIME
+    if normalized in _DELAYED_QUOTE_STATUSES:
+        return QuoteStatus.DELAYED, QuoteQuality.DELAYED
+    if normalized in _UNAVAILABLE_QUOTE_STATUSES:
+        return QuoteStatus.UNAVAILABLE, QuoteQuality.UNKNOWN
+    if normalized in _UNENTITLED_QUOTE_STATUSES:
+        return QuoteStatus.UNENTITLED, QuoteQuality.UNKNOWN
+    return QuoteStatus.UNKNOWN, QuoteQuality.UNKNOWN
+
+
+def _quote_market_session(instrument: Instrument, row: dict[str, Any], state: dict[str, Any]) -> str:
+    session = _optional_text(row.get("market_session"))
+    if session is None:
+        session = _optional_text(state.get(f"market_{instrument.market.lower()}"))
+    return session or "unknown"
+
+
+def _quote_as_of(instrument: Instrument, value: object) -> datetime:
+    try:
+        timezone_name = _QUOTE_TIMEZONES[instrument.market]
+    except KeyError as error:
+        raise ValueError("Moomoo quote market is unsupported") from error
+    return _opend_timestamp(value, timezone_name).astimezone(UTC)
+
+
+def _normalize_quote_snapshot(
+    instrument: Instrument,
+    row: dict[str, Any],
+    observed_at: datetime,
+    market_state: dict[str, Any],
+    maximum_age: timedelta,
+    maximum_spread_bps: Decimal,
+) -> QuoteSnapshot:
+    raw_payload: dict[str, object] = {
+        "snapshot": row,
+        "market_state": market_state,
+        "subscription_mode": "none",
+    }
+    fingerprint = _quote_fingerprint(raw_payload)
+    try:
+        status, quality = _quote_status(row)
+        vendor_time = _optional_text(row.get("update_time"))
+        if vendor_time is None:
+            raise ValueError("Moomoo snapshot update time is required")
+        as_of_at = _quote_as_of(instrument, vendor_time)
+        if as_of_at > observed_at:
+            raise ValueError("Moomoo snapshot time is after retrieval")
+        last_price_value = _optional_text(row.get("last_price"))
+        if status is QuoteStatus.AVAILABLE and last_price_value is None:
+            raise ValueError("Moomoo entitled snapshot price is required")
+        last_price = (
+            _positive_decimal(last_price_value, "Moomoo snapshot price")
+            if last_price_value is not None
+            else None
+        )
+        bid_value = _optional_text(row.get("bid_price"))
+        ask_value = _optional_text(row.get("ask_price"))
+        if (bid_value is None) != (ask_value is None):
+            raise ValueError("Moomoo snapshot bid and ask are incomplete")
+        bid_price = _positive_decimal(bid_value, "Moomoo snapshot bid") if bid_value else None
+        ask_price = _positive_decimal(ask_value, "Moomoo snapshot ask") if ask_value else None
+        if bid_price is not None and ask_price is not None:
+            midpoint = (bid_price + ask_price) / Decimal("2")
+            spread = ask_price - bid_price
+            if bid_price > ask_price:
+                raise ValueError("Moomoo snapshot bid exceeds ask")
+            order_book_status = "snapshot"
+            order_book_as_of = as_of_at
+        else:
+            midpoint = None
+            spread = None
+            order_book_status = "absent"
+            order_book_as_of = None
+        if status is QuoteStatus.AVAILABLE and observed_at - as_of_at > maximum_age:
+            status = QuoteStatus.STALE
+        if status is QuoteStatus.AVAILABLE and midpoint is not None and spread is not None:
+            spread_bps = spread / midpoint * Decimal("10000")
+            if spread_bps > maximum_spread_bps:
+                status = QuoteStatus.EXCESSIVE_SPREAD
+        return QuoteSnapshot(
+            instrument,
+            last_price,
+            observed_at,
+            quality,
+            fingerprint,
+            vendor_time,
+            status,
+            as_of_at,
+            bid_price,
+            ask_price,
+            midpoint,
+            spread,
+            order_book_as_of,
+            order_book_status,
+            _quote_market_session(instrument, row, market_state),
+            "none",
+            fingerprint,
+            raw_payload,
+        )
+    except (KeyError, ValueError, ZoneInfoNotFoundError):
+        return _malformed_snapshot(instrument, observed_at, row, "invalid_snapshot")
 
 
 def _canonical_json(value: object) -> bytes:

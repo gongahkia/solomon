@@ -10,7 +10,18 @@
     [{"time_key": "2026-01-01 00:00:00", "close": "100"}],
     [{"time_key": "2026-01-02 00:00:00", "close": "101"}]
   ],
-  "market_snapshots": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 16:00:00"}],
+  "market_snapshots": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 16:00:00", "quote_status": "ENTITLED", "bid_price": "100.90", "ask_price": "101.10"}],
+  "quote_snapshots": {
+    "entitled_us": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 10:00:00", "quote_status": "ENTITLED", "bid_price": "100.90", "ask_price": "101.10"}],
+    "entitled_sg": [{"code": "SG.SYNTH", "last_price": "10", "update_time": "2026-01-02 20:00:00", "quote_status": "ENTITLED", "bid_price": "9.99", "ask_price": "10.01"}],
+    "delayed": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 10:00:00", "quote_status": "DELAYED"}],
+    "unentitled": [{"code": "US.SYNTH", "update_time": "2026-01-02 10:00:00", "quote_status": "UNENTITLED"}],
+    "unavailable": [],
+    "stale": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 09:00:00", "quote_status": "ENTITLED"}],
+    "malformed": [{"code": "US.SYNTH", "last_price": "invalid", "update_time": "2026-01-02 10:00:00", "quote_status": "ENTITLED"}],
+    "absent_order_book": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 10:00:00", "quote_status": "ENTITLED"}],
+    "excessive_spread": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 10:00:00", "quote_status": "ENTITLED", "bid_price": "100", "ask_price": "103"}]
+  },
   "stock_splits": {"next_key": "-1", "split_list": [{"reform_type": "Split", "rate": "1->2", "dir_deci_pub_date_str": "2026-01-02"}]},
   "dividends": {"dividend_list": [{"pub_date": "2026/01/02", "statement": "Cash Dividend: 1.00000 USD Per Share", "process": "Proposed", "record_date": "2026/01/10", "ex_date": "2026/01/09", "dividend_payable_date": "2026/01/20"}]}
 }

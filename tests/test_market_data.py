@@ -11,6 +11,7 @@ from stonks_cli.market_data import (
     FxRate,
     QuoteQuality,
     QuoteSnapshot,
+    QuoteStatus,
     archive_and_store_daily_prices,
     archive_and_store_quote_snapshots,
     convert_currency,
@@ -23,6 +24,7 @@ from stonks_cli.market_data import (
     price_freshness,
     price_revisions,
 )
+from stonks_cli.storage import decrypt
 from stonks_cli.types import Currency, Instrument
 
 
@@ -71,15 +73,63 @@ def test_market_data_tracks_revisions_freshness_and_quote_quality(tmp_path: Path
         instrument,
         Decimal("102"),
         datetime(2026, 1, 4, tzinfo=UTC),
-        QuoteQuality.UNKNOWN,
+        QuoteQuality.REAL_TIME,
         "c" * 64,
         "2026-01-03 16:00:00",
+        QuoteStatus.AVAILABLE,
+        datetime(2026, 1, 3, 16, tzinfo=UTC),
+        Decimal("101"),
+        Decimal("103"),
+        Decimal("102"),
+        Decimal("2"),
+        datetime(2026, 1, 3, 16, tzinfo=UTC),
+        "snapshot",
+        "REGULAR",
+        raw_payload={"provider": "opend", "raw_price": "102"},
     )
     count, source_hash = archive_and_store_quote_snapshots(ledger, (quote,))
 
     assert count == 1
-    assert latest_quote_snapshots(ledger)[instrument.key].quality is QuoteQuality.UNKNOWN
+    snapshot = latest_quote_snapshots(ledger)[instrument.key]
+    assert snapshot.current_price == Decimal("102")
+    assert snapshot.provider_fingerprint == "c" * 64
     assert (ledger.sources / f"{source_hash}.enc").is_file()
+    raw = decrypt(
+        ledger.key,
+        (ledger.sources / f"{source_hash}.enc").read_bytes(),
+        profile=ledger.config.name,
+        label=f"source:{source_hash}",
+    )
+    assert raw == b'[{"provider":"opend","raw_price":"102"}]'
+
+
+def test_quote_snapshot_storage_migrates_legacy_rows(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    with ledger.connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE quote_snapshots (
+                instrument_key TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                last_price TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                quality TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                vendor_time TEXT,
+                PRIMARY KEY(instrument_key, observed_at, source_hash)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO quote_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("US:SPY", "2026-01-02T15:00:00+00:00", "100", "USD", "unknown", "d" * 64, None),
+        )
+
+    snapshot = latest_quote_snapshots(ledger)["US:SPY"]
+
+    assert snapshot.status is QuoteStatus.UNKNOWN
+    assert snapshot.last_price == Decimal("100")
+    assert snapshot.current_price is None
 
 
 def test_fx_import_requires_provenance_and_supports_direct_or_inverse_rates(tmp_path: Path, monkeypatch) -> None:

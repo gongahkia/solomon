@@ -52,6 +52,7 @@ from stonks_cli.market_data import (
     import_fx_rates_csv,
     latest_fx_rates,
     latest_prices,
+    latest_quote_snapshots,
 )
 from stonks_cli.moomoo import (
     MoomooReadOnlyProvider,
@@ -232,10 +233,17 @@ def portfolio(
     base_currency: str | None = typer.Option(None),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    events = list_events(EncryptedLedger(_profile(profile, key_file)))
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    events = list_events(ledger)
     cash = cash_balances(events)
     holdings = positions(events)
-    prices = latest_prices(EncryptedLedger(_profile(profile, key_file)))
+    prices = latest_prices(ledger)
+    quotes = latest_quote_snapshots(ledger)
+    valuation_sources: dict[str, str] = {instrument_key: "daily_close" for instrument_key in prices}
+    for instrument_key, snapshot in quotes.items():
+        if snapshot.current_price is not None:
+            prices[instrument_key] = snapshot.current_price
+            valuation_sources[instrument_key] = "current_quote"
     values_by_currency = market_values_by_currency(events, prices)
     payload = {
         "profile": profile,
@@ -261,6 +269,21 @@ def portfolio(
             }
             for currency, values in allocations_by_currency(events, prices).items()
         },
+        "quote_snapshots": {
+            instrument_key: {
+                "status": snapshot.status.value,
+                "as_of": snapshot.as_of_at.isoformat() if snapshot.as_of_at is not None else None,
+                "retrieved_at": snapshot.observed_at.isoformat(),
+                "price": str(snapshot.current_price) if snapshot.current_price is not None else None,
+                "market_session": snapshot.market_session,
+                "order_book_status": snapshot.order_book_status,
+                "spread": str(snapshot.spread) if snapshot.spread is not None else None,
+                "subscription_mode": snapshot.subscription_mode,
+                "provider_fingerprint": snapshot.provider_fingerprint,
+            }
+            for instrument_key, snapshot in quotes.items()
+        },
+        "valuation_price_sources": valuation_sources,
     }
     if base_currency is not None:
         try:
@@ -605,9 +628,11 @@ def refresh_moomoo_quotes(
     if not instruments:
         raise typer.BadParameter("watchlist is empty")
     provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
-    count, source_hash = archive_and_store_quote_snapshots(
-        ledger, provider.market_snapshots(instruments, datetime.now(UTC))
-    )
+    snapshots = provider.market_snapshots(instruments, datetime.now(UTC))
+    count, source_hash = archive_and_store_quote_snapshots(ledger, snapshots)
+    statuses: dict[str, int] = defaultdict(int)
+    for snapshot in snapshots:
+        statuses[snapshot.status.value] += 1
     console.print_json(
         json.dumps(
             {
@@ -615,7 +640,8 @@ def refresh_moomoo_quotes(
                 "instruments": len(instruments),
                 "quotes": count,
                 "source_hash": source_hash,
-                "quote_quality": "unknown",
+                "quote_statuses": dict(sorted(statuses.items())),
+                "subscription_mode": "none",
                 "execution": "denied",
             }
         )

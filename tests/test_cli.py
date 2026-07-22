@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from stonks_cli import cli
 from stonks_cli.cli import app
-from stonks_cli.market_data import DailyPrice
+from stonks_cli.market_data import (
+    DailyPrice,
+    QuoteQuality,
+    QuoteSnapshot,
+    QuoteStatus,
+    archive_and_store_quote_snapshots,
+)
 from stonks_cli.moomoo import OpenDSDKStatus
 from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
+from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import Currency, Instrument
 
 
@@ -275,6 +284,72 @@ def test_cli_refreshes_moomoo_prices_from_watchlist(tmp_path: Path, monkeypatch)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["prices"] == 1
+
+
+def test_cli_refreshes_moomoo_quotes_with_fail_closed_status(tmp_path: Path, monkeypatch) -> None:
+    class Provider:
+        def market_snapshots(self, instruments, observed_at):
+            return (
+                QuoteSnapshot(
+                    instruments[0],
+                    None,
+                    observed_at,
+                    QuoteQuality.UNKNOWN,
+                    "a" * 64,
+                    status=QuoteStatus.UNAVAILABLE,
+                    order_book_status="unavailable",
+                ),
+            )
+
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    assert runner.invoke(app, ["watchlist-add", "personal", "SPY", "US", "USD"]).exit_code == 0
+
+    result = runner.invoke(app, ["refresh-moomoo-quotes", "personal"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["quote_statuses"] == {"unavailable": 1}
+
+
+def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    events = tmp_path / "events.csv"
+    events.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,instrument_currency\n"
+        "main,2026-01-02T00:00:00+00:00,buy,USD,100,1,SPY,US,USD\n"
+    )
+    prices = tmp_path / "prices.csv"
+    prices.write_text("date,symbol,market,currency,close\n2026-01-02,SPY,US,USD,100\n")
+    assert runner.invoke(app, ["import-csv", "personal", str(events)]).exit_code == 0
+    assert runner.invoke(app, ["import-prices", "personal", str(prices)]).exit_code == 0
+    ledger = EncryptedLedger(cli._profile("personal", key))
+    instrument = Instrument("SPY", "US", Currency.USD)
+    delayed = QuoteSnapshot(
+        instrument,
+        Decimal("105"),
+        datetime(2026, 1, 2, 15, 1, tzinfo=UTC),
+        QuoteQuality.DELAYED,
+        "b" * 64,
+        "2026-01-02 10:00:00",
+        QuoteStatus.DELAYED,
+        datetime(2026, 1, 2, 15, tzinfo=UTC),
+    )
+    archive_and_store_quote_snapshots(ledger, (delayed,))
+
+    result = runner.invoke(app, ["portfolio", "personal", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["quote_snapshots"]["US:SPY"]["status"] == "delayed"
+    assert payload["quote_snapshots"]["US:SPY"]["price"] is None
+    assert payload["valuation_price_sources"]["US:SPY"] == "daily_close"
+    assert payload["market_values_by_currency"]["USD"]["csv:main:US:SPY"] == "100"
 
 
 def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:

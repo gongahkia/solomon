@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shlex
 from collections import defaultdict
 from dataclasses import replace
@@ -71,7 +72,9 @@ from stonks_cli.moomoo import (
 from stonks_cli.operator import (
     ScheduleDefinition,
     install_linux_schedule,
+    install_macos_schedule,
     linux_schedule_status,
+    macos_schedule_status,
     notify_local,
     notify_telegram,
     render_schedule,
@@ -1271,10 +1274,13 @@ def schedule_install(
     unit_directory: Path = typer.Option(Path("~/.config/systemd/user")),
 ) -> None:
     load_profile(profile)
-    service, timer = install_linux_schedule(
-        ScheduleDefinition(profile, hour_singapore, minute_singapore), unit_directory.expanduser()
-    )
-    console.print_json(json.dumps({"service": str(service), "timer": str(timer)}))
+    definition = ScheduleDefinition(profile, hour_singapore, minute_singapore)
+    if platform.system() == "Darwin":
+        path = install_macos_schedule(definition, Path("~/Library/LaunchAgents"))
+        console.print_json(json.dumps({"plist": str(path)}))
+    else:
+        service, timer = install_linux_schedule(definition, unit_directory.expanduser())
+        console.print_json(json.dumps({"service": str(service), "timer": str(timer)}))
 
 
 @app.command("schedule-status")
@@ -1284,7 +1290,12 @@ def schedule_status(
     minute_singapore: int = typer.Option(30),
 ) -> None:
     load_profile(profile)
-    status = linux_schedule_status(ScheduleDefinition(profile, hour_singapore, minute_singapore))
+    definition = ScheduleDefinition(profile, hour_singapore, minute_singapore)
+    status = (
+        macos_schedule_status(definition)
+        if platform.system() == "Darwin"
+        else linux_schedule_status(definition)
+    )
     console.print_json(
         json.dumps({"label": status.label, "enabled": status.enabled, "active": status.active})
     )

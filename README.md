@@ -24,6 +24,9 @@ Linux schedules use persistent user `systemd` timers. Confirm systemd and timezo
 `systemctl --user status`, `systemctl --user list-timers`, and service logs; catch-up occurs only
 after the Pi boots, never while it is powered off.
 
+On macOS, `schedule-install` writes a private LaunchAgent and bootstraps it with `launchctl`;
+inspect it with `schedule-status` or `launchctl print gui/<uid>/com.stonks-cli.<profile>`.
+
 ## Start
 
 ```console

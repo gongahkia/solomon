@@ -12,7 +12,9 @@ from stonks_cli.operator import (
     ScheduledJob,
     ScheduleJobKind,
     default_scheduler_plan,
+    install_macos_schedule,
     linux_schedule_status,
+    macos_schedule_status,
     notify_telegram,
     render_schedule,
     render_systemd_units,
@@ -107,6 +109,37 @@ def test_linux_schedule_status_reads_enabled_and_active_state(monkeypatch) -> No
     assert status.enabled is True
     assert status.active is False
     assert calls[0][3] == "com.stonks-cli.personal.timer"
+
+
+def test_macos_schedule_installation_and_status_are_launchctl_scoped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(operator.os, "getuid", lambda: 501)
+    calls: list[tuple[str, ...]] = []
+
+    class Result:
+        returncode = 0
+        stdout = "state = running"
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr(operator.subprocess, "run", run)
+    definition = ScheduleDefinition("personal", 8, 30)
+
+    path = install_macos_schedule(definition, tmp_path / "LaunchAgents")
+    status = macos_schedule_status(definition)
+
+    assert path.read_text().startswith("<?xml")
+    assert path.stat().st_mode & 0o077 == 0
+    assert status.enabled is True
+    assert status.active is True
+    assert calls == [
+        ("launchctl", "bootstrap", "gui/501", str(path)),
+        ("launchctl", "print", "gui/501/com.stonks-cli.personal"),
+    ]
 
 
 def test_telegram_notification_posts_without_persisting_secret(monkeypatch) -> None:

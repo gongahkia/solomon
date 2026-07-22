@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import subprocess
@@ -257,6 +258,30 @@ def install_linux_schedule(
     return service_path, timer_path
 
 
+def install_macos_schedule(
+    definition: ScheduleDefinition, agent_directory: Path, executable: str = "stonks-cli"
+) -> Path:
+    if platform.system() != "Darwin":
+        raise ValueError("macOS launchd scheduling is unavailable on this host")
+    agent_directory = agent_directory.expanduser().resolve()
+    agent_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    agent_directory.chmod(0o700)
+    path = agent_directory / f"{definition.label}.plist"
+    if path.exists():
+        raise ValueError("macOS schedule already exists")
+    path.write_text(render_schedule(definition, executable))
+    path.chmod(0o600)
+    result = subprocess.run(
+        ("launchctl", "bootstrap", f"gui/{os.getuid()}", str(path)),
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        path.unlink(missing_ok=True)
+        raise ValueError("macOS schedule installation failed")
+    return path
+
+
 def linux_schedule_status(definition: ScheduleDefinition) -> ScheduleStatus:
     if platform.system() != "Linux":
         raise ValueError("Linux systemd scheduling is unavailable on this host")
@@ -272,6 +297,19 @@ def linux_schedule_status(definition: ScheduleDefinition) -> ScheduleStatus:
         )
 
     return ScheduleStatus(definition.label, is_state("is-enabled"), is_state("is-active"))
+
+
+def macos_schedule_status(definition: ScheduleDefinition) -> ScheduleStatus:
+    if platform.system() != "Darwin":
+        raise ValueError("macOS launchd scheduling is unavailable on this host")
+    result = subprocess.run(
+        ("launchctl", "print", f"gui/{os.getuid()}/{definition.label}"),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout if isinstance(result.stdout, str) else ""
+    return ScheduleStatus(definition.label, result.returncode == 0, "state = running" in output)
 
 
 def notify_local(title: str, message: str) -> bool:

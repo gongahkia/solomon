@@ -56,6 +56,15 @@ class Context:
         self.closed = True
 
 
+class AccountContext(Context):
+    def __init__(self, records: object) -> None:
+        super().__init__()
+        self.records = records
+
+    def get_acc_list(self):
+        return 0, self.records
+
+
 class QuoteContext:
     def __init__(self) -> None:
         self.closed = False
@@ -98,6 +107,29 @@ def test_moomoo_reads_accounts_from_loopback_context() -> None:
     accounts = MoomooReadOnlyProvider(OpenDConnection(), factory).accounts()
     assert accounts[0].account_id == "2"
     assert contexts[0].closed is True
+
+
+@pytest.mark.parametrize(
+    "records",
+    (
+        [{"acc_id": " ", "acc_index": 0, "trd_env": "REAL"}],
+        [{"acc_id": "1", "acc_index": -1, "trd_env": "REAL"}],
+        [{"acc_id": "1", "acc_index": True, "trd_env": "REAL"}],
+        [{"acc_id": "1", "acc_index": 0, "trd_env": " "}],
+        [
+            {"acc_id": "1", "acc_index": 0, "trd_env": "REAL"},
+            {"acc_id": "1", "acc_index": 1, "trd_env": "PAPER"},
+        ],
+    ),
+)
+def test_moomoo_rejects_malformed_account_rows(records: object) -> None:
+    context = AccountContext(records)
+    provider = MoomooReadOnlyProvider(OpenDConnection(), lambda _host, _port: context)
+
+    with pytest.raises(ProviderError, match="Moomoo account"):
+        provider.accounts()
+
+    assert context.closed is True
 
 
 def test_moomoo_rejects_non_loopback_endpoint() -> None:

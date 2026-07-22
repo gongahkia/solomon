@@ -201,9 +201,17 @@ class MoomooReadOnlyProvider:
         parsed: list[MoomooAccount] = []
         for row in _records(records):
             try:
-                parsed.append(
-                    MoomooAccount(str(row["acc_id"]), int(row["acc_index"]), str(row["trd_env"]))
-                )
+                raw_account_id = row["acc_id"]
+                raw_index = row["acc_index"]
+                raw_environment = row["trd_env"]
+                if raw_account_id is None or raw_environment is None or isinstance(raw_index, bool):
+                    raise ValueError
+                account_id = str(raw_account_id).strip()
+                account_index = int(raw_index)
+                environment = str(raw_environment).strip().upper()
+                if not account_id or account_index < 0 or not environment:
+                    raise ValueError
+                parsed.append(MoomooAccount(account_id, account_index, environment))
             except (KeyError, TypeError, ValueError) as error:
                 raise ProviderError("malformed Moomoo account record") from error
         if len({item.account_id for item in parsed}) != len(parsed):

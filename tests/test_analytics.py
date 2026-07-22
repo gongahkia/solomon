@@ -7,6 +7,8 @@ import pytest
 
 from stonks_cli.accounting import fifo_lots, unrealized_pnl
 from stonks_cli.analytics import (
+    PortfolioValuation,
+    ValuationFreshness,
     allocations_by_currency,
     asset_class_allocation,
     asset_class_allocations_by_currency,
@@ -20,6 +22,7 @@ from stonks_cli.analytics import (
     money_weighted_return,
     portfolio_health,
     portfolio_return_attribution,
+    realized_rolling_drawdown,
     sector_concentration,
     sector_concentrations_by_currency,
     time_weighted_return,
@@ -291,4 +294,44 @@ def test_portfolio_return_attribution_reconciles_market_income_and_fees() -> Non
             market_gain=Decimal("6"),
             dividends=Decimal("5"),
             fees=Decimal("2"),
+        )
+
+
+def test_realized_rolling_drawdown_uses_portfolio_high_water_mark() -> None:
+    valuations = (
+        PortfolioValuation(
+            datetime(2026, 1, 1, tzinfo=UTC),
+            Currency.SGD,
+            Decimal("100"),
+            ("price:one",),
+            ValuationFreshness.FRESH,
+        ),
+        PortfolioValuation(
+            datetime(2026, 1, 2, tzinfo=UTC),
+            Currency.SGD,
+            Decimal("120"),
+            ("price:two",),
+            ValuationFreshness.FRESH,
+        ),
+        PortfolioValuation(
+            datetime(2026, 1, 3, tzinfo=UTC),
+            Currency.SGD,
+            Decimal("84"),
+            ("price:three",),
+            ValuationFreshness.STALE,
+        ),
+    )
+
+    drawdown = realized_rolling_drawdown(
+        valuations, threshold=Decimal("0.25"), configuration_version="strategy-3"
+    )
+
+    assert drawdown.high_water.value == Decimal("120")
+    assert drawdown.current.value == Decimal("84")
+    assert drawdown.drawdown == Decimal("-0.3")
+    assert drawdown.breached is True
+    assert drawdown.current.freshness is ValuationFreshness.STALE
+    with pytest.raises(ValueError, match="ordered"):
+        realized_rolling_drawdown(
+            tuple(reversed(valuations)), configuration_version="strategy-3"
         )

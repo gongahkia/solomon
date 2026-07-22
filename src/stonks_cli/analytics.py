@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
+from enum import StrEnum
 
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate, convert_currency
@@ -208,6 +209,81 @@ def portfolio_return_attribution(
         market_gain,
         dividends,
         fees,
+    )
+
+
+class ValuationFreshness(StrEnum):
+    FRESH = "fresh"
+    STALE = "stale"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class PortfolioValuation:
+    as_of: datetime
+    currency: Currency
+    value: Decimal
+    source_ids: tuple[str, ...]
+    freshness: ValuationFreshness
+
+    def __post_init__(self) -> None:
+        if self.as_of.tzinfo is None:
+            raise ValueError("portfolio valuation time must be timezone-aware")
+        if not isinstance(self.currency, Currency) or self.value <= 0:
+            raise ValueError("portfolio valuation currency and value are required")
+        if not isinstance(self.freshness, ValuationFreshness):
+            raise ValueError("portfolio valuation freshness is required")
+        if not self.source_ids or not all(isinstance(source, str) and source.strip() for source in self.source_ids):
+            raise ValueError("portfolio valuation sources are required")
+        object.__setattr__(self, "as_of", self.as_of.astimezone(UTC))
+        object.__setattr__(self, "source_ids", tuple(source.strip() for source in self.source_ids))
+
+
+@dataclass(frozen=True)
+class RealizedDrawdown:
+    current: PortfolioValuation
+    high_water: PortfolioValuation
+    configuration_version: str
+    threshold: Decimal
+    drawdown: Decimal
+    breached: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.configuration_version, str) or not self.configuration_version.strip():
+            raise ValueError("drawdown configuration version is required")
+        if not 0 < self.threshold < 1:
+            raise ValueError("drawdown threshold must be between zero and one")
+        if self.current.currency is not self.high_water.currency:
+            raise ValueError("drawdown valuations must use one currency")
+        if self.drawdown != self.current.value / self.high_water.value - Decimal("1"):
+            raise ValueError("drawdown value does not reconcile")
+        object.__setattr__(self, "configuration_version", self.configuration_version.strip())
+
+
+def realized_rolling_drawdown(
+    valuations: tuple[PortfolioValuation, ...],
+    *,
+    threshold: Decimal = Decimal("0.25"),
+    configuration_version: str,
+) -> RealizedDrawdown:
+    if not valuations:
+        raise ValueError("at least one portfolio valuation is required")
+    if not 0 < threshold < 1:
+        raise ValueError("drawdown threshold must be between zero and one")
+    if tuple(sorted(valuations, key=lambda valuation: valuation.as_of)) != valuations:
+        raise ValueError("portfolio valuations must be ordered by time")
+    current = valuations[-1]
+    if any(valuation.currency is not current.currency for valuation in valuations):
+        raise ValueError("drawdown valuations must use one currency")
+    high_water = max(valuations, key=lambda valuation: valuation.value)
+    drawdown = current.value / high_water.value - Decimal("1")
+    return RealizedDrawdown(
+        current,
+        high_water,
+        configuration_version,
+        threshold,
+        drawdown,
+        drawdown <= -threshold,
     )
 
 

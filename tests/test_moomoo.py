@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from importlib import metadata
+from pathlib import Path
 
 import pytest
 from conftest import encrypted_ledger
@@ -150,6 +152,72 @@ class SplitQuoteContext:
         self.closed = True
 
 
+def _opend_fixture() -> dict[str, object]:
+    path = Path(__file__).parent / "fixtures" / "moomoo" / "opend_responses.json"
+    payload = json.loads(path.read_text())
+    assert isinstance(payload, dict)
+    return payload
+
+
+class FixtureContext:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.closed = False
+
+    def get_acc_list(self):
+        return 0, self.payload["accounts"]
+
+    def accinfo_query(self, **kwargs):
+        assert kwargs == {"acc_id": "900001"}
+        return 0, self.payload["balances"]
+
+    def get_acc_cash_flow(self, **kwargs):
+        assert kwargs == {"acc_id": "900001", "clearing_date": "2026-01-02"}
+        return 0, self.payload["cash_flows"]
+
+    def position_list_query(self, **kwargs):
+        assert kwargs == {"acc_id": "900001"}
+        return 0, self.payload["positions"]
+
+    def history_order_list_query(self, **kwargs):
+        assert kwargs == {"acc_id": "900001", "start": "2026-01-01", "end": "2026-01-02"}
+        return 0, self.payload["orders"]
+
+    def history_deal_list_query(self, **kwargs):
+        assert kwargs == {"acc_id": "900001", "start": "2026-01-01", "end": "2026-01-02"}
+        return 0, self.payload["fills"]
+
+    def order_fee_query(self, order_ids):
+        assert order_ids == ("order-001",)
+        return 0, self.payload["order_fees"]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FixtureQuoteContext:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.closed = False
+
+    def request_history_kline(self, code: str, **kwargs):
+        assert code == "US.SYNTH"
+        page = 0 if kwargs["page_req_key"] is None else 1
+        return 0, self.payload["daily_pages"][page], None if page else "page-2"
+
+    def get_market_snapshot(self, codes: list[str]):
+        assert codes == ["US.SYNTH"]
+        return 0, self.payload["market_snapshots"]
+
+    def get_corporate_actions_stock_splits(self, code: str, **kwargs):
+        assert code == "US.SYNTH"
+        assert kwargs == {"next_key": None, "num": 50}
+        return 0, self.payload["stock_splits"]
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def test_moomoo_reads_accounts_from_loopback_context() -> None:
     contexts: list[Context] = []
 
@@ -226,6 +294,29 @@ def test_moomoo_reads_documented_account_data_only() -> None:
     assert provider.order_fees("2", ("o-1",)) == (
         {"order_id": "o-1", "fee_amount": "1", "fee_details": [("Commission", "1")]},
     )
+
+
+def test_moomoo_synthetic_opend_fixture_suite() -> None:
+    payload = _opend_fixture()
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(),
+        lambda _host, _port: FixtureContext(payload),
+        lambda _host, _port: FixtureQuoteContext(payload),
+    )
+    instrument = Instrument("SYNTH", "US", Currency.USD)
+
+    assert provider.accounts()[0].account_id == "900001"
+    assert provider.balances("900001") == ({"us_cash": "1234.56", "sg_cash": "78.90"},)
+    assert provider.cash_flows("900001", "2026-01-02") == (
+        {"cashflow_id": "flow-001", "cashflow_type": "Others"},
+    )
+    assert provider.positions("900001") == ({"code": "US.SYNTH"},)
+    assert provider.historical_orders("900001", "2026-01-01", "2026-01-02") == ({"order_id": "order-001"},)
+    assert provider.historical_fills("900001", "2026-01-01", "2026-01-02") == ({"deal_id": "deal-001"},)
+    assert provider.order_fees("900001", ("order-001",))[0]["fee_amount"] == "1.00"
+    assert [price.close for price in provider.daily_prices((instrument,), date(2026, 1, 1), date(2026, 1, 2))] == [Decimal("100"), Decimal("101")]
+    assert provider.market_snapshots((instrument,), datetime(2026, 1, 2, tzinfo=UTC))[0].last_price == Decimal("101")
+    assert provider.corporate_splits(instrument)[0]["rate"] == "1->2"
 
 
 def test_moomoo_rejects_unknown_and_execution_methods() -> None:

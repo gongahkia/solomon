@@ -29,6 +29,7 @@ from stonks_cli.storage import (
     restore_backup,
     rotate_key,
 )
+from stonks_cli.types import Currency
 
 
 def test_key_file_is_private_and_round_trips(tmp_path: Path) -> None:
@@ -143,6 +144,22 @@ def test_profile_config_schema_round_trips_versioned_fields(
         "providers": ["csv"],
         "schema_version": 1,
     }
+
+
+def test_profile_default_reporting_currency_is_sgd_and_is_versioned_when_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    default = ProfileConfig("personal", str(tmp_path / "personal.key"))
+    assert default.reporting_currency is Currency.SGD
+    configured = ProfileConfig(
+        "other", str(tmp_path / "other.key"), reporting_currency=Currency.USD
+    )
+
+    save_profile(configured)
+
+    assert load_profile("other") == configured
+    assert json.loads(config_path("other").read_text())["reporting_currency"] == "USD"
 
 
 def test_profile_dividend_credit_settings_are_explicit_and_round_trip(

@@ -10,6 +10,7 @@ from conftest import encrypted_ledger
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import (
     DailyPrice,
+    FxAsOfPrecision,
     FxRate,
     MarketSession,
     QuoteQuality,
@@ -18,6 +19,7 @@ from stonks_cli.market_data import (
     archive_and_store_daily_prices,
     archive_and_store_quote_snapshots,
     convert_currency,
+    fx_rate_freshness,
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
@@ -30,6 +32,7 @@ from stonks_cli.market_data import (
     latest_quote_snapshots,
     price_freshness,
     price_revisions,
+    resolve_fx_rate,
     resolve_sg_equity_or_etf,
     resolve_us_equity_or_etf,
     store_instrument_masters,
@@ -248,6 +251,68 @@ def test_fx_import_requires_provenance_and_supports_direct_or_inverse_rates(tmp_
     assert FxRate(Currency.USD, Currency.SGD, date(2026, 1, 2), "1.35", "a" * 64).rate == Decimal(
         "1.35"
     )
+
+
+def test_usd_sgd_rates_persist_as_of_provider_and_explicit_inversion(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    source = tmp_path / "fx.csv"
+    source.write_text(
+        "date,base_currency,quote_currency,rate,as_of_at,provider_id\n"
+        "2026-01-02,USD,SGD,1.35,2026-01-02T12:00:00+08:00,mas\n"
+    )
+
+    assert import_fx_rates_csv(ledger, source) == 1
+    rate = latest_fx_rates(ledger)[(Currency.USD, Currency.SGD)]
+    assert rate.as_of_at == datetime(2026, 1, 2, 4, tzinfo=UTC)
+    assert rate.provider_id == "mas"
+    assert rate.as_of_precision is FxAsOfPrecision.INSTANT
+    resolution = resolve_fx_rate(Currency.SGD, Currency.USD, {(
+        Currency.USD,
+        Currency.SGD,
+    ): rate})
+    assert resolution.inverted is True
+    assert resolution.rate == rate
+    assert resolution.conversion_rate == Decimal("1") / Decimal("1.35")
+    fresh = fx_rate_freshness(
+        rate, as_of=datetime(2026, 1, 3, 4, tzinfo=UTC), maximum_age=timedelta(days=1)
+    )
+    assert fresh.stale is False
+    assert fresh.age == timedelta(days=1)
+    stale = fx_rate_freshness(
+        rate, as_of=datetime(2026, 1, 3, 4, 1, tzinfo=UTC), maximum_age=timedelta(days=1)
+    )
+    assert stale.stale is True
+    with pytest.raises(ValueError, match="only USD/SGD"):
+        FxRate(Currency.USD, Currency.HKD, date(2026, 1, 2), "1", "b" * 64)
+    with pytest.raises(ProviderError, match="missing FX"):
+        resolve_fx_rate(Currency.USD, Currency.SGD, {})
+
+
+def test_fx_rate_storage_migrates_legacy_csv_rows_with_date_precision(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    with ledger.connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE fx_rates (
+                base_currency TEXT NOT NULL,
+                quote_currency TEXT NOT NULL,
+                session_date TEXT NOT NULL,
+                rate TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                PRIMARY KEY(base_currency, quote_currency, session_date, source_hash)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO fx_rates VALUES (?, ?, ?, ?, ?)",
+            ("USD", "SGD", "2026-01-02", "1.35", "a" * 64),
+        )
+
+    rate = latest_fx_rates(ledger)[(Currency.USD, Currency.SGD)]
+
+    assert rate.provider_id == "csv"
+    assert rate.as_of_at == datetime(2026, 1, 2, tzinfo=UTC)
+    assert rate.as_of_precision is FxAsOfPrecision.DATE
 
 
 def test_instrument_master_versions_us_sg_records_and_defaults_unknown_etfs_to_narrow(

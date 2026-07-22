@@ -210,11 +210,65 @@ class FxRate:
     session_date: date
     rate: Decimal
     source_hash: str
+    as_of_at: datetime | None = None
+    provider_id: str = "csv"
+    as_of_precision: FxAsOfPrecision | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.base_currency, Currency) or not isinstance(self.quote_currency, Currency):
+            raise ValueError("FX currencies are required")
+        if {self.base_currency, self.quote_currency} != {Currency.USD, Currency.SGD}:
+            raise ValueError("only USD/SGD FX pairs are supported")
+        if not isinstance(self.session_date, date):
+            raise ValueError("FX session date is required")
         object.__setattr__(self, "rate", decimal(self.rate))
         if self.base_currency is self.quote_currency or self.rate <= 0:
             raise ValueError("FX rate must be positive and use distinct currencies")
+        supplied_as_of_at = self.as_of_at
+        as_of_at = supplied_as_of_at or datetime(
+            self.session_date.year, self.session_date.month, self.session_date.day, tzinfo=UTC
+        )
+        if as_of_at.tzinfo is None:
+            raise ValueError("FX as-of time must be timezone-aware")
+        as_of_at = as_of_at.astimezone(UTC)
+        if as_of_at.date() != self.session_date:
+            raise ValueError("FX as-of time must match its session date")
+        precision = self.as_of_precision or (
+            FxAsOfPrecision.INSTANT if supplied_as_of_at is not None else FxAsOfPrecision.DATE
+        )
+        if not isinstance(precision, FxAsOfPrecision):
+            raise ValueError("FX as-of precision is invalid")
+        provider_id = self.provider_id.strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider_id):
+            raise ValueError("FX provider identifier is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.source_hash.lower()):
+            raise ValueError("FX source hash must be a SHA-256 digest")
+        object.__setattr__(self, "as_of_at", as_of_at)
+        object.__setattr__(self, "provider_id", provider_id)
+        object.__setattr__(self, "source_hash", self.source_hash.lower())
+        object.__setattr__(self, "as_of_precision", precision)
+
+
+class FxAsOfPrecision(StrEnum):
+    DATE = "date"
+    INSTANT = "instant"
+
+
+@dataclass(frozen=True)
+class FxRateFreshness:
+    rate: FxRate
+    as_of_at: datetime
+    age: timedelta
+    stale: bool
+
+
+@dataclass(frozen=True)
+class FxRateResolution:
+    source_currency: Currency
+    target_currency: Currency
+    rate: FxRate | None
+    conversion_rate: Decimal
+    inverted: bool
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
@@ -241,10 +295,14 @@ def _initialize(connection: sqlite3.Connection) -> None:
             session_date TEXT NOT NULL,
             rate TEXT NOT NULL,
             source_hash TEXT NOT NULL,
+            as_of_at TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            as_of_precision TEXT NOT NULL CHECK(as_of_precision IN ('date', 'instant')),
             PRIMARY KEY(base_currency, quote_currency, session_date, source_hash)
         )
         """
     )
+    _initialize_fx_rates(connection)
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS daily_price_revisions (
@@ -304,6 +362,21 @@ def _initialize_instrument_master(connection: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _initialize_fx_rates(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(fx_rates)")}
+    if "as_of_at" not in columns:
+        connection.execute("ALTER TABLE fx_rates ADD COLUMN as_of_at TEXT")
+        connection.execute(
+            "UPDATE fx_rates SET as_of_at = session_date || 'T00:00:00+00:00' WHERE as_of_at IS NULL"
+        )
+    if "provider_id" not in columns:
+        connection.execute("ALTER TABLE fx_rates ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'csv'")
+    if "as_of_precision" not in columns:
+        connection.execute(
+            "ALTER TABLE fx_rates ADD COLUMN as_of_precision TEXT NOT NULL DEFAULT 'date'"
+        )
 
 
 def _initialize_daily_price_ohlc(connection: sqlite3.Connection) -> None:
@@ -649,14 +722,28 @@ def store_fx_rates(ledger: EncryptedLedger, rates: tuple[FxRate, ...]) -> int:
     with ledger.connection() as connection:
         _initialize(connection)
         for rate in rates:
+            as_of_at = rate.as_of_at
+            as_of_precision = rate.as_of_precision
+            if as_of_at is None:
+                raise ValueError("FX as-of time is required")
+            if as_of_precision is None:
+                raise ValueError("FX as-of precision is required")
             cursor = connection.execute(
-                "INSERT OR IGNORE INTO fx_rates VALUES (?, ?, ?, ?, ?)",
+                """
+                INSERT OR IGNORE INTO fx_rates (
+                    base_currency, quote_currency, session_date, rate, source_hash, as_of_at, provider_id,
+                    as_of_precision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     rate.base_currency.value,
                     rate.quote_currency.value,
                     rate.session_date.isoformat(),
                     str(rate.rate),
                     rate.source_hash,
+                    as_of_at.isoformat(),
+                    rate.provider_id,
+                    as_of_precision.value,
                 ),
             )
             inserted += cursor.rowcount
@@ -683,6 +770,11 @@ def import_fx_rates_csv(ledger: EncryptedLedger, path: Path) -> int:
                     date.fromisoformat(row["date"] or ""),
                     decimal(row["rate"] or ""),
                     source_hash,
+                    datetime.fromisoformat(row["as_of_at"])
+                    if row.get("as_of_at")
+                    else None,
+                    row.get("provider_id") or "csv",
+                    FxAsOfPrecision.INSTANT if row.get("as_of_at") else FxAsOfPrecision.DATE,
                 )
             )
         except (KeyError, ValueError) as error:
@@ -697,9 +789,9 @@ def latest_fx_rates(ledger: EncryptedLedger) -> dict[tuple[Currency, Currency], 
             """
             SELECT first.* FROM fx_rates AS first
             JOIN (
-                SELECT base_currency, quote_currency, MAX(session_date) AS session_date
+                SELECT base_currency, quote_currency, MAX(as_of_at) AS as_of_at
                 FROM fx_rates GROUP BY base_currency, quote_currency
-            ) AS latest USING (base_currency, quote_currency, session_date)
+            ) AS latest USING (base_currency, quote_currency, as_of_at)
             ORDER BY first.base_currency, first.quote_currency, first.source_hash
             """
         ).fetchall()
@@ -711,6 +803,9 @@ def latest_fx_rates(ledger: EncryptedLedger) -> dict[tuple[Currency, Currency], 
             date.fromisoformat(row["session_date"]),
             Decimal(row["rate"]),
             row["source_hash"],
+            datetime.fromisoformat(row["as_of_at"]),
+            row["provider_id"],
+            FxAsOfPrecision(row["as_of_precision"]),
         )
         values[(rate.base_currency, rate.quote_currency)] = rate
     return values
@@ -905,17 +1000,52 @@ def convert_currency(
     target_currency: Currency,
     rates: dict[tuple[Currency, Currency], FxRate],
 ) -> Decimal:
+    resolution = resolve_fx_rate(source_currency, target_currency, rates)
+    if resolution.rate is None:
+        return decimal(amount)
+    if resolution.inverted:
+        return decimal(amount) / resolution.rate.rate
+    return decimal(amount) * resolution.rate.rate
+
+
+def resolve_fx_rate(
+    source_currency: Currency,
+    target_currency: Currency,
+    rates: dict[tuple[Currency, Currency], FxRate],
+) -> FxRateResolution:
+    if not isinstance(source_currency, Currency) or not isinstance(target_currency, Currency):
+        raise ValueError("FX currencies are required")
     if source_currency is target_currency:
-        return amount
+        return FxRateResolution(source_currency, target_currency, None, Decimal("1"), False)
     direct = rates.get((source_currency, target_currency))
     if direct is not None:
-        return amount * direct.rate
+        return FxRateResolution(source_currency, target_currency, direct, direct.rate, False)
     inverse = rates.get((target_currency, source_currency))
     if inverse is not None:
-        return amount / inverse.rate
+        return FxRateResolution(source_currency, target_currency, inverse, Decimal("1") / inverse.rate, True)
     raise ProviderError(
         f"missing FX rate:{source_currency.value}:{target_currency.value}"
     )
+
+
+def fx_rate_freshness(
+    rate: FxRate,
+    *,
+    as_of: datetime,
+    maximum_age: timedelta,
+) -> FxRateFreshness:
+    if as_of.tzinfo is None:
+        raise ValueError("FX freshness time must be timezone-aware")
+    if maximum_age < timedelta(0):
+        raise ValueError("maximum FX age must be non-negative")
+    observed_at = as_of.astimezone(UTC)
+    rate_as_of = rate.as_of_at
+    if rate_as_of is None:
+        raise ValueError("FX as-of time is required")
+    age = observed_at - rate_as_of
+    if age < timedelta(0):
+        raise ProviderError("FX rate is after requested time")
+    return FxRateFreshness(rate, observed_at, age, age > maximum_age)
 
 
 def _instrument_master_from_row(row: sqlite3.Row) -> InstrumentMaster:

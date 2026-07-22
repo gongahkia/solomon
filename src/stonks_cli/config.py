@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from platformdirs import user_data_path
 
 from stonks_cli.errors import ProfileError, ProviderError
+from stonks_cli.types import Currency
 
 _PROFILE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENVIRONMENT_VARIABLE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
@@ -120,6 +121,7 @@ class ProfileConfig:
     schema_version: int = 1
     llm: LLMSettings = LLMSettings()
     dividends: DividendSettings = DividendSettings()
+    reporting_currency: Currency = Currency.SGD
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -131,6 +133,8 @@ class ProfileConfig:
             providers = validate_provider_configuration(self.providers)
         except ProviderError as error:
             raise ProfileError(str(error)) from error
+        if not isinstance(self.reporting_currency, Currency):
+            raise ProfileError("profile reporting currency is invalid")
         object.__setattr__(self, "providers", providers)
 
 
@@ -152,6 +156,8 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("llm")
     if config.dividends == DividendSettings():
         data.pop("dividends")
+    if config.reporting_currency is Currency.SGD:
+        data.pop("reporting_currency")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -167,6 +173,7 @@ def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
         config.schema_version,
         config.llm,
         config.dividends,
+        config.reporting_currency,
     )
 
 
@@ -183,6 +190,7 @@ def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
         config.schema_version,
         config.llm,
         config.dividends,
+        config.reporting_currency,
     )
 
 
@@ -200,6 +208,7 @@ def load_profile(name: str) -> ProfileConfig:
             schema_version=int(value.get("schema_version", 1)),
             llm=LLMSettings(**value.get("llm", {})),
             dividends=DividendSettings(**value.get("dividends", {})),
+            reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

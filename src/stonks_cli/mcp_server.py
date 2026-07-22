@@ -12,6 +12,19 @@ from stonks_cli.config import disable_provider, enable_provider, load_profile, s
 from stonks_cli.ledger import import_csv, list_events
 from stonks_cli.storage import EncryptedLedger, export_backup
 
+_MCP_TOOL_ALLOWLIST = frozenset(
+    {
+        "confirm_csv_import",
+        "confirm_profile_backup",
+        "confirm_provider_change",
+        "prepare_csv_import",
+        "prepare_profile_backup",
+        "prepare_provider_change",
+        "profile_status",
+    }
+)
+_MCP_PREPARABLE_ACTIONS = frozenset({"csv_import", "profile_backup", "provider_change"})
+
 
 @dataclass(frozen=True)
 class PendingAction:
@@ -26,6 +39,8 @@ def create_server() -> FastMCP:
     pending: dict[str, PendingAction] = {}
 
     def prepare(profile: str, action: str, payload: dict[str, str]) -> dict[str, object]:
+        if action not in _MCP_PREPARABLE_ACTIONS:
+            raise ValueError("MCP action is prohibited")
         load_profile(profile)
         confirmation_id = uuid4().hex
         expires_at = datetime.now(UTC) + timedelta(minutes=5)
@@ -131,7 +146,13 @@ def create_server() -> FastMCP:
         destination = export_backup(load_profile(request.profile), Path(request.payload["destination"]))
         return {"profile": request.profile, "backup": str(destination), "execution": "denied"}
 
+    _validate_tool_registry(server)
     return server
+
+
+def _validate_tool_registry(server: FastMCP) -> None:
+    if set(server._tool_manager._tools) != _MCP_TOOL_ALLOWLIST:
+        raise RuntimeError("MCP tool registry contains a prohibited capability")
 
 
 def main() -> None:

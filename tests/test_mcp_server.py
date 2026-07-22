@@ -3,22 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from stonks_cli.config import ProfileConfig, save_profile
-from stonks_cli.mcp_server import create_server
+from stonks_cli.mcp_server import _MCP_TOOL_ALLOWLIST, _validate_tool_registry, create_server
 from stonks_cli.storage import generate_key_file
 
 
 def test_mcp_server_builds_without_execution_tools() -> None:
     server = create_server()
     assert server.name == "stonks-cli"
-    assert set(server._tool_manager._tools) == {
-        "confirm_csv_import",
-        "confirm_profile_backup",
-        "confirm_provider_change",
-        "prepare_csv_import",
-        "prepare_profile_backup",
-        "prepare_provider_change",
-        "profile_status",
-    }
+    assert set(server._tool_manager._tools) == _MCP_TOOL_ALLOWLIST
+
+
+def test_mcp_registry_rejects_added_execution_tool() -> None:
+    server = create_server()
+    server._tool_manager._tools["place_order"] = object()
+
+    try:
+        _validate_tool_registry(server)
+    except RuntimeError as error:
+        assert "prohibited" in str(error)
+    else:
+        raise AssertionError("MCP execution tool must be rejected")
 
 
 def test_mcp_provider_change_requires_single_use_confirmation(tmp_path: Path, monkeypatch) -> None:

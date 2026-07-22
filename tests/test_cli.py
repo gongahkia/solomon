@@ -56,6 +56,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "strategy-journal",
         "strategy-journal-list",
         "watchlist-add",
+        "watchlist-configure",
         "watchlist-remove",
         "watchlist",
         "refresh-moomoo-prices",
@@ -270,6 +271,15 @@ def test_cli_manages_encrypted_watchlist(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["watchlist", "personal"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["items"][0]["instrument"] == "US:SPY"
+    result = runner.invoke(app, ["watchlist-configure", "personal", "--restrict-recommendations"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["restriction_enabled"] is True
+    result = runner.invoke(app, ["watchlist", "personal"])
+    assert result.exit_code == 0, result.output
+    assert [entry["action"] for entry in json.loads(result.output)["audit"]] == [
+        "added",
+        "restriction_enabled",
+    ]
 
 
 def test_cli_refreshes_moomoo_prices_from_watchlist(tmp_path: Path, monkeypatch) -> None:

@@ -13,7 +13,7 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 - Profiles and imports: `init-profile`, `import-csv`, `import-prices`
 - Portfolio reports: `portfolio`, `transactions`, `performance`, `reconciliation`
 - Profile maintenance: `backup-profile`, `restore-profile`, `rotate-key`
-- Research and operator utilities: `backtest-csv`, `strategy-*`, `watchlist`, `refresh-moomoo-prices`, `refresh-moomoo-quotes`, `scan-alerts`, `monitor`, `ml-*`, `research-*`, `llm-*`, `paper-*`, `schedule-*`, `notify-local`, `notify-telegram`
+- Research and operator utilities: `backtest-csv`, `strategy-*`, `watchlist`, `watchlist-configure`, `refresh-moomoo-prices`, `refresh-moomoo-quotes`, `scan-alerts`, `monitor`, `ml-*`, `research-*`, `llm-*`, `paper-*`, `schedule-*`, `notify-local`, `notify-telegram`
 - Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `dividend-configure`, `moomoo-sdk-status`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `moomoo-dividends`, `moomoo-dividend-status`, `moomoo-map-dividend`, `version`
 
 `stonks-mcp` is the separate MCP server entrypoint. All commands and tools are read-only,

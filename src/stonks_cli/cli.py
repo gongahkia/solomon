@@ -104,10 +104,15 @@ from stonks_cli.strategy import (
 from stonks_cli.types import Account, Currency, Instrument
 from stonks_cli.watchlist import (
     WatchlistItem,
+    audit_history,
+    configure_restriction,
     list_items,
     remove,
 )
 from stonks_cli.watchlist import add as add_watchlist_item
+from stonks_cli.watchlist import (
+    settings as watchlist_settings,
+)
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -618,7 +623,7 @@ def watchlist_add(
     key_file: Path | None = typer.Option(None),
 ) -> None:
     item = WatchlistItem(_instrument(symbol, market, currency, name), note)
-    add_watchlist_item(EncryptedLedger(_profile(profile, key_file)), item)
+    add_watchlist_item(EncryptedLedger(_profile(profile, key_file)), item, source="cli")
     console.print_json(json.dumps({"profile": profile, "instrument": item.instrument.key}))
 
 
@@ -630,18 +635,23 @@ def watchlist_remove(
     key_file: Path | None = typer.Option(None),
 ) -> None:
     instrument_key = f"{market.strip().upper()}:{symbol.strip().upper()}"
-    if not remove(EncryptedLedger(_profile(profile, key_file)), instrument_key):
+    if not remove(EncryptedLedger(_profile(profile, key_file)), instrument_key, source="cli"):
         raise typer.BadParameter("watchlist instrument is not present")
     console.print_json(json.dumps({"profile": profile, "instrument": instrument_key}))
 
 
 @app.command("watchlist")
 def watchlist(profile: str, key_file: Path | None = typer.Option(None)) -> None:
-    items = list_items(EncryptedLedger(_profile(profile, key_file)))
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    items = list_items(ledger)
+    settings = watchlist_settings(ledger)
+    audit = audit_history(ledger)
     console.print_json(
         json.dumps(
             {
                 "profile": profile,
+                "restriction_enabled": settings.restriction_enabled,
+                "configuration_version": settings.version,
                 "items": [
                     {
                         "instrument": item.instrument.key,
@@ -651,6 +661,41 @@ def watchlist(profile: str, key_file: Path | None = typer.Option(None)) -> None:
                     }
                     for item in items
                 ],
+                "audit": [
+                    {
+                        "changed_at": entry.changed_at.isoformat(),
+                        "action": entry.action,
+                        "source": entry.source,
+                        "configuration_version": entry.configuration_version,
+                        "restriction_enabled": entry.restriction_enabled,
+                        "instrument": None
+                        if entry.item is None
+                        else entry.item.instrument.key,
+                    }
+                    for entry in audit
+                ],
+            }
+        )
+    )
+
+
+@app.command("watchlist-configure")
+def watchlist_configure(
+    profile: str,
+    restriction_enabled: bool = typer.Option(
+        ..., "--restrict-recommendations/--allow-all-recommendations"
+    ),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    settings = configure_restriction(
+        EncryptedLedger(_profile(profile, key_file)), restriction_enabled, source="cli"
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "restriction_enabled": settings.restriction_enabled,
+                "configuration_version": settings.version,
             }
         )
     )

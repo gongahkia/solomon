@@ -24,6 +24,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "import-fx",
         "portfolio",
         "holdings",
+        "cash",
         "reconciliation",
         "transactions",
         "performance",
@@ -105,6 +106,11 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     result = runner.invoke(app, ["holdings", "personal"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["positions"] == []
+    result = runner.invoke(app, ["cash", "personal"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["balances"] == [
+        {"account": "csv:main", "currency": "USD", "amount": "100"}
+    ]
 
 
 def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:

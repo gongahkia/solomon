@@ -310,6 +310,23 @@ def holdings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
 
 
 @app.command()
+def cash(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    values = cash_balances(list_events(EncryptedLedger(_profile(profile, key_file))))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "balances": [
+                    {"account": account, "currency": currency.value, "amount": str(amount)}
+                    for (account, currency), amount in sorted(values.items())
+                ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command()
 def transactions(profile: str, key_file: Path | None = typer.Option(None)) -> None:
     console.print_json(
         json.dumps(

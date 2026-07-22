@@ -46,6 +46,40 @@ class QuoteStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class MarketSession(StrEnum):
+    PRE_MARKET = "pre_market"
+    OPENING = "opening"
+    REGULAR = "regular"
+    BREAK = "break"
+    AFTER_HOURS = "after_hours"
+    OVERNIGHT = "overnight"
+    CLOSED = "closed"
+    UNKNOWN = "unknown"
+
+
+_MARKET_SESSION_STATES = {
+    "US": {
+        "PRE_MARKET_BEGIN": MarketSession.PRE_MARKET,
+        "AFTERNOON": MarketSession.REGULAR,
+        "AFTER_HOURS_BEGIN": MarketSession.AFTER_HOURS,
+        "AFTER_HOURS_END": MarketSession.CLOSED,
+        "OVERNIGHT": MarketSession.OVERNIGHT,
+    },
+    "SG": {
+        "WAITING_OPEN": MarketSession.OPENING,
+        "MORNING": MarketSession.REGULAR,
+        "REST": MarketSession.BREAK,
+        "AFTERNOON": MarketSession.REGULAR,
+        "CLOSED": MarketSession.CLOSED,
+    },
+}
+
+
+def normalize_market_session(market: str, value: str | None) -> MarketSession:
+    normalized = value.strip().upper() if value is not None else ""
+    return _MARKET_SESSION_STATES.get(market.strip().upper(), {}).get(normalized, MarketSession.UNKNOWN)
+
+
 @dataclass(frozen=True)
 class QuoteSnapshot:
     instrument: Instrument
@@ -62,10 +96,11 @@ class QuoteSnapshot:
     spread: Decimal | None = None
     order_book_as_of: datetime | None = None
     order_book_status: str = "absent"
-    market_session: str = "unknown"
+    market_session: MarketSession = MarketSession.UNKNOWN
     subscription_mode: str = "none"
     provider_fingerprint: str | None = None
     raw_payload: Mapping[str, object] | None = field(default=None, compare=False, repr=False)
+    market_session_raw: str = "unknown"
 
     def __post_init__(self) -> None:
         if self.last_price is not None:
@@ -107,7 +142,13 @@ class QuoteSnapshot:
                 raise ValueError("quote midpoint and spread must match bid and ask")
         elif self.midpoint is not None or self.spread is not None:
             raise ValueError("quote midpoint and spread require bid and ask")
-        if not self.order_book_status.strip() or not self.market_session.strip() or not self.subscription_mode.strip():
+        if not isinstance(self.market_session, MarketSession):
+            raise ValueError("quote market session is required")
+        if (
+            not self.order_book_status.strip()
+            or not self.subscription_mode.strip()
+            or not self.market_session_raw.strip()
+        ):
             raise ValueError("quote status fields must be non-empty")
         fingerprint = self.provider_fingerprint or self.source_hash
         if len(fingerprint) != 64:
@@ -194,18 +235,44 @@ def _initialize_quote_snapshots(connection: sqlite3.Connection) -> None:
             INSERT INTO quote_snapshots (
                 instrument_key, observed_at, as_of_at, last_price, currency, quality, status,
                 source_hash, provider_fingerprint, vendor_time, bid_price, ask_price, midpoint,
-                spread, order_book_as_of, order_book_status, market_session, subscription_mode
+                spread, order_book_as_of, order_book_status, market_session, market_session_raw,
+                subscription_mode
             )
             SELECT
                 instrument_key, observed_at, NULL, last_price, currency, quality, 'unknown',
                 source_hash, source_hash, vendor_time, NULL, NULL, NULL, NULL, NULL, 'absent',
-                'unknown', 'none'
+                'unknown', 'unknown', 'none'
             FROM quote_snapshots_legacy
             """
         )
         connection.execute("DROP TABLE quote_snapshots_legacy")
     elif not columns:
         _create_quote_snapshots_table(connection)
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(quote_snapshots)")}
+    if "market_session_raw" not in columns:
+        connection.execute(
+            "ALTER TABLE quote_snapshots ADD COLUMN market_session_raw TEXT NOT NULL DEFAULT 'unknown'"
+        )
+        rows = connection.execute(
+            "SELECT instrument_key, observed_at, source_hash, market_session FROM quote_snapshots"
+        ).fetchall()
+        for row in rows:
+            market, _, _ = row["instrument_key"].partition(":")
+            raw = row["market_session"]
+            connection.execute(
+                """
+                UPDATE quote_snapshots
+                SET market_session = ?, market_session_raw = ?
+                WHERE instrument_key = ? AND observed_at = ? AND source_hash = ?
+                """,
+                (
+                    normalize_market_session(market, raw).value,
+                    raw,
+                    row["instrument_key"],
+                    row["observed_at"],
+                    row["source_hash"],
+                ),
+            )
 
 
 def _create_quote_snapshots_table(connection: sqlite3.Connection) -> None:
@@ -232,6 +299,7 @@ def _create_quote_snapshots_table(connection: sqlite3.Connection) -> None:
             order_book_as_of TEXT,
             order_book_status TEXT NOT NULL,
             market_session TEXT NOT NULL,
+            market_session_raw TEXT NOT NULL,
             subscription_mode TEXT NOT NULL,
             PRIMARY KEY(instrument_key, observed_at, source_hash)
         )
@@ -369,8 +437,9 @@ def store_quote_snapshots(ledger: EncryptedLedger, snapshots: tuple[QuoteSnapsho
                 INSERT OR IGNORE INTO quote_snapshots (
                     instrument_key, observed_at, as_of_at, last_price, currency, quality, status,
                     source_hash, provider_fingerprint, vendor_time, bid_price, ask_price, midpoint,
-                    spread, order_book_as_of, order_book_status, market_session, subscription_mode
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    spread, order_book_as_of, order_book_status, market_session, subscription_mode,
+                    market_session_raw
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot.instrument.key,
@@ -393,6 +462,7 @@ def store_quote_snapshots(ledger: EncryptedLedger, snapshots: tuple[QuoteSnapsho
                     snapshot.order_book_status,
                     snapshot.market_session,
                     snapshot.subscription_mode,
+                    snapshot.market_session_raw,
                 ),
             )
             inserted += cursor.rowcount
@@ -457,9 +527,10 @@ def latest_quote_snapshots(ledger: EncryptedLedger) -> dict[str, QuoteSnapshot]:
             if row["order_book_as_of"] is not None
             else None,
             row["order_book_status"],
-            row["market_session"],
+            MarketSession(row["market_session"]),
             row["subscription_mode"],
             row["provider_fingerprint"],
+            market_session_raw=row["market_session_raw"],
         )
         snapshots[snapshot.instrument.key] = snapshot
     return snapshots

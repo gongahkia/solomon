@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
@@ -615,7 +615,7 @@ def test_moomoo_quote_snapshot_fixtures_fail_closed(
     assert isinstance(records, dict)
     rows = records[fixture_name]
     assert isinstance(rows, list)
-    context = SnapshotQuoteContext(rows, market_state={f"market_{instrument.market.lower()}": "REGULAR"})
+    context = SnapshotQuoteContext(rows, market_state={f"market_{instrument.market.lower()}": "AFTERNOON"})
     provider = MoomooReadOnlyProvider(
         OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
     )
@@ -625,7 +625,8 @@ def test_moomoo_quote_snapshot_fixtures_fail_closed(
     assert snapshot.status.value == expected_status
     assert snapshot.current_price == expected_current
     assert snapshot.order_book_status == expected_book
-    assert snapshot.market_session == ("unknown" if expected_status == "malformed" else "REGULAR")
+    assert snapshot.market_session.value == ("unknown" if expected_status == "malformed" else "regular")
+    assert snapshot.market_session_raw == ("unknown" if expected_status == "malformed" else "AFTERNOON")
     assert snapshot.subscription_mode == "none"
     assert context.subscribe_calls == []
     assert context.closed is True
@@ -649,6 +650,42 @@ def test_moomoo_quote_unavailable_response_is_persistable_status() -> None:
     assert snapshot.status.value == "unavailable"
     assert snapshot.current_price is None
     assert context.closed is True
+
+
+def test_moomoo_normalizes_documented_us_and_sg_market_sessions() -> None:
+    instruments = (
+        Instrument("SYNTH", "US", Currency.USD),
+        Instrument("SYNTH", "SG", Currency.SGD),
+    )
+    context = SnapshotQuoteContext(
+        [
+            {
+                "code": "US.SYNTH",
+                "last_price": "101",
+                "update_time": "2026-01-02 10:00:00",
+                "quote_status": "ENTITLED",
+            },
+            {
+                "code": "SG.SYNTH",
+                "last_price": "10",
+                "update_time": "2026-01-02 20:00:00",
+                "quote_status": "ENTITLED",
+            },
+        ],
+        market_state={"market_us": "PRE_MARKET_BEGIN", "market_sg": "REST"},
+    )
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
+    )
+
+    snapshots = provider.market_snapshots(
+        instruments, datetime(2026, 1, 2, 15, 1, tzinfo=UTC), maximum_age=timedelta(hours=4)
+    )
+
+    assert [(item.instrument.market, item.market_session.value, item.market_session_raw) for item in snapshots] == [
+        ("SG", "break", "REST"),
+        ("US", "pre_market", "PRE_MARKET_BEGIN"),
+    ]
 
 
 def test_moomoo_reads_paginated_stock_split_records() -> None:

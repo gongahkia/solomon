@@ -9,6 +9,7 @@ from conftest import encrypted_ledger
 from stonks_cli.market_data import (
     DailyPrice,
     FxRate,
+    MarketSession,
     QuoteQuality,
     QuoteSnapshot,
     QuoteStatus,
@@ -84,7 +85,7 @@ def test_market_data_tracks_revisions_freshness_and_quote_quality(tmp_path: Path
         Decimal("2"),
         datetime(2026, 1, 3, 16, tzinfo=UTC),
         "snapshot",
-        "REGULAR",
+        MarketSession.REGULAR,
         raw_payload={"provider": "opend", "raw_price": "102"},
     )
     count, source_hash = archive_and_store_quote_snapshots(ledger, (quote,))
@@ -130,6 +131,39 @@ def test_quote_snapshot_storage_migrates_legacy_rows(tmp_path: Path, monkeypatch
     assert snapshot.status is QuoteStatus.UNKNOWN
     assert snapshot.last_price == Decimal("100")
     assert snapshot.current_price is None
+
+
+def test_quote_snapshot_storage_normalizes_preexisting_market_session(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    with ledger.connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE quote_snapshots (
+                instrument_key TEXT NOT NULL, observed_at TEXT NOT NULL, as_of_at TEXT,
+                last_price TEXT, currency TEXT NOT NULL, quality TEXT NOT NULL, status TEXT NOT NULL,
+                source_hash TEXT NOT NULL, provider_fingerprint TEXT NOT NULL, vendor_time TEXT,
+                bid_price TEXT, ask_price TEXT, midpoint TEXT, spread TEXT, order_book_as_of TEXT,
+                order_book_status TEXT NOT NULL, market_session TEXT NOT NULL,
+                subscription_mode TEXT NOT NULL,
+                PRIMARY KEY(instrument_key, observed_at, source_hash)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO quote_snapshots VALUES (
+                'US:SPY', '2026-01-02T15:00:00+00:00', NULL, '100', 'USD', 'real_time',
+                'available', ?, ?, '2026-01-02 10:00:00', NULL, NULL, NULL, NULL, NULL,
+                'absent', 'AFTERNOON', 'none'
+            )
+            """,
+            ("e" * 64, "f" * 64),
+        )
+
+    snapshot = latest_quote_snapshots(ledger)["US:SPY"]
+
+    assert snapshot.market_session is MarketSession.REGULAR
+    assert snapshot.market_session_raw == "AFTERNOON"
 
 
 def test_fx_import_requires_provenance_and_supports_direct_or_inverse_rates(tmp_path: Path, monkeypatch) -> None:

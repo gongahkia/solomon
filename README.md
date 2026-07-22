@@ -142,14 +142,14 @@ $ stonks-cli moomoo-map-dividend personal 123456 --declaration-id <id> --cash-fl
 
 Daily prices retain source revisions. `refresh-moomoo-quotes` performs only a one-shot OpenD
 snapshot read; it creates no quote, order-book, order, or trade subscription. Raw snapshot payloads
-are encrypted, and records include retrieval/as-of time, market session, bid/ask-derived spread,
-provider fingerprint, and subscription mode. Only an explicit entitled, fresh, non-excessive-spread
-status can supply a current valuation; delayed, unavailable, stale, malformed, unentitled, and
-unknown snapshots expose a status with no current price. Portfolio JSON keeps `quote_snapshots` and
-`valuation_price_sources` separate from calculated values. Portfolio allocation is reported separately
-by currency by default. To produce a base-currency view, import a sourced FX CSV with
-`date,base_currency,quote_currency,rate` and request it explicitly; missing direct or inverse rates
-fail the report rather than using an implied conversion.
+are encrypted, and records include retrieval/as-of time, canonical US/SG market session plus the raw
+provider state, bid/ask-derived spread, provider fingerprint, and subscription mode. Only an explicit
+entitled, fresh, non-excessive-spread status can supply a current valuation; delayed, unavailable,
+stale, malformed, unentitled, and unknown snapshots expose a status with no current price. Portfolio
+JSON keeps `quote_snapshots` and `valuation_price_sources` separate from calculated values. Portfolio
+allocation is reported separately by currency by default. To produce a base-currency view, import a
+sourced FX CSV with `date,base_currency,quote_currency,rate` and request it explicitly; missing direct
+or inverse rates fail the report rather than using an implied conversion.
 
 ```console
 $ stonks-cli import-fx personal /absolute/path/usd-sgd.csv

@@ -22,7 +22,14 @@ from stonks_cli.ledger import (
     store_fee_record,
     store_position_snapshot,
 )
-from stonks_cli.market_data import DailyPrice, QuoteQuality, QuoteSnapshot, QuoteStatus
+from stonks_cli.market_data import (
+    DailyPrice,
+    MarketSession,
+    QuoteQuality,
+    QuoteSnapshot,
+    QuoteStatus,
+    normalize_market_session,
+)
 from stonks_cli.plugins import Capability, PluginManifest, register_builtin_provider
 from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
@@ -1047,7 +1054,7 @@ def _unavailable_snapshot(
         fingerprint,
         status=QuoteStatus.UNAVAILABLE,
         order_book_status="unavailable",
-        market_session="unknown",
+        market_session=MarketSession.UNKNOWN,
         subscription_mode="none",
         provider_fingerprint=fingerprint,
         raw_payload=raw_payload,
@@ -1071,7 +1078,7 @@ def _malformed_snapshot(
         fingerprint,
         status=QuoteStatus.MALFORMED,
         order_book_status="malformed",
-        market_session="unknown",
+        market_session=MarketSession.UNKNOWN,
         subscription_mode="none",
         provider_fingerprint=fingerprint,
         raw_payload=raw_payload,
@@ -1092,11 +1099,13 @@ def _quote_status(row: dict[str, Any]) -> tuple[QuoteStatus, QuoteQuality]:
     return QuoteStatus.UNKNOWN, QuoteQuality.UNKNOWN
 
 
-def _quote_market_session(instrument: Instrument, row: dict[str, Any], state: dict[str, Any]) -> str:
-    session = _optional_text(row.get("market_session"))
-    if session is None:
-        session = _optional_text(state.get(f"market_{instrument.market.lower()}"))
-    return session or "unknown"
+def _quote_market_session(
+    instrument: Instrument, row: dict[str, Any], state: dict[str, Any]
+) -> tuple[MarketSession, str]:
+    raw = _optional_text(row.get("market_session"))
+    if raw is None:
+        raw = _optional_text(state.get(f"market_{instrument.market.lower()}"))
+    return normalize_market_session(instrument.market, raw), raw or "unknown"
 
 
 def _quote_as_of(instrument: Instrument, value: object) -> datetime:
@@ -1161,6 +1170,7 @@ def _normalize_quote_snapshot(
             spread_bps = spread / midpoint * Decimal("10000")
             if spread_bps > maximum_spread_bps:
                 status = QuoteStatus.EXCESSIVE_SPREAD
+        market_session, market_session_raw = _quote_market_session(instrument, row, market_state)
         return QuoteSnapshot(
             instrument,
             last_price,
@@ -1176,10 +1186,11 @@ def _normalize_quote_snapshot(
             spread,
             order_book_as_of,
             order_book_status,
-            _quote_market_session(instrument, row, market_state),
+            market_session,
             "none",
             fingerprint,
             raw_payload,
+            market_session_raw,
         )
     except (KeyError, ValueError, ZoneInfoNotFoundError):
         return _malformed_snapshot(instrument, observed_at, row, "invalid_snapshot")

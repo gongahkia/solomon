@@ -1,13 +1,76 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import pytest
+
 from stonks_cli import operator
 from stonks_cli.operator import (
+    ScheduleAction,
+    ScheduleCadence,
     ScheduleDefinition,
+    ScheduledJob,
+    ScheduleJobKind,
+    default_scheduler_plan,
     linux_schedule_status,
     notify_telegram,
     render_schedule,
     render_systemd_units,
 )
+
+
+def test_default_scheduler_plan_is_versioned_and_targets_explicit_actions() -> None:
+    plan = default_scheduler_plan("personal")
+
+    assert plan.configuration_version == 1
+    assert plan.jobs[0].timezone == "Asia/Singapore"
+    assert plan.jobs[0].actions == (
+        ScheduleAction.REFRESH,
+        ScheduleAction.RECONCILE,
+        ScheduleAction.REPORT,
+    )
+    assert plan.jobs[1].timezone == "America/New_York"
+    assert plan.jobs[1].pre_open_lead_minutes == 15
+    assert plan.jobs[1].actions[-1] is ScheduleAction.ADVISORY
+    assert all(job.catch_up_on_boot for job in plan.jobs)
+
+
+def test_us_pre_open_schedule_follows_new_york_daylight_saving_time() -> None:
+    job = ScheduledJob(
+        "personal",
+        "preopen",
+        ScheduleJobKind.US_PRE_OPEN,
+        (ScheduleAction.REFRESH, ScheduleAction.ADVISORY),
+        pre_open_lead_minutes=15,
+    )
+
+    after_spring_change = job.next_run_at(datetime(2026, 3, 9, 12, tzinfo=UTC))
+    after_autumn_change = job.next_run_at(datetime(2026, 11, 2, 12, tzinfo=UTC))
+
+    assert after_spring_change == datetime(2026, 3, 9, 13, 15, tzinfo=UTC)
+    assert after_autumn_change == datetime(2026, 11, 2, 14, 15, tzinfo=UTC)
+    assert ScheduledJob(
+        "personal",
+        "weekly-report",
+        ScheduleJobKind.SINGAPORE_REPORT,
+        (ScheduleAction.REPORT,),
+        cadence=ScheduleCadence.WEEKLY,
+        weekday=0,
+        singapore_hour=8,
+        singapore_minute=30,
+    ).next_run_at(datetime(2026, 1, 1, tzinfo=UTC)) == datetime(2026, 1, 5, 0, 30, tzinfo=UTC)
+    with pytest.raises(ValueError, match="actions"):
+        ScheduledJob("personal", "bad", ScheduleJobKind.US_PRE_OPEN, (), pre_open_lead_minutes=15)
+    with pytest.raises(ValueError, match="catch up"):
+        ScheduledJob(
+            "personal",
+            "non-persistent",
+            ScheduleJobKind.SINGAPORE_REPORT,
+            (ScheduleAction.REPORT,),
+            singapore_hour=8,
+            singapore_minute=30,
+            catch_up_on_boot=False,
+        )
 
 
 def test_schedule_renderer_includes_profile_and_hour() -> None:

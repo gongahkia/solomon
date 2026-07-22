@@ -1256,8 +1256,8 @@ def monitor(
 @app.command("schedule-render")
 def schedule_render(
     profile: str,
-    hour_singapore: int = typer.Option(18),
-    minute_singapore: int = typer.Option(0),
+    hour_singapore: int = typer.Option(8),
+    minute_singapore: int = typer.Option(30),
 ) -> None:
     load_profile(profile)
     typer.echo(render_schedule(ScheduleDefinition(profile, hour_singapore, minute_singapore)))
@@ -1266,8 +1266,8 @@ def schedule_render(
 @app.command("schedule-install")
 def schedule_install(
     profile: str,
-    hour_singapore: int = typer.Option(18),
-    minute_singapore: int = typer.Option(0),
+    hour_singapore: int = typer.Option(8),
+    minute_singapore: int = typer.Option(30),
     unit_directory: Path = typer.Option(Path("~/.config/systemd/user")),
 ) -> None:
     load_profile(profile)
@@ -1278,9 +1278,13 @@ def schedule_install(
 
 
 @app.command("schedule-status")
-def schedule_status(profile: str) -> None:
+def schedule_status(
+    profile: str,
+    hour_singapore: int = typer.Option(8),
+    minute_singapore: int = typer.Option(30),
+) -> None:
     load_profile(profile)
-    status = linux_schedule_status(ScheduleDefinition(profile, 18))
+    status = linux_schedule_status(ScheduleDefinition(profile, hour_singapore, minute_singapore))
     console.print_json(
         json.dumps({"label": status.label, "enabled": status.enabled, "active": status.active})
     )

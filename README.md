@@ -20,6 +20,10 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 local-data management, reporting, notification, or simulation interfaces; none can unlock an
 account or submit, modify, or cancel an order.
 
+Linux schedules use persistent user `systemd` timers. Confirm systemd and timezone, then inspect
+`systemctl --user status`, `systemctl --user list-timers`, and service logs; catch-up occurs only
+after the Pi boots, never while it is powered off.
+
 ## Start
 
 ```console
@@ -63,7 +67,7 @@ $ stonks-cli monitor personal
 `monitor` sends only public ticker, date, and price-move information. It never sends account identifiers, holdings, transactions, credentials, or an order instruction. Install the persistent Singapore-time Linux timer only after a manual monitor run succeeds:
 
 ```console
-$ stonks-cli schedule-install personal --hour-singapore 18
+$ stonks-cli schedule-install personal
 $ stonks-cli schedule-status personal
 ```
 

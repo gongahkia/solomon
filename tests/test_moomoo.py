@@ -516,3 +516,37 @@ def test_moomoo_rate_limiter_waits_after_documented_account_cap() -> None:
     limiter.acquire("2")
 
     assert waits == [30]
+
+
+def test_moomoo_limits_historical_candlestick_initial_pages_only() -> None:
+    clock = [0.0]
+    waits: list[float] = []
+    contexts: list[QuoteContext] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        clock[0] += seconds
+
+    def quote_factory(_host: str, _port: int) -> QuoteContext:
+        context = QuoteContext()
+        contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(),
+        lambda _host, _port: Context(),
+        quote_factory,
+        quote_rate_limiter=MoomooRateLimiter(
+            limit=1, window_seconds=30, clock=lambda: clock[0], sleeper=sleep
+        ),
+    )
+
+    provider.daily_prices(
+        (Instrument("SPY", "US", Currency.USD), Instrument("QQQ", "US", Currency.USD)),
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+    )
+
+    assert waits == [30]
+    assert [len(context.calls) for context in contexts] == [2, 2]
+    assert all(context.closed for context in contexts)

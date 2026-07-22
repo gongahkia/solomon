@@ -99,7 +99,7 @@ class MoomooSyncResult:
 
 
 class MoomooRateLimiter:
-    """Conservative process-local limiter for documented per-account OpenD limits."""
+    """Conservative process-local sliding-window limiter."""
 
     def __init__(
         self,
@@ -149,11 +149,13 @@ class MoomooReadOnlyProvider:
         context_factory: Callable[[str, int], Any],
         quote_context_factory: Callable[[str, int], Any] | None = None,
         rate_limiter: MoomooRateLimiter | None = None,
+        quote_rate_limiter: MoomooRateLimiter | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.context_factory = context_factory
         self.quote_context_factory = quote_context_factory
         self.rate_limiter = rate_limiter or MoomooRateLimiter()
+        self.quote_rate_limiter = quote_rate_limiter or MoomooRateLimiter(limit=60)
 
     @classmethod
     def from_installed_sdk(cls, endpoint: OpenDConnection) -> MoomooReadOnlyProvider:
@@ -360,6 +362,7 @@ class MoomooReadOnlyProvider:
     ) -> list[dict[str, Any]]:
         if self.quote_context_factory is None:
             raise ProviderError("Moomoo quote context is unavailable")
+        self.quote_rate_limiter.acquire("request_history_kline")
         context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
         rows: list[dict[str, Any]] = []
         page_key: str | bytes | None = None

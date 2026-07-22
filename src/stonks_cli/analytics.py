@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate, convert_currency
-from stonks_cli.types import Currency, LedgerEvent
+from stonks_cli.types import AssetClass, Currency, InstrumentMaster, LedgerEvent
 
 
 def market_values(
@@ -50,6 +52,34 @@ def allocations_by_currency(
     return {
         currency: allocation(values)
         for currency, values in market_values_by_currency(events, prices).items()
+    }
+
+
+def asset_class_allocation(
+    values: Mapping[tuple[str, str], Decimal],
+    instrument_masters: Mapping[str, InstrumentMaster],
+) -> dict[AssetClass, Decimal]:
+    totals: dict[AssetClass, Decimal] = defaultdict(Decimal)
+    for (_, instrument_key), value in values.items():
+        if value < 0:
+            raise ValueError("asset-class allocation cannot include negative values")
+        if value == 0:
+            continue
+        instrument = instrument_masters.get(instrument_key)
+        if instrument is None:
+            raise ProviderError(f"asset class is unavailable:{instrument_key}")
+        totals[instrument.asset_class] += value
+    total = sum(totals.values(), Decimal("0"))
+    return {} if total == 0 else {asset_class: value / total for asset_class, value in totals.items()}
+
+
+def asset_class_allocations_by_currency(
+    values_by_currency: Mapping[Currency, Mapping[tuple[str, str], Decimal]],
+    instrument_masters: Mapping[str, InstrumentMaster],
+) -> dict[Currency, dict[AssetClass, Decimal]]:
+    return {
+        currency: asset_class_allocation(values, instrument_masters)
+        for currency, values in values_by_currency.items()
     }
 
 

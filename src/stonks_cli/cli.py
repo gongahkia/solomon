@@ -19,6 +19,8 @@ from stonks_cli.alerts import price_move_alert
 from stonks_cli.analytics import (
     allocation,
     allocations_by_currency,
+    asset_class_allocation,
+    asset_class_allocations_by_currency,
     convert_values_to_currency,
     market_values_by_currency,
 )
@@ -51,6 +53,7 @@ from stonks_cli.market_data import (
     import_daily_prices_csv,
     import_fx_rates_csv,
     latest_fx_rates,
+    latest_instrument_masters,
     latest_prices,
     latest_quote_snapshots,
 )
@@ -245,6 +248,7 @@ def portfolio(
             prices[instrument_key] = snapshot.current_price
             valuation_sources[instrument_key] = "current_quote"
     values_by_currency = market_values_by_currency(events, prices)
+    instrument_masters = latest_instrument_masters(ledger)
     payload = {
         "profile": profile,
         "event_count": len(events),
@@ -286,6 +290,15 @@ def portfolio(
         },
         "valuation_price_sources": valuation_sources,
     }
+    try:
+        payload["asset_class_allocation_by_currency"] = {
+            currency.value: {asset_class.value: str(value) for asset_class, value in allocations.items()}
+            for currency, allocations in asset_class_allocations_by_currency(
+                values_by_currency, instrument_masters
+            ).items()
+        }
+    except ProviderError:
+        payload["asset_class_allocation_status"] = "unavailable"
     if base_currency is not None:
         try:
             target_currency = Currency(base_currency.upper())
@@ -305,6 +318,15 @@ def portfolio(
             f"{account}:{instrument}": str(value)
             for (account, instrument), value in allocation(converted_values).items()
         }
+        try:
+            payload["asset_class_allocation"] = {
+                asset_class.value: str(value)
+                for asset_class, value in asset_class_allocation(
+                    converted_values, instrument_masters
+                ).items()
+            }
+        except ProviderError:
+            payload["asset_class_allocation_status"] = "unavailable"
     if as_json:
         console.print_json(json.dumps(payload))
         return

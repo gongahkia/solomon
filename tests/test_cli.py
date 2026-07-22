@@ -15,11 +15,19 @@ from stonks_cli.market_data import (
     QuoteSnapshot,
     QuoteStatus,
     archive_and_store_quote_snapshots,
+    store_instrument_masters,
 )
 from stonks_cli.moomoo import OpenDSDKStatus
 from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
 from stonks_cli.storage import EncryptedLedger
-from stonks_cli.types import Currency, Instrument
+from stonks_cli.types import (
+    AssetClass,
+    Currency,
+    ETFClassification,
+    Instrument,
+    InstrumentMaster,
+    ListingStatus,
+)
 
 
 def test_cli_public_command_contract_excludes_execution() -> None:
@@ -329,6 +337,24 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
     assert runner.invoke(app, ["import-csv", "personal", str(events)]).exit_code == 0
     assert runner.invoke(app, ["import-prices", "personal", str(prices)]).exit_code == 0
     ledger = EncryptedLedger(cli._profile("personal", key))
+    store_instrument_masters(
+        ledger,
+        (
+            InstrumentMaster(
+                "US:SPY",
+                "ARCA",
+                "US",
+                Currency.USD,
+                AssetClass.ETF,
+                "US.SPY",
+                ListingStatus.LISTED,
+                "issuer-2026-01",
+                "a" * 64,
+                ETFClassification.BROAD_DIVERSIFIED,
+                "issuer-2026-01",
+            ),
+        ),
+    )
     instrument = Instrument("SPY", "US", Currency.USD)
     delayed = QuoteSnapshot(
         instrument,
@@ -350,6 +376,7 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
     assert payload["quote_snapshots"]["US:SPY"]["price"] is None
     assert payload["valuation_price_sources"]["US:SPY"] == "daily_close"
     assert payload["market_values_by_currency"]["USD"]["csv:main:US:SPY"] == "100"
+    assert payload["asset_class_allocation_by_currency"] == {"USD": {"etf": "1"}}
 
 
 def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:

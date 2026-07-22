@@ -3,9 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
 from stonks_cli.accounting import fifo_lots, unrealized_pnl
 from stonks_cli.analytics import (
     allocations_by_currency,
+    asset_class_allocation,
+    asset_class_allocations_by_currency,
     benchmark_relative_return,
     cash_by_currency,
     concentration_hhi,
@@ -16,13 +20,18 @@ from stonks_cli.analytics import (
     portfolio_health,
     time_weighted_return,
 )
+from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate
 from stonks_cli.types import (
     Account,
+    AssetClass,
     Currency,
+    ETFClassification,
     EventKind,
     Instrument,
+    InstrumentMaster,
     LedgerEvent,
+    ListingStatus,
     SourceProvenance,
 )
 
@@ -95,3 +104,55 @@ def test_analytics_calculates_unrealized_money_weighted_and_currency_exposure() 
     assert unrealized_pnl(lots, {"US:SPY": Decimal("3")}) == Decimal("5")
     assert Decimal("0.09") < annualized < Decimal("0.11")
     assert cash_by_currency([deposit]) == {Currency.USD: Decimal("100")}
+
+
+def test_asset_class_allocation_uses_versioned_instrument_classifications() -> None:
+    masters = {
+        "US:SPY": InstrumentMaster(
+            "US:SPY",
+            "ARCA",
+            "US",
+            Currency.USD,
+            AssetClass.ETF,
+            "US.SPY",
+            ListingStatus.LISTED,
+            "issuer-2026-01",
+            "a" * 64,
+            ETFClassification.BROAD_DIVERSIFIED,
+            "issuer-2026-01",
+        ),
+        "SG:C6L": InstrumentMaster(
+            "SG:C6L",
+            "SGX",
+            "SG",
+            Currency.SGD,
+            AssetClass.EQUITY,
+            "SG.C6L",
+            ListingStatus.LISTED,
+            "sgx-2026-01",
+            "b" * 64,
+        ),
+    }
+    values = {
+        ("test:main", "US:SPY"): Decimal("200"),
+        ("test:main", "SG:C6L"): Decimal("50"),
+    }
+
+    assert asset_class_allocation(values, masters) == {
+        AssetClass.ETF: Decimal("0.8"),
+        AssetClass.EQUITY: Decimal("0.2"),
+    }
+    assert asset_class_allocations_by_currency(
+        {
+            Currency.USD: {("test:main", "US:SPY"): Decimal("200")},
+            Currency.SGD: {("test:main", "SG:C6L"): Decimal("50")},
+        },
+        masters,
+    ) == {
+        Currency.USD: {AssetClass.ETF: Decimal("1")},
+        Currency.SGD: {AssetClass.EQUITY: Decimal("1")},
+    }
+    with pytest.raises(ProviderError, match="unavailable:US:UNKNOWN"):
+        asset_class_allocation({("test:main", "US:UNKNOWN"): Decimal("1")}, masters)
+    with pytest.raises(ValueError, match="negative"):
+        asset_class_allocation({("test:main", "US:SPY"): Decimal("-1")}, masters)

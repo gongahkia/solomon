@@ -386,6 +386,35 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
     }
 
 
+def test_cli_performance_attributes_dividends_and_fees_by_currency(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    source = tmp_path / "events.csv"
+    source.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,fee\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,20,,,,\n"
+        "main,2026-01-02T00:00:00+00:00,buy,USD,10,1,SPY,US,1\n"
+        "main,2026-01-03T00:00:00+00:00,dividend,USD,5,,SPY,US,\n"
+        "main,2026-01-04T00:00:00+00:00,fee,USD,2,,,,\n"
+    )
+    assert runner.invoke(app, ["import-csv", "personal", str(source)]).exit_code == 0
+
+    result = runner.invoke(app, ["performance", "personal"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["dividend_and_fee_attribution"] == {
+        "USD": {
+            "dividends": "5",
+            "standalone_fees": "2",
+            "trade_fees": "1",
+            "fees": "3",
+            "net_return_contribution": "2",
+        }
+    }
+
+
 def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:
     monkeypatch.setenv("STONKS_CLI_TELEGRAM_TOKEN", "token")
     monkeypatch.setattr(cli, "notify_telegram", lambda token, chat_id, title, message: True)

@@ -14,6 +14,7 @@ from stonks_cli.analytics import (
     cash_by_currency,
     concentration_hhi,
     convert_values_to_currency,
+    dividend_and_fee_attribution,
     market_values_by_currency,
     maximum_drawdown,
     money_weighted_return,
@@ -222,3 +223,46 @@ def test_sector_concentration_requires_explicit_versioned_sector_metadata() -> N
             "e" * 64,
             sector=GICSSector.INFORMATION_TECHNOLOGY,
         )
+
+
+def test_dividend_and_fee_attribution_preserves_currency_and_fee_origin() -> None:
+    buy = _buy("SPY", Currency.USD, "1")
+    fee = LedgerEvent(
+        fingerprint="fee",
+        source=SourceProvenance("test", "b" * 64, "fee"),
+        account=buy.account,
+        occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+        kind=EventKind.FEE,
+        currency=Currency.USD,
+        amount=Decimal("2"),
+    )
+    dividend = LedgerEvent(
+        fingerprint="dividend",
+        source=SourceProvenance("test", "c" * 64, "dividend"),
+        account=buy.account,
+        occurred_at=datetime(2026, 1, 3, tzinfo=UTC),
+        kind=EventKind.DIVIDEND,
+        currency=Currency.USD,
+        amount=Decimal("5"),
+        instrument=buy.instrument,
+    )
+    trade_with_fee = LedgerEvent(
+        fingerprint="buy-fee",
+        source=SourceProvenance("test", "d" * 64, "buy-fee"),
+        account=buy.account,
+        occurred_at=datetime(2026, 1, 4, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("10"),
+        quantity=Decimal("1"),
+        instrument=buy.instrument,
+        fee=Decimal("1"),
+    )
+
+    attribution = dividend_and_fee_attribution([buy, fee, dividend, trade_with_fee])[Currency.USD]
+
+    assert attribution.dividends == Decimal("5")
+    assert attribution.standalone_fees == Decimal("2")
+    assert attribution.trade_fees == Decimal("1")
+    assert attribution.fees == Decimal("3")
+    assert attribution.net_return_contribution == Decimal("2")

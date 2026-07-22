@@ -22,6 +22,7 @@ from stonks_cli.analytics import (
     asset_class_allocation,
     asset_class_allocations_by_currency,
     convert_values_to_currency,
+    dividend_and_fee_attribution,
     market_values_by_currency,
     sector_concentration,
     sector_concentrations_by_currency,
@@ -444,12 +445,24 @@ def transactions(profile: str, key_file: Path | None = typer.Option(None)) -> No
 
 @app.command()
 def performance(profile: str, key_file: Path | None = typer.Option(None)) -> None:
-    lots, realized = fifo_lots(list_events(EncryptedLedger(_profile(profile, key_file))))
+    events = list_events(EncryptedLedger(_profile(profile, key_file)))
+    lots, realized = fifo_lots(events)
+    attribution = dividend_and_fee_attribution(events)
     payload = {
         "profile": profile,
         "realized_pnl": str(sum((item.value for item in realized), Decimal("0"))),
         "open_cost": str(sum((item.cost for item in lots), Decimal("0"))),
         "open_lots": len(lots),
+        "dividend_and_fee_attribution": {
+            currency.value: {
+                "dividends": str(item.dividends),
+                "standalone_fees": str(item.standalone_fees),
+                "trade_fees": str(item.trade_fees),
+                "fees": str(item.fees),
+                "net_return_contribution": str(item.net_return_contribution),
+            }
+            for currency, item in attribution.items()
+        },
     }
     console.print_json(json.dumps(payload))
 

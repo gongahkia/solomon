@@ -8,7 +8,14 @@ from decimal import Decimal
 
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate, convert_currency
-from stonks_cli.types import AssetClass, Currency, GICSSector, InstrumentMaster, LedgerEvent
+from stonks_cli.types import (
+    AssetClass,
+    Currency,
+    EventKind,
+    GICSSector,
+    InstrumentMaster,
+    LedgerEvent,
+)
 
 
 def market_values(
@@ -119,6 +126,43 @@ def sector_concentrations_by_currency(
     return {
         currency: sector_concentration(values, instrument_masters)
         for currency, values in values_by_currency.items()
+    }
+
+
+@dataclass(frozen=True)
+class DividendAndFeeAttribution:
+    dividends: Decimal
+    standalone_fees: Decimal
+    trade_fees: Decimal
+
+    @property
+    def fees(self) -> Decimal:
+        return self.standalone_fees + self.trade_fees
+
+    @property
+    def net_return_contribution(self) -> Decimal:
+        return self.dividends - self.fees
+
+
+def dividend_and_fee_attribution(
+    events: list[LedgerEvent],
+) -> dict[Currency, DividendAndFeeAttribution]:
+    from stonks_cli.ledger import effective_events
+
+    values: dict[Currency, list[Decimal]] = defaultdict(
+        lambda: [Decimal("0"), Decimal("0"), Decimal("0")]
+    )
+    for event in effective_events(events):
+        entry = values[event.currency]
+        if event.kind is EventKind.DIVIDEND:
+            entry[0] += event.amount
+        elif event.kind is EventKind.FEE:
+            entry[1] += event.amount
+        elif event.kind in {EventKind.BUY, EventKind.SELL}:
+            entry[2] += event.fee
+    return {
+        currency: DividendAndFeeAttribution(*amounts)
+        for currency, amounts in sorted(values.items(), key=lambda item: item[0].value)
     }
 
 

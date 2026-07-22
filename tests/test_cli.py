@@ -63,7 +63,11 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "plugins-validate",
         "enable-provider",
         "disable-provider",
+        "dividend-configure",
         "moomoo-accounts",
+        "moomoo-dividends",
+        "moomoo-dividend-status",
+        "moomoo-map-dividend",
         "moomoo-sync",
         "moomoo-cash-flows",
         "moomoo-probe",
@@ -128,6 +132,29 @@ def test_cli_updates_enabled_provider_list(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["enable-provider", "personal", "moomoo"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["providers"] == ["csv", "moomoo"]
+
+
+def test_cli_configures_explicit_dividend_credit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "dividend-configure",
+            "personal",
+            "--allow-explicit-credit",
+            "--allow-currency-conversion",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["dividends"] == {
+        "allow_explicit_credit": True,
+        "allow_currency_conversion": True,
+    }
 
 
 def test_cli_validates_enabled_plugin_contracts(tmp_path: Path, monkeypatch) -> None:

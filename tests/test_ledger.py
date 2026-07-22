@@ -12,6 +12,7 @@ from stonks_cli.errors import LedgerError
 from stonks_cli.ledger import (
     append,
     cash_balances,
+    credit_mapped_dividend,
     effective_events,
     event_from_csv_row,
     import_csv,
@@ -20,12 +21,15 @@ from stonks_cli.ledger import (
     integrity_errors,
     list_cash_flows,
     list_cash_snapshots,
+    list_dividend_credit_mappings,
+    list_dividend_declarations,
     list_events,
     list_position_snapshots,
     positions,
     query_audit_trail,
     store_cash_flow,
     store_cash_snapshot,
+    store_dividend_declaration,
     store_position_snapshot,
 )
 from stonks_cli.storage import EncryptedLedger
@@ -33,6 +37,7 @@ from stonks_cli.types import (
     Account,
     BrokerCashFlow,
     BrokerCashSnapshot,
+    BrokerDividendDeclaration,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -124,6 +129,180 @@ def test_broker_cash_flows_are_idempotent_and_encrypted(tmp_path: Path, monkeypa
     assert store_cash_flow(ledger, flow) is False
     assert list_cash_flows(ledger) == [flow]
     assert b"Deposit" not in ledger.path.read_bytes()
+
+
+def test_dividends_remain_pending_until_explicit_mapping_reconciles_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    account = Account("moomoo", "123")
+    instrument = Instrument("SPY", "US", Currency.USD)
+    buy = LedgerEvent(
+        fingerprint="buy-before-record-date",
+        source=SourceProvenance("moomoo", "1" * 64, "fill:buy-1"),
+        account=account,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        kind=EventKind.BUY,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+        quantity=Decimal("10"),
+        instrument=instrument,
+    )
+    declaration = BrokerDividendDeclaration(
+        SourceProvenance("moomoo", "2" * 64, "dividend_declaration:decl-1"),
+        "3" * 64,
+        account,
+        instrument,
+        datetime(2026, 1, 2, tzinfo=UTC).date(),
+        "Implemented",
+        datetime(2026, 1, 2, tzinfo=UTC).date(),
+        datetime(2026, 1, 1, tzinfo=UTC).date(),
+        datetime(2026, 1, 4, tzinfo=UTC).date(),
+        "Cash Dividend: 1.00000 USD Per Share",
+        Decimal("1"),
+        Currency.USD,
+    )
+    flow = BrokerCashFlow(
+        SourceProvenance("moomoo", "4" * 64, "cash_flow:flow-1"),
+        account,
+        datetime(2026, 1, 4, tzinfo=UTC).date(),
+        datetime(2026, 1, 5, tzinfo=UTC).date(),
+        Currency.USD,
+        "Dividend",
+        "IN",
+        Decimal("9"),
+    )
+    snapshot = BrokerCashSnapshot(
+        SourceProvenance("moomoo", "5" * 64, "cash:USD:2026-01-06T00:00:00+00:00"),
+        account,
+        Currency.USD,
+        Decimal("109"),
+        datetime(2026, 1, 6, tzinfo=UTC),
+    )
+    assert append(ledger, buy)
+    assert store_dividend_declaration(ledger, declaration)
+    assert store_cash_flow(ledger, flow)
+    assert store_cash_snapshot(ledger, snapshot)
+
+    assert list_dividend_declarations(ledger) == [declaration]
+    assert cash_balances(list_events(ledger))[account.key, Currency.USD] == Decimal("-100")
+    with pytest.raises(LedgerError, match="funds reconciliation confirmation"):
+        credit_mapped_dividend(
+            ledger,
+            account,
+            declaration_record_id=declaration.source.record_id,
+            cash_flow_record_id=flow.source.record_id,
+            cash_snapshot_record_id=snapshot.source.record_id,
+            gross_currency=Currency.USD,
+            gross_amount="10",
+            withholding_amount="1",
+            conversion_rate=None,
+            allow_currency_conversion=False,
+            confirm_reconciled_funds=False,
+        )
+
+    event, inserted = credit_mapped_dividend(
+        ledger,
+        account,
+        declaration_record_id=declaration.source.record_id,
+        cash_flow_record_id=flow.source.record_id,
+        cash_snapshot_record_id=snapshot.source.record_id,
+        gross_currency=Currency.USD,
+        gross_amount="10",
+        withholding_amount="1",
+        conversion_rate=None,
+        allow_currency_conversion=False,
+        confirm_reconciled_funds=True,
+    )
+
+    assert inserted is True
+    assert event.kind is EventKind.DIVIDEND
+    assert event.amount == Decimal("9")
+    assert event.metadata["confidence"] == "explicit_user_mapping"
+    assert cash_balances(list_events(ledger))[account.key, Currency.USD] == Decimal("-91")
+    mappings = list_dividend_credit_mappings(ledger)
+    assert mappings[0].cash_flow_source_key == flow.source.key
+    assert credit_mapped_dividend(
+        ledger,
+        account,
+        declaration_record_id=declaration.source.record_id,
+        cash_flow_record_id=flow.source.record_id,
+        cash_snapshot_record_id=snapshot.source.record_id,
+        gross_currency=Currency.USD,
+        gross_amount="10",
+        withholding_amount="1",
+        conversion_rate=None,
+        allow_currency_conversion=False,
+        confirm_reconciled_funds=True,
+    ) == (event, False)
+
+
+def test_dividend_currency_conversion_requires_profile_permission(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    account = Account("moomoo", "123")
+    instrument = Instrument("0700", "HK", Currency.HKD)
+    append(
+        ledger,
+        LedgerEvent(
+            "hk-buy",
+            SourceProvenance("moomoo", "6" * 64, "fill:buy-hk"),
+            account,
+            datetime(2026, 1, 1, tzinfo=UTC),
+            EventKind.BUY,
+            Currency.HKD,
+            Decimal("100"),
+            Decimal("10"),
+            instrument,
+        ),
+    )
+    declaration = BrokerDividendDeclaration(
+        SourceProvenance("moomoo", "7" * 64, "dividend_declaration:decl-hk"),
+        "8" * 64,
+        account,
+        instrument,
+        datetime(2026, 1, 2, tzinfo=UTC).date(),
+        "Implemented",
+        datetime(2026, 1, 2, tzinfo=UTC).date(),
+        None,
+        None,
+        "Cash Dividend: 1.00000 HKD Per Share",
+        Decimal("1"),
+        Currency.HKD,
+    )
+    flow = BrokerCashFlow(
+        SourceProvenance("moomoo", "9" * 64, "cash_flow:flow-hk"),
+        account,
+        datetime(2026, 1, 4, tzinfo=UTC).date(),
+        datetime(2026, 1, 5, tzinfo=UTC).date(),
+        Currency.USD,
+        "Dividend",
+        "IN",
+        Decimal("1"),
+    )
+    snapshot = BrokerCashSnapshot(
+        SourceProvenance("moomoo", "a" * 64, "cash:USD:2026-01-06T00:00:00+00:00"),
+        account,
+        Currency.USD,
+        Decimal("1"),
+        datetime(2026, 1, 6, tzinfo=UTC),
+    )
+    assert store_dividend_declaration(ledger, declaration)
+    assert store_cash_flow(ledger, flow)
+    assert store_cash_snapshot(ledger, snapshot)
+
+    arguments = {
+        "declaration_record_id": declaration.source.record_id,
+        "cash_flow_record_id": flow.source.record_id,
+        "cash_snapshot_record_id": snapshot.source.record_id,
+        "gross_currency": Currency.HKD,
+        "gross_amount": "10",
+        "withholding_amount": "0",
+        "conversion_rate": "0.1",
+        "confirm_reconciled_funds": True,
+    }
+    with pytest.raises(LedgerError, match="conversion is disabled"):
+        credit_mapped_dividend(ledger, account, allow_currency_conversion=False, **arguments)
+    assert credit_mapped_dividend(ledger, account, allow_currency_conversion=True, **arguments)[1] is True
 
 
 def test_audit_trail_queries_immutable_events_by_identity_and_time(tmp_path: Path, monkeypatch) -> None:

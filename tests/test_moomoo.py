@@ -13,6 +13,7 @@ from stonks_cli.errors import ProviderError
 from stonks_cli.ledger import (
     list_cash_flows,
     list_cash_snapshots,
+    list_dividend_declarations,
     list_events,
     list_position_snapshots,
 )
@@ -23,6 +24,7 @@ from stonks_cli.moomoo import (
     OpenDSDKStatus,
     import_account_snapshot,
     import_cash_flows,
+    import_dividend_declarations,
     import_order_fees,
     import_stock_splits,
 )
@@ -214,6 +216,10 @@ class FixtureQuoteContext:
         assert kwargs == {"next_key": None, "num": 50}
         return 0, self.payload["stock_splits"]
 
+    def get_corporate_actions_dividends(self, code: str):
+        assert code == "US.SYNTH"
+        return 0, self.payload["dividends"]
+
     def close(self) -> None:
         self.closed = True
 
@@ -317,6 +323,7 @@ def test_moomoo_synthetic_opend_fixture_suite() -> None:
     assert [price.close for price in provider.daily_prices((instrument,), date(2026, 1, 1), date(2026, 1, 2))] == [Decimal("100"), Decimal("101")]
     assert provider.market_snapshots((instrument,), datetime(2026, 1, 2, tzinfo=UTC))[0].last_price == Decimal("101")
     assert provider.corporate_splits(instrument)[0]["rate"] == "1->2"
+    assert provider.corporate_dividends(instrument)[0]["process"] == "Proposed"
 
 
 def test_moomoo_rejects_unknown_and_execution_methods() -> None:
@@ -624,6 +631,39 @@ def test_moomoo_cash_flows_are_archived_without_ledger_classification(tmp_path, 
     flow = list_cash_flows(ledger)[0]
     assert flow.amount == Decimal("12.5")
     assert flow.flow_type == "Fund Redemption"
+    assert list_events(ledger) == []
+
+
+def test_moomoo_dividends_are_pending_declarations_not_cash_events(tmp_path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    records = (
+        {
+            "pub_date": "2026/01/02",
+            "statement": "Cash Dividend: 1.00000 USD Per Share",
+            "process": "Proposed",
+            "record_date": "2026/01/10",
+            "ex_date": "2026/01/09",
+            "dividend_payable_date": "2026/01/20",
+        },
+    )
+
+    assert import_dividend_declarations(
+        ledger,
+        Account("moomoo", "2"),
+        Instrument("SPY", "US", Currency.USD),
+        records,
+    ) == (1, 0)
+    assert import_dividend_declarations(
+        ledger,
+        Account("moomoo", "2"),
+        Instrument("SPY", "US", Currency.USD),
+        records,
+    ) == (0, 1)
+
+    declaration = list_dividend_declarations(ledger)[0]
+    assert declaration.amount_per_share == Decimal("1")
+    assert declaration.currency is Currency.USD
+    assert declaration.record_date == date(2026, 1, 10)
     assert list_events(ledger) == []
 
 

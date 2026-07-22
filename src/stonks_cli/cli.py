@@ -22,6 +22,7 @@ from stonks_cli.analytics import (
     market_values_by_currency,
 )
 from stonks_cli.config import (
+    DividendSettings,
     LLMSettings,
     ProfileConfig,
     disable_provider,
@@ -29,11 +30,15 @@ from stonks_cli.config import (
     load_profile,
     save_profile,
 )
-from stonks_cli.errors import LLMError, ProfileError, ProviderError
+from stonks_cli.errors import LedgerError, LLMError, ProfileError, ProviderError
 from stonks_cli.ledger import (
     cash_balances,
+    credit_mapped_dividend,
     import_csv,
+    list_cash_flows,
     list_cash_snapshots,
+    list_dividend_credit_mappings,
+    list_dividend_declarations,
     list_events,
     list_position_snapshots,
     positions,
@@ -52,6 +57,7 @@ from stonks_cli.moomoo import (
     OpenDConnection,
     import_account_snapshot,
     import_cash_flows,
+    import_dividend_declarations,
 )
 from stonks_cli.operator import (
     ScheduleDefinition,
@@ -136,6 +142,13 @@ def _llm_settings_data(settings: LLMSettings) -> dict[str, object]:
         "output_cost_per_million_sgd": settings.output_cost_per_million_sgd,
         "max_output_tokens": settings.max_output_tokens,
         "allow_cloud": settings.allow_cloud,
+    }
+
+
+def _dividend_settings_data(settings: DividendSettings) -> dict[str, bool]:
+    return {
+        "allow_explicit_credit": settings.allow_explicit_credit,
+        "allow_currency_conversion": settings.allow_currency_conversion,
     }
 
 
@@ -1163,6 +1176,25 @@ def plugins_validate(profile: str) -> None:
         raise typer.Exit(1)
 
 
+@app.command("dividend-configure")
+def dividend_configure(
+    profile: str,
+    allow_explicit_credit: bool = typer.Option(
+        False, "--allow-explicit-credit/--disallow-explicit-credit"
+    ),
+    allow_currency_conversion: bool = typer.Option(
+        False, "--allow-currency-conversion/--disallow-currency-conversion"
+    ),
+) -> None:
+    try:
+        settings = DividendSettings(allow_explicit_credit, allow_currency_conversion)
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    config = replace(load_profile(profile), dividends=settings)
+    save_profile(config)
+    console.print_json(json.dumps({"profile": profile, "dividends": _dividend_settings_data(settings)}))
+
+
 @app.command("moomoo-accounts")
 def moomoo_accounts(host: str = typer.Option("127.0.0.1"), port: int = typer.Option(11111)) -> None:
     provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
@@ -1179,6 +1211,178 @@ def moomoo_accounts(host: str = typer.Option("127.0.0.1"), port: int = typer.Opt
                     }
                     for account in accounts
                 ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("moomoo-dividends")
+def moomoo_dividends(
+    profile: str,
+    account_id: str,
+    symbol: str,
+    market: str,
+    currency: str,
+    name: str | None = typer.Option(None),
+    host: str = typer.Option("127.0.0.1"),
+    port: int = typer.Option(11111),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    instrument = _instrument(symbol, market, currency, name)
+    provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
+    try:
+        selected = provider.selected_account(account_id)
+    except ProviderError:
+        raise typer.BadParameter("account-id is not available from this local OpenD instance")
+    inserted, skipped = import_dividend_declarations(
+        EncryptedLedger(_profile(profile, key_file)),
+        Account("moomoo", selected.account_id),
+        instrument,
+        provider.corporate_dividends(instrument),
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "account_id": selected.account_id,
+                "instrument": instrument.key,
+                "inserted": inserted,
+                "skipped": skipped,
+                "cash_credit": "pending_explicit_mapping",
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("moomoo-dividend-status")
+def moomoo_dividend_status(
+    profile: str, account_id: str, key_file: Path | None = typer.Option(None)
+) -> None:
+    account = Account("moomoo", account_id)
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
+    mapped = {
+        mapping.declaration_source_key: mapping
+        for mapping in list_dividend_credit_mappings(ledger)
+    }
+    declarations = [
+        declaration
+        for declaration in list_dividend_declarations(ledger)
+        if declaration.account == account
+    ]
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "account_id": account.account_id,
+                "settings": _dividend_settings_data(config.dividends),
+                "declarations": [
+                    {
+                        "declaration_id": declaration.source.record_id,
+                        "instrument": declaration.instrument.key,
+                        "announced_at": (
+                            None
+                            if declaration.announced_at is None
+                            else declaration.announced_at.isoformat()
+                        ),
+                        "record_date": (
+                            None if declaration.record_date is None else declaration.record_date.isoformat()
+                        ),
+                        "payable_date": (
+                            None
+                            if declaration.payable_date is None
+                            else declaration.payable_date.isoformat()
+                        ),
+                        "status": declaration.status,
+                        "statement": declaration.statement,
+                        "cash_credit": (
+                            "credited"
+                            if declaration.source.key in mapped
+                            else "pending_explicit_mapping"
+                        ),
+                        "reason": (
+                            None
+                            if declaration.source.key in mapped
+                            else "declared dividends never credit automatically"
+                        ),
+                    }
+                    for declaration in declarations
+                ],
+                "cash_flows": [
+                    {
+                        "cash_flow_id": flow.source.record_id,
+                        "clearing_date": flow.clearing_date.isoformat(),
+                        "settlement_date": flow.settlement_date.isoformat(),
+                        "currency": flow.currency.value,
+                        "direction": flow.direction,
+                        "amount": str(flow.amount),
+                    }
+                    for flow in list_cash_flows(ledger)
+                    if flow.account == account
+                ],
+                "cash_snapshots": [
+                    {
+                        "cash_snapshot_id": snapshot.source.record_id,
+                        "observed_at": snapshot.observed_at.isoformat(),
+                        "currency": snapshot.currency.value,
+                        "amount": str(snapshot.amount),
+                    }
+                    for snapshot in list_cash_snapshots(ledger)
+                    if snapshot.account == account
+                ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("moomoo-map-dividend")
+def moomoo_map_dividend(
+    profile: str,
+    account_id: str,
+    declaration_id: str = typer.Option(...),
+    cash_flow_id: str = typer.Option(...),
+    cash_snapshot_id: str = typer.Option(...),
+    gross_currency: str = typer.Option(...),
+    gross_amount: str = typer.Option(...),
+    withholding_amount: str = typer.Option("0"),
+    conversion_rate: str | None = typer.Option(None),
+    confirm_reconciled_funds: bool = typer.Option(False, "--confirm-reconciled-funds"),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    if not config.dividends.allow_explicit_credit:
+        raise typer.BadParameter("dividend explicit credit is disabled in profile settings")
+    try:
+        parsed_gross_currency = Currency(gross_currency.strip().upper())
+    except ValueError as error:
+        raise typer.BadParameter("gross-currency is invalid") from error
+    try:
+        event, inserted = credit_mapped_dividend(
+            EncryptedLedger(config),
+            Account("moomoo", account_id),
+            declaration_record_id=declaration_id,
+            cash_flow_record_id=cash_flow_id,
+            cash_snapshot_record_id=cash_snapshot_id,
+            gross_currency=parsed_gross_currency,
+            gross_amount=gross_amount,
+            withholding_amount=withholding_amount,
+            conversion_rate=conversion_rate,
+            allow_currency_conversion=config.dividends.allow_currency_conversion,
+            confirm_reconciled_funds=confirm_reconciled_funds,
+        )
+    except LedgerError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "account_id": account_id,
+                "event_fingerprint": event.fingerprint,
+                "inserted": inserted,
+                "cash_credit": "explicit_mapping",
                 "execution": "denied",
             }
         )

@@ -18,6 +18,7 @@ from stonks_cli.ledger import (
     ingest_events,
     store_cash_flow,
     store_cash_snapshot,
+    store_dividend_declaration,
     store_fee_record,
     store_position_snapshot,
 )
@@ -28,6 +29,7 @@ from stonks_cli.types import (
     Account,
     BrokerCashFlow,
     BrokerCashSnapshot,
+    BrokerDividendDeclaration,
     BrokerFeeRecord,
     BrokerPositionSnapshot,
     Currency,
@@ -56,6 +58,10 @@ _MAX_HISTORICAL_PAGES = 100
 _MAX_HISTORICAL_ROWS = 100_000
 _MAX_CORPORATE_ACTION_PAGES = 100
 _MAX_CORPORATE_ACTION_ROWS = 5_000
+_DIVIDEND_AMOUNT = re.compile(
+    r"\bcash dividend\s*:\s*(?P<amount>[0-9]+(?:\.[0-9]+)?)\s+(?P<currency>CNY|HKD|SGD|USD)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -424,6 +430,37 @@ class MoomooReadOnlyProvider:
                 raise ProviderError("Moomoo quote context cannot be closed")
             close()
 
+    def corporate_dividends(self, instrument: Instrument) -> tuple[dict[str, Any], ...]:
+        if self.quote_context_factory is None:
+            raise ProviderError("Moomoo quote context is unavailable")
+        context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
+        try:
+            self.corporate_action_rate_limiter.acquire("get_corporate_actions_dividends")
+            call = getattr(context, "get_corporate_actions_dividends", None)
+            if not callable(call):
+                raise ProviderError("Moomoo quote context does not support:get_corporate_actions_dividends")
+            response = call(f"{instrument.market}.{instrument.symbol}")
+            if not isinstance(response, tuple) or len(response) != 2 or response[0] != 0:
+                raise ProviderError("Moomoo read failed:get_corporate_actions_dividends")
+            payload = response[1]
+            if not isinstance(payload, dict):
+                raise ProviderError("Moomoo dividend response is malformed")
+            rows = payload.get("dividend_list")
+            if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+                raise ProviderError("Moomoo dividend response is malformed")
+            if not all(isinstance(row, dict) for row in rows):
+                raise ProviderError("Moomoo dividend response is malformed")
+            return tuple(rows)
+        except ProviderError:
+            raise
+        except Exception as error:
+            raise ProviderError("Moomoo read failed:get_corporate_actions_dividends") from error
+        finally:
+            close = getattr(context, "close", None)
+            if not callable(close):
+                raise ProviderError("Moomoo quote context cannot be closed")
+            close()
+
     def _historical_bars(
         self, instrument: Instrument, start: date, end: date
     ) -> list[dict[str, Any]]:
@@ -589,6 +626,47 @@ def import_cash_flows(
         except (KeyError, ValueError) as error:
             raise ProviderError("malformed Moomoo cash flow record") from error
         if store_cash_flow(ledger, flow):
+            inserted += 1
+        else:
+            skipped += 1
+    return inserted, skipped
+
+
+def import_dividend_declarations(
+    ledger: EncryptedLedger,
+    account: Account,
+    instrument: Instrument,
+    records: Sequence[dict[str, Any]],
+) -> tuple[int, int]:
+    """Store announced dividends as pending evidence without cash events."""
+    if account.provider_id != "moomoo":
+        raise ProviderError("Moomoo import requires a Moomoo account")
+    inserted = skipped = 0
+    for row in records:
+        try:
+            raw_payload = {"instrument": instrument.key, "dividend": row}
+            identifier = hashlib.sha256(_canonical_json(raw_payload)).hexdigest()
+            source, raw_hash = _record_source(
+                ledger, account, "dividend_declaration", identifier, raw_payload
+            )
+            amount_per_share, currency = _dividend_amount_per_share(row.get("statement"))
+            declaration = BrokerDividendDeclaration(
+                source=source,
+                raw_source_hash=raw_hash,
+                account=account,
+                instrument=instrument,
+                announced_at=_moomoo_date(row.get("pub_date")),
+                status=_optional_text(row.get("process")),
+                record_date=_moomoo_date(row.get("record_date")),
+                ex_date=_moomoo_date(row.get("ex_date")),
+                payable_date=_moomoo_date(row.get("dividend_payable_date")),
+                statement=_optional_text(row.get("statement")),
+                amount_per_share=amount_per_share,
+                currency=currency,
+            )
+        except ValueError as error:
+            raise ProviderError("malformed Moomoo dividend record") from error
+        if store_dividend_declaration(ledger, declaration):
             inserted += 1
         else:
             skipped += 1
@@ -897,6 +975,28 @@ def _canonical_json(value: object) -> bytes:
         return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     except (TypeError, ValueError) as error:
         raise ProviderError("Moomoo payload must be JSON serializable") from error
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _moomoo_date(value: object) -> date | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    return date.fromisoformat(text.replace("/", "-"))
+
+
+def _dividend_amount_per_share(value: object) -> tuple[Decimal | None, Currency | None]:
+    statement = _optional_text(value)
+    if statement is None or (match := _DIVIDEND_AMOUNT.search(statement)) is None:
+        return None, None
+    amount = _positive_decimal(match["amount"], "Moomoo dividend amount")
+    return amount, Currency(match["currency"].upper())
 
 
 def _identifier(row: dict[str, Any], field: str) -> str:

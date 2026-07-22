@@ -184,6 +184,102 @@ class BrokerCashFlow:
 
 
 @dataclass(frozen=True)
+class BrokerDividendDeclaration:
+    source: SourceProvenance
+    raw_source_hash: str
+    account: Account
+    instrument: Instrument
+    announced_at: date | None
+    status: str | None
+    record_date: date | None
+    ex_date: date | None
+    payable_date: date | None
+    statement: str | None
+    amount_per_share: Decimal | None
+    currency: Currency | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        if not isinstance(self.raw_source_hash, str) or not _SHA256.fullmatch(
+            self.raw_source_hash.lower()
+        ):
+            raise ValueError("raw source hash must be a SHA-256 digest")
+        if not isinstance(self.instrument, Instrument):
+            raise ValueError("dividend instrument is required")
+        for value in (self.announced_at, self.record_date, self.ex_date, self.payable_date):
+            if value is not None and not isinstance(value, date):
+                raise ValueError("dividend dates must be dates")
+        for field_name in ("status", "statement"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if not isinstance(value, str) or len(value.strip()) > 2048:
+                    raise ValueError(f"dividend {field_name} is invalid")
+                object.__setattr__(self, field_name, value.strip() or None)
+        if (self.amount_per_share is None) != (self.currency is None):
+            raise ValueError("dividend amount currency pair is required")
+        if self.amount_per_share is not None:
+            amount = decimal(self.amount_per_share)
+            if amount <= 0:
+                raise ValueError("dividend amount per share must be positive")
+            if not isinstance(self.currency, Currency):
+                raise ValueError("dividend currency is required")
+            object.__setattr__(self, "amount_per_share", amount)
+        object.__setattr__(self, "raw_source_hash", self.raw_source_hash.lower())
+
+
+@dataclass(frozen=True)
+class DividendCreditMapping:
+    declaration_source_key: str
+    cash_flow_source_key: str
+    cash_snapshot_source_key: str
+    event_fingerprint: str
+    gross_currency: Currency
+    gross_amount: Decimal
+    withholding_amount: Decimal
+    net_amount: Decimal
+    credited_currency: Currency
+    conversion_rate: Decimal | None
+    entitlement_quantity: Decimal
+
+    def __post_init__(self) -> None:
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (
+                self.declaration_source_key,
+                self.cash_flow_source_key,
+                self.cash_snapshot_source_key,
+                self.event_fingerprint,
+            )
+        ):
+            raise ValueError("dividend mapping identifiers are required")
+        if not isinstance(self.gross_currency, Currency) or not isinstance(
+            self.credited_currency, Currency
+        ):
+            raise ValueError("dividend mapping currencies are required")
+        gross = decimal(self.gross_amount)
+        withholding = decimal(self.withholding_amount)
+        net = decimal(self.net_amount)
+        entitlement = decimal(self.entitlement_quantity)
+        if gross <= 0 or withholding < 0 or withholding >= gross or net <= 0 or entitlement <= 0:
+            raise ValueError("dividend mapping amounts are invalid")
+        if self.gross_currency == self.credited_currency:
+            if self.conversion_rate is not None or gross - withholding != net:
+                raise ValueError("same-currency dividend mapping does not reconcile")
+        else:
+            if self.conversion_rate is None:
+                raise ValueError("cross-currency dividend mapping requires conversion")
+            rate = decimal(self.conversion_rate)
+            if rate <= 0 or (gross - withholding) * rate != net:
+                raise ValueError("cross-currency dividend mapping does not reconcile")
+            object.__setattr__(self, "conversion_rate", rate)
+        object.__setattr__(self, "gross_amount", gross)
+        object.__setattr__(self, "withholding_amount", withholding)
+        object.__setattr__(self, "net_amount", net)
+        object.__setattr__(self, "entitlement_quantity", entitlement)
+
+
+@dataclass(frozen=True)
 class BrokerFeeRecord:
     source: SourceProvenance
     raw_source_hash: str

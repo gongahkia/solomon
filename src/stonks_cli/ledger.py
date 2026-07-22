@@ -7,10 +7,10 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from stonks_cli.errors import LedgerError
 from stonks_cli.storage import EncryptedLedger
@@ -18,9 +18,11 @@ from stonks_cli.types import (
     Account,
     BrokerCashFlow,
     BrokerCashSnapshot,
+    BrokerDividendDeclaration,
     BrokerFeeRecord,
     BrokerPositionSnapshot,
     Currency,
+    DividendCreditMapping,
     EventKind,
     EventLifecycle,
     Instrument,
@@ -51,6 +53,8 @@ def initialize(connection: sqlite3.Connection) -> None:
     _initialize_position_snapshots(connection)
     _initialize_cash_snapshots(connection)
     _initialize_cash_flows(connection)
+    _initialize_dividend_declarations(connection)
+    _initialize_dividend_credit_mappings(connection)
     _initialize_fee_records(connection)
 
 
@@ -220,6 +224,61 @@ def _initialize_fee_records(connection: sqlite3.Connection) -> None:
     )
 
 
+def _initialize_dividend_declarations(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_dividend_declarations (
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            raw_source_hash TEXT NOT NULL CHECK(length(raw_source_hash) = 64),
+            account_provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            account_name TEXT,
+            instrument_symbol TEXT NOT NULL,
+            instrument_market TEXT NOT NULL,
+            instrument_currency TEXT NOT NULL,
+            instrument_name TEXT,
+            announced_at TEXT,
+            status TEXT,
+            record_date TEXT,
+            ex_date TEXT,
+            payable_date TEXT,
+            statement TEXT,
+            amount_per_share TEXT,
+            currency TEXT,
+            PRIMARY KEY(source_provider_id, source_hash, source_record_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS broker_dividend_declarations_account
+        ON broker_dividend_declarations(account_provider_id, account_id, record_date)
+        """
+    )
+
+
+def _initialize_dividend_credit_mappings(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dividend_credit_mappings (
+            declaration_source_key TEXT PRIMARY KEY,
+            cash_flow_source_key TEXT NOT NULL UNIQUE,
+            cash_snapshot_source_key TEXT NOT NULL,
+            event_fingerprint TEXT NOT NULL UNIQUE,
+            gross_currency TEXT NOT NULL,
+            gross_amount TEXT NOT NULL,
+            withholding_amount TEXT NOT NULL,
+            net_amount TEXT NOT NULL,
+            credited_currency TEXT NOT NULL,
+            conversion_rate TEXT,
+            entitlement_quantity TEXT NOT NULL
+        )
+        """
+    )
+
+
 def _migrate_legacy_event_table(connection: sqlite3.Connection) -> None:
     legacy_columns = _columns(connection, "ledger_events")
     if not {"fingerprint", "source_id", "account_id"} <= legacy_columns:
@@ -314,6 +373,12 @@ def store_cash_flow(ledger: EncryptedLedger, flow: BrokerCashFlow) -> bool:
         return _insert_cash_flow(connection, flow).rowcount == 1
 
 
+def store_dividend_declaration(ledger: EncryptedLedger, declaration: BrokerDividendDeclaration) -> bool:
+    with ledger.connection() as connection:
+        initialize(connection)
+        return _insert_dividend_declaration(connection, declaration).rowcount == 1
+
+
 def store_fee_record(ledger: EncryptedLedger, fee: BrokerFeeRecord) -> bool:
     with ledger.connection() as connection:
         initialize(connection)
@@ -382,6 +447,40 @@ def _insert_cash_flow(connection: sqlite3.Connection, flow: BrokerCashFlow) -> s
             flow.direction,
             str(flow.amount),
             flow.remark,
+        ),
+    )
+
+
+def _insert_dividend_declaration(
+    connection: sqlite3.Connection, declaration: BrokerDividendDeclaration
+) -> sqlite3.Cursor:
+    instrument = declaration.instrument
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO broker_dividend_declarations VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        (
+            declaration.source.provider_id,
+            declaration.source.source_hash,
+            declaration.source.record_id,
+            declaration.raw_source_hash,
+            declaration.account.provider_id,
+            declaration.account.account_id,
+            declaration.account.name,
+            instrument.symbol,
+            instrument.market,
+            instrument.currency.value,
+            instrument.name,
+            None if declaration.announced_at is None else declaration.announced_at.isoformat(),
+            declaration.status,
+            None if declaration.record_date is None else declaration.record_date.isoformat(),
+            None if declaration.ex_date is None else declaration.ex_date.isoformat(),
+            None if declaration.payable_date is None else declaration.payable_date.isoformat(),
+            declaration.statement,
+            None if declaration.amount_per_share is None else str(declaration.amount_per_share),
+            None if declaration.currency is None else declaration.currency.value,
         ),
     )
 
@@ -505,6 +604,30 @@ def list_cash_flows(ledger: EncryptedLedger) -> list[BrokerCashFlow]:
     return [_cash_flow_from_row(row) for row in rows]
 
 
+def list_dividend_declarations(ledger: EncryptedLedger) -> list[BrokerDividendDeclaration]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM broker_dividend_declarations
+            ORDER BY payable_date, record_date, source_provider_id, source_hash, source_record_id
+            """
+        ).fetchall()
+    return [_dividend_declaration_from_row(row) for row in rows]
+
+
+def list_dividend_credit_mappings(ledger: EncryptedLedger) -> list[DividendCreditMapping]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM dividend_credit_mappings
+            ORDER BY declaration_source_key
+            """
+        ).fetchall()
+    return [_dividend_credit_mapping_from_row(row) for row in rows]
+
+
 def list_fee_records(ledger: EncryptedLedger) -> list[BrokerFeeRecord]:
     with ledger.connection() as connection:
         initialize(connection)
@@ -560,6 +683,297 @@ def _cash_flow_from_row(row: sqlite3.Row) -> BrokerCashFlow:
         amount=Decimal(row["amount"]),
         remark=row["remark"],
     )
+
+
+def _dividend_declaration_from_row(row: sqlite3.Row) -> BrokerDividendDeclaration:
+    return BrokerDividendDeclaration(
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        raw_source_hash=row["raw_source_hash"],
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        instrument=Instrument(
+            row["instrument_symbol"],
+            row["instrument_market"],
+            Currency(row["instrument_currency"]),
+            row["instrument_name"],
+        ),
+        announced_at=None if row["announced_at"] is None else date.fromisoformat(row["announced_at"]),
+        status=row["status"],
+        record_date=None if row["record_date"] is None else date.fromisoformat(row["record_date"]),
+        ex_date=None if row["ex_date"] is None else date.fromisoformat(row["ex_date"]),
+        payable_date=None if row["payable_date"] is None else date.fromisoformat(row["payable_date"]),
+        statement=row["statement"],
+        amount_per_share=None if row["amount_per_share"] is None else Decimal(row["amount_per_share"]),
+        currency=None if row["currency"] is None else Currency(row["currency"]),
+    )
+
+
+def _dividend_credit_mapping_from_row(row: sqlite3.Row) -> DividendCreditMapping:
+    return DividendCreditMapping(
+        declaration_source_key=row["declaration_source_key"],
+        cash_flow_source_key=row["cash_flow_source_key"],
+        cash_snapshot_source_key=row["cash_snapshot_source_key"],
+        event_fingerprint=row["event_fingerprint"],
+        gross_currency=Currency(row["gross_currency"]),
+        gross_amount=Decimal(row["gross_amount"]),
+        withholding_amount=Decimal(row["withholding_amount"]),
+        net_amount=Decimal(row["net_amount"]),
+        credited_currency=Currency(row["credited_currency"]),
+        conversion_rate=(
+            None if row["conversion_rate"] is None else Decimal(row["conversion_rate"])
+        ),
+        entitlement_quantity=Decimal(row["entitlement_quantity"]),
+    )
+
+
+_MARKET_TIMEZONES = {
+    "HK": "Asia/Hong_Kong",
+    "SG": "Asia/Singapore",
+    "SH": "Asia/Shanghai",
+    "SZ": "Asia/Shanghai",
+    "US": "America/New_York",
+}
+
+
+def credit_mapped_dividend(
+    ledger: EncryptedLedger,
+    account: Account,
+    *,
+    declaration_record_id: str,
+    cash_flow_record_id: str,
+    cash_snapshot_record_id: str,
+    gross_currency: Currency,
+    gross_amount: Decimal | str,
+    withholding_amount: Decimal | str,
+    conversion_rate: Decimal | str | None,
+    allow_currency_conversion: bool,
+    confirm_reconciled_funds: bool,
+) -> tuple[LedgerEvent, bool]:
+    """Credit only an explicitly confirmed declaration-to-cash-flow mapping."""
+    if not confirm_reconciled_funds:
+        raise LedgerError("dividend mapping requires funds reconciliation confirmation")
+    with ledger.connection() as connection:
+        initialize(connection)
+        declaration = _dividend_declaration_for_record(connection, account, declaration_record_id)
+        cash_flow = _cash_flow_for_record(connection, account, cash_flow_record_id)
+        cash_snapshot = _cash_snapshot_for_record(connection, account, cash_snapshot_record_id)
+        if declaration.record_date is None:
+            raise LedgerError("dividend mapping requires a record date")
+        if cash_flow.direction.upper() != "IN" or cash_flow.amount <= 0:
+            raise LedgerError("dividend mapping requires an inflow cash flow")
+        if cash_snapshot.currency != cash_flow.currency:
+            raise LedgerError("dividend mapping cash snapshot currency does not match cash flow")
+        settlement_at = datetime.combine(cash_flow.settlement_date, time.min, tzinfo=UTC)
+        if cash_snapshot.observed_at < settlement_at:
+            raise LedgerError("dividend mapping cash snapshot predates settlement")
+        latest_snapshot = _latest_cash_snapshot(connection, account, cash_flow.currency)
+        if latest_snapshot is None or latest_snapshot.source != cash_snapshot.source:
+            raise LedgerError("dividend mapping requires the current cash snapshot")
+        if cash_snapshot.amount < cash_flow.amount:
+            raise LedgerError("dividend mapping cash snapshot does not cover credited cash")
+        entitlement_quantity = _entitlement_quantity(
+            connection, account, declaration.instrument, declaration.record_date
+        )
+        if entitlement_quantity <= 0:
+            raise LedgerError("dividend mapping has no record-date entitlement")
+        if declaration.currency is not None and declaration.currency != gross_currency:
+            raise LedgerError("dividend mapping gross currency conflicts with declaration")
+        if gross_currency != cash_flow.currency and not allow_currency_conversion:
+            raise LedgerError("dividend currency conversion is disabled in profile settings")
+        try:
+            gross = decimal(gross_amount)
+            withholding = decimal(withholding_amount)
+            if (
+                declaration.amount_per_share is not None
+                and declaration.amount_per_share * entitlement_quantity != gross
+            ):
+                raise ValueError("dividend gross amount does not match record-date entitlement")
+            mapping = DividendCreditMapping(
+                declaration.source.key,
+                cash_flow.source.key,
+                cash_snapshot.source.key,
+                "pending",
+                gross_currency,
+                gross,
+                withholding,
+                cash_flow.amount,
+                cash_flow.currency,
+                None if conversion_rate is None else decimal(conversion_rate),
+                entitlement_quantity,
+            )
+        except ValueError as error:
+            raise LedgerError(str(error)) from error
+        source_payload = {
+            "declaration_source": declaration.source.key,
+            "cash_flow_source": cash_flow.source.key,
+            "cash_snapshot_source": cash_snapshot.source.key,
+            "gross_currency": gross_currency.value,
+            "gross_amount": str(mapping.gross_amount),
+            "withholding_amount": str(mapping.withholding_amount),
+            "net_amount": str(mapping.net_amount),
+            "conversion_rate": None if mapping.conversion_rate is None else str(mapping.conversion_rate),
+        }
+        source = SourceProvenance(
+            "user", hashlib.sha256(_canonical_json_bytes(source_payload)).hexdigest(),
+            f"dividend:{declaration.source.record_id}:{cash_flow.source.record_id}",
+        )
+        event = LedgerEvent(
+            fingerprint=import_fingerprint(source, source_payload),
+            source=source,
+            account=account,
+            occurred_at=settlement_at,
+            kind=EventKind.DIVIDEND,
+            currency=cash_flow.currency,
+            amount=cash_flow.amount,
+            instrument=declaration.instrument,
+            metadata={
+                "confidence": "explicit_user_mapping",
+                "declaration_source": declaration.source.key,
+                "cash_flow_source": cash_flow.source.key,
+                "cash_snapshot_source": cash_snapshot.source.key,
+                "gross_currency": gross_currency.value,
+                "gross_amount": str(mapping.gross_amount),
+                "withholding_amount": str(mapping.withholding_amount),
+                "net_credited_amount": str(cash_flow.amount),
+                "conversion_rate": (
+                    None if mapping.conversion_rate is None else str(mapping.conversion_rate)
+                ),
+                "entitlement_quantity": str(entitlement_quantity),
+                "settlement_date": cash_flow.settlement_date.isoformat(),
+                "funds_reconciliation_confirmed": True,
+            },
+        )
+        mapping = DividendCreditMapping(
+            mapping.declaration_source_key,
+            mapping.cash_flow_source_key,
+            mapping.cash_snapshot_source_key,
+            event.fingerprint,
+            mapping.gross_currency,
+            mapping.gross_amount,
+            mapping.withholding_amount,
+            mapping.net_amount,
+            mapping.credited_currency,
+            mapping.conversion_rate,
+            mapping.entitlement_quantity,
+        )
+        existing = connection.execute(
+            "SELECT * FROM dividend_credit_mappings WHERE declaration_source_key = ?",
+            (mapping.declaration_source_key,),
+        ).fetchone()
+        if existing is not None:
+            stored = _dividend_credit_mapping_from_row(existing)
+            if stored != mapping:
+                raise LedgerError("dividend declaration is already mapped")
+            row = connection.execute(
+                "SELECT * FROM ledger_events WHERE fingerprint = ?", (stored.event_fingerprint,)
+            ).fetchone()
+            if row is None:
+                raise LedgerError("dividend mapping event is missing")
+            return _event_from_row(row), False
+        if connection.execute(
+            "SELECT 1 FROM dividend_credit_mappings WHERE cash_flow_source_key = ?",
+            (mapping.cash_flow_source_key,),
+        ).fetchone() is not None:
+            raise LedgerError("cash flow is already mapped to a dividend")
+        if _insert_event(connection, event).rowcount != 1:
+            raise LedgerError("dividend mapping event conflicts with an existing event")
+        connection.execute(
+            """
+            INSERT INTO dividend_credit_mappings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mapping.declaration_source_key,
+                mapping.cash_flow_source_key,
+                mapping.cash_snapshot_source_key,
+                mapping.event_fingerprint,
+                mapping.gross_currency.value,
+                str(mapping.gross_amount),
+                str(mapping.withholding_amount),
+                str(mapping.net_amount),
+                mapping.credited_currency.value,
+                None if mapping.conversion_rate is None else str(mapping.conversion_rate),
+                str(mapping.entitlement_quantity),
+            ),
+        )
+    return event, True
+
+
+def _dividend_declaration_for_record(
+    connection: sqlite3.Connection, account: Account, record_id: str
+) -> BrokerDividendDeclaration:
+    row = _one_broker_record(
+        connection, "broker_dividend_declarations", account, record_id, "dividend declaration"
+    )
+    return _dividend_declaration_from_row(row)
+
+
+def _cash_flow_for_record(
+    connection: sqlite3.Connection, account: Account, record_id: str
+) -> BrokerCashFlow:
+    row = _one_broker_record(connection, "broker_cash_flows", account, record_id, "cash flow")
+    return _cash_flow_from_row(row)
+
+
+def _cash_snapshot_for_record(
+    connection: sqlite3.Connection, account: Account, record_id: str
+) -> BrokerCashSnapshot:
+    row = _one_broker_record(connection, "broker_cash_snapshots", account, record_id, "cash snapshot")
+    return _cash_snapshot_from_row(row)
+
+
+def _one_broker_record(
+    connection: sqlite3.Connection, table: str, account: Account, record_id: str, label: str
+) -> sqlite3.Row:
+    if not isinstance(record_id, str) or not (identifier := record_id.strip()):
+        raise LedgerError(f"{label} record identifier is required")
+    rows = connection.execute(
+        f"""
+        SELECT * FROM {table}
+        WHERE account_provider_id = ? AND account_id = ? AND source_record_id = ?
+        """,
+        (account.provider_id, account.account_id, identifier),
+    ).fetchall()
+    if len(rows) != 1:
+        raise LedgerError(f"{label} record is unavailable")
+    return cast(sqlite3.Row, rows[0])
+
+
+def _latest_cash_snapshot(
+    connection: sqlite3.Connection, account: Account, currency: Currency
+) -> BrokerCashSnapshot | None:
+    row = connection.execute(
+        """
+        SELECT * FROM broker_cash_snapshots
+        WHERE account_provider_id = ? AND account_id = ? AND currency = ?
+        ORDER BY observed_at DESC, source_provider_id DESC, source_hash DESC, source_record_id DESC
+        LIMIT 1
+        """,
+        (account.provider_id, account.account_id, currency.value),
+    ).fetchone()
+    return None if row is None else _cash_snapshot_from_row(row)
+
+
+def _entitlement_quantity(
+    connection: sqlite3.Connection, account: Account, instrument: Instrument, record_date: date
+) -> Decimal:
+    try:
+        from zoneinfo import ZoneInfo
+
+        timezone = ZoneInfo(_MARKET_TIMEZONES[instrument.market])
+    except KeyError as error:
+        raise LedgerError("dividend instrument market has no record-date timezone") from error
+    cutoff = datetime.combine(record_date + timedelta(days=1), time.min, tzinfo=timezone).astimezone(UTC)
+    rows = connection.execute(
+        "SELECT * FROM ledger_events WHERE occurred_at < ? ORDER BY occurred_at, fingerprint",
+        (cutoff.isoformat(),),
+    ).fetchall()
+    events = [_event_from_row(row) for row in rows]
+    return positions(events).get((account.key, instrument.key), Decimal("0"))
+
+
+def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
 def _fee_record_from_row(row: sqlite3.Row) -> BrokerFeeRecord:

@@ -14,7 +14,7 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 - Portfolio reports: `portfolio`, `transactions`, `performance`, `reconciliation`
 - Profile maintenance: `backup-profile`, `restore-profile`, `rotate-key`
 - Research and operator utilities: `backtest-csv`, `strategy-*`, `watchlist`, `refresh-moomoo-prices`, `refresh-moomoo-quotes`, `scan-alerts`, `monitor`, `ml-*`, `research-*`, `llm-*`, `paper-*`, `schedule-*`, `notify-local`, `notify-telegram`
-- Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `moomoo-sdk-status`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `version`
+- Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `dividend-configure`, `moomoo-sdk-status`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `moomoo-dividends`, `moomoo-dividend-status`, `moomoo-map-dividend`, `version`
 
 `stonks-mcp` is the separate MCP server entrypoint. All commands and tools are read-only,
 local-data management, reporting, notification, or simulation interfaces; none can unlock an
@@ -121,6 +121,24 @@ OpenD timestamps use its configured timezone. Set `--opend-timezone` to that exa
 the default is `Asia/Singapore`. `moomoo-cash-flows` retains the broker's documented flow type,
 direction, amount, and dates, but does not silently map free-text flow labels into ledger events.
 Moomoo documents that cash-flow queries are unavailable for paper accounts and Moomoo US accounts.
+
+## Dividend receipts
+
+`moomoo-dividends` archives announcement records only. A declared per-share amount or payment date
+does not create available cash. To credit a dividend, first enable the per-profile setting, import the
+cash flow and a current funds snapshot with `moomoo-sync`, then inspect exact local IDs with
+`moomoo-dividend-status`. `moomoo-map-dividend` requires an explicit declaration-to-flow map,
+record-date holding evidence, a settled inflow, the latest funds snapshot, and an explicit funds
+reconciliation confirmation. Currency conversion additionally requires both the profile setting and
+an exact user-supplied conversion rate.
+
+```console
+$ stonks-cli dividend-configure personal --allow-explicit-credit --allow-currency-conversion
+$ stonks-cli moomoo-dividends personal 123456 SPY US USD
+$ stonks-cli moomoo-cash-flows personal 123456 --clearing-date 2026-07-22
+$ stonks-cli moomoo-dividend-status personal 123456
+$ stonks-cli moomoo-map-dividend personal 123456 --declaration-id <id> --cash-flow-id <id> --cash-snapshot-id <id> --gross-currency USD --gross-amount 10 --withholding-amount 1 --confirm-reconciled-funds
+```
 
 Daily prices retain source revisions. Quote snapshots are labelled `unknown` quality unless the
 provider supplies an auditable entitlement/delay status, so they are not used as a real-time signal.

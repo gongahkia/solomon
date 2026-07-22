@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from stonks_cli.config import (
+    DividendSettings,
     ProfileConfig,
     config_path,
     disable_provider,
@@ -131,6 +132,27 @@ def test_profile_config_schema_round_trips_versioned_fields(
         "providers": ["csv"],
         "schema_version": 1,
     }
+
+
+def test_profile_dividend_credit_settings_are_explicit_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig(
+        "personal",
+        str(tmp_path / "personal.key"),
+        dividends=DividendSettings(True, True),
+    )
+
+    save_profile(config)
+
+    assert load_profile("personal") == config
+    assert json.loads(config_path("personal").read_text())["dividends"] == {
+        "allow_currency_conversion": True,
+        "allow_explicit_credit": True,
+    }
+    with pytest.raises(ProfileError, match="requires explicit credit"):
+        DividendSettings(False, True)
 
 
 def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: Path) -> None:

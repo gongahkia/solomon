@@ -17,6 +17,20 @@ _BUDGET_PERIODS = frozenset(("none", "daily", "monthly"))
 
 
 @dataclass(frozen=True)
+class DividendSettings:
+    allow_explicit_credit: bool = False
+    allow_currency_conversion: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.allow_explicit_credit, bool):
+            raise ProfileError("dividend explicit credit setting must be boolean")
+        if not isinstance(self.allow_currency_conversion, bool):
+            raise ProfileError("dividend currency conversion setting must be boolean")
+        if self.allow_currency_conversion and not self.allow_explicit_credit:
+            raise ProfileError("dividend currency conversion requires explicit credit")
+
+
+@dataclass(frozen=True)
 class LLMSettings:
     provider: str | None = None
     model: str | None = None
@@ -105,6 +119,7 @@ class ProfileConfig:
     benchmarks: tuple[str, ...] = ()
     schema_version: int = 1
     llm: LLMSettings = LLMSettings()
+    dividends: DividendSettings = DividendSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -135,6 +150,8 @@ def save_profile(config: ProfileConfig) -> None:
     data = asdict(config)
     if not config.llm.enabled:
         data.pop("llm")
+    if config.dividends == DividendSettings():
+        data.pop("dividends")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -142,7 +159,15 @@ def save_profile(config: ProfileConfig) -> None:
 
 def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = (*config.providers, provider_id)
-    return ProfileConfig(config.name, config.key_file, providers, config.benchmarks, config.schema_version, config.llm)
+    return ProfileConfig(
+        config.name,
+        config.key_file,
+        providers,
+        config.benchmarks,
+        config.schema_version,
+        config.llm,
+        config.dividends,
+    )
 
 
 def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
@@ -150,7 +175,15 @@ def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = tuple(item for item in config.providers if item != identifier)
     if len(providers) == len(config.providers):
         raise ProfileError("provider is not enabled")
-    return ProfileConfig(config.name, config.key_file, providers, config.benchmarks, config.schema_version, config.llm)
+    return ProfileConfig(
+        config.name,
+        config.key_file,
+        providers,
+        config.benchmarks,
+        config.schema_version,
+        config.llm,
+        config.dividends,
+    )
 
 
 def load_profile(name: str) -> ProfileConfig:
@@ -166,6 +199,7 @@ def load_profile(name: str) -> ProfileConfig:
             benchmarks=tuple(value.get("benchmarks", ())),
             schema_version=int(value.get("schema_version", 1)),
             llm=LLMSettings(**value.get("llm", {})),
+            dividends=DividendSettings(**value.get("dividends", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

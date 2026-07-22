@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
@@ -27,7 +28,14 @@ from stonks_cli.market_data import (
     latest_prices,
 )
 from stonks_cli.moomoo import MoomooReadOnlyProvider, OpenDConnection
-from stonks_cli.operator import ScheduleDefinition, notify_local, render_schedule
+from stonks_cli.operator import (
+    ScheduleDefinition,
+    install_linux_schedule,
+    linux_schedule_status,
+    notify_local,
+    notify_telegram,
+    render_schedule,
+)
 from stonks_cli.plugins import builtin_provider_manifests, discover_with_diagnostics
 from stonks_cli.storage import (
     EncryptedLedger,
@@ -291,14 +299,50 @@ def refresh_moomoo_prices(
 
 
 @app.command("schedule-render")
-def schedule_render(profile: str, hour_utc: int = typer.Option(8)) -> None:
+def schedule_render(
+    profile: str,
+    hour_singapore: int = typer.Option(18),
+    minute_singapore: int = typer.Option(0),
+) -> None:
     load_profile(profile)
-    typer.echo(render_schedule(ScheduleDefinition(profile, hour_utc)))
+    typer.echo(render_schedule(ScheduleDefinition(profile, hour_singapore, minute_singapore)))
+
+
+@app.command("schedule-install")
+def schedule_install(
+    profile: str,
+    hour_singapore: int = typer.Option(18),
+    minute_singapore: int = typer.Option(0),
+    unit_directory: Path = typer.Option(Path("~/.config/systemd/user")),
+) -> None:
+    load_profile(profile)
+    service, timer = install_linux_schedule(
+        ScheduleDefinition(profile, hour_singapore, minute_singapore), unit_directory.expanduser()
+    )
+    console.print_json(json.dumps({"service": str(service), "timer": str(timer)}))
+
+
+@app.command("schedule-status")
+def schedule_status(profile: str) -> None:
+    load_profile(profile)
+    status = linux_schedule_status(ScheduleDefinition(profile, 18))
+    console.print_json(
+        json.dumps({"label": status.label, "enabled": status.enabled, "active": status.active})
+    )
 
 
 @app.command("notify-local")
 def notify(title: str, message: str) -> None:
     if not notify_local(title, message):
+        raise typer.Exit(1)
+
+
+@app.command("notify-telegram")
+def notify_telegram_command(title: str, message: str, chat_id: str = typer.Option(...)) -> None:
+    token = os.environ.get("STONKS_CLI_TELEGRAM_TOKEN")
+    if token is None:
+        raise typer.BadParameter("STONKS_CLI_TELEGRAM_TOKEN is required")
+    if not notify_telegram(token, chat_id, title, message):
         raise typer.Exit(1)
 
 

@@ -31,7 +31,10 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "watchlist",
         "refresh-moomoo-prices",
         "schedule-render",
+        "schedule-install",
+        "schedule-status",
         "notify-local",
+        "notify-telegram",
         "plugins",
         "enable-provider",
         "disable-provider",
@@ -137,6 +140,15 @@ def test_cli_refreshes_moomoo_prices_from_watchlist(tmp_path: Path, monkeypatch)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["prices"] == 1
+
+
+def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_TELEGRAM_TOKEN", "token")
+    monkeypatch.setattr(cli, "notify_telegram", lambda token, chat_id, title, message: True)
+
+    result = CliRunner().invoke(app, ["notify-telegram", "Title", "Message", "--chat-id", "chat"])
+
+    assert result.exit_code == 0, result.output
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

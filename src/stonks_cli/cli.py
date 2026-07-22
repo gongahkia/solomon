@@ -23,6 +23,8 @@ from stonks_cli.analytics import (
     asset_class_allocations_by_currency,
     convert_values_to_currency,
     market_values_by_currency,
+    sector_concentration,
+    sector_concentrations_by_currency,
 )
 from stonks_cli.config import (
     DividendSettings,
@@ -299,6 +301,21 @@ def portfolio(
         }
     except ProviderError:
         payload["asset_class_allocation_status"] = "unavailable"
+    try:
+        payload["sector_concentration_by_currency"] = {
+            currency.value: {
+                "allocation": {
+                    sector.value: str(value)
+                    for sector, value in concentration.allocation.items()
+                },
+                "hhi": str(concentration.hhi),
+            }
+            for currency, concentration in sector_concentrations_by_currency(
+                values_by_currency, instrument_masters
+            ).items()
+        }
+    except ProviderError:
+        payload["sector_concentration_status"] = "unavailable"
     if base_currency is not None:
         try:
             target_currency = Currency(base_currency.upper())
@@ -327,6 +344,16 @@ def portfolio(
             }
         except ProviderError:
             payload["asset_class_allocation_status"] = "unavailable"
+        try:
+            concentration = sector_concentration(converted_values, instrument_masters)
+            payload["sector_concentration"] = {
+                "allocation": {
+                    sector.value: str(value) for sector, value in concentration.allocation.items()
+                },
+                "hhi": str(concentration.hhi),
+            }
+        except ProviderError:
+            payload["sector_concentration_status"] = "unavailable"
     if as_json:
         console.print_json(json.dumps(payload))
         return

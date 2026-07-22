@@ -36,6 +36,20 @@ class ETFClassification(StrEnum):
     SECTOR_NARROW = "sector_narrow"
 
 
+class GICSSector(StrEnum):
+    ENERGY = "energy"
+    MATERIALS = "materials"
+    INDUSTRIALS = "industrials"
+    CONSUMER_DISCRETIONARY = "consumer_discretionary"
+    CONSUMER_STAPLES = "consumer_staples"
+    HEALTH_CARE = "health_care"
+    FINANCIALS = "financials"
+    INFORMATION_TECHNOLOGY = "information_technology"
+    COMMUNICATION_SERVICES = "communication_services"
+    UTILITIES = "utilities"
+    REAL_ESTATE = "real_estate"
+
+
 class EventKind(StrEnum):
     CASH_DEPOSIT = "cash_deposit"
     CASH_WITHDRAWAL = "cash_withdrawal"
@@ -105,6 +119,9 @@ class InstrumentMaster:
     short_only: bool = False
     leveraged: bool = False
     inverse: bool = False
+    sector: GICSSector | None = None
+    sector_version: str | None = None
+    sector_source_hash: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.currency, Currency) or not isinstance(self.asset_class, AssetClass):
@@ -142,6 +159,18 @@ class InstrumentMaster:
             object.__setattr__(self, "classification_version", self.classification_version.strip())
         elif self.etf_classification is not None or self.classification_version is not None:
             raise ValueError("only ETFs may include ETF classification metadata")
+        sector_metadata = (self.sector, self.sector_version, self.sector_source_hash)
+        if any(value is not None for value in sector_metadata):
+            if (
+                not isinstance(self.sector, GICSSector)
+                or not isinstance(self.sector_version, str)
+                or not self.sector_version.strip()
+                or not isinstance(self.sector_source_hash, str)
+                or not _SHA256.fullmatch(self.sector_source_hash.lower())
+            ):
+                raise ValueError("instrument master sector metadata is invalid")
+            object.__setattr__(self, "sector_version", self.sector_version.strip())
+            object.__setattr__(self, "sector_source_hash", self.sector_source_hash.lower())
         for name in ("margin_only", "short_only", "leveraged", "inverse"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"instrument master {name} must be boolean")

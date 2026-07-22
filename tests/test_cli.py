@@ -24,6 +24,7 @@ from stonks_cli.types import (
     AssetClass,
     Currency,
     ETFClassification,
+    GICSSector,
     Instrument,
     InstrumentMaster,
     ListingStatus,
@@ -352,6 +353,9 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
                 "a" * 64,
                 ETFClassification.BROAD_DIVERSIFIED,
                 "issuer-2026-01",
+                sector=GICSSector.INFORMATION_TECHNOLOGY,
+                sector_version="gics-2025",
+                sector_source_hash="b" * 64,
             ),
         ),
     )
@@ -377,6 +381,9 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
     assert payload["valuation_price_sources"]["US:SPY"] == "daily_close"
     assert payload["market_values_by_currency"]["USD"]["csv:main:US:SPY"] == "100"
     assert payload["asset_class_allocation_by_currency"] == {"USD": {"etf": "1"}}
+    assert payload["sector_concentration_by_currency"] == {
+        "USD": {"allocation": {"information_technology": "1"}, "hhi": "1"}
+    }
 
 
 def test_cli_sends_telegram_using_environment_token(monkeypatch) -> None:

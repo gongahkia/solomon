@@ -377,6 +377,38 @@ def test_instrument_master_versions_us_sg_records_and_defaults_unknown_etfs_to_n
         )
 
 
+def test_instrument_master_storage_migrates_missing_sector_metadata_columns(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    with ledger.connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE instrument_master_versions (
+                canonical_id TEXT NOT NULL, exchange TEXT NOT NULL, market TEXT NOT NULL,
+                currency TEXT NOT NULL, asset_class TEXT NOT NULL, provider_symbol TEXT NOT NULL,
+                listing_status TEXT NOT NULL, metadata_version TEXT NOT NULL,
+                metadata_source_hash TEXT NOT NULL, etf_classification TEXT,
+                classification_version TEXT, margin_only INTEGER NOT NULL, short_only INTEGER NOT NULL,
+                leveraged INTEGER NOT NULL, inverse_product INTEGER NOT NULL, recorded_at TEXT NOT NULL,
+                PRIMARY KEY(canonical_id, metadata_version, metadata_source_hash)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO instrument_master_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "US:SPY", "ARCA", "US", "USD", "etf", "US.SPY", "listed", "issuer-2026-01",
+                "a" * 64, "broad_diversified", "issuer-2026-01", 0, 0, 0, 0,
+                "2026-01-02T00:00:00+00:00",
+            ),
+        )
+
+    master = latest_instrument_masters(ledger)["US:SPY"]
+
+    assert master.sector is None
+    assert master.sector_version is None
+    assert master.sector_source_hash is None
+
+
 def test_recommendation_candidate_requires_listing_and_read_only_cash_eligibility(
     tmp_path: Path, monkeypatch
 ) -> None:

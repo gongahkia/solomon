@@ -18,6 +18,8 @@ from stonks_cli.analytics import (
     maximum_drawdown,
     money_weighted_return,
     portfolio_health,
+    sector_concentration,
+    sector_concentrations_by_currency,
     time_weighted_return,
 )
 from stonks_cli.errors import ProviderError
@@ -28,6 +30,7 @@ from stonks_cli.types import (
     Currency,
     ETFClassification,
     EventKind,
+    GICSSector,
     Instrument,
     InstrumentMaster,
     LedgerEvent,
@@ -156,3 +159,66 @@ def test_asset_class_allocation_uses_versioned_instrument_classifications() -> N
         asset_class_allocation({("test:main", "US:UNKNOWN"): Decimal("1")}, masters)
     with pytest.raises(ValueError, match="negative"):
         asset_class_allocation({("test:main", "US:SPY"): Decimal("-1")}, masters)
+
+
+def test_sector_concentration_requires_explicit_versioned_sector_metadata() -> None:
+    masters = {
+        "US:NVDA": InstrumentMaster(
+            "US:NVDA",
+            "NASDAQ",
+            "US",
+            Currency.USD,
+            AssetClass.EQUITY,
+            "US.NVDA",
+            ListingStatus.LISTED,
+            "issuer-2026-01",
+            "a" * 64,
+            sector=GICSSector.INFORMATION_TECHNOLOGY,
+            sector_version="gics-2025",
+            sector_source_hash="b" * 64,
+        ),
+        "SG:C6L": InstrumentMaster(
+            "SG:C6L",
+            "SGX",
+            "SG",
+            Currency.SGD,
+            AssetClass.EQUITY,
+            "SG.C6L",
+            ListingStatus.LISTED,
+            "sgx-2026-01",
+            "c" * 64,
+            sector=GICSSector.INDUSTRIALS,
+            sector_version="gics-2025",
+            sector_source_hash="d" * 64,
+        ),
+    }
+    values = {
+        ("test:main", "US:NVDA"): Decimal("90"),
+        ("test:main", "SG:C6L"): Decimal("10"),
+    }
+
+    concentration = sector_concentration(values, masters)
+
+    assert concentration.allocation == {
+        GICSSector.INDUSTRIALS: Decimal("0.1"),
+        GICSSector.INFORMATION_TECHNOLOGY: Decimal("0.9"),
+    }
+    assert concentration.hhi == Decimal("0.82")
+    assert sector_concentrations_by_currency(
+        {Currency.USD: {("test:main", "US:NVDA"): Decimal("90")}}, masters
+    )[Currency.USD].hhi == Decimal("1")
+    with pytest.raises(ProviderError, match="sector is unavailable:US:UNKNOWN"):
+        sector_concentration({("test:main", "US:UNKNOWN"): Decimal("1")}, masters)
+    with pytest.raises(ValueError, match="sector metadata"):
+        InstrumentMaster(
+            "US:NVDA",
+            "NASDAQ",
+            "US",
+            Currency.USD,
+            AssetClass.EQUITY,
+            "US.NVDA",
+            ListingStatus.LISTED,
+            "issuer-2026-01",
+            "e" * 64,
+            sector=GICSSector.INFORMATION_TECHNOLOGY,
+        )

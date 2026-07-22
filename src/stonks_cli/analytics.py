@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate, convert_currency
-from stonks_cli.types import AssetClass, Currency, InstrumentMaster, LedgerEvent
+from stonks_cli.types import AssetClass, Currency, GICSSector, InstrumentMaster, LedgerEvent
 
 
 def market_values(
@@ -79,6 +79,45 @@ def asset_class_allocations_by_currency(
 ) -> dict[Currency, dict[AssetClass, Decimal]]:
     return {
         currency: asset_class_allocation(values, instrument_masters)
+        for currency, values in values_by_currency.items()
+    }
+
+
+@dataclass(frozen=True)
+class SectorConcentration:
+    allocation: dict[GICSSector, Decimal]
+    hhi: Decimal
+
+
+def sector_concentration(
+    values: Mapping[tuple[str, str], Decimal],
+    instrument_masters: Mapping[str, InstrumentMaster],
+) -> SectorConcentration:
+    totals: dict[GICSSector, Decimal] = defaultdict(Decimal)
+    for (_, instrument_key), value in values.items():
+        if value < 0:
+            raise ValueError("sector concentration cannot include negative values")
+        if value == 0:
+            continue
+        instrument = instrument_masters.get(instrument_key)
+        if instrument is None or instrument.sector is None:
+            raise ProviderError(f"sector is unavailable:{instrument_key}")
+        totals[instrument.sector] += value
+    total = sum(totals.values(), Decimal("0"))
+    allocation = (
+        {}
+        if total == 0
+        else {sector: value / total for sector, value in sorted(totals.items())}
+    )
+    return SectorConcentration(allocation, sum((value * value for value in allocation.values()), Decimal("0")))
+
+
+def sector_concentrations_by_currency(
+    values_by_currency: Mapping[Currency, Mapping[tuple[str, str], Decimal]],
+    instrument_masters: Mapping[str, InstrumentMaster],
+) -> dict[Currency, SectorConcentration]:
+    return {
+        currency: sector_concentration(values, instrument_masters)
         for currency, values in values_by_currency.items()
     }
 

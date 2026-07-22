@@ -19,6 +19,7 @@ from stonks_cli.types import (
     AssetClass,
     Currency,
     ETFClassification,
+    GICSSector,
     Instrument,
     InstrumentMaster,
     ListingStatus,
@@ -343,11 +344,22 @@ def _initialize_instrument_master(connection: sqlite3.Connection) -> None:
             short_only INTEGER NOT NULL CHECK(short_only IN (0, 1)),
             leveraged INTEGER NOT NULL CHECK(leveraged IN (0, 1)),
             inverse_product INTEGER NOT NULL CHECK(inverse_product IN (0, 1)),
+            sector TEXT CHECK(sector IN (
+                'energy', 'materials', 'industrials', 'consumer_discretionary', 'consumer_staples',
+                'health_care', 'financials', 'information_technology', 'communication_services',
+                'utilities', 'real_estate'
+            )),
+            sector_version TEXT,
+            sector_source_hash TEXT,
             recorded_at TEXT NOT NULL,
             PRIMARY KEY(canonical_id, metadata_version, metadata_source_hash)
         )
         """
     )
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(instrument_master_versions)")}
+    for name in ("sector", "sector_version", "sector_source_hash"):
+        if name not in columns:
+            connection.execute(f"ALTER TABLE instrument_master_versions ADD COLUMN {name} TEXT")
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS moomoo_instrument_eligibility (
@@ -822,7 +834,8 @@ def store_instrument_masters(ledger: EncryptedLedger, instruments: tuple[Instrum
                     canonical_id, exchange, market, currency, asset_class, provider_symbol, listing_status,
                     metadata_version, metadata_source_hash, etf_classification, classification_version,
                     margin_only, short_only, leveraged, inverse_product, recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    , sector, sector_version, sector_source_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     instrument.canonical_id,
@@ -843,6 +856,9 @@ def store_instrument_masters(ledger: EncryptedLedger, instruments: tuple[Instrum
                     instrument.leveraged,
                     instrument.inverse,
                     datetime.now(UTC).isoformat(),
+                    instrument.sector.value if instrument.sector is not None else None,
+                    instrument.sector_version,
+                    instrument.sector_source_hash,
                 ),
             )
             inserted += cursor.rowcount
@@ -1066,6 +1082,9 @@ def _instrument_master_from_row(row: sqlite3.Row) -> InstrumentMaster:
         bool(row["short_only"]),
         bool(row["leveraged"]),
         bool(row["inverse_product"]),
+        GICSSector(row["sector"]) if row["sector"] is not None else None,
+        row["sector_version"],
+        row["sector_source_hash"],
     )
 
 

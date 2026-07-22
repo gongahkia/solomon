@@ -11,7 +11,15 @@ from uuid import uuid4
 from mcp.server.fastmcp import FastMCP
 
 from stonks_cli.config import disable_provider, enable_provider, load_profile, save_profile
-from stonks_cli.ledger import import_csv, list_events
+from stonks_cli.ledger import (
+    cash_balances,
+    import_csv,
+    list_cash_snapshots,
+    list_events,
+    list_position_snapshots,
+    positions,
+)
+from stonks_cli.reconciliation import reconcile_latest
 from stonks_cli.storage import EncryptedLedger, export_backup
 
 _MCP_TOOL_ALLOWLIST = frozenset(
@@ -22,6 +30,9 @@ _MCP_TOOL_ALLOWLIST = frozenset(
         "prepare_csv_import",
         "prepare_profile_backup",
         "prepare_provider_change",
+        "portfolio_reconciliation",
+        "portfolio_summary",
+        "portfolio_transactions",
         "profile_status",
     }
 )
@@ -93,6 +104,30 @@ def create_server() -> FastMCP:
             "event_count": len(list_events(EncryptedLedger(config))),
             "execution": "denied",
         }
+
+    @server.tool()
+    def portfolio_summary(profile: str) -> dict[str, object]:
+        """Read local portfolio cash and positions; it cannot access broker execution APIs."""
+        ledger = EncryptedLedger(load_profile(profile))
+        events = list_events(ledger)
+        return {
+            "profile": profile,
+            "cash": {f"{account}:{currency}": str(value) for (account, currency), value in cash_balances(events).items()},
+            "positions": {f"{account}:{instrument}": str(value) for (account, instrument), value in positions(events).items()},
+            "execution": "denied",
+        }
+
+    @server.tool()
+    def portfolio_transactions(profile: str) -> dict[str, object]:
+        """Read immutable local transaction events; it cannot submit or modify orders."""
+        return {"profile": profile, "events": [event.to_data() for event in list_events(EncryptedLedger(load_profile(profile)))], "execution": "denied"}
+
+    @server.tool()
+    def portfolio_reconciliation(profile: str) -> dict[str, object]:
+        """Read ledger-to-broker snapshot differences; it cannot change account state."""
+        ledger = EncryptedLedger(load_profile(profile))
+        differences = reconcile_latest(list_events(ledger), list_cash_snapshots(ledger), list_position_snapshots(ledger))
+        return {"profile": profile, "differences": [{"subject": item.subject, "expected": str(item.expected), "observed": str(item.observed), "delta": str(item.delta)} for item in differences], "execution": "denied"}
 
     @server.tool()
     def prepare_csv_import(profile: str, path: str) -> dict[str, object]:

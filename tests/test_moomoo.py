@@ -565,6 +565,8 @@ def test_moomoo_import_archives_fills_and_observed_account_snapshots(tmp_path, m
     assert result.fills_inserted == 1
     assert result.position_snapshots == 1
     assert result.cash_snapshots == 1
+    assert len(result.source_hashes) == 3
+    assert all((ledger.sources / f"{source_hash}.enc").is_file() for source_hash in result.source_hashes)
     event = list_events(ledger)[0]
     assert event.kind is EventKind.BUY
     assert event.amount == Decimal("201.0")

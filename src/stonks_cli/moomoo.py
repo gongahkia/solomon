@@ -101,6 +101,7 @@ class MoomooSyncResult:
     fills_skipped: int
     position_snapshots: int
     cash_snapshots: int
+    source_hashes: tuple[str, ...]
 
 
 class MoomooRateLimiter:
@@ -539,6 +540,11 @@ def import_account_snapshot(
     if account.provider_id != "moomoo":
         raise ProviderError("Moomoo import requires a Moomoo account")
     observed_at = _utc_timestamp(observed_at)
+    source_hashes = (
+        _archive_response(ledger, account, "fills", fills),
+        _archive_response(ledger, account, "positions", positions),
+        _archive_response(ledger, account, "balances", balances),
+    )
     events = tuple(
         _fill_to_event(ledger, account, row, opend_timezone)
         for row in sorted(fills, key=lambda item: str(item.get("deal_id", "")))
@@ -555,7 +561,7 @@ def import_account_snapshot(
         for row in balances
         for snapshot in _balance_to_snapshots(ledger, account, row, observed_at)
     )
-    return MoomooSyncResult(inserted, skipped, position_count, cash_count)
+    return MoomooSyncResult(inserted, skipped, position_count, cash_count, source_hashes)
 
 
 def import_cash_flows(
@@ -847,6 +853,24 @@ def _record_source(
     }
     identity_hash = ledger.archive_source(_canonical_json(identity))
     return SourceProvenance("moomoo", identity_hash, f"{record_type}:{record_id}"), raw_hash
+
+
+def _archive_response(
+    ledger: EncryptedLedger,
+    account: Account,
+    response_type: str,
+    records: Sequence[dict[str, Any]],
+) -> str:
+    return ledger.archive_source(
+        _canonical_json(
+            {
+                "account_id": account.account_id,
+                "provider": "moomoo",
+                "response_type": response_type,
+                "records": records,
+            }
+        )
+    )
 
 
 def _instrument_from_moomoo_row(row: dict[str, Any], market_field: str) -> Instrument:

@@ -3,12 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from stonks_cli.accounting import fifo_lots, unrealized_pnl
 from stonks_cli.analytics import (
     allocations_by_currency,
+    cash_by_currency,
     concentration_hhi,
     convert_values_to_currency,
     market_values_by_currency,
     maximum_drawdown,
+    money_weighted_return,
     portfolio_health,
     time_weighted_return,
 )
@@ -66,3 +69,27 @@ def test_analytics_reports_returns_drawdown_concentration_and_missing_prices() -
     health = portfolio_health(events, {}, stale_instruments=("US:SPY",))
     assert health.missing_prices == ("US:SPY",)
     assert health.stale_instruments == ("US:SPY",)
+
+
+def test_analytics_calculates_unrealized_money_weighted_and_currency_exposure() -> None:
+    buy = _buy("SPY", Currency.USD, "2")
+    deposit = LedgerEvent(
+        fingerprint="deposit",
+        source=SourceProvenance("test", "b" * 64, "deposit"),
+        account=buy.account,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        kind=EventKind.CASH_DEPOSIT,
+        currency=Currency.USD,
+        amount=Decimal("100"),
+    )
+    lots, _ = fifo_lots([buy])
+    annualized = money_weighted_return(
+        [
+            (datetime(2026, 1, 1, tzinfo=UTC), Decimal("-100")),
+            (datetime(2027, 1, 1, tzinfo=UTC), Decimal("110")),
+        ]
+    )
+
+    assert unrealized_pnl(lots, {"US:SPY": Decimal("3")}) == Decimal("5")
+    assert Decimal("0.09") < annualized < Decimal("0.11")
+    assert cash_by_currency([deposit]) == {Currency.USD: Decimal("100")}

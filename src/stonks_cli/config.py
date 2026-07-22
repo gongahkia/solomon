@@ -4,12 +4,82 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from platformdirs import user_data_path
 
 from stonks_cli.errors import ProfileError, ProviderError
 
 _PROFILE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_ENVIRONMENT_VARIABLE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_LLM_PROVIDERS = frozenset(("ollama", "openai", "anthropic", "gemini"))
+_BUDGET_PERIODS = frozenset(("none", "daily", "monthly"))
+
+
+@dataclass(frozen=True)
+class LLMSettings:
+    provider: str | None = None
+    model: str | None = None
+    api_key_env: str | None = None
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_local_only: bool = False
+    budget_period: str = "none"
+    budget_limit_sgd: str | None = None
+    input_cost_per_million_sgd: str = "0"
+    output_cost_per_million_sgd: str = "0"
+    max_output_tokens: int = 600
+    allow_cloud: bool = False
+
+    def __post_init__(self) -> None:
+        if self.provider is None:
+            if self.model is not None or self.api_key_env is not None:
+                raise ProfileError("LLM model and key environment require a provider")
+            return
+        provider = self.provider.strip().lower()
+        if provider not in _LLM_PROVIDERS:
+            raise ProfileError("LLM provider is invalid")
+        if not isinstance(self.model, str) or not self.model.strip() or len(self.model) > 256:
+            raise ProfileError("LLM model is required")
+        if self.api_key_env is not None and not _ENVIRONMENT_VARIABLE.fullmatch(self.api_key_env):
+            raise ProfileError("LLM key environment variable is invalid")
+        if self.budget_period not in _BUDGET_PERIODS:
+            raise ProfileError("LLM budget period is invalid")
+        if not isinstance(self.max_output_tokens, int) or not 1 <= self.max_output_tokens <= 4096:
+            raise ProfileError("LLM max output tokens must be between 1 and 4096")
+        try:
+            from decimal import Decimal
+
+            input_cost = Decimal(self.input_cost_per_million_sgd)
+            output_cost = Decimal(self.output_cost_per_million_sgd)
+            limit = None if self.budget_limit_sgd is None else Decimal(self.budget_limit_sgd)
+        except Exception as error:
+            raise ProfileError("LLM budget values must be decimal") from error
+        if input_cost < 0 or output_cost < 0 or (limit is not None and limit <= 0):
+            raise ProfileError("LLM budget values must be positive")
+        if self.budget_period == "none" and limit is not None:
+            raise ProfileError("LLM budget limit requires a daily or monthly period")
+        if self.budget_period != "none" and limit is None:
+            raise ProfileError("LLM budget period requires a limit")
+        if provider != "ollama" and not self.allow_cloud:
+            raise ProfileError("cloud LLM provider requires explicit privacy acknowledgement")
+        if provider == "ollama" and not self.ollama_local_only:
+            raise ProfileError("Ollama requires explicit local-only acknowledgement")
+        parsed = urlsplit(self.ollama_url)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ProfileError("Ollama URL must be a loopback HTTP endpoint")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "model", self.model.strip())
+
+    @property
+    def enabled(self) -> bool:
+        return self.provider is not None
 
 
 def app_root() -> Path:
@@ -34,6 +104,7 @@ class ProfileConfig:
     providers: tuple[str, ...] = ("csv", "moomoo")
     benchmarks: tuple[str, ...] = ()
     schema_version: int = 1
+    llm: LLMSettings = LLMSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -61,16 +132,17 @@ def save_profile(config: ProfileConfig) -> None:
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
     path = config_path(config.name)
-    payload = json.dumps(asdict(config), sort_keys=True, indent=2).encode() + b"\n"
+    data = asdict(config)
+    if not config.llm.enabled:
+        data.pop("llm")
+    payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
 
 
 def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = (*config.providers, provider_id)
-    return ProfileConfig(
-        config.name, config.key_file, providers, config.benchmarks, config.schema_version
-    )
+    return ProfileConfig(config.name, config.key_file, providers, config.benchmarks, config.schema_version, config.llm)
 
 
 def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
@@ -78,9 +150,7 @@ def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = tuple(item for item in config.providers if item != identifier)
     if len(providers) == len(config.providers):
         raise ProfileError("provider is not enabled")
-    return ProfileConfig(
-        config.name, config.key_file, providers, config.benchmarks, config.schema_version
-    )
+    return ProfileConfig(config.name, config.key_file, providers, config.benchmarks, config.schema_version, config.llm)
 
 
 def load_profile(name: str) -> ProfileConfig:
@@ -95,6 +165,7 @@ def load_profile(name: str) -> ProfileConfig:
             providers=tuple(value.get("providers", ("csv", "moomoo"))),
             benchmarks=tuple(value.get("benchmarks", ())),
             schema_version=int(value.get("schema_version", 1)),
+            llm=LLMSettings(**value.get("llm", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

@@ -8,21 +8,41 @@ from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
-from stonks_cli.config import load_profile
+from stonks_cli.config import disable_provider, enable_provider, load_profile, save_profile
 from stonks_cli.ledger import import_csv, list_events
-from stonks_cli.storage import EncryptedLedger
+from stonks_cli.storage import EncryptedLedger, export_backup
 
 
 @dataclass(frozen=True)
-class PendingImport:
+class PendingAction:
     profile: str
-    path: Path
+    action: str
+    payload: dict[str, str]
     expires_at: datetime
 
 
 def create_server() -> FastMCP:
     server = FastMCP("stonks-cli")
-    pending: dict[str, PendingImport] = {}
+    pending: dict[str, PendingAction] = {}
+
+    def prepare(profile: str, action: str, payload: dict[str, str]) -> dict[str, object]:
+        load_profile(profile)
+        confirmation_id = uuid4().hex
+        expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        pending[confirmation_id] = PendingAction(profile, action, payload, expires_at)
+        return {
+            "confirmation_id": confirmation_id,
+            "profile": profile,
+            "action": action,
+            "expires_at": expires_at.isoformat(),
+            "execution": "denied",
+        }
+
+    def consume(confirmation_id: str, action: str) -> PendingAction:
+        request = pending.pop(confirmation_id, None)
+        if request is None or request.expires_at <= datetime.now(UTC) or request.action != action:
+            raise ValueError("confirmation is invalid or expired")
+        return request
 
     @server.tool()
     def profile_status(profile: str, key_file: str | None = None) -> dict[str, object]:
@@ -41,28 +61,21 @@ def create_server() -> FastMCP:
     @server.tool()
     def prepare_csv_import(profile: str, path: str) -> dict[str, object]:
         """Prepare, but do not execute, a local CSV import. Confirm once within five minutes."""
-        load_profile(profile)
         source = Path(path).expanduser().resolve()
         if not source.is_file():
             raise ValueError("CSV import path must be an existing regular file")
-        confirmation_id = uuid4().hex
-        expires_at = datetime.now(UTC) + timedelta(minutes=5)
-        pending[confirmation_id] = PendingImport(profile, source, expires_at)
-        return {
-            "confirmation_id": confirmation_id,
-            "profile": profile,
-            "path": str(source),
-            "expires_at": expires_at.isoformat(),
-        }
+        response = prepare(profile, "csv_import", {"path": str(source)})
+        response["path"] = str(source)
+        return response
 
     @server.tool()
     def confirm_csv_import(confirmation_id: str) -> dict[str, object]:
         """Execute one prepared CSV import. Confirmation IDs are single-use and expire after five minutes."""
-        request = pending.pop(confirmation_id, None)
-        if request is None or request.expires_at <= datetime.now(UTC):
-            raise ValueError("CSV import confirmation is invalid or expired")
+        request = consume(confirmation_id, "csv_import")
         config = load_profile(request.profile)
-        inserted, skipped, source_hash = import_csv(EncryptedLedger(config), request.path)
+        inserted, skipped, source_hash = import_csv(
+            EncryptedLedger(config), Path(request.payload["path"])
+        )
         return {
             "profile": request.profile,
             "inserted": inserted,
@@ -70,6 +83,53 @@ def create_server() -> FastMCP:
             "source_hash": source_hash,
             "execution": "denied",
         }
+
+    @server.tool()
+    def prepare_provider_change(profile: str, provider_id: str, enabled: bool) -> dict[str, object]:
+        """Prepare one local provider configuration change. Confirm once within five minutes."""
+        response = prepare(
+            profile,
+            "provider_change",
+            {"enabled": str(enabled), "provider_id": provider_id.strip().lower()},
+        )
+        response["provider_id"] = provider_id.strip().lower()
+        response["enabled"] = enabled
+        return response
+
+    @server.tool()
+    def confirm_provider_change(confirmation_id: str) -> dict[str, object]:
+        """Apply one prepared provider configuration change; confirmation IDs are single-use."""
+        request = consume(confirmation_id, "provider_change")
+        config = load_profile(request.profile)
+        enabled = request.payload["enabled"] == "True"
+        updated = (
+            enable_provider(config, request.payload["provider_id"])
+            if enabled
+            else disable_provider(config, request.payload["provider_id"])
+        )
+        save_profile(updated)
+        return {
+            "profile": request.profile,
+            "providers": list(updated.providers),
+            "execution": "denied",
+        }
+
+    @server.tool()
+    def prepare_profile_backup(profile: str, destination: str) -> dict[str, object]:
+        """Prepare an encrypted local profile backup. Confirm once within five minutes."""
+        target = Path(destination).expanduser().resolve()
+        if target.exists():
+            raise ValueError("backup destination already exists")
+        response = prepare(profile, "profile_backup", {"destination": str(target)})
+        response["destination"] = str(target)
+        return response
+
+    @server.tool()
+    def confirm_profile_backup(confirmation_id: str) -> dict[str, object]:
+        """Create one prepared encrypted backup; confirmation IDs are single-use."""
+        request = consume(confirmation_id, "profile_backup")
+        destination = export_backup(load_profile(request.profile), Path(request.payload["destination"]))
+        return {"profile": request.profile, "backup": str(destination), "execution": "denied"}
 
     return server
 

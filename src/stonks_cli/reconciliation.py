@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from stonks_cli.ledger import cash_balances, positions
-from stonks_cli.types import BrokerPositionSnapshot, Currency, LedgerEvent
+from stonks_cli.types import BrokerCashSnapshot, BrokerPositionSnapshot, Currency, LedgerEvent
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,19 @@ def broker_positions(
     return {key: snapshot.quantity for key, snapshot in latest.items()}
 
 
+def broker_cash(snapshots: list[BrokerCashSnapshot]) -> dict[tuple[str, Currency], Decimal]:
+    latest: dict[tuple[str, Currency], BrokerCashSnapshot] = {}
+    for snapshot in snapshots:
+        key = (snapshot.account.key, snapshot.currency)
+        current = latest.get(key)
+        if current is None or (snapshot.observed_at, snapshot.source.key) > (
+            current.observed_at,
+            current.source.key,
+        ):
+            latest[key] = snapshot
+    return {key: snapshot.amount for key, snapshot in latest.items()}
+
+
 def reconcile_positions(
     events: list[LedgerEvent], snapshots: list[BrokerPositionSnapshot]
 ) -> tuple[ReconciliationDifference, ...]:
@@ -75,6 +88,19 @@ def reconcile_cash(
     events: list[LedgerEvent], observed: dict[tuple[str, Currency], Decimal]
 ) -> tuple[ReconciliationDifference, ...]:
     return reconcile(cash_balances(events), observed, {}, {})
+
+
+def reconcile_latest(
+    events: list[LedgerEvent],
+    cash_snapshots: list[BrokerCashSnapshot],
+    position_snapshots: list[BrokerPositionSnapshot],
+) -> tuple[ReconciliationDifference, ...]:
+    return reconcile(
+        cash_balances(events),
+        broker_cash(cash_snapshots),
+        positions(events),
+        broker_positions(position_snapshots),
+    )
 
 
 def render_discrepancy_report(differences: tuple[ReconciliationDifference, ...]) -> str:

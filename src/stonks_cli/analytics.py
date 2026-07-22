@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from stonks_cli.market_data import FxRate, convert_currency
 from stonks_cli.types import Currency, LedgerEvent
 
 
@@ -22,6 +24,97 @@ def market_values(
 def allocation(values: dict[tuple[str, str], Decimal]) -> dict[tuple[str, str], Decimal]:
     total = sum(values.values(), Decimal("0"))
     return {} if total == 0 else {key: value / total for key, value in values.items()}
+
+
+def market_values_by_currency(
+    events: list[LedgerEvent], prices: dict[str, Decimal]
+) -> dict[Currency, dict[tuple[str, str], Decimal]]:
+    currencies: dict[tuple[str, str], Currency] = {}
+    for event in events:
+        if event.instrument is not None:
+            currencies[(event.account_id, event.instrument.key)] = event.instrument.currency
+    from stonks_cli.ledger import positions
+
+    grouped: dict[Currency, dict[tuple[str, str], Decimal]] = defaultdict(dict)
+    for key, value in market_values(positions(events), prices).items():
+        try:
+            grouped[currencies[key]][key] = value
+        except KeyError as error:
+            raise ValueError(f"position currency is unknown:{key[1]}") from error
+    return dict(grouped)
+
+
+def allocations_by_currency(
+    events: list[LedgerEvent], prices: dict[str, Decimal]
+) -> dict[Currency, dict[tuple[str, str], Decimal]]:
+    return {
+        currency: allocation(values)
+        for currency, values in market_values_by_currency(events, prices).items()
+    }
+
+
+def convert_values_to_currency(
+    values_by_currency: dict[Currency, dict[tuple[str, str], Decimal]],
+    target_currency: Currency,
+    rates: dict[tuple[Currency, Currency], FxRate],
+) -> dict[tuple[str, str], Decimal]:
+    converted: dict[tuple[str, str], Decimal] = {}
+    for currency, values in values_by_currency.items():
+        for key, value in values.items():
+            converted[key] = convert_currency(value, currency, target_currency, rates)
+    return converted
+
+
+def concentration_hhi(values: dict[tuple[str, str], Decimal]) -> Decimal:
+    return sum((weight * weight for weight in allocation(values).values()), Decimal("0"))
+
+
+def maximum_drawdown(values: tuple[Decimal, ...]) -> Decimal:
+    if not values or any(value <= 0 for value in values):
+        raise ValueError("drawdown values must be non-empty and positive")
+    peak = values[0]
+    drawdown = Decimal("0")
+    for value in values:
+        peak = max(peak, value)
+        drawdown = min(drawdown, value / peak - Decimal("1"))
+    return drawdown
+
+
+def time_weighted_return(periods: tuple[tuple[Decimal, Decimal, Decimal], ...]) -> Decimal:
+    """Chain returns from (opening value, external cash flow, closing value) periods."""
+    if not periods:
+        raise ValueError("at least one return period is required")
+    result = Decimal("1")
+    for opening, external_flow, closing in periods:
+        if opening <= 0 or closing < 0:
+            raise ValueError("return period values are invalid")
+        result *= (closing - external_flow) / opening
+    return result - Decimal("1")
+
+
+@dataclass(frozen=True)
+class PortfolioHealth:
+    concentration_hhi: Decimal | None
+    stale_instruments: tuple[str, ...]
+    missing_prices: tuple[str, ...]
+
+
+def portfolio_health(
+    events: list[LedgerEvent],
+    prices: dict[str, Decimal],
+    *,
+    stale_instruments: tuple[str, ...] = (),
+) -> PortfolioHealth:
+    from stonks_cli.ledger import positions
+
+    held = positions(events)
+    missing = tuple(sorted(key[1] for key in held if key[1] not in prices))
+    values = market_values(held, prices)
+    return PortfolioHealth(
+        concentration_hhi(values) if values else None,
+        tuple(sorted(set(stale_instruments))),
+        missing,
+    )
 
 
 def cash_by_currency(events: list[LedgerEvent]) -> dict[Currency, Decimal]:

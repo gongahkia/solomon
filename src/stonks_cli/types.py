@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
@@ -11,6 +11,8 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class Currency(StrEnum):
+    CNY = "CNY"
+    HKD = "HKD"
     SGD = "SGD"
     USD = "USD"
 
@@ -131,6 +133,54 @@ class BrokerPositionSnapshot:
             raise ValueError("snapshot quantity must be non-negative")
         object.__setattr__(self, "quantity", quantity)
         object.__setattr__(self, "observed_at", utc(self.observed_at))
+
+
+@dataclass(frozen=True)
+class BrokerCashSnapshot:
+    source: SourceProvenance
+    account: Account
+    currency: Currency
+    amount: Decimal
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        if not isinstance(self.currency, Currency):
+            raise ValueError("cash snapshot currency is required")
+        object.__setattr__(self, "amount", decimal(self.amount))
+        object.__setattr__(self, "observed_at", utc(self.observed_at))
+
+
+@dataclass(frozen=True)
+class BrokerCashFlow:
+    source: SourceProvenance
+    account: Account
+    clearing_date: date
+    settlement_date: date
+    currency: Currency
+    flow_type: str
+    direction: str
+    amount: Decimal
+    remark: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        if not isinstance(self.clearing_date, date) or not isinstance(self.settlement_date, date):
+            raise ValueError("cash flow dates are required")
+        if not isinstance(self.currency, Currency):
+            raise ValueError("cash flow currency is required")
+        flow_type = self.flow_type.strip()
+        direction = self.direction.strip()
+        if not flow_type or not direction:
+            raise ValueError("cash flow type and direction are required")
+        object.__setattr__(self, "flow_type", flow_type)
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "amount", decimal(self.amount))
+        if self.remark is not None:
+            remark = self.remark.strip()
+            object.__setattr__(self, "remark", remark or None)
 
 
 @dataclass(frozen=True)

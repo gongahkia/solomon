@@ -34,13 +34,13 @@ class ScheduleStatus:
 
 
 def render_schedule(definition: ScheduleDefinition, executable: str = "stonks-cli") -> str:
-    command = f"{executable} portfolio {definition.profile} --json"
+    command = f"{executable} monitor {definition.profile}"
     if platform.system() == "Darwin":
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<plist version="1.0"><dict><key>Label</key><string>com.stonks-cli.'
             f"{definition.profile}</string><key>ProgramArguments</key><array><string>{executable}</string>"
-            f"<string>portfolio</string><string>{definition.profile}</string><string>--json</string></array>"
+            f"<string>monitor</string><string>{definition.profile}</string></array>"
             f"<key>StartCalendarInterval</key><dict><key>Hour</key><integer>{definition.hour_singapore}</integer>"
             f"<key>Minute</key><integer>{definition.minute_singapore}</integer></dict></dict></plist>\n"
         )
@@ -55,7 +55,7 @@ def render_schedule(definition: ScheduleDefinition, executable: str = "stonks-cl
 def render_systemd_units(
     definition: ScheduleDefinition, executable: str = "stonks-cli"
 ) -> tuple[str, str]:
-    command = f"{executable} portfolio {definition.profile} --json"
+    command = f"{executable} monitor {definition.profile}"
     service = (
         "[Unit]\nDescription=stonks-cli portfolio report\n\n[Service]\nType=oneshot\n"
         f"Environment=TZ=Asia/Singapore\nExecStart={command}\n"

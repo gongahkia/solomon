@@ -21,7 +21,7 @@ from stonks_cli.types import (
 def test_money_uses_exact_decimal_values_and_supported_currencies() -> None:
     assert decimal("12.340") == Decimal("12.340")
     assert decimal(7) == Decimal("7")
-    assert {currency.value for currency in Currency} == {"SGD", "USD"}
+    assert {currency.value for currency in Currency} == {"CNY", "HKD", "SGD", "USD"}
 
 
 @pytest.mark.parametrize("value", ("NaN", "Infinity", "not-money"))

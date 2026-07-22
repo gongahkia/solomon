@@ -5,13 +5,16 @@ from decimal import Decimal
 
 from stonks_cli.reconciliation import (
     ReconciliationDifference,
+    broker_cash,
     reconcile,
     reconcile_cash,
+    reconcile_latest,
     reconcile_positions,
     render_discrepancy_report,
 )
 from stonks_cli.types import (
     Account,
+    BrokerCashSnapshot,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -81,6 +84,22 @@ def test_cash_reconciliation_uses_canonical_ledger_cash() -> None:
 
     differences = reconcile_cash([event], {(account.key, Currency.USD): Decimal("99")})
     assert differences == (ReconciliationDifference("cash:moomoo:123:USD", Decimal("100"), Decimal("99")),)
+
+
+def test_latest_reconciliation_uses_observed_cash_snapshots() -> None:
+    account = Account("moomoo", "123")
+    snapshot = BrokerCashSnapshot(
+        SourceProvenance("moomoo", "b" * 64, "cash-1"),
+        account,
+        Currency.USD,
+        Decimal("95"),
+        datetime(2026, 1, 2, tzinfo=UTC),
+    )
+
+    assert broker_cash([snapshot]) == {(account.key, Currency.USD): Decimal("95")}
+    assert reconcile_latest([], [snapshot], ()) == (
+        ReconciliationDifference("cash:moomoo:123:USD", Decimal("0"), Decimal("95")),
+    )
 
 
 def test_discrepancy_report_is_deterministic_and_handles_clean_state() -> None:

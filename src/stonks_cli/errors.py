@@ -22,5 +22,9 @@ class ProviderError(StonksError):
     """A read-only provider failed."""
 
 
+class LLMError(StonksError):
+    """An optional LLM provider failed or privacy policy blocked input."""
+
+
 class ExecutionDeniedError(StonksError):
     """An execution capability was requested."""

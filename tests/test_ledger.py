@@ -18,15 +18,21 @@ from stonks_cli.ledger import (
     import_fingerprint,
     ingest_events,
     integrity_errors,
+    list_cash_flows,
+    list_cash_snapshots,
     list_events,
     list_position_snapshots,
     positions,
     query_audit_trail,
+    store_cash_flow,
+    store_cash_snapshot,
     store_position_snapshot,
 )
 from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
     Account,
+    BrokerCashFlow,
+    BrokerCashSnapshot,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -82,6 +88,42 @@ def test_broker_position_snapshots_are_idempotent_and_encrypted(tmp_path: Path, 
     assert store_position_snapshot(ledger, snapshot) is False
     assert list_position_snapshots(ledger) == [snapshot]
     assert b"position-1" not in ledger.path.read_bytes()
+
+
+def test_broker_cash_snapshots_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    snapshot = BrokerCashSnapshot(
+        source=SourceProvenance("moomoo", "a" * 64, "cash-1"),
+        account=Account("moomoo", "123", "Personal"),
+        currency=Currency.USD,
+        amount=Decimal("101.5"),
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert store_cash_snapshot(ledger, snapshot) is True
+    assert store_cash_snapshot(ledger, snapshot) is False
+    assert list_cash_snapshots(ledger) == [snapshot]
+    assert b"cash-1" not in ledger.path.read_bytes()
+
+
+def test_broker_cash_flows_are_idempotent_and_encrypted(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path, monkeypatch)
+    flow = BrokerCashFlow(
+        SourceProvenance("moomoo", "a" * 64, "flow-1"),
+        Account("moomoo", "123"),
+        datetime(2026, 1, 1, tzinfo=UTC).date(),
+        datetime(2026, 1, 2, tzinfo=UTC).date(),
+        Currency.USD,
+        "Deposit",
+        "IN",
+        Decimal("50"),
+        "example",
+    )
+
+    assert store_cash_flow(ledger, flow) is True
+    assert store_cash_flow(ledger, flow) is False
+    assert list_cash_flows(ledger) == [flow]
+    assert b"Deposit" not in ledger.path.read_bytes()
 
 
 def test_audit_trail_queries_immutable_events_by_identity_and_time(tmp_path: Path, monkeypatch) -> None:

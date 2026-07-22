@@ -7,7 +7,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -16,6 +16,8 @@ from stonks_cli.errors import LedgerError
 from stonks_cli.storage import EncryptedLedger
 from stonks_cli.types import (
     Account,
+    BrokerCashFlow,
+    BrokerCashSnapshot,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -46,6 +48,8 @@ def initialize(connection: sqlite3.Connection) -> None:
         """
     )
     _initialize_position_snapshots(connection)
+    _initialize_cash_snapshots(connection)
+    _initialize_cash_flows(connection)
 
 
 _CANONICAL_EVENT_COLUMNS = {
@@ -138,6 +142,54 @@ def _initialize_position_snapshots(connection: sqlite3.Connection) -> None:
     )
 
 
+def _initialize_cash_snapshots(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_cash_snapshots (
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            account_provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            account_name TEXT,
+            currency TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            PRIMARY KEY(source_provider_id, source_hash, source_record_id)
+        )
+        """
+    )
+
+
+def _initialize_cash_flows(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_cash_flows (
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            account_provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            account_name TEXT,
+            clearing_date TEXT NOT NULL,
+            settlement_date TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            flow_type TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            remark TEXT,
+            PRIMARY KEY(source_provider_id, source_hash, source_record_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS broker_cash_snapshots_time
+        ON broker_cash_snapshots(observed_at, source_provider_id, source_hash, source_record_id)
+        """
+    )
+
+
 def _migrate_legacy_event_table(connection: sqlite3.Connection) -> None:
     legacy_columns = _columns(connection, "ledger_events")
     if not {"fingerprint", "source_id", "account_id"} <= legacy_columns:
@@ -220,6 +272,18 @@ def store_position_snapshot(ledger: EncryptedLedger, snapshot: BrokerPositionSna
         return _insert_position_snapshot(connection, snapshot).rowcount == 1
 
 
+def store_cash_snapshot(ledger: EncryptedLedger, snapshot: BrokerCashSnapshot) -> bool:
+    with ledger.connection() as connection:
+        initialize(connection)
+        return _insert_cash_snapshot(connection, snapshot).rowcount == 1
+
+
+def store_cash_flow(ledger: EncryptedLedger, flow: BrokerCashFlow) -> bool:
+    with ledger.connection() as connection:
+        initialize(connection)
+        return _insert_cash_flow(connection, flow).rowcount == 1
+
+
 def _insert_position_snapshot(
     connection: sqlite3.Connection, snapshot: BrokerPositionSnapshot
 ) -> sqlite3.Cursor:
@@ -240,6 +304,48 @@ def _insert_position_snapshot(
             snapshot.instrument.name,
             str(snapshot.quantity),
             snapshot.observed_at.isoformat(),
+        ),
+    )
+
+
+def _insert_cash_snapshot(connection: sqlite3.Connection, snapshot: BrokerCashSnapshot) -> sqlite3.Cursor:
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO broker_cash_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            snapshot.source.provider_id,
+            snapshot.source.source_hash,
+            snapshot.source.record_id,
+            snapshot.account.provider_id,
+            snapshot.account.account_id,
+            snapshot.account.name,
+            snapshot.currency.value,
+            str(snapshot.amount),
+            snapshot.observed_at.isoformat(),
+        ),
+    )
+
+
+def _insert_cash_flow(connection: sqlite3.Connection, flow: BrokerCashFlow) -> sqlite3.Cursor:
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO broker_cash_flows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            flow.source.provider_id,
+            flow.source.source_hash,
+            flow.source.record_id,
+            flow.account.provider_id,
+            flow.account.account_id,
+            flow.account.name,
+            flow.clearing_date.isoformat(),
+            flow.settlement_date.isoformat(),
+            flow.currency.value,
+            flow.flow_type,
+            flow.direction,
+            str(flow.amount),
+            flow.remark,
         ),
     )
 
@@ -317,6 +423,30 @@ def list_position_snapshots(ledger: EncryptedLedger) -> list[BrokerPositionSnaps
     return [_position_snapshot_from_row(row) for row in rows]
 
 
+def list_cash_snapshots(ledger: EncryptedLedger) -> list[BrokerCashSnapshot]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM broker_cash_snapshots
+            ORDER BY observed_at, source_provider_id, source_hash, source_record_id
+            """
+        ).fetchall()
+    return [_cash_snapshot_from_row(row) for row in rows]
+
+
+def list_cash_flows(ledger: EncryptedLedger) -> list[BrokerCashFlow]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM broker_cash_flows
+            ORDER BY clearing_date, settlement_date, source_provider_id, source_hash, source_record_id
+            """
+        ).fetchall()
+    return [_cash_flow_from_row(row) for row in rows]
+
+
 def _position_snapshot_from_row(row: sqlite3.Row) -> BrokerPositionSnapshot:
     return BrokerPositionSnapshot(
         source=SourceProvenance(
@@ -331,6 +461,34 @@ def _position_snapshot_from_row(row: sqlite3.Row) -> BrokerPositionSnapshot:
         ),
         quantity=Decimal(row["quantity"]),
         observed_at=datetime.fromisoformat(row["observed_at"]),
+    )
+
+
+def _cash_snapshot_from_row(row: sqlite3.Row) -> BrokerCashSnapshot:
+    return BrokerCashSnapshot(
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        currency=Currency(row["currency"]),
+        amount=Decimal(row["amount"]),
+        observed_at=datetime.fromisoformat(row["observed_at"]),
+    )
+
+
+def _cash_flow_from_row(row: sqlite3.Row) -> BrokerCashFlow:
+    return BrokerCashFlow(
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        clearing_date=date.fromisoformat(row["clearing_date"]),
+        settlement_date=date.fromisoformat(row["settlement_date"]),
+        currency=Currency(row["currency"]),
+        flow_type=row["flow_type"],
+        direction=row["direction"],
+        amount=Decimal(row["amount"]),
+        remark=row["remark"],
     )
 
 

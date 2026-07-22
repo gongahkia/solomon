@@ -15,7 +15,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from stonks_cli.config import ProfileConfig, profile_dir, save_profile
+from stonks_cli.config import LLMSettings, ProfileConfig, profile_dir, save_profile
 from stonks_cli.errors import EncryptedStorageError, KeyFileError
 
 _MAGIC_PREFIX = b"STONKS"
@@ -233,6 +233,7 @@ def _backup_profile(source: Path) -> ProfileConfig:
             providers=tuple(value.get("providers", ("csv", "moomoo"))),
             benchmarks=tuple(value.get("benchmarks", ())),
             schema_version=int(value.get("schema_version", 1)),
+            llm=LLMSettings(**value.get("llm", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise EncryptedStorageError("backup profile configuration is invalid") from error
@@ -288,7 +289,12 @@ def rotate_key(config: ProfileConfig, new_key_file: Path) -> ProfileConfig:
         new_key_file.unlink(missing_ok=True)
         raise
     updated = ProfileConfig(
-        config.name, str(new_key_file), config.providers, config.benchmarks, config.schema_version
+        config.name,
+        str(new_key_file),
+        config.providers,
+        config.benchmarks,
+        config.schema_version,
+        config.llm,
     )
     save_profile(updated)
     return updated

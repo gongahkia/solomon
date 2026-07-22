@@ -218,6 +218,14 @@ class MoomooReadOnlyProvider:
             raise ProviderError("duplicate Moomoo account IDs")
         return tuple(sorted(parsed, key=lambda item: (item.account_index, item.account_id)))
 
+    def selected_account(self, account_id: str) -> MoomooAccount:
+        if not isinstance(account_id, str) or not (selected_id := account_id.strip()):
+            raise ProviderError("Moomoo account selection is required")
+        for account in self.accounts():
+            if account.account_id == selected_id:
+                return account
+        raise ProviderError("Moomoo account selection is unavailable")
+
     @classmethod
     def probe(cls, endpoint: OpenDConnection) -> OpenDProbe:
         status = cls.sdk_status()

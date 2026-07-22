@@ -109,6 +109,15 @@ def test_moomoo_reads_accounts_from_loopback_context() -> None:
     assert contexts[0].closed is True
 
 
+def test_moomoo_requires_explicit_current_account_selection() -> None:
+    provider = MoomooReadOnlyProvider(OpenDConnection(), lambda _host, _port: Context())
+
+    assert provider.selected_account(" 2 ").environment == "REAL"
+    for account_id in ("", "missing"):
+        with pytest.raises(ProviderError, match="selection"):
+            provider.selected_account(account_id)
+
+
 @pytest.mark.parametrize(
     "records",
     (

@@ -1201,9 +1201,9 @@ def moomoo_sync(
     if start_date > end_date:
         raise typer.BadParameter("start must not be after end")
     provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
-    accounts = {item.account_id: item for item in provider.accounts()}
-    selected = accounts.get(account_id)
-    if selected is None:
+    try:
+        selected = provider.selected_account(account_id)
+    except ProviderError:
         raise typer.BadParameter("account-id is not available from this local OpenD instance")
     account = Account("moomoo", selected.account_id)
     result = import_account_snapshot(
@@ -1246,18 +1246,20 @@ def moomoo_cash_flows(
 ) -> None:
     _iso_date(clearing_date, "clearing-date")
     provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
-    if account_id not in {item.account_id for item in provider.accounts()}:
+    try:
+        selected = provider.selected_account(account_id)
+    except ProviderError:
         raise typer.BadParameter("account-id is not available from this local OpenD instance")
     inserted, skipped = import_cash_flows(
         EncryptedLedger(_profile(profile, key_file)),
-        Account("moomoo", account_id),
-        provider.cash_flows(account_id, clearing_date),
+        Account("moomoo", selected.account_id),
+        provider.cash_flows(selected.account_id, clearing_date),
     )
     console.print_json(
         json.dumps(
             {
                 "profile": profile,
-                "account_id": account_id,
+                "account_id": selected.account_id,
                 "clearing_date": clearing_date,
                 "inserted": inserted,
                 "skipped": skipped,

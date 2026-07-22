@@ -4,8 +4,10 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from conftest import encrypted_ledger
 
+from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import (
     DailyPrice,
     FxRate,
@@ -51,6 +53,57 @@ def test_market_refresh_archives_normalized_source(tmp_path: Path, monkeypatch) 
 
     assert count == 1
     assert (ledger.sources / f"{source_hash}.enc").is_file()
+
+
+def test_daily_prices_require_complete_ordered_ohlc_and_preserve_it(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    instrument = Instrument("SPY", "US", Currency.USD)
+    price = DailyPrice(
+        instrument,
+        date(2026, 1, 1),
+        "100",
+        "a" * 64,
+        open="99",
+        high="102",
+        low="98",
+    )
+
+    assert archive_and_store_daily_prices(ledger, (price,))[0] == 1
+    revision = price_revisions(ledger, instrument.key)[0]
+    assert (revision.open, revision.high, revision.low, revision.close) == (
+        Decimal("99"),
+        Decimal("102"),
+        Decimal("98"),
+        Decimal("100"),
+    )
+    with pytest.raises(ValueError, match="complete"):
+        DailyPrice(instrument, date(2026, 1, 2), "100", "b" * 64, open="99")
+    with pytest.raises(ValueError, match="ordering"):
+        DailyPrice(
+            instrument,
+            date(2026, 1, 2),
+            "100",
+            "b" * 64,
+            open="99",
+            high="99",
+            low="98",
+        )
+
+
+def test_price_csv_accepts_complete_ohlc_and_rejects_partial_columns(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    complete = tmp_path / "complete.csv"
+    complete.write_text(
+        "date,symbol,market,currency,open,high,low,close\n"
+        "2026-01-01,SPY,US,USD,99,102,98,100\n"
+    )
+    partial = tmp_path / "partial.csv"
+    partial.write_text("date,symbol,market,currency,open,close\n2026-01-02,SPY,US,USD,100,101\n")
+
+    assert import_daily_prices_csv(ledger, complete) == 1
+    assert price_revisions(ledger, "US:SPY")[0].has_complete_ohlc is True
+    with pytest.raises(ProviderError, match="OHLC"):
+        import_daily_prices_csv(ledger, partial)
 
 
 def test_market_data_tracks_revisions_freshness_and_quote_quality(tmp_path: Path, monkeypatch) -> None:

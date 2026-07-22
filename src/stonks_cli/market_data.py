@@ -22,11 +22,30 @@ class DailyPrice:
     session_date: date
     close: Decimal
     source_hash: str
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "close", decimal(self.close))
         if self.close <= 0:
             raise ValueError("daily close must be positive")
+        for name in ("open", "high", "low"):
+            value = getattr(self, name)
+            if value is not None:
+                value = decimal(value)
+                if value <= 0:
+                    raise ValueError(f"daily {name} must be positive")
+                object.__setattr__(self, name, value)
+        if any(value is not None for value in (self.open, self.high, self.low)):
+            if self.open is None or self.high is None or self.low is None:
+                raise ValueError("daily OHLC must be complete")
+            if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
+                raise ValueError("daily OHLC ordering is invalid")
+
+    @property
+    def has_complete_ohlc(self) -> bool:
+        return self.open is not None
 
 
 class QuoteQuality(StrEnum):
@@ -84,7 +103,7 @@ def normalize_market_session(market: str, value: str | None) -> MarketSession:
 class QuoteSnapshot:
     instrument: Instrument
     last_price: Decimal | None
-    observed_at: datetime  # retrieval time
+    observed_at: datetime
     quality: QuoteQuality
     source_hash: str
     vendor_time: str | None = None
@@ -191,6 +210,9 @@ def _initialize(connection: sqlite3.Connection) -> None:
             instrument_key TEXT NOT NULL,
             session_date TEXT NOT NULL,
             close TEXT NOT NULL,
+            open TEXT,
+            high TEXT,
+            low TEXT,
             currency TEXT NOT NULL,
             source_hash TEXT NOT NULL,
             PRIMARY KEY(instrument_key, session_date)
@@ -215,6 +237,9 @@ def _initialize(connection: sqlite3.Connection) -> None:
             instrument_key TEXT NOT NULL,
             session_date TEXT NOT NULL,
             close TEXT NOT NULL,
+            open TEXT,
+            high TEXT,
+            low TEXT,
             currency TEXT NOT NULL,
             source_hash TEXT NOT NULL,
             recorded_at TEXT NOT NULL,
@@ -222,7 +247,16 @@ def _initialize(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    _initialize_daily_price_ohlc(connection)
     _initialize_quote_snapshots(connection)
+
+
+def _initialize_daily_price_ohlc(connection: sqlite3.Connection) -> None:
+    for table in ("daily_prices", "daily_price_revisions"):
+        columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+        for name in ("open", "high", "low"):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
 
 
 def _initialize_quote_snapshots(connection: sqlite3.Connection) -> None:
@@ -313,11 +347,18 @@ def store_daily_prices(ledger: EncryptedLedger, prices: list[DailyPrice]) -> int
         _initialize(connection)
         for price in prices:
             cursor = connection.execute(
-                "INSERT OR REPLACE INTO daily_prices VALUES (?, ?, ?, ?, ?)",
+                """
+                INSERT OR REPLACE INTO daily_prices (
+                    instrument_key, session_date, close, open, high, low, currency, source_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     price.instrument.key,
                     price.session_date.isoformat(),
                     str(price.close),
+                    str(price.open) if price.open is not None else None,
+                    str(price.high) if price.high is not None else None,
+                    str(price.low) if price.low is not None else None,
                     price.instrument.currency.value,
                     price.source_hash,
                 ),
@@ -325,12 +366,18 @@ def store_daily_prices(ledger: EncryptedLedger, prices: list[DailyPrice]) -> int
             inserted += cursor.rowcount
             connection.execute(
                 """
-                INSERT OR IGNORE INTO daily_price_revisions VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO daily_price_revisions (
+                    instrument_key, session_date, close, open, high, low, currency, source_hash,
+                    recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     price.instrument.key,
                     price.session_date.isoformat(),
                     str(price.close),
+                    str(price.open) if price.open is not None else None,
+                    str(price.high) if price.high is not None else None,
+                    str(price.low) if price.low is not None else None,
                     price.instrument.currency.value,
                     price.source_hash,
                     datetime.now(UTC).isoformat(),
@@ -350,6 +397,9 @@ def archive_and_store_daily_prices(
                 "instrument": price.instrument.key,
                 "currency": price.instrument.currency.value,
                 "date": price.session_date.isoformat(),
+                "open": str(price.open) if price.open is not None else None,
+                "high": str(price.high) if price.high is not None else None,
+                "low": str(price.low) if price.low is not None else None,
                 "close": str(price.close),
             }
             for price in prices
@@ -391,7 +441,7 @@ def price_revisions(ledger: EncryptedLedger, instrument_key: str) -> tuple[Daily
         _initialize(connection)
         rows = connection.execute(
             """
-            SELECT instrument_key, session_date, close, currency, source_hash
+            SELECT instrument_key, session_date, close, open, high, low, currency, source_hash
             FROM daily_price_revisions WHERE instrument_key = ?
             ORDER BY session_date, source_hash
             """,
@@ -403,6 +453,9 @@ def price_revisions(ledger: EncryptedLedger, instrument_key: str) -> tuple[Daily
             date.fromisoformat(row["session_date"]),
             Decimal(row["close"]),
             row["source_hash"],
+            Decimal(row["open"]) if row["open"] is not None else None,
+            Decimal(row["high"]) if row["high"] is not None else None,
+            Decimal(row["low"]) if row["low"] is not None else None,
         )
         for row in rows
     )
@@ -644,6 +697,10 @@ def import_daily_prices_csv(ledger: EncryptedLedger, path: Path) -> int:
     required = {"date", "symbol", "market", "currency", "close"}
     if rows.fieldnames is None or not required <= set(rows.fieldnames):
         raise ProviderError("price CSV requires date,symbol,market,currency,close")
+    ohlc_fields = {"open", "high", "low"}
+    if ohlc_fields & set(rows.fieldnames) and not ohlc_fields <= set(rows.fieldnames):
+        raise ProviderError("price CSV OHLC requires open,high,low")
+    has_ohlc = ohlc_fields <= set(rows.fieldnames)
     prices: list[DailyPrice] = []
     for row in rows:
         try:
@@ -656,6 +713,9 @@ def import_daily_prices_csv(ledger: EncryptedLedger, path: Path) -> int:
                     date.fromisoformat(row["date"] or ""),
                     decimal(row["close"] or ""),
                     source_hash,
+                    decimal(row["open"] or "") if has_ohlc else None,
+                    decimal(row["high"] or "") if has_ohlc else None,
+                    decimal(row["low"] or "") if has_ohlc else None,
                 )
             )
         except (KeyError, ValueError) as error:

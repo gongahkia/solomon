@@ -140,7 +140,9 @@ $ stonks-cli moomoo-dividend-status personal 123456
 $ stonks-cli moomoo-map-dividend personal 123456 --declaration-id <id> --cash-flow-id <id> --cash-snapshot-id <id> --gross-currency USD --gross-amount 10 --withholding-amount 1 --confirm-reconciled-funds
 ```
 
-Daily prices retain source revisions. `refresh-moomoo-quotes` performs only a one-shot OpenD
+Daily prices retain source revisions. OpenD historical daily bars require complete, ordered OHLC
+values; legacy CSV imports may remain close-only, while CSVs that include any OHLC column must include
+all three. `refresh-moomoo-quotes` performs only a one-shot OpenD
 snapshot read; it creates no quote, order-book, order, or trade subscription. Raw snapshot payloads
 are encrypted, and records include retrieval/as-of time, canonical US/SG market session plus the raw
 provider state, bid/ask-derived spread, provider fingerprint, and subscription mode. Only an explicit

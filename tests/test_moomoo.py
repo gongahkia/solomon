@@ -31,6 +31,10 @@ from stonks_cli.moomoo import (
 from stonks_cli.types import Account, Currency, EventKind, Instrument
 
 
+def _daily_bar(time_key: str, close: str) -> dict[str, str]:
+    return {"time_key": time_key, "open": close, "high": close, "low": close, "close": close}
+
+
 class Context:
     def __init__(self) -> None:
         self.closed = False
@@ -83,8 +87,8 @@ class QuoteContext:
     def request_history_kline(self, code: str, **kwargs):
         self.calls.append({"code": code, **kwargs})
         if kwargs["page_req_key"] is None:
-            return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], b"page-2"
-        return 0, [{"time_key": "2026-01-02 00:00:00", "close": "101"}], None
+            return 0, [_daily_bar("2026-01-01 00:00:00", "100")], b"page-2"
+        return 0, [_daily_bar("2026-01-02 00:00:00", "101")], None
 
     def close(self) -> None:
         self.closed = True
@@ -93,13 +97,13 @@ class QuoteContext:
 class RepeatingPageQuoteContext(QuoteContext):
     def request_history_kline(self, code: str, **kwargs):
         self.calls.append({"code": code, **kwargs})
-        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], b"same-page"
+        return 0, [_daily_bar("2026-01-01 00:00:00", "100")], b"same-page"
 
 
 class EndlessPageQuoteContext(QuoteContext):
     def request_history_kline(self, code: str, **kwargs):
         self.calls.append({"code": code, **kwargs})
-        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], str(len(self.calls))
+        return 0, [_daily_bar("2026-01-01 00:00:00", "100")], str(len(self.calls))
 
 
 class OversizedPageQuoteContext(QuoteContext):
@@ -108,8 +112,8 @@ class OversizedPageQuoteContext(QuoteContext):
         return (
             0,
             [
-                {"time_key": "2026-01-01 00:00:00", "close": "100"},
-                {"time_key": "2026-01-02 00:00:00", "close": "101"},
+                _daily_bar("2026-01-01 00:00:00", "100"),
+                _daily_bar("2026-01-02 00:00:00", "101"),
             ],
             None,
         )
@@ -118,7 +122,7 @@ class OversizedPageQuoteContext(QuoteContext):
 class InvalidTokenQuoteContext(QuoteContext):
     def request_history_kline(self, code: str, **kwargs):
         self.calls.append({"code": code, **kwargs})
-        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], 1
+        return 0, [_daily_bar("2026-01-01 00:00:00", "100")], 1
 
 
 class SnapshotQuoteContext:
@@ -433,9 +437,30 @@ def test_moomoo_reads_paginated_daily_bars_from_local_quote_context() -> None:
     prices = provider.daily_prices((instrument,), date(2026, 1, 1), date(2026, 1, 2))
 
     assert [item.close for item in prices] == [Decimal("100"), Decimal("101")]
+    assert [item.open for item in prices] == [Decimal("100"), Decimal("101")]
+    assert all(item.has_complete_ohlc for item in prices)
     assert contexts[0].calls[0]["code"] == "US.SPY"
     assert contexts[0].calls[1]["page_req_key"] == b"page-2"
     assert contexts[0].closed is True
+
+
+def test_moomoo_daily_bars_reject_incomplete_or_invalid_ohlc() -> None:
+    class MalformedOHLCContext(QuoteContext):
+        def request_history_kline(self, code: str, **kwargs):
+            self.calls.append({"code": code, **kwargs})
+            return 0, [{"time_key": "2026-01-01 00:00:00", "open": "100", "close": "99", "high": "98"}], None
+
+    context = MalformedOHLCContext()
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
+    )
+
+    with pytest.raises(ProviderError, match="malformed Moomoo daily bar"):
+        provider.daily_prices(
+            (Instrument("SPY", "US", Currency.USD),), date(2026, 1, 1), date(2026, 1, 1)
+        )
+
+    assert context.closed is True
 
 
 @pytest.mark.parametrize(

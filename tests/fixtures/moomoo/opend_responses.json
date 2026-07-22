@@ -7,8 +7,8 @@
   "fills": [{"deal_id": "deal-001"}],
   "order_fees": [{"order_id": "order-001", "fee_amount": "1.00", "fee_details": [["Commission", "0.99"], ["SEC Fee", "0.01"]]}],
   "daily_pages": [
-    [{"time_key": "2026-01-01 00:00:00", "close": "100"}],
-    [{"time_key": "2026-01-02 00:00:00", "close": "101"}]
+    [{"time_key": "2026-01-01 00:00:00", "open": "99", "high": "101", "low": "98", "close": "100"}],
+    [{"time_key": "2026-01-02 00:00:00", "open": "100", "high": "102", "low": "99", "close": "101"}]
   ],
   "market_snapshots": [{"code": "US.SYNTH", "last_price": "101", "update_time": "2026-01-02 16:00:00", "quote_status": "ENTITLED", "bid_price": "100.90", "ask_price": "101.10"}],
   "quote_snapshots": {

@@ -335,13 +335,25 @@ class MoomooReadOnlyProvider:
             source_hash = hashlib.sha256(
                 json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
+            seen_dates: set[date] = set()
             for row in rows:
                 try:
                     session_date = date.fromisoformat(str(row["time_key"]).split()[0])
-                    close = Decimal(str(row["close"]))
+                    if session_date < start or session_date > end or session_date in seen_dates:
+                        raise ValueError("Moomoo daily bar session date is invalid")
+                    price = DailyPrice(
+                        instrument,
+                        session_date,
+                        _positive_decimal(row["close"], "Moomoo daily close"),
+                        source_hash,
+                        _positive_decimal(row["open"], "Moomoo daily open"),
+                        _positive_decimal(row["high"], "Moomoo daily high"),
+                        _positive_decimal(row["low"], "Moomoo daily low"),
+                    )
                 except (KeyError, ValueError) as error:
                     raise ProviderError("malformed Moomoo daily bar") from error
-                prices.append(DailyPrice(instrument, session_date, close, source_hash))
+                seen_dates.add(session_date)
+                prices.append(price)
         return tuple(sorted(prices, key=lambda item: (item.instrument.key, item.session_date)))
 
     def market_snapshots(

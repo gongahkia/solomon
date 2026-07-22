@@ -143,7 +143,14 @@ def test_moomoo_rejects_unknown_and_execution_methods() -> None:
 
 
 def test_moomoo_probe_reports_only_local_readiness(monkeypatch) -> None:
-    provider = MoomooReadOnlyProvider(OpenDConnection(), lambda _host, _port: Context())
+    contexts: list[Context] = []
+
+    def factory(_host: str, _port: int) -> Context:
+        context = Context()
+        contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(OpenDConnection(), factory)
     monkeypatch.setattr(MoomooReadOnlyProvider, "from_installed_sdk", lambda _endpoint: provider)
     monkeypatch.setattr(
         MoomooReadOnlyProvider,
@@ -155,6 +162,9 @@ def test_moomoo_probe_reports_only_local_readiness(monkeypatch) -> None:
 
     assert probe.sdk_version == "10.9"
     assert probe.account_count == 1
+    assert probe.endpoint == OpenDConnection()
+    assert contexts[0].closed is True
+    assert "account_id" not in probe.__dict__
 
 
 @pytest.mark.parametrize(

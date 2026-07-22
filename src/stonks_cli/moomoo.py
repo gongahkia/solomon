@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from importlib import import_module, metadata, util
 from typing import Any
 
 from stonks_cli.errors import ProviderError
+from stonks_cli.market_data import DailyPrice
 from stonks_cli.plugins import Capability, PluginManifest, register_builtin_provider
+from stonks_cli.types import Instrument
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_READ_METHODS = frozenset(
+    {
+        "get_acc_list",
+        "accinfo_query",
+        "get_acc_cash_flow",
+        "position_list_query",
+        "history_order_list_query",
+        "history_deal_list_query",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +44,13 @@ class MoomooAccount:
     environment: str
 
 
+@dataclass(frozen=True)
+class OpenDProbe:
+    endpoint: OpenDConnection
+    sdk_version: str | None
+    account_count: int
+
+
 class MoomooReadOnlyProvider:
     manifest = PluginManifest(
         "moomoo",
@@ -44,23 +67,31 @@ class MoomooReadOnlyProvider:
     )
 
     def __init__(
-        self, endpoint: OpenDConnection, context_factory: Callable[[str, int], Any]
+        self,
+        endpoint: OpenDConnection,
+        context_factory: Callable[[str, int], Any],
+        quote_context_factory: Callable[[str, int], Any] | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.context_factory = context_factory
+        self.quote_context_factory = quote_context_factory
 
     @classmethod
     def from_installed_sdk(cls, endpoint: OpenDConnection) -> MoomooReadOnlyProvider:
         try:
             module: Any = import_module("moomoo")
             context_class = module.OpenSecTradeContext
+            quote_context_class = module.OpenQuoteContext
         except (AttributeError, ImportError) as error:
             raise ProviderError("install with: uv sync --extra moomoo") from error
 
         def factory(host: str, port: int) -> Any:
             return context_class(host=host, port=port)
 
-        return cls(endpoint, factory)
+        def quote_factory(host: str, port: int) -> Any:
+            return quote_context_class(host=host, port=port)
+
+        return cls(endpoint, factory, quote_factory)
 
     @staticmethod
     def sdk_version() -> str | None:
@@ -84,8 +115,25 @@ class MoomooReadOnlyProvider:
             raise ProviderError("duplicate Moomoo account IDs")
         return tuple(sorted(parsed, key=lambda item: (item.account_index, item.account_id)))
 
+    @classmethod
+    def probe(cls, endpoint: OpenDConnection) -> OpenDProbe:
+        provider = cls.from_installed_sdk(endpoint)
+        return OpenDProbe(endpoint, provider.sdk_version(), len(provider.accounts()))
+
     def positions(self, account_id: str) -> tuple[dict[str, Any], ...]:
         return tuple(_records(self._call("position_list_query", acc_id=account_id)))
+
+    def balances(self, account_id: str) -> tuple[dict[str, Any], ...]:
+        return tuple(_records(self._call("accinfo_query", acc_id=account_id)))
+
+    def cash_flows(self, account_id: str, clearing_date: str) -> tuple[dict[str, Any], ...]:
+        if not clearing_date:
+            raise ProviderError("Moomoo cash flow clearing date is required")
+        return tuple(
+            _records(
+                self._call("get_acc_cash_flow", acc_id=account_id, clearing_date=clearing_date)
+            )
+        )
 
     def historical_orders(
         self, account_id: str, start: str, end: str
@@ -101,12 +149,67 @@ class MoomooReadOnlyProvider:
             _records(self._call("history_deal_list_query", acc_id=account_id, start=start, end=end))
         )
 
+    def daily_prices(
+        self, instruments: tuple[Instrument, ...], start: date, end: date
+    ) -> tuple[DailyPrice, ...]:
+        if start > end:
+            raise ProviderError("Moomoo market-data date range is invalid")
+        if self.quote_context_factory is None:
+            raise ProviderError("Moomoo quote context is unavailable")
+        prices: list[DailyPrice] = []
+        for instrument in instruments:
+            rows = self._historical_bars(instrument, start, end)
+            source_hash = hashlib.sha256(
+                json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            for row in rows:
+                try:
+                    session_date = date.fromisoformat(str(row["time_key"]).split()[0])
+                    close = Decimal(str(row["close"]))
+                except (KeyError, ValueError) as error:
+                    raise ProviderError("malformed Moomoo daily bar") from error
+                prices.append(DailyPrice(instrument, session_date, close, source_hash))
+        return tuple(sorted(prices, key=lambda item: (item.instrument.key, item.session_date)))
+
+    def _historical_bars(
+        self, instrument: Instrument, start: date, end: date
+    ) -> list[dict[str, Any]]:
+        if self.quote_context_factory is None:
+            raise ProviderError("Moomoo quote context is unavailable")
+        context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
+        rows: list[dict[str, Any]] = []
+        page_key: Any = None
+        try:
+            while True:
+                call = getattr(context, "request_history_kline", None)
+                if not callable(call):
+                    raise ProviderError("Moomoo quote context does not support:request_history_kline")
+                response = call(
+                    f"{instrument.market}.{instrument.symbol}",
+                    start=start.isoformat(),
+                    end=end.isoformat(),
+                    max_count=1000,
+                    page_req_key=page_key,
+                )
+                if not isinstance(response, tuple) or len(response) != 3 or response[0] != 0:
+                    raise ProviderError("Moomoo read failed:request_history_kline")
+                page_rows = list(_records(response[1]))
+                rows.extend(page_rows)
+                page_key = response[2]
+                if page_key is None:
+                    return rows
+        except ProviderError:
+            raise
+        except Exception as error:
+            raise ProviderError("Moomoo read failed:request_history_kline") from error
+        finally:
+            close = getattr(context, "close", None)
+            if not callable(close):
+                raise ProviderError("Moomoo quote context cannot be closed")
+            close()
+
     def _call(self, method: str, **kwargs: Any) -> Any:
-        if any(
-            part in method.lower() for part in ("order", "unlock", "modify", "place", "cancel")
-        ) and method not in {
-            "history_order_list_query",
-        }:
+        if method not in _READ_METHODS:
             raise ProviderError(f"Moomoo method is not read-only:{method}")
         context = self.context_factory(self.endpoint.host, self.endpoint.port)
         try:

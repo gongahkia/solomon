@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,7 +21,11 @@ from stonks_cli.config import (
     save_profile,
 )
 from stonks_cli.ledger import cash_balances, import_csv, list_events, positions
-from stonks_cli.market_data import import_daily_prices_csv, latest_prices
+from stonks_cli.market_data import (
+    archive_and_store_daily_prices,
+    import_daily_prices_csv,
+    latest_prices,
+)
 from stonks_cli.moomoo import MoomooReadOnlyProvider, OpenDConnection
 from stonks_cli.operator import ScheduleDefinition, notify_local, render_schedule
 from stonks_cli.plugins import builtin_provider_manifests, discover_with_diagnostics
@@ -32,6 +37,13 @@ from stonks_cli.storage import (
     rotate_key,
 )
 from stonks_cli.strategy import run_csv_backtest
+from stonks_cli.types import Currency, Instrument
+from stonks_cli.watchlist import (
+    WatchlistItem,
+    list_items,
+    remove,
+)
+from stonks_cli.watchlist import add as add_watchlist_item
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -44,6 +56,13 @@ def _profile(name: str, key_file: Path | None) -> ProfileConfig:
         if key_file is None
         else replace(config, key_file=str(key_file.expanduser().resolve()))
     )
+
+
+def _instrument(symbol: str, market: str, currency: str, name: str | None) -> Instrument:
+    try:
+        return Instrument(symbol, market, Currency(currency.upper()), name)
+    except ValueError as error:
+        raise typer.BadParameter("instrument values are invalid") from error
 
 
 @app.command("init-profile")
@@ -192,6 +211,85 @@ def backtest_csv(
     )
 
 
+@app.command("watchlist-add")
+def watchlist_add(
+    profile: str,
+    symbol: str,
+    market: str,
+    currency: str,
+    name: str | None = typer.Option(None),
+    note: str | None = typer.Option(None),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    item = WatchlistItem(_instrument(symbol, market, currency, name), note)
+    add_watchlist_item(EncryptedLedger(_profile(profile, key_file)), item)
+    console.print_json(json.dumps({"profile": profile, "instrument": item.instrument.key}))
+
+
+@app.command("watchlist-remove")
+def watchlist_remove(
+    profile: str,
+    market: str,
+    symbol: str,
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    instrument_key = f"{market.strip().upper()}:{symbol.strip().upper()}"
+    if not remove(EncryptedLedger(_profile(profile, key_file)), instrument_key):
+        raise typer.BadParameter("watchlist instrument is not present")
+    console.print_json(json.dumps({"profile": profile, "instrument": instrument_key}))
+
+
+@app.command("watchlist")
+def watchlist(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    items = list_items(EncryptedLedger(_profile(profile, key_file)))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "items": [
+                    {
+                        "instrument": item.instrument.key,
+                        "currency": item.instrument.currency.value,
+                        "name": item.instrument.name,
+                        "note": item.note,
+                    }
+                    for item in items
+                ],
+            }
+        )
+    )
+
+
+@app.command("refresh-moomoo-prices")
+def refresh_moomoo_prices(
+    profile: str,
+    days: int = typer.Option(7, min=1, max=365),
+    host: str = typer.Option("127.0.0.1"),
+    port: int = typer.Option(11111),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    instruments = tuple(item.instrument for item in list_items(ledger))
+    if not instruments:
+        raise typer.BadParameter("watchlist is empty")
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    provider = MoomooReadOnlyProvider.from_installed_sdk(OpenDConnection(host, port))
+    prices = provider.daily_prices(instruments, start, end)
+    count, source_hash = archive_and_store_daily_prices(ledger, prices)
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "instruments": len(instruments),
+                "prices": count,
+                "source_hash": source_hash,
+                "execution": "denied",
+            }
+        )
+    )
+
+
 @app.command("schedule-render")
 def schedule_render(profile: str, hour_utc: int = typer.Option(8)) -> None:
     load_profile(profile)
@@ -254,6 +352,21 @@ def moomoo_accounts(host: str = typer.Option("127.0.0.1"), port: int = typer.Opt
                     }
                     for account in accounts
                 ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("moomoo-probe")
+def moomoo_probe(host: str = typer.Option("127.0.0.1"), port: int = typer.Option(11111)) -> None:
+    probe = MoomooReadOnlyProvider.probe(OpenDConnection(host, port))
+    console.print_json(
+        json.dumps(
+            {
+                "endpoint": f"{probe.endpoint.host}:{probe.endpoint.port}",
+                "sdk_version": probe.sdk_version,
+                "account_count": probe.account_count,
                 "execution": "denied",
             }
         )

@@ -7,7 +7,9 @@ from typer.testing import CliRunner
 
 from stonks_cli import cli
 from stonks_cli.cli import app
+from stonks_cli.market_data import DailyPrice
 from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
+from stonks_cli.types import Currency, Instrument
 
 
 def test_cli_public_command_contract_excludes_execution() -> None:
@@ -24,12 +26,17 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "restore-profile",
         "rotate-key",
         "backtest-csv",
+        "watchlist-add",
+        "watchlist-remove",
+        "watchlist",
+        "refresh-moomoo-prices",
         "schedule-render",
         "notify-local",
         "plugins",
         "enable-provider",
         "disable-provider",
         "moomoo-accounts",
+        "moomoo-probe",
         "version",
     ):
         assert command in result.output
@@ -90,6 +97,46 @@ def test_cli_updates_enabled_provider_list(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["enable-provider", "personal", "moomoo"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["providers"] == ["csv", "moomoo"]
+
+
+def test_cli_manages_encrypted_watchlist(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["watchlist-add", "personal", "SPY", "US", "USD", "--name", "S&P 500"],
+    )
+
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["watchlist", "personal"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["items"][0]["instrument"] == "US:SPY"
+
+
+def test_cli_refreshes_moomoo_prices_from_watchlist(tmp_path: Path, monkeypatch) -> None:
+    class Provider:
+        def daily_prices(self, instruments, start, end):
+            assert instruments == (Instrument("SPY", "US", Currency.USD, None),)
+            return (DailyPrice(instruments[0], start, "100", "a" * 64),)
+
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        cli.MoomooReadOnlyProvider,
+        "from_installed_sdk",
+        lambda endpoint: Provider(),
+    )
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    assert runner.invoke(app, ["watchlist-add", "personal", "SPY", "US", "USD"]).exit_code == 0
+
+    result = runner.invoke(app, ["refresh-moomoo-prices", "personal"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["prices"] == 1
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

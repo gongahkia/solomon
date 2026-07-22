@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -58,6 +59,28 @@ def store_daily_prices(ledger: EncryptedLedger, prices: list[DailyPrice]) -> int
             )
             inserted += cursor.rowcount
     return inserted
+
+
+def archive_and_store_daily_prices(
+    ledger: EncryptedLedger, prices: tuple[DailyPrice, ...]
+) -> tuple[int, str]:
+    if not prices:
+        return 0, ledger.archive_source(b"[]")
+    content = json.dumps(
+        [
+            {
+                "instrument": price.instrument.key,
+                "currency": price.instrument.currency.value,
+                "date": price.session_date.isoformat(),
+                "close": str(price.close),
+            }
+            for price in prices
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    source_hash = ledger.archive_source(content)
+    return store_daily_prices(ledger, [replace(price, source_hash=source_hash) for price in prices]), source_hash
 
 
 def latest_prices(ledger: EncryptedLedger) -> dict[str, Decimal]:

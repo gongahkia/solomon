@@ -80,6 +80,37 @@ class QuoteContext:
         self.closed = True
 
 
+class RepeatingPageQuoteContext(QuoteContext):
+    def request_history_kline(self, code: str, **kwargs):
+        self.calls.append({"code": code, **kwargs})
+        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], b"same-page"
+
+
+class EndlessPageQuoteContext(QuoteContext):
+    def request_history_kline(self, code: str, **kwargs):
+        self.calls.append({"code": code, **kwargs})
+        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], str(len(self.calls))
+
+
+class OversizedPageQuoteContext(QuoteContext):
+    def request_history_kline(self, code: str, **kwargs):
+        self.calls.append({"code": code, **kwargs})
+        return (
+            0,
+            [
+                {"time_key": "2026-01-01 00:00:00", "close": "100"},
+                {"time_key": "2026-01-02 00:00:00", "close": "101"},
+            ],
+            None,
+        )
+
+
+class InvalidTokenQuoteContext(QuoteContext):
+    def request_history_kline(self, code: str, **kwargs):
+        self.calls.append({"code": code, **kwargs})
+        return 0, [{"time_key": "2026-01-01 00:00:00", "close": "100"}], 1
+
+
 class SnapshotQuoteContext:
     def __init__(self) -> None:
         self.closed = False
@@ -255,6 +286,76 @@ def test_moomoo_reads_paginated_daily_bars_from_local_quote_context() -> None:
     assert contexts[0].calls[0]["code"] == "US.SPY"
     assert contexts[0].calls[1]["page_req_key"] == b"page-2"
     assert contexts[0].closed is True
+
+
+@pytest.mark.parametrize(
+    ("context_type", "error"),
+    (
+        (RepeatingPageQuoteContext, "repeated page key"),
+        (InvalidTokenQuoteContext, "token is invalid"),
+    ),
+)
+def test_moomoo_historical_pagination_rejects_invalid_continuations(
+    context_type: type[QuoteContext], error: str
+) -> None:
+    contexts: list[QuoteContext] = []
+
+    def quote_factory(_host: str, _port: int) -> QuoteContext:
+        context = context_type()
+        contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), quote_factory
+    )
+
+    with pytest.raises(ProviderError, match=error):
+        provider.daily_prices(
+            (Instrument("SPY", "US", Currency.USD),), date(2026, 1, 1), date(2026, 1, 2)
+        )
+
+    assert contexts[0].closed is True
+
+
+def test_moomoo_historical_pagination_enforces_page_and_row_bounds(monkeypatch) -> None:
+    page_contexts: list[EndlessPageQuoteContext] = []
+
+    def page_factory(_host: str, _port: int) -> EndlessPageQuoteContext:
+        context = EndlessPageQuoteContext()
+        page_contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), page_factory
+    )
+    monkeypatch.setattr("stonks_cli.moomoo._MAX_HISTORICAL_PAGES", 2)
+
+    with pytest.raises(ProviderError, match="page limit"):
+        provider.daily_prices(
+            (Instrument("SPY", "US", Currency.USD),), date(2026, 1, 1), date(2026, 1, 2)
+        )
+
+    assert len(page_contexts[0].calls) == 2
+    assert page_contexts[0].closed is True
+
+    row_contexts: list[OversizedPageQuoteContext] = []
+
+    def row_factory(_host: str, _port: int) -> OversizedPageQuoteContext:
+        context = OversizedPageQuoteContext()
+        row_contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), row_factory
+    )
+    monkeypatch.setattr("stonks_cli.moomoo._MAX_HISTORICAL_ROWS", 1)
+
+    with pytest.raises(ProviderError, match="row limit"):
+        provider.daily_prices(
+            (Instrument("SPY", "US", Currency.USD),), date(2026, 1, 1), date(2026, 1, 2)
+        )
+
+    assert row_contexts[0].closed is True
 
 
 def test_moomoo_market_snapshots_are_explicitly_unknown_quality() -> None:

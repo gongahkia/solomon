@@ -49,6 +49,8 @@ _READ_METHODS = frozenset(
 _MARKET_CURRENCIES = {"HK": Currency.HKD, "SH": Currency.CNY, "SZ": Currency.CNY, "SG": Currency.SGD, "US": Currency.USD}
 _CASH_FIELDS = (("hk_cash", Currency.HKD), ("us_cash", Currency.USD), ("cn_cash", Currency.CNY), ("sg_cash", Currency.SGD))
 _SDK_VERSION = re.compile(r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)(?:\.[0-9]+)?\Z")
+_MAX_HISTORICAL_PAGES = 100
+_MAX_HISTORICAL_ROWS = 100_000
 
 
 @dataclass(frozen=True)
@@ -360,9 +362,10 @@ class MoomooReadOnlyProvider:
             raise ProviderError("Moomoo quote context is unavailable")
         context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
         rows: list[dict[str, Any]] = []
-        page_key: Any = None
+        page_key: str | bytes | None = None
+        seen_page_keys: set[str | bytes] = set()
         try:
-            while True:
+            for _ in range(_MAX_HISTORICAL_PAGES):
                 call = getattr(context, "request_history_kline", None)
                 if not callable(call):
                     raise ProviderError("Moomoo quote context does not support:request_history_kline")
@@ -377,9 +380,15 @@ class MoomooReadOnlyProvider:
                     raise ProviderError("Moomoo read failed:request_history_kline")
                 page_rows = list(_records(response[1]))
                 rows.extend(page_rows)
-                page_key = response[2]
+                if len(rows) > _MAX_HISTORICAL_ROWS:
+                    raise ProviderError("Moomoo historical pagination exceeded row limit")
+                page_key = _pagination_key(response[2])
                 if page_key is None:
                     return rows
+                if page_key in seen_page_keys:
+                    raise ProviderError("Moomoo historical pagination repeated page key")
+                seen_page_keys.add(page_key)
+            raise ProviderError("Moomoo historical pagination exceeded page limit")
         except ProviderError:
             raise
         except Exception as error:
@@ -427,6 +436,14 @@ def _records(value: Any) -> Sequence[dict[str, Any]]:
     if not all(isinstance(record, dict) for record in records):
         raise ProviderError("Moomoo response contains malformed records")
     return records
+
+
+def _pagination_key(value: Any) -> str | bytes | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) and value:
+        return value
+    raise ProviderError("Moomoo historical pagination token is invalid")
 
 
 def import_account_snapshot(

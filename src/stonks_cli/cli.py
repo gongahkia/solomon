@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+from collections import defaultdict
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -324,6 +325,30 @@ def cash(profile: str, key_file: Path | None = typer.Option(None)) -> None:
             }
         )
     )
+
+
+@app.command()
+def exposure(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    events = list_events(ledger)
+    cash = cash_balances(events)
+    market_values = market_values_by_currency(events, latest_prices(ledger))
+    cash_by_currency: dict[Currency, Decimal] = defaultdict(Decimal)
+    for (_, currency), amount in cash.items():
+        cash_by_currency[currency] += amount
+    output = []
+    for currency in sorted(set(cash_by_currency) | set(market_values), key=lambda item: item.value):
+        market_value = sum(market_values.get(currency, {}).values(), Decimal("0"))
+        cash_value = cash_by_currency[currency]
+        output.append(
+            {
+                "currency": currency.value,
+                "cash": str(cash_value),
+                "market_value": str(market_value),
+                "exposure": str(cash_value + market_value),
+            }
+        )
+    console.print_json(json.dumps({"profile": profile, "exposure": output, "execution": "denied"}))
 
 
 @app.command()

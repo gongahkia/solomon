@@ -59,6 +59,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "scan-alerts",
         "monitor",
         "plugins",
+        "plugins-validate",
         "enable-provider",
         "disable-provider",
         "moomoo-accounts",
@@ -125,6 +126,25 @@ def test_cli_updates_enabled_provider_list(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["enable-provider", "personal", "moomoo"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["providers"] == ["csv", "moomoo"]
+
+
+def test_cli_validates_enabled_plugin_contracts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    result = runner.invoke(app, ["plugins-validate", "personal"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["profile"] == "personal"
+    assert payload["valid"] is True
+    assert payload["enabled"] == [
+        {"identifier": "csv", "source": "built_in", "valid": True},
+        {"identifier": "moomoo", "source": "built_in", "valid": True},
+    ]
+    assert payload["execution"] == "denied"
 
 
 def test_cli_configures_local_llm_and_keeps_agent_wrappers_manual(tmp_path: Path, monkeypatch) -> None:

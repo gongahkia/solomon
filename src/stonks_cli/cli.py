@@ -65,7 +65,12 @@ from stonks_cli.paper import (
     PaperEvent,
     PaperEventKind,
 )
-from stonks_cli.plugins import builtin_provider_manifests, discover_with_diagnostics
+from stonks_cli.plugins import (
+    PluginDiscovery,
+    PluginManifest,
+    builtin_provider_manifests,
+    discover_with_diagnostics,
+)
 from stonks_cli.reconciliation import reconcile_latest, render_discrepancy_report
 from stonks_cli.storage import (
     EncryptedLedger,
@@ -1069,14 +1074,13 @@ def notify_telegram_command(title: str, message: str, chat_id: str = typer.Optio
 @app.command("plugins")
 def plugins_command() -> None:
     discovery = discover_with_diagnostics()
+    built_in = builtin_provider_manifests()
     console.print_json(
         json.dumps(
             {
                 "installed": [identifier for identifier, _ in discovery.providers],
-                "built_in": [
-                    "csv",
-                    *(manifest.identifier for manifest in builtin_provider_manifests()),
-                ],
+                "built_in": ["csv", *(manifest.identifier for manifest in built_in)],
+                "providers": _plugin_manifest_data(built_in, discovery),
                 "diagnostics": [
                     {"entry_point": item.entry_point, "error": item.error}
                     for item in discovery.diagnostics
@@ -1084,6 +1088,32 @@ def plugins_command() -> None:
             }
         )
     )
+
+
+def _plugin_manifest_data(
+    built_in: tuple[PluginManifest, ...], discovery: PluginDiscovery
+) -> list[dict[str, object]]:
+    adapters: list[dict[str, object]] = [
+        {
+            "identifier": "csv",
+            "api_version": None,
+            "capabilities": [],
+            "source": "built_in_adapter",
+        }
+    ]
+    manifests = (
+        *((manifest, "built_in") for manifest in built_in),
+        *((provider.manifest, "external") for _, provider in discovery.providers),
+    )
+    return adapters + [
+        {
+            "identifier": manifest.identifier,
+            "api_version": manifest.api_version,
+            "capabilities": sorted(capability.value for capability in manifest.capabilities),
+            "source": source,
+        }
+        for manifest, source in manifests
+    ]
 
 
 @app.command("enable-provider")
@@ -1098,6 +1128,39 @@ def disable_provider_command(profile: str, provider_id: str) -> None:
     config = disable_provider(load_profile(profile), provider_id)
     save_profile(config)
     console.print_json(json.dumps({"profile": profile, "providers": list(config.providers)}))
+
+
+@app.command("plugins-validate")
+def plugins_validate(profile: str) -> None:
+    config = load_profile(profile)
+    discovery = discover_with_diagnostics()
+    built_in = {"csv", *(manifest.identifier for manifest in builtin_provider_manifests())}
+    external = {identifier for identifier, _ in discovery.providers}
+    enabled = [
+        {
+            "identifier": identifier,
+            "source": "built_in" if identifier in built_in else "external",
+            "valid": identifier in built_in or identifier in external,
+        }
+        for identifier in config.providers
+    ]
+    valid = all(item["valid"] is True for item in enabled)
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "valid": valid,
+                "enabled": enabled,
+                "diagnostics": [
+                    {"entry_point": item.entry_point, "error": item.error}
+                    for item in discovery.diagnostics
+                ],
+                "execution": "denied",
+            }
+        )
+    )
+    if not valid:
+        raise typer.Exit(1)
 
 
 @app.command("moomoo-accounts")

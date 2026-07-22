@@ -27,6 +27,7 @@ from stonks_cli.types import (
 )
 
 _US_TICKER = re.compile(r"[A-Z0-9][A-Z0-9.-]*\Z")
+_SG_TICKER = re.compile(r"[A-Z0-9][A-Z0-9.-]*\Z")
 
 
 @dataclass(frozen=True)
@@ -796,6 +797,18 @@ def resolve_us_equity_or_etf(ledger: EncryptedLedger, identifier: str) -> Instru
     return instrument
 
 
+def resolve_sg_equity_or_etf(ledger: EncryptedLedger, identifier: str) -> InstrumentMaster:
+    canonical_id = _canonical_sg_identifier(identifier)
+    instrument = latest_instrument_masters(ledger).get(canonical_id)
+    if instrument is None:
+        raise ProviderError("SG symbol is not registered in the instrument master")
+    if instrument.asset_class not in {AssetClass.EQUITY, AssetClass.ETF}:
+        raise ProviderError("SG symbol is not a supported equity or ETF")
+    if instrument.provider_symbol != f"SG.{instrument.instrument.symbol}":
+        raise ProviderError("SG symbol has an invalid Moomoo provider mapping")
+    return instrument
+
+
 def store_moomoo_instrument_eligibility(
     ledger: EncryptedLedger, evidence: tuple[MoomooInstrumentEligibility, ...]
 ) -> int:
@@ -937,6 +950,19 @@ def _canonical_us_identifier(value: str) -> str:
     if not _US_TICKER.fullmatch(identifier):
         raise ValueError("US symbol format is invalid")
     return f"US:{identifier}"
+
+
+def _canonical_sg_identifier(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("SG symbol is required")
+    identifier = value.strip().upper()
+    if identifier.startswith(("US:", "US.")):
+        raise ValueError("SG symbol must not identify another market")
+    if identifier.startswith("SG:") or identifier.startswith("SG."):
+        identifier = identifier[3:]
+    if not _SG_TICKER.fullmatch(identifier):
+        raise ValueError("SG symbol format is invalid")
+    return f"SG:{identifier}"
 
 
 def _instrument_from_key(value: str, currency: Currency) -> Instrument:

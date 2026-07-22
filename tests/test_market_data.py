@@ -30,6 +30,7 @@ from stonks_cli.market_data import (
     latest_quote_snapshots,
     price_freshness,
     price_revisions,
+    resolve_sg_equity_or_etf,
     resolve_us_equity_or_etf,
     store_instrument_masters,
     store_moomoo_instrument_eligibility,
@@ -450,3 +451,57 @@ def test_us_symbol_resolver_uses_registered_moomoo_equity_and_etf_mappings(
             ETFClassification.BROAD_DIVERSIFIED,
             "issuer-2026-01",
         )
+
+
+def test_sg_symbol_resolver_uses_registered_moomoo_equity_and_etf_mappings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    equity = InstrumentMaster(
+        "SG:C6L",
+        "SGX",
+        "SG",
+        Currency.SGD,
+        AssetClass.EQUITY,
+        "SG.C6L",
+        ListingStatus.LISTED,
+        "sgx-2026-01",
+        "a" * 64,
+    )
+    etf = InstrumentMaster(
+        "SG:ES3",
+        "SGX",
+        "SG",
+        Currency.SGD,
+        AssetClass.ETF,
+        "SG.ES3",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "b" * 64,
+        ETFClassification.BROAD_DIVERSIFIED,
+        "issuer-2026-01",
+    )
+    index = InstrumentMaster(
+        "SG:STI",
+        "SPDJI",
+        "SG",
+        Currency.SGD,
+        AssetClass.INDEX,
+        "SG.STI",
+        ListingStatus.LISTED,
+        "index-2026-01",
+        "c" * 64,
+    )
+
+    assert store_instrument_masters(ledger, (equity, etf, index)) == 3
+    assert resolve_sg_equity_or_etf(ledger, "c6l") == equity
+    assert resolve_sg_equity_or_etf(ledger, "SG.ES3") == etf
+    assert resolve_sg_equity_or_etf(ledger, "sg:es3") == etf
+    with pytest.raises(ProviderError, match="supported equity or ETF"):
+        resolve_sg_equity_or_etf(ledger, "STI")
+    with pytest.raises(ProviderError, match="not registered"):
+        resolve_sg_equity_or_etf(ledger, "D05")
+    with pytest.raises(ValueError, match="another market"):
+        resolve_sg_equity_or_etf(ledger, "US.AAPL")
+    with pytest.raises(ValueError, match="format"):
+        resolve_sg_equity_or_etf(ledger, "SG..C6L")

@@ -128,8 +128,8 @@ class InstrumentMaster:
         source_hash = self.metadata_source_hash.lower()
         if not exchange or not provider_symbol or not metadata_version:
             raise ValueError("instrument master exchange, provider symbol, and metadata version are required")
-        if market == "US" and provider_symbol != f"US.{instrument.symbol}":
-            raise ValueError("US Moomoo provider symbol must match the canonical US ticker")
+        if provider_symbol != f"{market}.{instrument.symbol}":
+            raise ValueError("Moomoo provider symbol must match the canonical market ticker")
         if not _SHA256.fullmatch(source_hash):
             raise ValueError("instrument master metadata source hash must be a SHA-256 digest")
         if self.asset_class is AssetClass.ETF:

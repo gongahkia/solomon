@@ -33,6 +33,22 @@ def test_strategy_uses_prior_close_signal_only() -> None:
     assert result.total_return == Decimal("0.10")
 
 
+def test_strategy_split_ratio_prevents_a_false_split_loss() -> None:
+    result = simulate_eod_long_only(
+        (
+            DailyBar(Decimal("100"), True),
+            DailyBar(Decimal("50"), True, Decimal("2")),
+        ),
+        fee_rate=Decimal("0"),
+        slippage_rate=Decimal("0"),
+    )
+
+    assert result.total_return == Decimal("0")
+    assert buy_and_hold_return(
+        (DailyBar(Decimal("100"), True), DailyBar(Decimal("50"), True, Decimal("2")))
+    ) == Decimal("0")
+
+
 def test_csv_backtest_archives_source(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "strategy.csv"
     source.write_text("close,signal\n100,true\n110,false\n")

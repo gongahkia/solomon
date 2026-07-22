@@ -18,10 +18,13 @@ from stonks_cli.storage import EncryptedLedger
 class DailyBar:
     close: Decimal
     signal: bool
+    split_ratio: Decimal = Decimal("1")
 
     def __post_init__(self) -> None:
         if self.close <= 0:
             raise ValueError("daily close must be positive")
+        if self.split_ratio <= 0:
+            raise ValueError("split ratio must be positive")
 
 
 @dataclass(frozen=True)
@@ -98,7 +101,7 @@ def simulate_eod_long_only(
             trades += 1
             invested = should_hold
         if invested:
-            value *= bars[index].close / bars[index - 1].close
+            value *= bars[index].close * bars[index].split_ratio / bars[index - 1].close
         values.append(value)
     return BacktestResult(value - Decimal("1"), len(bars) - 1, trades, tuple(values))
 
@@ -106,7 +109,10 @@ def simulate_eod_long_only(
 def buy_and_hold_return(bars: Sequence[DailyBar]) -> Decimal:
     if len(bars) < 2:
         raise ValueError("at least two daily bars are required")
-    return bars[-1].close / bars[0].close - Decimal("1")
+    value = Decimal("1")
+    for index in range(1, len(bars)):
+        value *= bars[index].close * bars[index].split_ratio / bars[index - 1].close
+    return value - Decimal("1")
 
 
 def run_csv_backtest(
@@ -125,7 +131,13 @@ def run_csv_backtest(
         signal = (row["signal"] or "").strip().lower()
         if signal not in {"0", "1", "false", "true"}:
             raise ProviderError("strategy signal must be true/false or 1/0")
-        bars.append(DailyBar(Decimal(row["close"] or ""), signal in {"1", "true"}))
+        bars.append(
+            DailyBar(
+                Decimal(row["close"] or ""),
+                signal in {"1", "true"},
+                Decimal(row.get("split_ratio") or "1"),
+            )
+        )
     return simulate_eod_long_only(bars, fee_rate=fee_rate, slippage_rate=slippage_rate), source_hash
 
 

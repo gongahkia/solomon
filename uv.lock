@@ -1310,7 +1310,7 @@ moomoo = [
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0" },
     { name = "mcp", specifier = ">=1.27,<2" },
-    { name = "moomoo-api", marker = "extra == 'moomoo'", specifier = ">=10.9" },
+    { name = "moomoo-api", marker = "extra == 'moomoo'", specifier = ">=10.9,<11" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "platformdirs", specifier = ">=4.2" },
     { name = "pydantic", specifier = ">=2.7" },

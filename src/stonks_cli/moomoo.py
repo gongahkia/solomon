@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ _READ_METHODS = frozenset(
 )
 _MARKET_CURRENCIES = {"HK": Currency.HKD, "SH": Currency.CNY, "SZ": Currency.CNY, "SG": Currency.SGD, "US": Currency.USD}
 _CASH_FIELDS = (("hk_cash", Currency.HKD), ("us_cash", Currency.USD), ("cn_cash", Currency.CNY), ("sg_cash", Currency.SGD))
+_SDK_VERSION = re.compile(r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)(?:\.[0-9]+)?\Z")
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,13 @@ class OpenDProbe:
     endpoint: OpenDConnection
     sdk_version: str | None
     account_count: int
+
+
+@dataclass(frozen=True)
+class OpenDSDKStatus:
+    available: bool
+    version: str | None
+    reason: str | None
 
 
 @dataclass(frozen=True)
@@ -146,12 +155,15 @@ class MoomooReadOnlyProvider:
 
     @classmethod
     def from_installed_sdk(cls, endpoint: OpenDConnection) -> MoomooReadOnlyProvider:
+        status = cls.sdk_status()
+        if not status.available:
+            raise ProviderError(f"Moomoo SDK unavailable:{status.reason}")
         try:
             module: Any = import_module("moomoo")
             context_class = module.OpenSecTradeContext
             quote_context_class = module.OpenQuoteContext
         except (AttributeError, ImportError) as error:
-            raise ProviderError("install with: uv sync --extra moomoo") from error
+            raise ProviderError("Moomoo SDK unavailable:module_import") from error
 
         def factory(host: str, port: int) -> Any:
             return context_class(host=host, port=port)
@@ -162,12 +174,27 @@ class MoomooReadOnlyProvider:
         return cls(endpoint, factory, quote_factory)
 
     @staticmethod
-    def sdk_version() -> str | None:
+    def sdk_status() -> OpenDSDKStatus:
         try:
-            version = metadata.version("moomoo-api")
+            version = metadata.version("moomoo-api").strip()
         except metadata.PackageNotFoundError:
-            return None
-        return version if util.find_spec("moomoo") is not None else None
+            return OpenDSDKStatus(False, None, "distribution_missing")
+        try:
+            module = util.find_spec("moomoo")
+        except (AttributeError, ImportError, ValueError):
+            return OpenDSDKStatus(False, version, "module_malformed")
+        if module is None:
+            return OpenDSDKStatus(False, version, "module_missing")
+        match = _SDK_VERSION.fullmatch(version)
+        if match is None:
+            return OpenDSDKStatus(False, version, "version_malformed")
+        if int(match["major"]) != 10 or int(match["minor"]) < 9:
+            return OpenDSDKStatus(False, version, "version_incompatible")
+        return OpenDSDKStatus(True, version, None)
+
+    @classmethod
+    def sdk_version(cls) -> str | None:
+        return cls.sdk_status().version
 
     def accounts(self) -> tuple[MoomooAccount, ...]:
         records = self._call("get_acc_list")
@@ -185,8 +212,11 @@ class MoomooReadOnlyProvider:
 
     @classmethod
     def probe(cls, endpoint: OpenDConnection) -> OpenDProbe:
+        status = cls.sdk_status()
+        if not status.available:
+            raise ProviderError(f"Moomoo SDK unavailable:{status.reason}")
         provider = cls.from_installed_sdk(endpoint)
-        return OpenDProbe(endpoint, provider.sdk_version(), len(provider.accounts()))
+        return OpenDProbe(endpoint, status.version, len(provider.accounts()))
 
     def positions(self, account_id: str) -> tuple[dict[str, Any], ...]:
         return tuple(_records(self._call("position_list_query", acc_id=account_id)))

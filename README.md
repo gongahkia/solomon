@@ -14,7 +14,7 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 - Portfolio reports: `portfolio`, `transactions`, `performance`, `reconciliation`
 - Profile maintenance: `backup-profile`, `restore-profile`, `rotate-key`
 - Research and operator utilities: `backtest-csv`, `strategy-*`, `watchlist`, `refresh-moomoo-prices`, `refresh-moomoo-quotes`, `scan-alerts`, `monitor`, `ml-*`, `research-*`, `llm-*`, `paper-*`, `schedule-*`, `notify-local`, `notify-telegram`
-- Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `version`
+- Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `moomoo-sdk-status`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `version`
 
 `stonks-mcp` is the separate MCP server entrypoint. All commands and tools are read-only,
 local-data management, reporting, notification, or simulation interfaces; none can unlock an
@@ -37,6 +37,7 @@ Use the Pi only for read-only monitoring. Before enabling a timer, run each comm
 ```console
 $ uv sync --extra moomoo
 $ stonks-cli init-profile personal --key-file /absolute/path/personal.key
+$ stonks-cli moomoo-sdk-status
 $ stonks-cli moomoo-probe
 $ stonks-cli moomoo-accounts
 $ stonks-cli watchlist-add personal SPY US USD --name "S&P 500 ETF"

@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from stonks_cli import cli
 from stonks_cli.cli import app
 from stonks_cli.market_data import DailyPrice
+from stonks_cli.moomoo import OpenDSDKStatus
 from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
 from stonks_cli.types import Currency, Instrument
 
@@ -66,6 +67,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "moomoo-sync",
         "moomoo-cash-flows",
         "moomoo-probe",
+        "moomoo-sdk-status",
         "version",
     ):
         assert command in result.output
@@ -145,6 +147,24 @@ def test_cli_validates_enabled_plugin_contracts(tmp_path: Path, monkeypatch) -> 
         {"identifier": "moomoo", "source": "built_in", "valid": True},
     ]
     assert payload["execution"] == "denied"
+
+
+def test_cli_reports_sdk_status_without_connecting(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli.MoomooReadOnlyProvider,
+        "sdk_status",
+        staticmethod(lambda: OpenDSDKStatus(False, "9.9", "version_incompatible")),
+    )
+
+    result = CliRunner().invoke(app, ["moomoo-sdk-status"])
+
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output) == {
+        "available": False,
+        "version": "9.9",
+        "reason": "version_incompatible",
+        "execution": "denied",
+    }
 
 
 def test_cli_configures_local_llm_and_keeps_agent_wrappers_manual(tmp_path: Path, monkeypatch) -> None:

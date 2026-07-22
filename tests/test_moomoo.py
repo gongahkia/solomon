@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from importlib import metadata
 
 import pytest
 from conftest import encrypted_ledger
@@ -17,6 +18,7 @@ from stonks_cli.moomoo import (
     MoomooRateLimiter,
     MoomooReadOnlyProvider,
     OpenDConnection,
+    OpenDSDKStatus,
     import_account_snapshot,
     import_cash_flows,
 )
@@ -143,12 +145,44 @@ def test_moomoo_rejects_unknown_and_execution_methods() -> None:
 def test_moomoo_probe_reports_only_local_readiness(monkeypatch) -> None:
     provider = MoomooReadOnlyProvider(OpenDConnection(), lambda _host, _port: Context())
     monkeypatch.setattr(MoomooReadOnlyProvider, "from_installed_sdk", lambda _endpoint: provider)
-    monkeypatch.setattr(MoomooReadOnlyProvider, "sdk_version", staticmethod(lambda: "10.9"))
+    monkeypatch.setattr(
+        MoomooReadOnlyProvider,
+        "sdk_status",
+        staticmethod(lambda: OpenDSDKStatus(True, "10.9", None)),
+    )
 
     probe = MoomooReadOnlyProvider.probe(OpenDConnection())
 
     assert probe.sdk_version == "10.9"
     assert probe.account_count == 1
+
+
+@pytest.mark.parametrize(
+    ("version", "module", "available", "reason"),
+    (
+        (None, object(), False, "distribution_missing"),
+        ("10.9", None, False, "module_missing"),
+        ("latest", object(), False, "version_malformed"),
+        ("9.9", object(), False, "version_incompatible"),
+        ("11.0", object(), False, "version_incompatible"),
+        ("10.9.1", object(), True, None),
+    ),
+)
+def test_moomoo_sdk_status_requires_compatible_distribution_and_module(
+    monkeypatch, version: str | None, module: object | None, available: bool, reason: str | None
+) -> None:
+    if version is None:
+        monkeypatch.setattr(
+            "stonks_cli.moomoo.metadata.version",
+            lambda _name: (_ for _ in ()).throw(metadata.PackageNotFoundError("moomoo-api")),
+        )
+    else:
+        monkeypatch.setattr("stonks_cli.moomoo.metadata.version", lambda _name: version)
+    monkeypatch.setattr("stonks_cli.moomoo.util.find_spec", lambda _name: module)
+
+    status = MoomooReadOnlyProvider.sdk_status()
+
+    assert status == OpenDSDKStatus(available, version, reason)
 
 
 def test_moomoo_reads_paginated_daily_bars_from_local_quote_context() -> None:

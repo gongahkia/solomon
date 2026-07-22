@@ -1280,6 +1280,23 @@ def moomoo_probe(host: str = typer.Option("127.0.0.1"), port: int = typer.Option
     )
 
 
+@app.command("moomoo-sdk-status")
+def moomoo_sdk_status() -> None:
+    status = MoomooReadOnlyProvider.sdk_status()
+    console.print_json(
+        json.dumps(
+            {
+                "available": status.available,
+                "version": status.version,
+                "reason": status.reason,
+                "execution": "denied",
+            }
+        )
+    )
+    if not status.available:
+        raise typer.Exit(1)
+
+
 @app.command()
 def version() -> None:
     typer.echo(__version__)

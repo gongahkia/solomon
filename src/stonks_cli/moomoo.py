@@ -54,6 +54,8 @@ _CASH_FIELDS = (("hk_cash", Currency.HKD), ("us_cash", Currency.USD), ("cn_cash"
 _SDK_VERSION = re.compile(r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)(?:\.[0-9]+)?\Z")
 _MAX_HISTORICAL_PAGES = 100
 _MAX_HISTORICAL_ROWS = 100_000
+_MAX_CORPORATE_ACTION_PAGES = 100
+_MAX_CORPORATE_ACTION_ROWS = 5_000
 
 
 @dataclass(frozen=True)
@@ -153,12 +155,14 @@ class MoomooReadOnlyProvider:
         quote_context_factory: Callable[[str, int], Any] | None = None,
         rate_limiter: MoomooRateLimiter | None = None,
         quote_rate_limiter: MoomooRateLimiter | None = None,
+        corporate_action_rate_limiter: MoomooRateLimiter | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.context_factory = context_factory
         self.quote_context_factory = quote_context_factory
         self.rate_limiter = rate_limiter or MoomooRateLimiter()
         self.quote_rate_limiter = quote_rate_limiter or MoomooRateLimiter(limit=60)
+        self.corporate_action_rate_limiter = corporate_action_rate_limiter or MoomooRateLimiter(limit=30)
 
     @classmethod
     def from_installed_sdk(cls, endpoint: OpenDConnection) -> MoomooReadOnlyProvider:
@@ -375,6 +379,50 @@ class MoomooReadOnlyProvider:
             raise ProviderError("Moomoo market snapshot omitted requested instrument")
         return tuple(sorted(snapshots, key=lambda item: item.instrument.key))
 
+    def corporate_splits(self, instrument: Instrument) -> tuple[dict[str, Any], ...]:
+        if self.quote_context_factory is None:
+            raise ProviderError("Moomoo quote context is unavailable")
+        context = self.quote_context_factory(self.endpoint.host, self.endpoint.port)
+        rows: list[dict[str, Any]] = []
+        next_key: str | None = None
+        seen_keys: set[str] = set()
+        try:
+            for _ in range(_MAX_CORPORATE_ACTION_PAGES):
+                self.corporate_action_rate_limiter.acquire("get_corporate_actions_stock_splits")
+                call = getattr(context, "get_corporate_actions_stock_splits", None)
+                if not callable(call):
+                    raise ProviderError("Moomoo quote context does not support:get_corporate_actions_stock_splits")
+                response = call(f"{instrument.market}.{instrument.symbol}", next_key=next_key, num=50)
+                if not isinstance(response, tuple) or len(response) != 2 or response[0] != 0:
+                    raise ProviderError("Moomoo read failed:get_corporate_actions_stock_splits")
+                payload = response[1]
+                if not isinstance(payload, dict):
+                    raise ProviderError("Moomoo stock split response is malformed")
+                page_rows = payload.get("split_list")
+                if not isinstance(page_rows, Sequence) or isinstance(page_rows, (str, bytes)):
+                    raise ProviderError("Moomoo stock split response is malformed")
+                if not all(isinstance(row, dict) for row in page_rows):
+                    raise ProviderError("Moomoo stock split response is malformed")
+                rows.extend(page_rows)
+                if len(rows) > _MAX_CORPORATE_ACTION_ROWS:
+                    raise ProviderError("Moomoo stock split pagination exceeded row limit")
+                next_key = _corporate_action_next_key(payload.get("next_key"))
+                if next_key is None:
+                    return tuple(rows)
+                if next_key in seen_keys:
+                    raise ProviderError("Moomoo stock split pagination repeated page key")
+                seen_keys.add(next_key)
+            raise ProviderError("Moomoo stock split pagination exceeded page limit")
+        except ProviderError:
+            raise
+        except Exception as error:
+            raise ProviderError("Moomoo read failed:get_corporate_actions_stock_splits") from error
+        finally:
+            close = getattr(context, "close", None)
+            if not callable(close):
+                raise ProviderError("Moomoo quote context cannot be closed")
+            close()
+
     def _historical_bars(
         self, instrument: Instrument, start: date, end: date
     ) -> list[dict[str, Any]]:
@@ -467,6 +515,14 @@ def _pagination_key(value: Any) -> str | bytes | None:
     if isinstance(value, (str, bytes)) and value:
         return value
     raise ProviderError("Moomoo historical pagination token is invalid")
+
+
+def _corporate_action_next_key(value: Any) -> str | None:
+    if value == "-1":
+        return None
+    if isinstance(value, str) and value:
+        return value
+    raise ProviderError("Moomoo stock split pagination token is invalid")
 
 
 def import_account_snapshot(
@@ -570,6 +626,23 @@ def import_order_fees(
     return inserted, skipped
 
 
+def import_stock_splits(
+    ledger: EncryptedLedger,
+    account: Account,
+    instrument: Instrument,
+    records: Sequence[dict[str, Any]],
+    *,
+    market_timezone: str,
+) -> tuple[int, int]:
+    """Normalize documented stock split and reverse split records into ledger events."""
+    if account.provider_id != "moomoo":
+        raise ProviderError("Moomoo import requires a Moomoo account")
+    events = tuple(
+        _split_to_event(ledger, account, instrument, row, market_timezone) for row in records
+    )
+    return ingest_events(ledger, events)
+
+
 def _fill_to_event(
     ledger: EncryptedLedger, account: Account, row: dict[str, Any], opend_timezone: str
 ) -> LedgerEvent:
@@ -665,6 +738,53 @@ def _fee_records_from_moomoo_row(
             )
         )
     return tuple(records)
+
+
+def _split_to_event(
+    ledger: EncryptedLedger,
+    account: Account,
+    instrument: Instrument,
+    row: dict[str, Any],
+    market_timezone: str,
+) -> LedgerEvent:
+    try:
+        reform_type = str(row["reform_type"]).strip()
+        if not reform_type:
+            raise ValueError("Moomoo split reorganization type is required")
+        rate = str(row["rate"]).strip()
+        ratio = _split_ratio(rate)
+        effective_date_source = "ex_date_str" if row.get("ex_date_str") else "dir_deci_pub_date_str"
+        effective_date = date.fromisoformat(str(row[effective_date_source]).strip())
+        timezone = ZoneInfo(market_timezone)
+    except (KeyError, ValueError, ZoneInfoNotFoundError) as error:
+        raise ProviderError("malformed Moomoo stock split record") from error
+    occurred_at = datetime.combine(effective_date, datetime.min.time(), tzinfo=timezone).astimezone(UTC)
+    raw_payload = {"instrument": instrument.key, "split": row}
+    identity = hashlib.sha256(_canonical_json(raw_payload)).hexdigest()
+    source, raw_hash = _record_source(ledger, account, "split", identity, raw_payload)
+    canonical = {
+        "instrument": instrument.key,
+        "reform_type": reform_type,
+        "rate": rate,
+        "effective_date": effective_date.isoformat(),
+    }
+    return LedgerEvent(
+        fingerprint=import_fingerprint(source, canonical),
+        source=source,
+        account=account,
+        occurred_at=occurred_at,
+        kind=EventKind.SPLIT,
+        currency=instrument.currency,
+        amount=Decimal("0"),
+        quantity=ratio,
+        instrument=instrument,
+        metadata={
+            "effective_date_source": effective_date_source,
+            "raw_payload_hash": raw_hash,
+            "reform_type": reform_type,
+            "vendor": "moomoo",
+        },
+    )
 
 
 def _position_to_snapshot(
@@ -769,6 +889,15 @@ def _nonempty_strings(values: Sequence[str], label: str) -> tuple[str, ...]:
     if len(normalized) != len(values) or len(set(normalized)) != len(normalized):
         raise ProviderError(f"{label} are invalid")
     return normalized
+
+
+def _split_ratio(value: str) -> Decimal:
+    before, separator, after = value.partition("->")
+    if not separator or "->" in after:
+        raise ValueError("Moomoo split rate is invalid")
+    previous = _positive_decimal(before.strip(), "Moomoo split prior shares")
+    current = _positive_decimal(after.strip(), "Moomoo split new shares")
+    return current / previous
 
 
 def _positive_decimal(value: object, label: str) -> Decimal:

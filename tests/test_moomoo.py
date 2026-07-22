@@ -22,6 +22,7 @@ from stonks_cli.moomoo import (
     import_account_snapshot,
     import_cash_flows,
     import_order_fees,
+    import_stock_splits,
 )
 from stonks_cli.types import Account, Currency, EventKind, Instrument
 
@@ -127,6 +128,23 @@ class SnapshotQuoteContext:
             {"code": code, "last_price": "100", "update_time": "2026-01-02 09:30:00"}
             for code in codes
         ]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class SplitQuoteContext:
+    def __init__(self, next_keys: tuple[str, ...] = ("-1",)) -> None:
+        self.closed = False
+        self.calls: list[dict[str, object]] = []
+        self.next_keys = iter(next_keys)
+
+    def get_corporate_actions_stock_splits(self, code: str, **kwargs):
+        self.calls.append({"code": code, **kwargs})
+        return 0, {
+            "next_key": next(self.next_keys),
+            "split_list": [{"reform_type": "Split", "rate": "1->5", "dir_deci_pub_date_str": "2026-01-02"}],
+        }
 
     def close(self) -> None:
         self.closed = True
@@ -386,6 +404,40 @@ def test_moomoo_market_snapshots_are_explicitly_unknown_quality() -> None:
     assert contexts[0].closed is True
 
 
+def test_moomoo_reads_paginated_stock_split_records() -> None:
+    contexts: list[SplitQuoteContext] = []
+
+    def quote_factory(_host: str, _port: int) -> SplitQuoteContext:
+        context = SplitQuoteContext(("next", "-1"))
+        contexts.append(context)
+        return context
+
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), quote_factory
+    )
+
+    records = provider.corporate_splits(Instrument("SPY", "US", Currency.USD))
+
+    assert len(records) == 2
+    assert contexts[0].calls == [
+        {"code": "US.SPY", "next_key": None, "num": 50},
+        {"code": "US.SPY", "next_key": "next", "num": 50},
+    ]
+    assert contexts[0].closed is True
+
+
+def test_moomoo_stock_split_pagination_rejects_repeated_keys() -> None:
+    context = SplitQuoteContext(("next", "next"))
+    provider = MoomooReadOnlyProvider(
+        OpenDConnection(), lambda _host, _port: Context(), lambda _host, _port: context
+    )
+
+    with pytest.raises(ProviderError, match="repeated page key"):
+        provider.corporate_splits(Instrument("SPY", "US", Currency.USD))
+
+    assert context.closed is True
+
+
 def test_moomoo_import_archives_fills_and_observed_account_snapshots(tmp_path, monkeypatch) -> None:
     ledger = encrypted_ledger(tmp_path, monkeypatch)
     result = import_account_snapshot(
@@ -534,6 +586,47 @@ def test_moomoo_order_fee_records_reject_unreconciled_or_unlinked_rows(tmp_path,
             ({"order_id": "missing", "fee_amount": "1", "fee_details": [("Commission", "1")]},),
             (order,),
             opend_timezone="Asia/Singapore",
+        )
+
+
+def test_moomoo_stock_split_records_are_normalized_and_archived(tmp_path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    instrument = Instrument("SPY", "US", Currency.USD)
+    records = (
+        {
+            "reform_type": "Split",
+            "rate": "1->5",
+            "dir_deci_pub_date_str": "2026-01-02",
+            "ex_date_str": "2026-01-03",
+        },
+        {"reform_type": "Reverse Split", "rate": "5->1", "dir_deci_pub_date_str": "2026-02-02"},
+    )
+
+    assert import_stock_splits(
+        ledger, Account("moomoo", "2"), instrument, records, market_timezone="America/New_York"
+    ) == (2, 0)
+    assert import_stock_splits(
+        ledger, Account("moomoo", "2"), instrument, records, market_timezone="America/New_York"
+    ) == (0, 2)
+
+    events = list_events(ledger)
+    assert [event.quantity for event in events] == [Decimal("5"), Decimal("0.2")]
+    assert events[0].occurred_at == datetime(2026, 1, 3, 5, tzinfo=UTC)
+    assert events[0].metadata["effective_date_source"] == "ex_date_str"
+    assert (ledger.sources / f"{events[0].metadata['raw_payload_hash']}.enc").is_file()
+
+
+@pytest.mark.parametrize("rate", ("1->0", "1->", "invalid"))
+def test_moomoo_stock_split_records_reject_invalid_rates(tmp_path, monkeypatch, rate: str) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+
+    with pytest.raises(ProviderError, match="stock split"):
+        import_stock_splits(
+            ledger,
+            Account("moomoo", "2"),
+            Instrument("SPY", "US", Currency.USD),
+            ({"reform_type": "Split", "rate": rate, "dir_deci_pub_date_str": "2026-01-02"},),
+            market_timezone="America/New_York",
         )
 
 

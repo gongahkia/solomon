@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +30,7 @@ _MCP_PREPARABLE_ACTIONS = frozenset({"csv_import", "profile_backup", "provider_c
 
 @dataclass(frozen=True)
 class PendingAction:
+    confirmation_id: str
     profile: str
     action: str
     payload: dict[str, str]
@@ -44,7 +47,9 @@ def create_server() -> FastMCP:
         load_profile(profile)
         confirmation_id = uuid4().hex
         expires_at = datetime.now(UTC) + timedelta(minutes=5)
-        pending[confirmation_id] = PendingAction(profile, action, payload, expires_at)
+        request = PendingAction(confirmation_id, profile, action, payload, expires_at)
+        _write_audit(request, "requested", {})
+        pending[confirmation_id] = request
         return {
             "confirmation_id": confirmation_id,
             "profile": profile,
@@ -55,9 +60,25 @@ def create_server() -> FastMCP:
 
     def consume(confirmation_id: str, action: str) -> PendingAction:
         request = pending.pop(confirmation_id, None)
-        if request is None or request.expires_at <= datetime.now(UTC) or request.action != action:
+        if request is None:
             raise ValueError("confirmation is invalid or expired")
+        if request.expires_at <= datetime.now(UTC) or request.action != action:
+            _write_audit(request, "failed", {"reason": "confirmation_invalid_or_expired"})
+            raise ValueError("confirmation is invalid or expired")
+        _write_audit(request, "confirmed", {})
         return request
+
+    def run(
+        confirmation_id: str, action: str, mutation: Callable[[PendingAction], dict[str, object]]
+    ) -> dict[str, object]:
+        request = consume(confirmation_id, action)
+        try:
+            result = mutation(request)
+        except Exception as error:
+            _write_audit(request, "failed", {"reason": type(error).__name__})
+            raise
+        _write_audit(request, "completed", result)
+        return result
 
     @server.tool()
     def profile_status(profile: str, key_file: str | None = None) -> dict[str, object]:
@@ -86,18 +107,14 @@ def create_server() -> FastMCP:
     @server.tool()
     def confirm_csv_import(confirmation_id: str) -> dict[str, object]:
         """Execute one prepared CSV import. Confirmation IDs are single-use and expire after five minutes."""
-        request = consume(confirmation_id, "csv_import")
-        config = load_profile(request.profile)
-        inserted, skipped, source_hash = import_csv(
-            EncryptedLedger(config), Path(request.payload["path"])
-        )
-        return {
-            "profile": request.profile,
-            "inserted": inserted,
-            "skipped": skipped,
-            "source_hash": source_hash,
-            "execution": "denied",
-        }
+        def mutate(request: PendingAction) -> dict[str, object]:
+            config = load_profile(request.profile)
+            inserted, skipped, source_hash = import_csv(
+                EncryptedLedger(config), Path(request.payload["path"])
+            )
+            return {"profile": request.profile, "inserted": inserted, "skipped": skipped, "source_hash": source_hash, "execution": "denied"}
+
+        return run(confirmation_id, "csv_import", mutate)
 
     @server.tool()
     def prepare_provider_change(profile: str, provider_id: str, enabled: bool) -> dict[str, object]:
@@ -114,20 +131,14 @@ def create_server() -> FastMCP:
     @server.tool()
     def confirm_provider_change(confirmation_id: str) -> dict[str, object]:
         """Apply one prepared provider configuration change; confirmation IDs are single-use."""
-        request = consume(confirmation_id, "provider_change")
-        config = load_profile(request.profile)
-        enabled = request.payload["enabled"] == "True"
-        updated = (
-            enable_provider(config, request.payload["provider_id"])
-            if enabled
-            else disable_provider(config, request.payload["provider_id"])
-        )
-        save_profile(updated)
-        return {
-            "profile": request.profile,
-            "providers": list(updated.providers),
-            "execution": "denied",
-        }
+        def mutate(request: PendingAction) -> dict[str, object]:
+            config = load_profile(request.profile)
+            enabled = request.payload["enabled"] == "True"
+            updated = enable_provider(config, request.payload["provider_id"]) if enabled else disable_provider(config, request.payload["provider_id"])
+            save_profile(updated)
+            return {"profile": request.profile, "providers": list(updated.providers), "execution": "denied"}
+
+        return run(confirmation_id, "provider_change", mutate)
 
     @server.tool()
     def prepare_profile_backup(profile: str, destination: str) -> dict[str, object]:
@@ -142,9 +153,11 @@ def create_server() -> FastMCP:
     @server.tool()
     def confirm_profile_backup(confirmation_id: str) -> dict[str, object]:
         """Create one prepared encrypted backup; confirmation IDs are single-use."""
-        request = consume(confirmation_id, "profile_backup")
-        destination = export_backup(load_profile(request.profile), Path(request.payload["destination"]))
-        return {"profile": request.profile, "backup": str(destination), "execution": "denied"}
+        def mutate(request: PendingAction) -> dict[str, object]:
+            destination = export_backup(load_profile(request.profile), Path(request.payload["destination"]))
+            return {"profile": request.profile, "backup": str(destination), "execution": "denied"}
+
+        return run(confirmation_id, "profile_backup", mutate)
 
     _validate_tool_registry(server)
     return server
@@ -153,6 +166,12 @@ def create_server() -> FastMCP:
 def _validate_tool_registry(server: FastMCP) -> None:
     if set(server._tool_manager._tools) != _MCP_TOOL_ALLOWLIST:
         raise RuntimeError("MCP tool registry contains a prohibited capability")
+
+
+def _write_audit(request: PendingAction, event: str, result: dict[str, object]) -> None:
+    with EncryptedLedger(load_profile(request.profile)).connection() as connection:
+        connection.execute("CREATE TABLE IF NOT EXISTS mcp_mutation_audit (at TEXT NOT NULL, confirmation_id TEXT NOT NULL, action TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, result TEXT NOT NULL)")
+        connection.execute("INSERT INTO mcp_mutation_audit VALUES (?, ?, ?, ?, ?, ?)", (datetime.now(UTC).isoformat(), request.confirmation_id, request.action, event, json.dumps(request.payload, sort_keys=True), json.dumps(result, sort_keys=True)))
 
 
 def main() -> None:

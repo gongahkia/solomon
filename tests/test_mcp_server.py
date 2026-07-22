@@ -4,7 +4,7 @@ from pathlib import Path
 
 from stonks_cli.config import ProfileConfig, save_profile
 from stonks_cli.mcp_server import _MCP_TOOL_ALLOWLIST, _validate_tool_registry, create_server
-from stonks_cli.storage import generate_key_file
+from stonks_cli.storage import EncryptedLedger, generate_key_file
 
 
 def test_mcp_server_builds_without_execution_tools() -> None:
@@ -36,6 +36,9 @@ def test_mcp_provider_change_requires_single_use_confirmation(tmp_path: Path, mo
     result = tools["confirm_provider_change"].fn(str(prepared["confirmation_id"]))
 
     assert result["providers"] == ["csv"]
+    with EncryptedLedger(ProfileConfig("personal", str(key))).connection() as connection:
+        events = [row["event"] for row in connection.execute("SELECT event FROM mcp_mutation_audit")]
+    assert events == ["requested", "confirmed", "completed"]
     try:
         tools["confirm_provider_change"].fn(str(prepared["confirmation_id"]))
     except ValueError as error:

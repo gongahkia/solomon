@@ -30,6 +30,7 @@ from stonks_cli.market_data import (
     latest_quote_snapshots,
     price_freshness,
     price_revisions,
+    resolve_us_equity_or_etf,
     store_instrument_masters,
     store_moomoo_instrument_eligibility,
 )
@@ -381,3 +382,71 @@ def test_recommendation_candidate_requires_listing_and_read_only_cash_eligibilit
     )
     with pytest.raises(ProviderError, match="instrument master"):
         store_moomoo_instrument_eligibility(ledger, (unknown,))
+
+
+def test_us_symbol_resolver_uses_registered_moomoo_equity_and_etf_mappings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    equity = InstrumentMaster(
+        "US:BRK.B",
+        "NYSE",
+        "US",
+        Currency.USD,
+        AssetClass.EQUITY,
+        "US.BRK.B",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "a" * 64,
+    )
+    etf = InstrumentMaster(
+        "US:SPY",
+        "ARCA",
+        "US",
+        Currency.USD,
+        AssetClass.ETF,
+        "US.SPY",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "b" * 64,
+        ETFClassification.BROAD_DIVERSIFIED,
+        "issuer-2026-01",
+    )
+    index = InstrumentMaster(
+        "US:SPX",
+        "SPDJI",
+        "US",
+        Currency.USD,
+        AssetClass.INDEX,
+        "US.SPX",
+        ListingStatus.LISTED,
+        "index-2026-01",
+        "c" * 64,
+    )
+
+    assert store_instrument_masters(ledger, (equity, etf, index)) == 3
+    assert resolve_us_equity_or_etf(ledger, "brk.b") == equity
+    assert resolve_us_equity_or_etf(ledger, "US.SPY") == etf
+    assert resolve_us_equity_or_etf(ledger, "us:spy") == etf
+    with pytest.raises(ProviderError, match="supported equity or ETF"):
+        resolve_us_equity_or_etf(ledger, "SPX")
+    with pytest.raises(ProviderError, match="not registered"):
+        resolve_us_equity_or_etf(ledger, "AAPL")
+    with pytest.raises(ValueError, match="another market"):
+        resolve_us_equity_or_etf(ledger, "SG.C6L")
+    with pytest.raises(ValueError, match="format"):
+        resolve_us_equity_or_etf(ledger, "US..SPY")
+    with pytest.raises(ValueError, match="provider symbol"):
+        InstrumentMaster(
+            "US:SPY",
+            "ARCA",
+            "US",
+            Currency.USD,
+            AssetClass.ETF,
+            "US.IVV",
+            ListingStatus.LISTED,
+            "issuer-2026-01",
+            "d" * 64,
+            ETFClassification.BROAD_DIVERSIFIED,
+            "issuer-2026-01",
+        )

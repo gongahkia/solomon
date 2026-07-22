@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -24,6 +25,8 @@ from stonks_cli.types import (
     MoomooInstrumentEligibility,
     decimal,
 )
+
+_US_TICKER = re.compile(r"[A-Z0-9][A-Z0-9.-]*\Z")
 
 
 @dataclass(frozen=True)
@@ -781,6 +784,18 @@ def latest_instrument_masters(ledger: EncryptedLedger) -> dict[str, InstrumentMa
     return {row["canonical_id"]: _instrument_master_from_row(row) for row in rows}
 
 
+def resolve_us_equity_or_etf(ledger: EncryptedLedger, identifier: str) -> InstrumentMaster:
+    canonical_id = _canonical_us_identifier(identifier)
+    instrument = latest_instrument_masters(ledger).get(canonical_id)
+    if instrument is None:
+        raise ProviderError("US symbol is not registered in the instrument master")
+    if instrument.asset_class not in {AssetClass.EQUITY, AssetClass.ETF}:
+        raise ProviderError("US symbol is not a supported equity or ETF")
+    if instrument.provider_symbol != f"US.{instrument.instrument.symbol}":
+        raise ProviderError("US symbol has an invalid Moomoo provider mapping")
+    return instrument
+
+
 def store_moomoo_instrument_eligibility(
     ledger: EncryptedLedger, evidence: tuple[MoomooInstrumentEligibility, ...]
 ) -> int:
@@ -909,6 +924,19 @@ def _instrument_master_from_row(row: sqlite3.Row) -> InstrumentMaster:
         bool(row["leveraged"]),
         bool(row["inverse_product"]),
     )
+
+
+def _canonical_us_identifier(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("US symbol is required")
+    identifier = value.strip().upper()
+    if identifier.startswith(("SG:", "SG.")):
+        raise ValueError("US symbol must not identify another market")
+    if identifier.startswith("US:") or identifier.startswith("US."):
+        identifier = identifier[3:]
+    if not _US_TICKER.fullmatch(identifier):
+        raise ValueError("US symbol format is invalid")
+    return f"US:{identifier}"
 
 
 def _instrument_from_key(value: str, currency: Currency) -> Instrument:

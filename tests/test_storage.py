@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from stonks_cli.config import ProfileConfig, config_path, load_profile, profile_dir, save_profile
+from stonks_cli.config import (
+    ProfileConfig,
+    config_path,
+    disable_provider,
+    enable_provider,
+    load_profile,
+    profile_dir,
+    save_profile,
+)
 from stonks_cli.errors import EncryptedStorageError, KeyFileError, ProfileError
 from stonks_cli.storage import (
     EncryptedLedger,
@@ -131,6 +139,19 @@ def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: 
     )
 
     assert config.providers == ("csv", "moomoo")
+
+
+def test_profile_provider_lifecycle_updates_a_validated_configuration(tmp_path: Path) -> None:
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"), providers=("csv",))
+
+    enabled = enable_provider(config, " moomoo ")
+
+    assert enabled.providers == ("csv", "moomoo")
+    assert disable_provider(enabled, "csv").providers == ("moomoo",)
+    with pytest.raises(ProfileError, match="not enabled"):
+        disable_provider(enabled, "fixture")
+    with pytest.raises(ProfileError, match="at least one"):
+        disable_provider(config, "csv")
 
 
 @pytest.mark.parametrize(

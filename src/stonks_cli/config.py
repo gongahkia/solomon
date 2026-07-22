@@ -66,6 +66,23 @@ def save_profile(config: ProfileConfig) -> None:
     path.chmod(0o600)
 
 
+def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
+    providers = (*config.providers, provider_id)
+    return ProfileConfig(
+        config.name, config.key_file, providers, config.benchmarks, config.schema_version
+    )
+
+
+def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
+    identifier = provider_id.strip().lower()
+    providers = tuple(item for item in config.providers if item != identifier)
+    if len(providers) == len(config.providers):
+        raise ProfileError("provider is not enabled")
+    return ProfileConfig(
+        config.name, config.key_file, providers, config.benchmarks, config.schema_version
+    )
+
+
 def load_profile(name: str) -> ProfileConfig:
     path = config_path(name)
     if not path.is_file():

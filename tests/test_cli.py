@@ -27,6 +27,8 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "schedule-render",
         "notify-local",
         "plugins",
+        "enable-provider",
+        "disable-provider",
         "moomoo-accounts",
         "version",
     ):
@@ -73,6 +75,21 @@ def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:
     assert payload["diagnostics"] == [
         {"entry_point": "broken", "error": "RuntimeError: fixture load failed"}
     ]
+
+
+def test_cli_updates_enabled_provider_list(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    result = runner.invoke(app, ["disable-provider", "personal", "moomoo"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["providers"] == ["csv"]
+    result = runner.invoke(app, ["enable-provider", "personal", "moomoo"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["providers"] == ["csv", "moomoo"]
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

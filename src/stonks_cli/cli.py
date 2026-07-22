@@ -12,7 +12,13 @@ from rich.table import Table
 from stonks_cli import __version__
 from stonks_cli.accounting import fifo_lots
 from stonks_cli.analytics import allocation, market_values
-from stonks_cli.config import ProfileConfig, load_profile, save_profile
+from stonks_cli.config import (
+    ProfileConfig,
+    disable_provider,
+    enable_provider,
+    load_profile,
+    save_profile,
+)
 from stonks_cli.ledger import cash_balances, import_csv, list_events, positions
 from stonks_cli.market_data import import_daily_prices_csv, latest_prices
 from stonks_cli.moomoo import MoomooReadOnlyProvider, OpenDConnection
@@ -216,6 +222,20 @@ def plugins_command() -> None:
             }
         )
     )
+
+
+@app.command("enable-provider")
+def enable_provider_command(profile: str, provider_id: str) -> None:
+    config = enable_provider(load_profile(profile), provider_id)
+    save_profile(config)
+    console.print_json(json.dumps({"profile": profile, "providers": list(config.providers)}))
+
+
+@app.command("disable-provider")
+def disable_provider_command(profile: str, provider_id: str) -> None:
+    config = disable_provider(load_profile(profile), provider_id)
+    save_profile(config)
+    console.print_json(json.dumps({"profile": profile, "providers": list(config.providers)}))
 
 
 @app.command("moomoo-accounts")

@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
+from stonks_cli.config import ProfileConfig
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate, convert_currency
 from stonks_cli.types import (
     AssetClass,
     Currency,
+    DrawdownResponsePolicy,
     EventKind,
     GICSSector,
     InstrumentMaster,
@@ -247,6 +249,8 @@ class RealizedDrawdown:
     threshold: Decimal
     drawdown: Decimal
     breached: bool
+    response_policy: DrawdownResponsePolicy
+    freshness: ValuationFreshness
 
     def __post_init__(self) -> None:
         if not isinstance(self.configuration_version, str) or not self.configuration_version.strip():
@@ -257,6 +261,10 @@ class RealizedDrawdown:
             raise ValueError("drawdown valuations must use one currency")
         if self.drawdown != self.current.value / self.high_water.value - Decimal("1"):
             raise ValueError("drawdown value does not reconcile")
+        if not isinstance(self.response_policy, DrawdownResponsePolicy):
+            raise ValueError("drawdown response policy is required")
+        if not isinstance(self.freshness, ValuationFreshness):
+            raise ValueError("drawdown freshness is required")
         object.__setattr__(self, "configuration_version", self.configuration_version.strip())
 
 
@@ -265,6 +273,7 @@ def realized_rolling_drawdown(
     *,
     threshold: Decimal = Decimal("0.25"),
     configuration_version: str,
+    response_policy: DrawdownResponsePolicy = DrawdownResponsePolicy.ALERT_ONLY,
 ) -> RealizedDrawdown:
     if not valuations:
         raise ValueError("at least one portfolio valuation is required")
@@ -277,6 +286,14 @@ def realized_rolling_drawdown(
         raise ValueError("drawdown valuations must use one currency")
     high_water = max(valuations, key=lambda valuation: valuation.value)
     drawdown = current.value / high_water.value - Decimal("1")
+    freshness = max(
+        (current.freshness, high_water.freshness),
+        key=lambda value: (
+            ValuationFreshness.FRESH,
+            ValuationFreshness.STALE,
+            ValuationFreshness.UNAVAILABLE,
+        ).index(value),
+    )
     return RealizedDrawdown(
         current,
         high_water,
@@ -284,6 +301,19 @@ def realized_rolling_drawdown(
         threshold,
         drawdown,
         drawdown <= -threshold,
+        response_policy,
+        freshness,
+    )
+
+
+def realized_profile_drawdown(
+    valuations: tuple[PortfolioValuation, ...], config: ProfileConfig
+) -> RealizedDrawdown:
+    return realized_rolling_drawdown(
+        valuations,
+        threshold=config.drawdown.threshold,
+        configuration_version=f"drawdown:{config.drawdown.version}",
+        response_policy=config.drawdown.response_policy,
     )
 
 

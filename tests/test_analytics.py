@@ -22,17 +22,20 @@ from stonks_cli.analytics import (
     money_weighted_return,
     portfolio_health,
     portfolio_return_attribution,
+    realized_profile_drawdown,
     realized_rolling_drawdown,
     sector_concentration,
     sector_concentrations_by_currency,
     time_weighted_return,
 )
+from stonks_cli.config import ProfileConfig, configure_drawdown
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import FxRate
 from stonks_cli.types import (
     Account,
     AssetClass,
     Currency,
+    DrawdownResponsePolicy,
     ETFClassification,
     EventKind,
     GICSSector,
@@ -297,7 +300,7 @@ def test_portfolio_return_attribution_reconciles_market_income_and_fees() -> Non
         )
 
 
-def test_realized_rolling_drawdown_uses_portfolio_high_water_mark() -> None:
+def test_realized_rolling_drawdown_uses_portfolio_high_water_mark(tmp_path) -> None:
     valuations = (
         PortfolioValuation(
             datetime(2026, 1, 1, tzinfo=UTC),
@@ -331,6 +334,15 @@ def test_realized_rolling_drawdown_uses_portfolio_high_water_mark() -> None:
     assert drawdown.drawdown == Decimal("-0.3")
     assert drawdown.breached is True
     assert drawdown.current.freshness is ValuationFreshness.STALE
+    assert drawdown.freshness is ValuationFreshness.STALE
+    assert drawdown.response_policy is DrawdownResponsePolicy.ALERT_ONLY
+    configured = configure_drawdown(
+        ProfileConfig("personal", str(tmp_path / "key")), "0.30", "record_only"
+    )
+    profile_drawdown = realized_profile_drawdown(valuations, configured)
+    assert profile_drawdown.configuration_version == "drawdown:2"
+    assert profile_drawdown.threshold == Decimal("0.30")
+    assert profile_drawdown.response_policy is DrawdownResponsePolicy.RECORD_ONLY
     with pytest.raises(ValueError, match="ordered"):
         realized_rolling_drawdown(
             tuple(reversed(valuations)), configuration_version="strategy-3"

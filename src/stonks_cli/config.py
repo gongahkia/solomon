@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from platformdirs import user_data_path
 
 from stonks_cli.errors import ProfileError, ProviderError
-from stonks_cli.types import Currency
+from stonks_cli.types import Currency, DrawdownResponsePolicy
 
 _PROFILE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENVIRONMENT_VARIABLE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
@@ -29,6 +30,35 @@ class DividendSettings:
             raise ProfileError("dividend currency conversion setting must be boolean")
         if self.allow_currency_conversion and not self.allow_explicit_credit:
             raise ProfileError("dividend currency conversion requires explicit credit")
+
+
+@dataclass(frozen=True)
+class DrawdownSettings:
+    warning_threshold: str = "0.25"
+    response_policy: DrawdownResponsePolicy = DrawdownResponsePolicy.ALERT_ONLY
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.warning_threshold, str) or not self.warning_threshold.strip():
+            raise ProfileError("drawdown warning threshold must be decimal")
+        try:
+            threshold = Decimal(self.warning_threshold)
+        except InvalidOperation as error:
+            raise ProfileError("drawdown warning threshold must be decimal") from error
+        if not threshold.is_finite() or not Decimal("0") < threshold < Decimal("1"):
+            raise ProfileError("drawdown warning threshold must be between zero and one")
+        try:
+            policy = DrawdownResponsePolicy(self.response_policy)
+        except ValueError as error:
+            raise ProfileError("drawdown response policy is invalid") from error
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("drawdown settings version must be a positive integer")
+        object.__setattr__(self, "warning_threshold", format(threshold, "f"))
+        object.__setattr__(self, "response_policy", policy)
+
+    @property
+    def threshold(self) -> Decimal:
+        return Decimal(self.warning_threshold)
 
 
 @dataclass(frozen=True)
@@ -122,6 +152,7 @@ class ProfileConfig:
     llm: LLMSettings = LLMSettings()
     dividends: DividendSettings = DividendSettings()
     reporting_currency: Currency = Currency.SGD
+    drawdown: DrawdownSettings = DrawdownSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -135,6 +166,8 @@ class ProfileConfig:
             raise ProfileError(str(error)) from error
         if not isinstance(self.reporting_currency, Currency):
             raise ProfileError("profile reporting currency is invalid")
+        if not isinstance(self.drawdown, DrawdownSettings):
+            raise ProfileError("profile drawdown settings are invalid")
         object.__setattr__(self, "providers", providers)
 
 
@@ -158,6 +191,8 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("dividends")
     if config.reporting_currency is Currency.SGD:
         data.pop("reporting_currency")
+    if config.drawdown == DrawdownSettings():
+        data.pop("drawdown")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -174,6 +209,7 @@ def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
         config.llm,
         config.dividends,
         config.reporting_currency,
+        config.drawdown,
     )
 
 
@@ -191,7 +227,23 @@ def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
         config.llm,
         config.dividends,
         config.reporting_currency,
+        config.drawdown,
     )
+
+
+def configure_drawdown(
+    config: ProfileConfig, warning_threshold: str, response_policy: DrawdownResponsePolicy | str
+) -> ProfileConfig:
+    try:
+        policy = DrawdownResponsePolicy(response_policy)
+    except ValueError as error:
+        raise ProfileError("drawdown response policy is invalid") from error
+    candidate = DrawdownSettings(
+        warning_threshold, policy, config.drawdown.version
+    )
+    if candidate == config.drawdown:
+        return config
+    return replace(config, drawdown=replace(candidate, version=config.drawdown.version + 1))
 
 
 def load_profile(name: str) -> ProfileConfig:
@@ -209,6 +261,7 @@ def load_profile(name: str) -> ProfileConfig:
             llm=LLMSettings(**value.get("llm", {})),
             dividends=DividendSettings(**value.get("dividends", {})),
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
+            drawdown=DrawdownSettings(**value.get("drawdown", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

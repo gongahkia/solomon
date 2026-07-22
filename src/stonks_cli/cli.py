@@ -31,6 +31,7 @@ from stonks_cli.config import (
     DividendSettings,
     LLMSettings,
     ProfileConfig,
+    configure_drawdown,
     disable_provider,
     enable_provider,
     load_profile,
@@ -101,7 +102,7 @@ from stonks_cli.strategy import (
     run_csv_backtest,
     store_artifact,
 )
-from stonks_cli.types import Account, Currency, Instrument
+from stonks_cli.types import Account, Currency, DrawdownResponsePolicy, Instrument
 from stonks_cli.watchlist import (
     WatchlistItem,
     audit_history,
@@ -1409,6 +1410,32 @@ def dividend_configure(
     config = replace(load_profile(profile), dividends=settings)
     save_profile(config)
     console.print_json(json.dumps({"profile": profile, "dividends": _dividend_settings_data(settings)}))
+
+
+@app.command("drawdown-configure")
+def drawdown_configure(
+    profile: str,
+    warning_threshold: str = typer.Option("0.25"),
+    response_policy: DrawdownResponsePolicy = typer.Option(DrawdownResponsePolicy.ALERT_ONLY),
+) -> None:
+    try:
+        config = configure_drawdown(load_profile(profile), warning_threshold, response_policy)
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    save_profile(config)
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "drawdown": {
+                    "warning_threshold": config.drawdown.warning_threshold,
+                    "response_policy": config.drawdown.response_policy,
+                    "version": config.drawdown.version,
+                    "execution": "denied",
+                },
+            }
+        )
+    )
 
 
 @app.command("moomoo-accounts")

@@ -7,8 +7,10 @@ import pytest
 
 from stonks_cli.config import (
     DividendSettings,
+    DrawdownSettings,
     ProfileConfig,
     config_path,
+    configure_drawdown,
     disable_provider,
     enable_provider,
     load_profile,
@@ -29,7 +31,7 @@ from stonks_cli.storage import (
     restore_backup,
     rotate_key,
 )
-from stonks_cli.types import Currency
+from stonks_cli.types import Currency, DrawdownResponsePolicy
 
 
 def test_key_file_is_private_and_round_trips(tmp_path: Path) -> None:
@@ -181,6 +183,27 @@ def test_profile_dividend_credit_settings_are_explicit_and_round_trip(
     }
     with pytest.raises(ProfileError, match="requires explicit credit"):
         DividendSettings(False, True)
+
+
+def test_profile_drawdown_settings_are_versioned_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"))
+
+    configured = configure_drawdown(config, "0.30", "record_only")
+    save_profile(configured)
+
+    assert configured.drawdown == DrawdownSettings("0.30", DrawdownResponsePolicy.RECORD_ONLY, 2)
+    assert configure_drawdown(configured, "0.30", "record_only") == configured
+    assert load_profile("personal") == configured
+    assert json.loads(config_path("personal").read_text())["drawdown"] == {
+        "response_policy": "record_only",
+        "version": 2,
+        "warning_threshold": "0.30",
+    }
+    with pytest.raises(ProfileError, match="between zero and one"):
+        DrawdownSettings("1")
 
 
 def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: Path) -> None:

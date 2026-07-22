@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from stonks_cli.config import (
     DividendSettings,
+    DrawdownSettings,
     LLMSettings,
     ProfileConfig,
     profile_dir,
@@ -252,6 +253,7 @@ def _backup_profile(source: Path) -> ProfileConfig:
             llm=LLMSettings(**value.get("llm", {})),
             dividends=DividendSettings(**value.get("dividends", {})),
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
+            drawdown=DrawdownSettings(**value.get("drawdown", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise EncryptedStorageError("backup profile configuration is invalid") from error
@@ -315,6 +317,7 @@ def rotate_key(config: ProfileConfig, new_key_file: Path) -> ProfileConfig:
         config.llm,
         config.dividends,
         config.reporting_currency,
+        config.drawdown,
     )
     save_profile(updated)
     return updated

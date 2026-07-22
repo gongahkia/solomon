@@ -50,6 +50,11 @@ class GICSSector(StrEnum):
     REAL_ESTATE = "real_estate"
 
 
+class DrawdownResponsePolicy(StrEnum):
+    RECORD_ONLY = "record_only"
+    ALERT_ONLY = "alert_only"
+
+
 class EventKind(StrEnum):
     CASH_DEPOSIT = "cash_deposit"
     CASH_WITHDRAWAL = "cash_withdrawal"

@@ -18,6 +18,7 @@ from stonks_cli.ledger import (
     ingest_events,
     store_cash_flow,
     store_cash_snapshot,
+    store_fee_record,
     store_position_snapshot,
 )
 from stonks_cli.market_data import DailyPrice, QuoteQuality, QuoteSnapshot
@@ -27,6 +28,7 @@ from stonks_cli.types import (
     Account,
     BrokerCashFlow,
     BrokerCashSnapshot,
+    BrokerFeeRecord,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -44,6 +46,7 @@ _READ_METHODS = frozenset(
         "position_list_query",
         "history_order_list_query",
         "history_deal_list_query",
+        "order_fee_query",
     }
 )
 _MARKET_CURRENCIES = {"HK": Currency.HKD, "SH": Currency.CNY, "SZ": Currency.CNY, "SG": Currency.SGD, "US": Currency.USD}
@@ -267,6 +270,21 @@ class MoomooReadOnlyProvider:
             _records(self._call("history_deal_list_query", acc_id=account_id, start=start, end=end))
         )
 
+    def order_fees(
+        self, account_id: str, order_ids: Sequence[str]
+    ) -> tuple[dict[str, Any], ...]:
+        selected = self.selected_account(account_id)
+        identifiers = tuple(_nonempty_strings(order_ids, "Moomoo order IDs"))
+        if not identifiers:
+            return ()
+        return tuple(
+            _records(
+                self._call(
+                    "order_fee_query", identifiers, rate_limit_account_id=selected.account_id
+                )
+            )
+        )
+
     def transaction_records(
         self, account: Account, start: datetime, end: datetime
     ) -> tuple[dict[str, Any], ...]:
@@ -402,10 +420,12 @@ class MoomooReadOnlyProvider:
                 raise ProviderError("Moomoo quote context cannot be closed")
             close()
 
-    def _call(self, method: str, **kwargs: Any) -> Any:
+    def _call(
+        self, method: str, *args: Any, rate_limit_account_id: str | None = None, **kwargs: Any
+    ) -> Any:
         if method not in _READ_METHODS:
             raise ProviderError(f"Moomoo method is not read-only:{method}")
-        account_id = kwargs.get("acc_id")
+        account_id = rate_limit_account_id or kwargs.get("acc_id")
         if isinstance(account_id, str) and account_id:
             self.rate_limiter.acquire(account_id)
         context = self.context_factory(self.endpoint.host, self.endpoint.port)
@@ -413,7 +433,7 @@ class MoomooReadOnlyProvider:
             call = getattr(context, method, None)
             if not callable(call):
                 raise ProviderError(f"Moomoo context does not support:{method}")
-            response = call(**kwargs)
+            response = call(*args, **kwargs)
             if not isinstance(response, tuple) or len(response) != 2 or response[0] != 0:
                 raise ProviderError(f"Moomoo read failed:{method}")
             return response[1]
@@ -513,6 +533,43 @@ def import_cash_flows(
     return inserted, skipped
 
 
+def import_order_fees(
+    ledger: EncryptedLedger,
+    account: Account,
+    fee_records: Sequence[dict[str, Any]],
+    orders: Sequence[dict[str, Any]],
+    *,
+    opend_timezone: str,
+) -> tuple[int, int]:
+    """Store observed fee components without tax inference or netting."""
+    if account.provider_id != "moomoo":
+        raise ProviderError("Moomoo import requires a Moomoo account")
+    orders_by_id: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        try:
+            order_id = _identifier(order, "order_id")
+        except (KeyError, ValueError) as error:
+            raise ProviderError("malformed Moomoo order record") from error
+        if order_id in orders_by_id:
+            raise ProviderError("duplicate Moomoo order record")
+        orders_by_id[order_id] = order
+    inserted = skipped = 0
+    for fee_record in fee_records:
+        try:
+            order_id = _identifier(fee_record, "order_id")
+            order = orders_by_id[order_id]
+        except (KeyError, ValueError) as error:
+            raise ProviderError("Moomoo fee record has no matching order") from error
+        for fee in _fee_records_from_moomoo_row(
+            ledger, account, fee_record, order, opend_timezone
+        ):
+            if store_fee_record(ledger, fee):
+                inserted += 1
+            else:
+                skipped += 1
+    return inserted, skipped
+
+
 def _fill_to_event(
     ledger: EncryptedLedger, account: Account, row: dict[str, Any], opend_timezone: str
 ) -> LedgerEvent:
@@ -552,6 +609,62 @@ def _fill_to_event(
             "vendor": "moomoo",
         },
     )
+
+
+def _fee_records_from_moomoo_row(
+    ledger: EncryptedLedger,
+    account: Account,
+    fee_record: dict[str, Any],
+    order: dict[str, Any],
+    opend_timezone: str,
+) -> tuple[BrokerFeeRecord, ...]:
+    try:
+        order_id = _identifier(fee_record, "order_id")
+        currency = Currency(str(order["currency"]).strip().upper())
+        timestamp = _opend_timestamp(order.get("updated_time") or order["create_time"], opend_timezone)
+        total = _nonnegative_decimal(fee_record["fee_amount"], "Moomoo fee amount")
+        details = fee_record["fee_details"]
+        if not isinstance(details, Sequence) or isinstance(details, (str, bytes)):
+            raise ValueError("Moomoo fee details must be a sequence")
+    except (KeyError, ValueError, ZoneInfoNotFoundError) as error:
+        raise ProviderError("malformed Moomoo fee record") from error
+    parsed: list[tuple[str, Decimal]] = []
+    for detail in details:
+        if (
+            not isinstance(detail, Sequence)
+            or isinstance(detail, (str, bytes))
+            or len(detail) != 2
+        ):
+            raise ProviderError("malformed Moomoo fee detail")
+        classification = str(detail[0]).strip()
+        if not classification:
+            raise ProviderError("malformed Moomoo fee detail")
+        try:
+            amount = _nonnegative_decimal(detail[1], "Moomoo fee detail amount")
+        except ValueError as error:
+            raise ProviderError("malformed Moomoo fee detail") from error
+        parsed.append((classification, amount))
+    if not parsed or sum(amount for _, amount in parsed) != total:
+        raise ProviderError("Moomoo fee details do not reconcile to total")
+    records: list[BrokerFeeRecord] = []
+    raw_payload = {"fee": fee_record, "order": order}
+    for index, (classification, amount) in enumerate(parsed):
+        source, raw_hash = _record_source(
+            ledger, account, "fee", f"{order_id}:{index}", raw_payload
+        )
+        records.append(
+            BrokerFeeRecord(
+                source,
+                raw_hash,
+                account,
+                currency,
+                amount,
+                classification,
+                order_id,
+                timestamp,
+            )
+        )
+    return tuple(records)
 
 
 def _position_to_snapshot(
@@ -647,6 +760,15 @@ def _identifier(row: dict[str, Any], field: str) -> str:
     if not value or value.lower() == "nan":
         raise ValueError(f"Moomoo {field} is required")
     return value
+
+
+def _nonempty_strings(values: Sequence[str], label: str) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise ProviderError(f"{label} must be a sequence")
+    normalized = tuple(value.strip() for value in values if isinstance(value, str) and value.strip())
+    if len(normalized) != len(values) or len(set(normalized)) != len(normalized):
+        raise ProviderError(f"{label} are invalid")
+    return normalized
 
 
 def _positive_decimal(value: object, label: str) -> Decimal:

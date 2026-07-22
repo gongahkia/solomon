@@ -18,6 +18,7 @@ from stonks_cli.types import (
     Account,
     BrokerCashFlow,
     BrokerCashSnapshot,
+    BrokerFeeRecord,
     BrokerPositionSnapshot,
     Currency,
     EventKind,
@@ -50,6 +51,7 @@ def initialize(connection: sqlite3.Connection) -> None:
     _initialize_position_snapshots(connection)
     _initialize_cash_snapshots(connection)
     _initialize_cash_flows(connection)
+    _initialize_fee_records(connection)
 
 
 _CANONICAL_EVENT_COLUMNS = {
@@ -190,6 +192,34 @@ def _initialize_cash_flows(connection: sqlite3.Connection) -> None:
     )
 
 
+def _initialize_fee_records(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_fee_records (
+            source_provider_id TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+            source_record_id TEXT NOT NULL,
+            raw_source_hash TEXT NOT NULL CHECK(length(raw_source_hash) = 64),
+            account_provider_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            account_name TEXT,
+            currency TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            transaction_id TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            PRIMARY KEY(source_provider_id, source_hash, source_record_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS broker_fee_records_time
+        ON broker_fee_records(occurred_at, source_provider_id, source_hash, source_record_id)
+        """
+    )
+
+
 def _migrate_legacy_event_table(connection: sqlite3.Connection) -> None:
     legacy_columns = _columns(connection, "ledger_events")
     if not {"fingerprint", "source_id", "account_id"} <= legacy_columns:
@@ -284,6 +314,12 @@ def store_cash_flow(ledger: EncryptedLedger, flow: BrokerCashFlow) -> bool:
         return _insert_cash_flow(connection, flow).rowcount == 1
 
 
+def store_fee_record(ledger: EncryptedLedger, fee: BrokerFeeRecord) -> bool:
+    with ledger.connection() as connection:
+        initialize(connection)
+        return _insert_fee_record(connection, fee).rowcount == 1
+
+
 def _insert_position_snapshot(
     connection: sqlite3.Connection, snapshot: BrokerPositionSnapshot
 ) -> sqlite3.Cursor:
@@ -346,6 +382,28 @@ def _insert_cash_flow(connection: sqlite3.Connection, flow: BrokerCashFlow) -> s
             flow.direction,
             str(flow.amount),
             flow.remark,
+        ),
+    )
+
+
+def _insert_fee_record(connection: sqlite3.Connection, fee: BrokerFeeRecord) -> sqlite3.Cursor:
+    return connection.execute(
+        """
+        INSERT OR IGNORE INTO broker_fee_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            fee.source.provider_id,
+            fee.source.source_hash,
+            fee.source.record_id,
+            fee.raw_source_hash,
+            fee.account.provider_id,
+            fee.account.account_id,
+            fee.account.name,
+            fee.currency.value,
+            str(fee.amount),
+            fee.classification,
+            fee.transaction_id,
+            fee.occurred_at.isoformat(),
         ),
     )
 
@@ -447,6 +505,18 @@ def list_cash_flows(ledger: EncryptedLedger) -> list[BrokerCashFlow]:
     return [_cash_flow_from_row(row) for row in rows]
 
 
+def list_fee_records(ledger: EncryptedLedger) -> list[BrokerFeeRecord]:
+    with ledger.connection() as connection:
+        initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM broker_fee_records
+            ORDER BY occurred_at, source_provider_id, source_hash, source_record_id
+            """
+        ).fetchall()
+    return [_fee_record_from_row(row) for row in rows]
+
+
 def _position_snapshot_from_row(row: sqlite3.Row) -> BrokerPositionSnapshot:
     return BrokerPositionSnapshot(
         source=SourceProvenance(
@@ -489,6 +559,21 @@ def _cash_flow_from_row(row: sqlite3.Row) -> BrokerCashFlow:
         direction=row["direction"],
         amount=Decimal(row["amount"]),
         remark=row["remark"],
+    )
+
+
+def _fee_record_from_row(row: sqlite3.Row) -> BrokerFeeRecord:
+    return BrokerFeeRecord(
+        source=SourceProvenance(
+            row["source_provider_id"], row["source_hash"], row["source_record_id"]
+        ),
+        raw_source_hash=row["raw_source_hash"],
+        account=Account(row["account_provider_id"], row["account_id"], row["account_name"]),
+        currency=Currency(row["currency"]),
+        amount=Decimal(row["amount"]),
+        classification=row["classification"],
+        transaction_id=row["transaction_id"],
+        occurred_at=datetime.fromisoformat(row["occurred_at"]),
     )
 
 

@@ -184,6 +184,40 @@ class BrokerCashFlow:
 
 
 @dataclass(frozen=True)
+class BrokerFeeRecord:
+    source: SourceProvenance
+    raw_source_hash: str
+    account: Account
+    currency: Currency
+    amount: Decimal
+    classification: str
+    transaction_id: str
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceProvenance) or not isinstance(self.account, Account):
+            raise ValueError("source and account are required")
+        if not isinstance(self.raw_source_hash, str) or not _SHA256.fullmatch(
+            self.raw_source_hash.lower()
+        ):
+            raise ValueError("raw source hash must be a SHA-256 digest")
+        if not isinstance(self.currency, Currency):
+            raise ValueError("fee currency is required")
+        classification = self.classification.strip()
+        transaction_id = self.transaction_id.strip()
+        if not classification or not transaction_id:
+            raise ValueError("fee classification and transaction identifier are required")
+        amount = decimal(self.amount)
+        if amount < 0:
+            raise ValueError("fee amount must be non-negative")
+        object.__setattr__(self, "raw_source_hash", self.raw_source_hash.lower())
+        object.__setattr__(self, "amount", amount)
+        object.__setattr__(self, "classification", classification)
+        object.__setattr__(self, "transaction_id", transaction_id)
+        object.__setattr__(self, "occurred_at", utc(self.occurred_at))
+
+
+@dataclass(frozen=True)
 class LedgerEvent:
     fingerprint: str
     source: SourceProvenance

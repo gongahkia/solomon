@@ -21,6 +21,7 @@ from stonks_cli.moomoo import (
     OpenDSDKStatus,
     import_account_snapshot,
     import_cash_flows,
+    import_order_fees,
 )
 from stonks_cli.types import Account, Currency, EventKind, Instrument
 
@@ -51,6 +52,10 @@ class Context:
     def history_deal_list_query(self, **kwargs):
         assert kwargs == {"acc_id": "2", "start": "2026-01-01", "end": "2026-01-02"}
         return 0, [{"deal_id": "1"}]
+
+    def order_fee_query(self, order_ids):
+        assert order_ids == ("o-1",)
+        return 0, [{"order_id": "o-1", "fee_amount": "1", "fee_details": [("Commission", "1")]}]
 
     def close(self) -> None:
         self.closed = True
@@ -200,6 +205,9 @@ def test_moomoo_reads_documented_account_data_only() -> None:
     assert provider.positions("2") == ({"code": "US.SPY"},)
     assert provider.historical_orders("2", "2026-01-01", "2026-01-02") == ({"order_id": "1"},)
     assert provider.historical_fills("2", "2026-01-01", "2026-01-02") == ({"deal_id": "1"},)
+    assert provider.order_fees("2", ("o-1",)) == (
+        {"order_id": "o-1", "fee_amount": "1", "fee_details": [("Commission", "1")]},
+    )
 
 
 def test_moomoo_rejects_unknown_and_execution_methods() -> None:
@@ -472,6 +480,61 @@ def test_moomoo_cash_flows_are_archived_without_ledger_classification(tmp_path, 
     assert flow.amount == Decimal("12.5")
     assert flow.flow_type == "Fund Redemption"
     assert list_events(ledger) == []
+
+
+def test_moomoo_order_fee_records_preserve_components_and_raw_provenance(tmp_path, monkeypatch) -> None:
+    from stonks_cli.ledger import list_fee_records
+
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    order = {
+        "order_id": "o-1",
+        "currency": "USD",
+        "create_time": "2026-01-02 09:30:00",
+        "updated_time": "2026-01-02 09:31:00",
+    }
+    fee = {
+        "order_id": "o-1",
+        "fee_amount": "1.25",
+        "fee_details": [("Commission", "1.00"), ("Tax Withholding", "0.25")],
+    }
+
+    assert import_order_fees(
+        ledger, Account("moomoo", "2"), (fee,), (order,), opend_timezone="Asia/Singapore"
+    ) == (2, 0)
+    assert import_order_fees(
+        ledger, Account("moomoo", "2"), (fee,), (order,), opend_timezone="Asia/Singapore"
+    ) == (0, 2)
+
+    records = list_fee_records(ledger)
+    assert {(record.classification, record.amount) for record in records} == {
+        ("Commission", Decimal("1.00")),
+        ("Tax Withholding", Decimal("0.25")),
+    }
+    assert {record.transaction_id for record in records} == {"o-1"}
+    assert {record.occurred_at for record in records} == {datetime(2026, 1, 2, 1, 31, tzinfo=UTC)}
+    assert (ledger.sources / f"{records[0].raw_source_hash}.enc").is_file()
+
+
+def test_moomoo_order_fee_records_reject_unreconciled_or_unlinked_rows(tmp_path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    order = {"order_id": "o-1", "currency": "USD", "create_time": "2026-01-02 09:30:00"}
+
+    with pytest.raises(ProviderError, match="do not reconcile"):
+        import_order_fees(
+            ledger,
+            Account("moomoo", "2"),
+            ({"order_id": "o-1", "fee_amount": "1", "fee_details": [("Commission", "0.5")]},),
+            (order,),
+            opend_timezone="Asia/Singapore",
+        )
+    with pytest.raises(ProviderError, match="no matching order"):
+        import_order_fees(
+            ledger,
+            Account("moomoo", "2"),
+            ({"order_id": "missing", "fee_amount": "1", "fee_details": [("Commission", "1")]},),
+            (order,),
+            opend_timezone="Asia/Singapore",
+        )
 
 
 def test_moomoo_import_rejects_unsupported_short_position(tmp_path, monkeypatch) -> None:

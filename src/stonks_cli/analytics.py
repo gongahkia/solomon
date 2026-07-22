@@ -92,6 +92,10 @@ def time_weighted_return(periods: tuple[tuple[Decimal, Decimal, Decimal], ...]) 
     return result - Decimal("1")
 
 
+def benchmark_relative_return(portfolio_return: Decimal, benchmark_return: Decimal) -> Decimal:
+    return portfolio_return - benchmark_return
+
+
 @dataclass(frozen=True)
 class PortfolioHealth:
     concentration_hhi: Decimal | None

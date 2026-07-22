@@ -6,6 +6,7 @@ from decimal import Decimal
 from stonks_cli.accounting import fifo_lots, unrealized_pnl
 from stonks_cli.analytics import (
     allocations_by_currency,
+    benchmark_relative_return,
     cash_by_currency,
     concentration_hhi,
     convert_values_to_currency,
@@ -66,6 +67,7 @@ def test_analytics_reports_returns_drawdown_concentration_and_missing_prices() -
     assert time_weighted_return(((Decimal("100"), Decimal("0"), Decimal("110")),)) == Decimal(
         "0.1"
     )
+    assert benchmark_relative_return(Decimal("0.1"), Decimal("0.08")) == Decimal("0.02")
     health = portfolio_health(events, {}, stale_instruments=("US:SPY",))
     assert health.missing_prices == ("US:SPY",)
     assert health.stale_instruments == ("US:SPY",)

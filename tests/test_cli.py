@@ -19,6 +19,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
     for command in (
         "init-profile",
         "import-csv",
+        "import-history",
         "import-prices",
         "import-fx",
         "portfolio",
@@ -97,6 +98,9 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     result = runner.invoke(app, ["portfolio", "personal", "--json"])
     assert result.exit_code == 0, result.output
     assert '"event_count": 1' in result.output
+    result = runner.invoke(app, ["import-history", "personal"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["source_hashes"]
 
 
 def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:

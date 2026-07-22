@@ -112,6 +112,17 @@ def test_profile_directory_layout_uses_expected_paths(
     assert root.stat().st_mode & 0o077 == 0
 
 
+def test_archived_source_history_exposes_only_hashes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    key = tmp_path / "personal.key"
+    generate_key_file(key)
+    ledger = EncryptedLedger(ProfileConfig("personal", str(key)))
+    digest = ledger.archive_source(b"private source")
+
+    assert ledger.archived_source_hashes() == (digest,)
+    assert b"private source" not in (ledger.sources / f"{digest}.enc").read_bytes()
+
+
 def test_profile_config_schema_round_trips_versioned_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

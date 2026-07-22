@@ -171,6 +171,15 @@ class EncryptedLedger:
             )
         return digest
 
+    def archived_source_hashes(self) -> tuple[str, ...]:
+        if not self.sources.is_dir():
+            return ()
+        return tuple(
+            path.stem
+            for path in sorted(self.sources.glob("*.enc"))
+            if len(path.stem) == 64 and all(character in "0123456789abcdef" for character in path.stem)
+        )
+
     def _load(self) -> sqlite3.Connection:
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row

@@ -210,6 +210,20 @@ def import_fx(
     console.print_json(json.dumps({"profile": profile, "rates": count}))
 
 
+@app.command("import-history")
+def import_history(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    ledger = EncryptedLedger(_profile(profile, key_file))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "source_hashes": ledger.archived_source_hashes(),
+                "encrypted": True,
+            }
+        )
+    )
+
+
 @app.command()
 def portfolio(
     profile: str,

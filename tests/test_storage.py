@@ -369,7 +369,9 @@ def test_backup_and_key_rotation_preserve_encrypted_data(
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     old_key = tmp_path / "old.key"
     generate_key_file(old_key)
-    config = ProfileConfig("personal", str(old_key))
+    config = configure_drawdown(
+        ProfileConfig("personal", str(old_key)), "0.30", DrawdownResponsePolicy.RECORD_ONLY
+    )
     save_profile(config)
     ledger = EncryptedLedger(config)
     digest = ledger.archive_source(b"source")
@@ -386,6 +388,7 @@ def test_backup_and_key_rotation_preserve_encrypted_data(
         export_backup(config, backup)
     updated = rotate_key(config, tmp_path / "new.key")
     assert load_profile("personal") == updated
+    assert updated.drawdown == config.drawdown
     assert (
         decrypt(
             read_key_file(Path(updated.key_file)),
@@ -413,7 +416,9 @@ def test_backup_restore_preserves_encrypted_profile(
     monkeypatch.setenv("STONKS_CLI_HOME", str(source_home))
     key = tmp_path / "personal.key"
     generate_key_file(key)
-    config = ProfileConfig("personal", str(key))
+    config = configure_drawdown(
+        ProfileConfig("personal", str(key)), "0.30", DrawdownResponsePolicy.RECORD_ONLY
+    )
     save_profile(config)
     ledger = EncryptedLedger(config)
     digest = ledger.archive_source(b"source")

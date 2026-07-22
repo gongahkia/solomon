@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -300,7 +301,7 @@ def test_portfolio_return_attribution_reconciles_market_income_and_fees() -> Non
         )
 
 
-def test_realized_rolling_drawdown_uses_portfolio_high_water_mark(tmp_path) -> None:
+def test_realized_rolling_drawdown_uses_portfolio_high_water_mark(tmp_path: Path) -> None:
     valuations = (
         PortfolioValuation(
             datetime(2026, 1, 1, tzinfo=UTC),

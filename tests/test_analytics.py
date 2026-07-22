@@ -19,6 +19,7 @@ from stonks_cli.analytics import (
     maximum_drawdown,
     money_weighted_return,
     portfolio_health,
+    portfolio_return_attribution,
     sector_concentration,
     sector_concentrations_by_currency,
     time_weighted_return,
@@ -266,3 +267,28 @@ def test_dividend_and_fee_attribution_preserves_currency_and_fee_origin() -> Non
     assert attribution.trade_fees == Decimal("1")
     assert attribution.fees == Decimal("3")
     assert attribution.net_return_contribution == Decimal("2")
+
+
+def test_portfolio_return_attribution_reconciles_market_income_and_fees() -> None:
+    attribution = portfolio_return_attribution(
+        opening_value=Decimal("100"),
+        closing_value=Decimal("112"),
+        external_cash_flow=Decimal("5"),
+        market_gain=Decimal("5"),
+        dividends=Decimal("5"),
+        fees=Decimal("3"),
+    )
+
+    assert attribution.total_return == Decimal("0.07")
+    assert attribution.market_return == Decimal("0.05")
+    assert attribution.dividend_return == Decimal("0.05")
+    assert attribution.fee_return == Decimal("-0.03")
+    with pytest.raises(ValueError, match="does not reconcile"):
+        portfolio_return_attribution(
+            opening_value=Decimal("100"),
+            closing_value=Decimal("112"),
+            external_cash_flow=Decimal("5"),
+            market_gain=Decimal("6"),
+            dividends=Decimal("5"),
+            fees=Decimal("2"),
+        )

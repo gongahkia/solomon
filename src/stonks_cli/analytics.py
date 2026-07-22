@@ -166,6 +166,51 @@ def dividend_and_fee_attribution(
     }
 
 
+@dataclass(frozen=True)
+class PortfolioReturnAttribution:
+    total_return: Decimal
+    market_return: Decimal
+    dividend_return: Decimal
+    fee_return: Decimal
+    opening_value: Decimal
+    closing_value: Decimal
+    external_cash_flow: Decimal
+    market_gain: Decimal
+    dividends: Decimal
+    fees: Decimal
+
+
+def portfolio_return_attribution(
+    *,
+    opening_value: Decimal,
+    closing_value: Decimal,
+    external_cash_flow: Decimal,
+    market_gain: Decimal,
+    dividends: Decimal,
+    fees: Decimal,
+) -> PortfolioReturnAttribution:
+    if opening_value <= 0 or closing_value < 0:
+        raise ValueError("return attribution opening and closing values are invalid")
+    if dividends < 0 or fees < 0:
+        raise ValueError("return attribution dividends and fees must be non-negative")
+    net_gain = closing_value - opening_value - external_cash_flow
+    attributed_gain = market_gain + dividends - fees
+    if net_gain != attributed_gain:
+        raise ValueError("return attribution does not reconcile")
+    return PortfolioReturnAttribution(
+        net_gain / opening_value,
+        market_gain / opening_value,
+        dividends / opening_value,
+        -fees / opening_value,
+        opening_value,
+        closing_value,
+        external_cash_flow,
+        market_gain,
+        dividends,
+        fees,
+    )
+
+
 def convert_values_to_currency(
     values_by_currency: dict[Currency, dict[tuple[str, str], Decimal]],
     target_currency: Currency,

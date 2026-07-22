@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from base64 import b64encode
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from typer.testing import CliRunner
 
 from stonks_cli import cli
@@ -49,6 +51,11 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "transactions",
         "performance",
         "backup-profile",
+        "recipient-key-add",
+        "recipient-key-revoke",
+        "recipient-key-list",
+        "report-export",
+        "report-export-audit",
         "restore-profile",
         "rotate-key",
         "backtest-csv",
@@ -226,6 +233,27 @@ def test_cli_configures_drawdown_without_execution(tmp_path: Path, monkeypatch) 
         "version": 2,
         "execution": "denied",
     }
+
+
+def test_cli_exports_portfolio_only_to_explicit_recipient(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    recipient = X25519PrivateKey.generate()
+    public_key = b64encode(recipient.public_key().public_bytes_raw()).decode()
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    assert runner.invoke(app, ["recipient-key-add", "analyst", public_key]).exit_code == 0
+
+    destination = tmp_path / "portfolio.stonks"
+    result = runner.invoke(
+        app,
+        ["report-export", "personal", str(destination), "--recipient", "analyst"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["integrity"] == "authenticated"
+    assert destination.is_file()
+    assert b"portfolio-report" not in destination.read_bytes()
 
 
 def test_cli_validates_enabled_plugin_contracts(tmp_path: Path, monkeypatch) -> None:

@@ -13,6 +13,7 @@ No command, plugin capability, MCP tool, or scheduler can unlock an account or s
 - Profiles and imports: `init-profile`, `import-csv`, `import-prices`
 - Portfolio reports: `portfolio`, `transactions`, `performance`, `reconciliation`
 - Profile maintenance: `backup-profile`, `restore-profile`, `rotate-key`
+- Portable encrypted reports: `recipient-key-add`, `recipient-key-revoke`, `recipient-key-list`, `report-export`, `report-export-audit`
 - Research and operator utilities: `backtest-csv`, `strategy-*`, `watchlist`, `watchlist-configure`, `refresh-moomoo-prices`, `refresh-moomoo-quotes`, `scan-alerts`, `monitor`, `ml-*`, `research-*`, `llm-*`, `paper-*`, `schedule-*`, `notify-local`, `notify-telegram`
 - Integrations and metadata: `plugins`, `enable-provider`, `disable-provider`, `dividend-configure`, `drawdown-configure`, `moomoo-sdk-status`, `moomoo-probe`, `moomoo-accounts`, `moomoo-sync`, `moomoo-cash-flows`, `moomoo-dividends`, `moomoo-dividend-status`, `moomoo-map-dividend`, `version`
 

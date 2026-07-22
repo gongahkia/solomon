@@ -90,6 +90,14 @@ from stonks_cli.plugins import (
     discover_with_diagnostics,
 )
 from stonks_cli.reconciliation import reconcile_latest, render_discrepancy_report
+from stonks_cli.report_export import (
+    RecipientPublicKey,
+    add_recipient_key,
+    export_audits,
+    export_report,
+    load_recipient_keyring,
+    revoke_recipient_key,
+)
 from stonks_cli.storage import (
     EncryptedLedger,
     export_backup,
@@ -491,6 +499,118 @@ def backup_profile(
 ) -> None:
     path = export_backup(_profile(profile, key_file), destination)
     console.print_json(json.dumps({"profile": profile, "backup": str(path)}))
+
+
+@app.command("recipient-key-add")
+def recipient_key_add(
+    identifier: str,
+    public_key: str,
+    recovery: bool = typer.Option(False),
+) -> None:
+    try:
+        key = add_recipient_key(RecipientPublicKey(identifier, public_key, recovery=recovery))
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(json.dumps({"identifier": key.identifier, "recovery": key.recovery}))
+
+
+@app.command("recipient-key-revoke")
+def recipient_key_revoke(identifier: str) -> None:
+    try:
+        key = revoke_recipient_key(identifier)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(json.dumps({"identifier": key.identifier, "revoked": key.revoked}))
+
+
+@app.command("recipient-key-list")
+def recipient_key_list() -> None:
+    console.print_json(
+        json.dumps(
+            {
+                "recipients": [
+                    {"identifier": key.identifier, "recovery": key.recovery, "revoked": key.revoked}
+                    for key in load_recipient_keyring()
+                ]
+            }
+        )
+    )
+
+
+@app.command("report-export")
+def report_export(
+    profile: str,
+    destination: Path = typer.Argument(..., exists=False),
+    recipient: list[str] = typer.Option(..., "--recipient"),
+    recovery_recipient: str | None = typer.Option(None),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
+    events = list_events(ledger)
+    report = {
+        "format": "stonks-cli-portfolio-report",
+        "version": 1,
+        "profile": profile,
+        "cash": [
+            {"account": account, "currency": currency.value, "amount": str(amount)}
+            for (account, currency), amount in sorted(cash_balances(events).items())
+        ],
+        "positions": [
+            {"account": account, "instrument": instrument, "quantity": str(quantity)}
+            for (account, instrument), quantity in sorted(positions(events).items())
+        ],
+    }
+    provenance = {
+        "report_kind": "portfolio",
+        "profile_schema_version": config.schema_version,
+        "source_hashes": list(ledger.archived_source_hashes()),
+    }
+    try:
+        audit = export_report(
+            ledger,
+            report,
+            destination,
+            tuple(recipient),
+            provenance=provenance,
+            recovery_recipient=recovery_recipient,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "export_id": audit.export_id,
+                "recipient_count": len(audit.recipient_identifiers),
+                "integrity": audit.integrity_status,
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("report-export-audit")
+def report_export_audit(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    records = export_audits(EncryptedLedger(_profile(profile, key_file)))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "exports": [
+                    {
+                        "export_id": record.export_id,
+                        "created_at": record.created_at.isoformat(),
+                        "envelope_hash": record.envelope_hash,
+                        "recipient_identifiers": record.recipient_identifiers,
+                        "provenance": record.provenance,
+                        "integrity": record.integrity_status,
+                    }
+                    for record in records
+                ],
+            }
+        )
+    )
 
 
 @app.command("restore-profile")

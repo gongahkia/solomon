@@ -293,6 +293,23 @@ def portfolio(
 
 
 @app.command()
+def holdings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    values = positions(list_events(EncryptedLedger(_profile(profile, key_file))))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "positions": [
+                    {"account": account, "instrument": instrument, "quantity": str(quantity)}
+                    for (account, instrument), quantity in sorted(values.items())
+                ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command()
 def transactions(profile: str, key_file: Path | None = typer.Option(None)) -> None:
     console.print_json(
         json.dumps(

@@ -293,6 +293,15 @@ def portfolio(
     console.print(table)
 
 
+@app.command("daily-report")
+def daily_report(
+    profile: str,
+    key_file: Path | None = typer.Option(None),
+    base_currency: str | None = typer.Option(None),
+) -> None:
+    portfolio(profile, key_file, base_currency, True)
+
+
 @app.command()
 def holdings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
     values = positions(list_events(EncryptedLedger(_profile(profile, key_file))))

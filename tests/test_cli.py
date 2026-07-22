@@ -23,6 +23,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "import-prices",
         "import-fx",
         "portfolio",
+        "daily-report",
         "holdings",
         "cash",
         "exposure",
@@ -101,6 +102,9 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     result = runner.invoke(app, ["portfolio", "personal", "--json"])
     assert result.exit_code == 0, result.output
     assert '"event_count": 1' in result.output
+    result = runner.invoke(app, ["daily-report", "personal"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["event_count"] == 1
     result = runner.invoke(app, ["import-history", "personal"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["source_hashes"]

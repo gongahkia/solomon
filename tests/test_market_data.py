@@ -21,14 +21,29 @@ from stonks_cli.market_data import (
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
+    instrument_master_versions,
+    is_recommendation_candidate,
     latest_fx_rates,
+    latest_instrument_masters,
+    latest_moomoo_instrument_eligibility,
     latest_prices,
     latest_quote_snapshots,
     price_freshness,
     price_revisions,
+    store_instrument_masters,
+    store_moomoo_instrument_eligibility,
 )
 from stonks_cli.storage import decrypt
-from stonks_cli.types import Currency, Instrument
+from stonks_cli.types import (
+    Account,
+    AssetClass,
+    Currency,
+    ETFClassification,
+    Instrument,
+    InstrumentMaster,
+    ListingStatus,
+    MoomooInstrumentEligibility,
+)
 
 
 def test_price_import_keeps_latest_value(tmp_path: Path, monkeypatch) -> None:
@@ -231,3 +246,138 @@ def test_fx_import_requires_provenance_and_supports_direct_or_inverse_rates(tmp_
     assert FxRate(Currency.USD, Currency.SGD, date(2026, 1, 2), "1.35", "a" * 64).rate == Decimal(
         "1.35"
     )
+
+
+def test_instrument_master_versions_us_sg_records_and_defaults_unknown_etfs_to_narrow(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    first = InstrumentMaster(
+        "us:spy",
+        "arca",
+        "us",
+        Currency.USD,
+        AssetClass.ETF,
+        "us.spy",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "a" * 64,
+        ETFClassification.BROAD_DIVERSIFIED,
+        "issuer-2026-01",
+    )
+    replacement = InstrumentMaster(
+        "US:SPY",
+        "ARCA",
+        "US",
+        Currency.USD,
+        AssetClass.ETF,
+        "US.SPY",
+        ListingStatus.LISTED,
+        "issuer-2026-02",
+        "b" * 64,
+        classification_version="issuer-2026-02",
+    )
+    sg_reit = InstrumentMaster(
+        "SG:CLR",
+        "SGX",
+        "SG",
+        Currency.SGD,
+        AssetClass.REIT,
+        "SG.CLR",
+        ListingStatus.LISTED,
+        "sgx-2026-01",
+        "c" * 64,
+    )
+
+    assert store_instrument_masters(ledger, (first, sg_reit)) == 2
+    assert store_instrument_masters(ledger, (replacement,)) == 1
+    assert [item.metadata_version for item in instrument_master_versions(ledger, "US:SPY")] == [
+        "issuer-2026-01",
+        "issuer-2026-02",
+    ]
+    latest = latest_instrument_masters(ledger)
+    assert latest["US:SPY"].etf_classification is ETFClassification.SECTOR_NARROW
+    assert latest["SG:CLR"].instrument == Instrument("CLR", "SG", Currency.SGD)
+    with pytest.raises(ValueError, match="classification version"):
+        InstrumentMaster(
+            "US:SPY", "ARCA", "US", Currency.USD, AssetClass.ETF, "US.SPY", ListingStatus.LISTED,
+            "issuer-2026-03", "d" * 64
+        )
+    with pytest.raises(ValueError, match="only ETFs"):
+        InstrumentMaster(
+            "SG:CLR", "SGX", "SG", Currency.SGD, AssetClass.REIT, "SG.CLR", ListingStatus.LISTED,
+            "sgx-2026-02", "e" * 64, ETFClassification.SECTOR_NARROW, "sgx-2026-02"
+        )
+
+
+def test_recommendation_candidate_requires_listing_and_read_only_cash_eligibility(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    account = Account("moomoo", "selected")
+    master = InstrumentMaster(
+        "US:SPY",
+        "ARCA",
+        "US",
+        Currency.USD,
+        AssetClass.ETF,
+        "US.SPY",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "a" * 64,
+        ETFClassification.BROAD_DIVERSIFIED,
+        "issuer-2026-01",
+    )
+    index = InstrumentMaster(
+        "US:SPX",
+        "SPDJI",
+        "US",
+        Currency.USD,
+        AssetClass.INDEX,
+        "US.SPX",
+        ListingStatus.LISTED,
+        "index-2026-01",
+        "b" * 64,
+    )
+    evidence = MoomooInstrumentEligibility(
+        "US:SPY",
+        account,
+        datetime(2026, 1, 2, tzinfo=UTC),
+        "c" * 64,
+        True,
+        True,
+        True,
+    )
+
+    assert store_instrument_masters(ledger, (master, index)) == 2
+    assert store_moomoo_instrument_eligibility(ledger, (evidence,)) == 1
+    stored = latest_moomoo_instrument_eligibility(ledger, account)
+    assert is_recommendation_candidate(master, stored["US:SPY"], account) is True
+    assert is_recommendation_candidate(index, stored["US:SPY"], account) is False
+    assert is_recommendation_candidate(master, None, account) is False
+    blocked = InstrumentMaster(
+        "US:TQQQ",
+        "NASDAQ",
+        "US",
+        Currency.USD,
+        AssetClass.ETF,
+        "US.TQQQ",
+        ListingStatus.LISTED,
+        "issuer-2026-01",
+        "d" * 64,
+        ETFClassification.SECTOR_NARROW,
+        "issuer-2026-01",
+        leveraged=True,
+    )
+    assert is_recommendation_candidate(blocked, evidence, account) is False
+    unknown = MoomooInstrumentEligibility(
+        "US:UNKNOWN",
+        account,
+        datetime(2026, 1, 2, tzinfo=UTC),
+        "e" * 64,
+        True,
+        True,
+        True,
+    )
+    with pytest.raises(ProviderError, match="instrument master"):
+        store_moomoo_instrument_eligibility(ledger, (unknown,))

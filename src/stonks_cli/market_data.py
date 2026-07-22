@@ -13,7 +13,17 @@ from pathlib import Path
 
 from stonks_cli.errors import ProviderError
 from stonks_cli.storage import EncryptedLedger
-from stonks_cli.types import Currency, Instrument, decimal
+from stonks_cli.types import (
+    Account,
+    AssetClass,
+    Currency,
+    ETFClassification,
+    Instrument,
+    InstrumentMaster,
+    ListingStatus,
+    MoomooInstrumentEligibility,
+    decimal,
+)
 
 
 @dataclass(frozen=True)
@@ -247,8 +257,49 @@ def _initialize(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    _initialize_instrument_master(connection)
     _initialize_daily_price_ohlc(connection)
     _initialize_quote_snapshots(connection)
+
+
+def _initialize_instrument_master(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS instrument_master_versions (
+            canonical_id TEXT NOT NULL,
+            exchange TEXT NOT NULL,
+            market TEXT NOT NULL CHECK(market IN ('US', 'SG')),
+            currency TEXT NOT NULL,
+            asset_class TEXT NOT NULL CHECK(asset_class IN ('equity', 'etf', 'reit', 'index')),
+            provider_symbol TEXT NOT NULL,
+            listing_status TEXT NOT NULL CHECK(listing_status IN ('listed', 'delisted', 'suspended', 'unknown')),
+            metadata_version TEXT NOT NULL,
+            metadata_source_hash TEXT NOT NULL,
+            etf_classification TEXT CHECK(etf_classification IN ('broad_diversified', 'sector_narrow')),
+            classification_version TEXT,
+            margin_only INTEGER NOT NULL CHECK(margin_only IN (0, 1)),
+            short_only INTEGER NOT NULL CHECK(short_only IN (0, 1)),
+            leveraged INTEGER NOT NULL CHECK(leveraged IN (0, 1)),
+            inverse_product INTEGER NOT NULL CHECK(inverse_product IN (0, 1)),
+            recorded_at TEXT NOT NULL,
+            PRIMARY KEY(canonical_id, metadata_version, metadata_source_hash)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS moomoo_instrument_eligibility (
+            canonical_id TEXT NOT NULL,
+            account_key TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            source_hash TEXT NOT NULL,
+            available INTEGER NOT NULL CHECK(available IN (0, 1)),
+            cash_buy_eligible INTEGER NOT NULL CHECK(cash_buy_eligible IN (0, 1)),
+            settled_cash_available INTEGER NOT NULL CHECK(settled_cash_available IN (0, 1)),
+            PRIMARY KEY(canonical_id, account_key, observed_at, source_hash)
+        )
+        """
+    )
 
 
 def _initialize_daily_price_ohlc(connection: sqlite3.Connection) -> None:
@@ -661,6 +712,165 @@ def latest_fx_rates(ledger: EncryptedLedger) -> dict[tuple[Currency, Currency], 
     return values
 
 
+def store_instrument_masters(ledger: EncryptedLedger, instruments: tuple[InstrumentMaster, ...]) -> int:
+    inserted = 0
+    with ledger.connection() as connection:
+        _initialize(connection)
+        for instrument in instruments:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO instrument_master_versions (
+                    canonical_id, exchange, market, currency, asset_class, provider_symbol, listing_status,
+                    metadata_version, metadata_source_hash, etf_classification, classification_version,
+                    margin_only, short_only, leveraged, inverse_product, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    instrument.canonical_id,
+                    instrument.exchange,
+                    instrument.market,
+                    instrument.currency.value,
+                    instrument.asset_class.value,
+                    instrument.provider_symbol,
+                    instrument.listing_status.value,
+                    instrument.metadata_version,
+                    instrument.metadata_source_hash,
+                    instrument.etf_classification.value
+                    if instrument.etf_classification is not None
+                    else None,
+                    instrument.classification_version,
+                    instrument.margin_only,
+                    instrument.short_only,
+                    instrument.leveraged,
+                    instrument.inverse,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            inserted += cursor.rowcount
+    return inserted
+
+
+def instrument_master_versions(
+    ledger: EncryptedLedger, canonical_id: str
+) -> tuple[InstrumentMaster, ...]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM instrument_master_versions
+            WHERE canonical_id = ?
+            ORDER BY rowid
+            """,
+            (canonical_id.strip().upper(),),
+        ).fetchall()
+    return tuple(_instrument_master_from_row(row) for row in rows)
+
+
+def latest_instrument_masters(ledger: EncryptedLedger) -> dict[str, InstrumentMaster]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM instrument_master_versions
+            WHERE rowid IN (
+                SELECT MAX(rowid) FROM instrument_master_versions GROUP BY canonical_id
+            )
+            ORDER BY canonical_id
+            """
+        ).fetchall()
+    return {row["canonical_id"]: _instrument_master_from_row(row) for row in rows}
+
+
+def store_moomoo_instrument_eligibility(
+    ledger: EncryptedLedger, evidence: tuple[MoomooInstrumentEligibility, ...]
+) -> int:
+    inserted = 0
+    with ledger.connection() as connection:
+        _initialize(connection)
+        known = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT canonical_id FROM instrument_master_versions")
+        }
+        for item in evidence:
+            if item.canonical_id not in known:
+                raise ProviderError("Moomoo eligibility requires an instrument master record")
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO moomoo_instrument_eligibility (
+                    canonical_id, account_key, observed_at, source_hash, available, cash_buy_eligible,
+                    settled_cash_available
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item.canonical_id,
+                    item.account.key,
+                    item.observed_at.isoformat(),
+                    item.source_hash,
+                    item.available,
+                    item.cash_buy_eligible,
+                    item.settled_cash_available,
+                ),
+            )
+            inserted += cursor.rowcount
+    return inserted
+
+
+def latest_moomoo_instrument_eligibility(
+    ledger: EncryptedLedger, account: Account
+) -> dict[str, MoomooInstrumentEligibility]:
+    if account.provider_id != "moomoo":
+        raise ValueError("Moomoo eligibility requires a Moomoo account")
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM moomoo_instrument_eligibility
+            WHERE account_key = ? AND rowid IN (
+                SELECT MAX(rowid) FROM moomoo_instrument_eligibility
+                WHERE account_key = ? GROUP BY canonical_id
+            )
+            ORDER BY canonical_id
+            """,
+            (account.key, account.key),
+        ).fetchall()
+    return {
+        row["canonical_id"]: MoomooInstrumentEligibility(
+            row["canonical_id"],
+            account,
+            datetime.fromisoformat(row["observed_at"]),
+            row["source_hash"],
+            bool(row["available"]),
+            bool(row["cash_buy_eligible"]),
+            bool(row["settled_cash_available"]),
+        )
+        for row in rows
+    }
+
+
+def is_recommendation_candidate(
+    instrument: InstrumentMaster,
+    evidence: MoomooInstrumentEligibility | None,
+    selected_account: Account,
+) -> bool:
+    if selected_account.provider_id != "moomoo":
+        raise ValueError("recommendation eligibility requires a Moomoo account")
+    if evidence is None or evidence.canonical_id != instrument.canonical_id:
+        return False
+    if evidence.account != selected_account:
+        return False
+    return (
+        instrument.asset_class is not AssetClass.INDEX
+        and instrument.listing_status is ListingStatus.LISTED
+        and not instrument.margin_only
+        and not instrument.short_only
+        and not instrument.leveraged
+        and not instrument.inverse
+        and evidence.available
+        and evidence.cash_buy_eligible
+        and evidence.settled_cash_available
+    )
+
+
 def convert_currency(
     amount: Decimal,
     source_currency: Currency,
@@ -677,6 +887,27 @@ def convert_currency(
         return amount / inverse.rate
     raise ProviderError(
         f"missing FX rate:{source_currency.value}:{target_currency.value}"
+    )
+
+
+def _instrument_master_from_row(row: sqlite3.Row) -> InstrumentMaster:
+    classification = row["etf_classification"]
+    return InstrumentMaster(
+        row["canonical_id"],
+        row["exchange"],
+        row["market"],
+        Currency(row["currency"]),
+        AssetClass(row["asset_class"]),
+        row["provider_symbol"],
+        ListingStatus(row["listing_status"]),
+        row["metadata_version"],
+        row["metadata_source_hash"],
+        ETFClassification(classification) if classification is not None else None,
+        row["classification_version"],
+        bool(row["margin_only"]),
+        bool(row["short_only"]),
+        bool(row["leveraged"]),
+        bool(row["inverse_product"]),
     )
 
 

@@ -17,6 +17,25 @@ class Currency(StrEnum):
     USD = "USD"
 
 
+class AssetClass(StrEnum):
+    EQUITY = "equity"
+    ETF = "etf"
+    REIT = "reit"
+    INDEX = "index"
+
+
+class ListingStatus(StrEnum):
+    LISTED = "listed"
+    DELISTED = "delisted"
+    SUSPENDED = "suspended"
+    UNKNOWN = "unknown"
+
+
+class ETFClassification(StrEnum):
+    BROAD_DIVERSIFIED = "broad_diversified"
+    SECTOR_NARROW = "sector_narrow"
+
+
 class EventKind(StrEnum):
     CASH_DEPOSIT = "cash_deposit"
     CASH_WITHDRAWAL = "cash_withdrawal"
@@ -67,6 +86,104 @@ class Instrument:
     @property
     def key(self) -> str:
         return f"{self.market.upper()}:{self.symbol.upper()}"
+
+
+@dataclass(frozen=True)
+class InstrumentMaster:
+    canonical_id: str
+    exchange: str
+    market: str
+    currency: Currency
+    asset_class: AssetClass
+    provider_symbol: str
+    listing_status: ListingStatus
+    metadata_version: str
+    metadata_source_hash: str
+    etf_classification: ETFClassification | None = None
+    classification_version: str | None = None
+    margin_only: bool = False
+    short_only: bool = False
+    leveraged: bool = False
+    inverse: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.currency, Currency) or not isinstance(self.asset_class, AssetClass):
+            raise ValueError("instrument master currency and asset class are required")
+        if not isinstance(self.listing_status, ListingStatus):
+            raise ValueError("instrument master listing status is required")
+        canonical_id = self.canonical_id.strip().upper()
+        canonical_market, separator, symbol = canonical_id.partition(":")
+        market = self.market.strip().upper()
+        if (
+            not separator
+            or ":" in symbol
+            or market not in {"US", "SG"}
+            or canonical_market != market
+        ):
+            raise ValueError("instrument master canonical identifier must use US or SG market")
+        instrument = Instrument(symbol, market, self.currency)
+        exchange = self.exchange.strip().upper()
+        provider_symbol = self.provider_symbol.strip().upper()
+        metadata_version = self.metadata_version.strip()
+        source_hash = self.metadata_source_hash.lower()
+        if not exchange or not provider_symbol or not metadata_version:
+            raise ValueError("instrument master exchange, provider symbol, and metadata version are required")
+        if not _SHA256.fullmatch(source_hash):
+            raise ValueError("instrument master metadata source hash must be a SHA-256 digest")
+        if self.asset_class is AssetClass.ETF:
+            classification = self.etf_classification or ETFClassification.SECTOR_NARROW
+            if not isinstance(classification, ETFClassification):
+                raise ValueError("ETF classification is invalid")
+            if not isinstance(self.classification_version, str) or not self.classification_version.strip():
+                raise ValueError("ETF classification version is required")
+            object.__setattr__(self, "etf_classification", classification)
+            object.__setattr__(self, "classification_version", self.classification_version.strip())
+        elif self.etf_classification is not None or self.classification_version is not None:
+            raise ValueError("only ETFs may include ETF classification metadata")
+        for name in ("margin_only", "short_only", "leveraged", "inverse"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"instrument master {name} must be boolean")
+        object.__setattr__(self, "canonical_id", instrument.key)
+        object.__setattr__(self, "exchange", exchange)
+        object.__setattr__(self, "market", market)
+        object.__setattr__(self, "provider_symbol", provider_symbol)
+        object.__setattr__(self, "metadata_version", metadata_version)
+        object.__setattr__(self, "metadata_source_hash", source_hash)
+
+    @property
+    def instrument(self) -> Instrument:
+        _, _, symbol = self.canonical_id.partition(":")
+        return Instrument(symbol, self.market, self.currency)
+
+
+@dataclass(frozen=True)
+class MoomooInstrumentEligibility:
+    canonical_id: str
+    account: Account
+    observed_at: datetime
+    source_hash: str
+    available: bool
+    cash_buy_eligible: bool
+    settled_cash_available: bool
+
+    def __post_init__(self) -> None:
+        canonical_id = self.canonical_id.strip().upper()
+        market, separator, symbol = canonical_id.partition(":")
+        if not separator or ":" in symbol or market not in {"US", "SG"}:
+            raise ValueError("Moomoo eligibility canonical identifier must use US or SG market")
+        if not isinstance(self.account, Account) or self.account.provider_id != "moomoo":
+            raise ValueError("Moomoo eligibility requires a Moomoo account")
+        if not isinstance(self.observed_at, datetime):
+            raise ValueError("Moomoo eligibility observation time is required")
+        source_hash = self.source_hash.lower()
+        if not _SHA256.fullmatch(source_hash):
+            raise ValueError("Moomoo eligibility source hash must be a SHA-256 digest")
+        for name in ("available", "cash_buy_eligible", "settled_cash_available"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"Moomoo eligibility {name} must be boolean")
+        object.__setattr__(self, "canonical_id", canonical_id)
+        object.__setattr__(self, "observed_at", utc(self.observed_at))
+        object.__setattr__(self, "source_hash", source_hash)
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -12,7 +13,12 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from stonks_cli.config import JournalSettings
+from stonks_cli.config import (
+    JournalSettings,
+    StrategySettings,
+    strategy_settings_from_data,
+    strategy_settings_to_data,
+)
 from stonks_cli.errors import ProviderError
 from stonks_cli.ledger import list_events
 from stonks_cli.storage import EncryptedLedger
@@ -53,7 +59,12 @@ class StrategyRunCard:
     def __post_init__(self) -> None:
         if not all(
             isinstance(value, str) and value.strip()
-            for value in (self.strategy_name, self.universe, self.signal_definition, self.source_hash)
+            for value in (
+                self.strategy_name,
+                self.universe,
+                self.signal_definition,
+                self.source_hash,
+            )
         ):
             raise ValueError("strategy run card fields are required")
         if len(self.source_hash) != 64:
@@ -141,19 +152,28 @@ class AdvisoryJournalEntry:
             if self.disposition_at is not None or reason is not None or self.disposition_history:
                 raise ValueError("undisposed journal entries cannot include a disposition")
         else:
-            if not isinstance(self.disposition, AdvisoryJournalDisposition) or self.disposition_at is None:
+            if (
+                not isinstance(self.disposition, AdvisoryJournalDisposition)
+                or self.disposition_at is None
+            ):
                 raise ValueError("journal disposition timestamp is required")
             if self.disposition_at.tzinfo is None:
                 raise ValueError("journal disposition time must be timezone-aware")
             disposition_at = self.disposition_at.astimezone(UTC)
-            if disposition_at < opened_at or disposition_at > updated_at or not self.disposition_history:
+            if (
+                disposition_at < opened_at
+                or disposition_at > updated_at
+                or not self.disposition_history
+            ):
                 raise ValueError("journal disposition history is invalid")
             if self.disposition_history[-1].disposition is not self.disposition:
                 raise ValueError("journal disposition must match its history")
             object.__setattr__(self, "disposition_at", disposition_at)
         if (
             not isinstance(self.evidence_fingerprints, tuple)
-            or not all(isinstance(value, str) and value.strip() for value in self.evidence_fingerprints)
+            or not all(
+                isinstance(value, str) and value.strip() for value in self.evidence_fingerprints
+            )
             or len(set(self.evidence_fingerprints)) != len(self.evidence_fingerprints)
         ):
             raise ValueError("journal evidence fingerprints are invalid")
@@ -177,6 +197,21 @@ class JournalSettingsAuditRecord:
             raise ValueError("journal settings profile is required")
         if self.changed_at.tzinfo is None or not isinstance(self.settings, JournalSettings):
             raise ValueError("journal settings audit record is invalid")
+        object.__setattr__(self, "profile", self.profile.strip())
+        object.__setattr__(self, "changed_at", self.changed_at.astimezone(UTC))
+
+
+@dataclass(frozen=True)
+class StrategySettingsAuditRecord:
+    profile: str
+    changed_at: datetime
+    settings: StrategySettings
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.profile, str) or not self.profile.strip():
+            raise ValueError("strategy settings profile is required")
+        if self.changed_at.tzinfo is None or not isinstance(self.settings, StrategySettings):
+            raise ValueError("strategy settings audit record is invalid")
         object.__setattr__(self, "profile", self.profile.strip())
         object.__setattr__(self, "changed_at", self.changed_at.astimezone(UTC))
 
@@ -272,7 +307,9 @@ def store_artifact(
 def list_artifacts(ledger: EncryptedLedger) -> tuple[StrategyArtifact, ...]:
     with ledger.connection() as connection:
         _initialize(connection)
-        rows = connection.execute("SELECT * FROM strategy_artifacts ORDER BY created_at, artifact_id").fetchall()
+        rows = connection.execute(
+            "SELECT * FROM strategy_artifacts ORDER BY created_at, artifact_id"
+        ).fetchall()
     return tuple(
         StrategyArtifact(
             row["artifact_id"],
@@ -308,7 +345,9 @@ def append_journal_entry(
 def list_journal_entries(ledger: EncryptedLedger) -> tuple[StrategyJournalEntry, ...]:
     with ledger.connection() as connection:
         _initialize(connection)
-        rows = connection.execute("SELECT * FROM strategy_journal ORDER BY created_at, entry_id").fetchall()
+        rows = connection.execute(
+            "SELECT * FROM strategy_journal ORDER BY created_at, entry_id"
+        ).fetchall()
     return tuple(
         StrategyJournalEntry(
             row["entry_id"],
@@ -454,7 +493,9 @@ def link_advisory_journal_evidence(
             AdvisoryJournalDisposition.ACCEPTED,
             AdvisoryJournalDisposition.PARTIALLY_EXECUTED,
         }:
-            raise ValueError("journal evidence requires an accepted or partially executed disposition")
+            raise ValueError(
+                "journal evidence requires an accepted or partially executed disposition"
+            )
         if now < entry.updated_at:
             raise ValueError("journal evidence time must not precede the latest entry update")
         inserted = connection.execute(
@@ -488,7 +529,11 @@ def purge_expired_advisory_journal_entries(
 ) -> int:
     if retention_days is None:
         return 0
-    if not isinstance(retention_days, int) or isinstance(retention_days, bool) or retention_days < 1:
+    if (
+        not isinstance(retention_days, int)
+        or isinstance(retention_days, bool)
+        or retention_days < 1
+    ):
         raise ValueError("journal retention days must be positive")
     cutoff = _journal_time(now) - timedelta(days=retention_days)
     with ledger.connection() as connection:
@@ -502,7 +547,8 @@ def purge_expired_advisory_journal_entries(
             return 0
         placeholders = ", ".join("?" for _ in entry_ids)
         connection.execute(
-            f"DELETE FROM advisory_journal_dispositions WHERE entry_id IN ({placeholders})", entry_ids
+            f"DELETE FROM advisory_journal_dispositions WHERE entry_id IN ({placeholders})",
+            entry_ids,
         )
         connection.execute(
             f"DELETE FROM advisory_journal_evidence WHERE entry_id IN ({placeholders})", entry_ids
@@ -556,6 +602,43 @@ def journal_settings_audit(ledger: EncryptedLedger) -> tuple[JournalSettingsAudi
         )
         for row in rows
     )
+
+
+def record_strategy_settings_audit(
+    ledger: EncryptedLedger, settings: StrategySettings, *, changed_at: datetime | None = None
+) -> StrategySettingsAuditRecord:
+    record = StrategySettingsAuditRecord(ledger.config.name, _journal_time(changed_at), settings)
+    payload = json.dumps(strategy_settings_to_data(settings), sort_keys=True, separators=(",", ":"))
+    with ledger.connection() as connection:
+        _initialize(connection)
+        connection.execute(
+            "INSERT INTO strategy_settings_audit VALUES (?, ?, ?, ?)",
+            (record.profile, record.changed_at.isoformat(), settings.version, payload),
+        )
+    return record
+
+
+def strategy_settings_audit(ledger: EncryptedLedger) -> tuple[StrategySettingsAuditRecord, ...]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM strategy_settings_audit
+            WHERE profile = ? ORDER BY changed_at, configuration_version
+            """,
+            (ledger.config.name,),
+        ).fetchall()
+    try:
+        return tuple(
+            StrategySettingsAuditRecord(
+                row["profile"],
+                datetime.fromisoformat(row["changed_at"]),
+                strategy_settings_from_data(json.loads(row["settings_json"])),
+            )
+            for row in rows
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("strategy settings audit is invalid") from error
 
 
 def _optional_journal_text(value: str | None) -> str | None:
@@ -702,6 +785,17 @@ def _initialize(connection: sqlite3.Connection) -> None:
             retention_days INTEGER,
             display_reasons INTEGER NOT NULL,
             configuration_version INTEGER NOT NULL,
+            PRIMARY KEY(profile, changed_at, configuration_version)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS strategy_settings_audit (
+            profile TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            configuration_version INTEGER NOT NULL,
+            settings_json TEXT NOT NULL,
             PRIMARY KEY(profile, changed_at, configuration_version)
         )
         """

@@ -51,15 +51,19 @@ from stonks_cli.config import (
     JournalSettings,
     LLMSettings,
     ProfileConfig,
+    StrategySettings,
     configure_benchmark,
     configure_drawdown,
     configure_fx_reporting,
     configure_journal,
+    configure_strategy,
     configure_universe,
     disable_provider,
     enable_provider,
     load_profile,
     save_profile,
+    strategy_settings_from_data,
+    strategy_settings_to_data,
 )
 from stonks_cli.errors import LedgerError, LLMError, ProfileError, ProviderError
 from stonks_cli.ledger import (
@@ -145,8 +149,10 @@ from stonks_cli.strategy import (
     purge_expired_advisory_journal_entries,
     record_advisory_journal_disposition,
     record_journal_settings_audit,
+    record_strategy_settings_audit,
     run_csv_backtest,
     store_artifact,
+    strategy_settings_audit,
 )
 from stonks_cli.strategy import (
     journal_settings_audit as advisory_journal_settings_audit,
@@ -223,7 +229,9 @@ def _fx_conversion_data(
         "source_currency": conversion.source_currency.value,
         "target_currency": conversion.target_currency.value,
         "status": conversion.status.value,
-        "conversion_rate": None if conversion.conversion_rate is None else str(conversion.conversion_rate),
+        "conversion_rate": None
+        if conversion.conversion_rate is None
+        else str(conversion.conversion_rate),
         "inverted": conversion.inverted,
         "maximum_age_calendar_days": maximum_age_calendar_days,
         "rate": None
@@ -474,7 +482,9 @@ def portfolio(
                 "status": snapshot.status.value,
                 "as_of": snapshot.as_of_at.isoformat() if snapshot.as_of_at is not None else None,
                 "retrieved_at": snapshot.observed_at.isoformat(),
-                "price": str(snapshot.current_price) if snapshot.current_price is not None else None,
+                "price": str(snapshot.current_price)
+                if snapshot.current_price is not None
+                else None,
                 "market_session": snapshot.market_session.value,
                 "market_session_raw": snapshot.market_session_raw,
                 "order_book_status": snapshot.order_book_status,
@@ -488,7 +498,9 @@ def portfolio(
     }
     try:
         payload["asset_class_allocation_by_currency"] = {
-            currency.value: {asset_class.value: str(value) for asset_class, value in allocations.items()}
+            currency.value: {
+                asset_class.value: str(value) for asset_class, value in allocations.items()
+            }
             for currency, allocations in asset_class_allocations_by_currency(
                 values_by_currency, instrument_masters
             ).items()
@@ -499,8 +511,7 @@ def portfolio(
         payload["sector_concentration_by_currency"] = {
             currency.value: {
                 "allocation": {
-                    sector.value: str(value)
-                    for sector, value in concentration.allocation.items()
+                    sector.value: str(value) for sector, value in concentration.allocation.items()
                 },
                 "hhi": str(concentration.hhi),
             }
@@ -516,9 +527,7 @@ def portfolio(
         )
     except ValueError as error:
         raise typer.BadParameter("base-currency is invalid") from error
-    source_currencies = {
-        currency for (_, currency), amount in cash.items() if amount != 0
-    }
+    source_currencies = {currency for (_, currency), amount in cash.items() if amount != 0}
     source_currencies.update(
         currency
         for currency, values in values_by_currency.items()
@@ -908,9 +917,7 @@ def backtest_csv(
     except Exception as error:
         raise typer.BadParameter("fee-rate and slippage-rate must be decimal values") from error
     ledger = EncryptedLedger(_profile(profile, key_file))
-    result, source_hash = run_csv_backtest(
-        ledger, path, fee_rate=fee, slippage_rate=slippage
-    )
+    result, source_hash = run_csv_backtest(ledger, path, fee_rate=fee, slippage_rate=slippage)
     artifact = store_artifact(
         ledger,
         StrategyRunCard(
@@ -1004,6 +1011,64 @@ def _journal_settings_data(profile: str, settings: JournalSettings) -> dict[str,
         "display_reasons": settings.display_reasons,
         "configuration_version": settings.version,
     }
+
+
+def _strategy_settings_data(profile: str, settings: StrategySettings) -> dict[str, object]:
+    data = strategy_settings_to_data(settings)
+    data["profile"] = profile
+    data["configuration_version"] = data.pop("version")
+    data["configuration_reference"] = f"strategy:{settings.version}"
+    data["practical_effects"] = {
+        "advisory_status": (
+            "enabled"
+            if settings.advisories_enabled
+            else (
+                "disabled_pending_explicit_risk_tolerance_confirmation"
+                if not settings.risk_tolerance_selected
+                else "disabled"
+            )
+        ),
+        "risk_breach_action": settings.effective_risk_breach_action,
+        "position_limits": {
+            "individual_equities_reits_sectors_narrow_or_unknown": settings.individual_position_limit,
+            "broad_index_etfs": settings.broad_etf_position_limit,
+        },
+        "trend_exit": {
+            "completed_closes_below_sma": settings.trend_exit_consecutive_closes,
+            "sma_days": settings.trend_exit_sma_days,
+        },
+        "rebalance_observation_deviation": settings.rebalance_deviation_threshold,
+        "rebalance_policy": settings.rebalance_policy.value,
+        "decision_engine": "settings_only_not_implemented",
+    }
+    return data
+
+
+def _strategy_settings_patch(value: str) -> dict[str, object]:
+    try:
+        patch = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter("settings must be a JSON object") from error
+    if not isinstance(patch, dict) or not patch:
+        raise typer.BadParameter("settings must be a non-empty JSON object")
+    known = set(strategy_settings_to_data(StrategySettings()))
+    protected = {
+        "version",
+        "risk_tolerance_selected",
+        "cash_funded_only",
+        "long_only",
+        "eligible_markets",
+        "eligible_instrument_types",
+        "requires_listing",
+        "requires_moomoo_cash_eligibility",
+    }
+    unknown = set(patch) - known
+    if unknown:
+        raise typer.BadParameter(f"unknown strategy settings: {', '.join(sorted(unknown))}")
+    immutable = set(patch) & protected
+    if immutable:
+        raise typer.BadParameter(f"immutable strategy settings: {', '.join(sorted(immutable))}")
+    return patch
 
 
 def _benchmark_settings_data(profile: str, settings: BenchmarkSettings) -> dict[str, object]:
@@ -1102,7 +1167,9 @@ def _benchmark_period_data(profile: str, report: BenchmarkPeriodReport) -> dict[
         "reporting_currency": report.reporting_currency.value,
         "configuration_version": report.configuration_version,
         "components": [_benchmark_period_component_data(item) for item in report.components],
-        "aggregate_return": None if report.aggregate_return is None else str(report.aggregate_return),
+        "aggregate_return": None
+        if report.aggregate_return is None
+        else str(report.aggregate_return),
         "status": report.status,
         "reference_only": True,
         "execution": "denied",
@@ -1167,7 +1234,9 @@ def _advisory_journal_entry_data(
         "opened_at": entry.opened_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),
         "disposition": None if entry.disposition is None else entry.disposition.value,
-        "disposition_at": None if entry.disposition_at is None else entry.disposition_at.isoformat(),
+        "disposition_at": None
+        if entry.disposition_at is None
+        else entry.disposition_at.isoformat(),
         "evidence_fingerprints": list(entry.evidence_fingerprints),
         "disposition_history": [
             {
@@ -1201,7 +1270,9 @@ def strategy_advisory_journal_open(
                 "opened": entry is not None,
                 "entry": None
                 if entry is None
-                else _advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons),
+                else _advisory_journal_entry_data(
+                    entry, display_reasons=config.journal.display_reasons
+                ),
                 "execution": "denied",
             }
         )
@@ -1224,7 +1295,9 @@ def strategy_advisory_journal_dispose(
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     console.print_json(
-        json.dumps(_advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons))
+        json.dumps(
+            _advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons)
+        )
     )
 
 
@@ -1241,12 +1314,16 @@ def strategy_advisory_journal_link_evidence(
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     console.print_json(
-        json.dumps(_advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons))
+        json.dumps(
+            _advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons)
+        )
     )
 
 
 @app.command("strategy-advisory-journal-list")
-def strategy_advisory_journal_list(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+def strategy_advisory_journal_list(
+    profile: str, key_file: Path | None = typer.Option(None)
+) -> None:
     config = _profile(profile, key_file)
     entries = list_advisory_journal_entries(
         EncryptedLedger(config), retention_days=config.journal.retention_days
@@ -1256,7 +1333,9 @@ def strategy_advisory_journal_list(profile: str, key_file: Path | None = typer.O
             {
                 "profile": profile,
                 "entries": [
-                    _advisory_journal_entry_data(item, display_reasons=config.journal.display_reasons)
+                    _advisory_journal_entry_data(
+                        item, display_reasons=config.journal.display_reasons
+                    )
                     for item in entries
                 ],
                 "execution": "denied",
@@ -1293,7 +1372,9 @@ def strategy_advisory_journal_configure(
 
 
 @app.command("strategy-advisory-journal-settings")
-def strategy_advisory_journal_settings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+def strategy_advisory_journal_settings(
+    profile: str, key_file: Path | None = typer.Option(None)
+) -> None:
     config = _profile(profile, key_file)
     records = advisory_journal_settings_audit(EncryptedLedger(config))
     payload = _journal_settings_data(profile, config.journal)
@@ -1306,6 +1387,43 @@ def strategy_advisory_journal_settings(profile: str, key_file: Path | None = typ
             "configuration_version": record.settings.version,
         }
         for record in records
+    ]
+    console.print_json(json.dumps(payload))
+
+
+@app.command("strategy-configure")
+def strategy_configure(
+    profile: str,
+    settings: str = typer.Option(..., help="partial strategy settings JSON object"),
+) -> None:
+    current = load_profile(profile)
+    patch = _strategy_settings_patch(settings)
+    merged = strategy_settings_to_data(current.strategy)
+    merged.update(patch)
+    if "risk_tolerance" in patch:
+        merged["risk_tolerance_selected"] = True
+    try:
+        configured = configure_strategy(current, strategy_settings_from_data(merged))
+    except (ProfileError, TypeError, ValueError, KeyError) as error:
+        raise typer.BadParameter(str(error)) from error
+    ledger = EncryptedLedger(configured)
+    if configured != current:
+        save_profile(configured)
+        record_strategy_settings_audit(ledger, configured.strategy)
+    console.print_json(json.dumps(_strategy_settings_data(profile, configured.strategy)))
+
+
+@app.command("strategy-settings")
+def strategy_settings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    config = _profile(profile, key_file)
+    payload = _strategy_settings_data(profile, config.strategy)
+    payload["audit"] = [
+        {
+            "changed_at": record.changed_at.isoformat(),
+            "configuration_version": record.settings.version,
+            "settings": strategy_settings_to_data(record.settings),
+        }
+        for record in strategy_settings_audit(EncryptedLedger(config))
     ]
     console.print_json(json.dumps(payload))
 
@@ -1366,9 +1484,7 @@ def watchlist(profile: str, key_file: Path | None = typer.Option(None)) -> None:
                         "source": entry.source,
                         "configuration_version": entry.configuration_version,
                         "restriction_enabled": entry.restriction_enabled,
-                        "instrument": None
-                        if entry.item is None
-                        else entry.item.instrument.key,
+                        "instrument": None if entry.item is None else entry.item.instrument.key,
                     }
                     for entry in audit
                 ],
@@ -1580,8 +1696,12 @@ def paper_portfolio(profile: str, key_file: Path | None = typer.Option(None)) ->
         json.dumps(
             {
                 "profile": profile,
-                "cash": {currency.value: str(amount) for currency, amount in paper.cash(events).items()},
-                "positions": {key: str(quantity) for key, quantity in paper.positions(events).items()},
+                "cash": {
+                    currency.value: str(amount) for currency, amount in paper.cash(events).items()
+                },
+                "positions": {
+                    key: str(quantity) for key, quantity in paper.positions(events).items()
+                },
                 "event_count": len(events),
             }
         )
@@ -1597,7 +1717,9 @@ def ml_train(
 ) -> None:
     ledger = EncryptedLedger(_profile(profile, key_file))
     instrument_key = f"{market.strip().upper()}:{symbol.strip().upper()}"
-    model = ml.train_instrument_trend_model(instrument_key, historical_prices(ledger, instrument_key))
+    model = ml.train_instrument_trend_model(
+        instrument_key, historical_prices(ledger, instrument_key)
+    )
     ml.store_model(ledger, model)
     prediction = ml.predict_trend(model, historical_prices(ledger, instrument_key))
     console.print_json(
@@ -1896,7 +2018,9 @@ def scan_alerts(
 def _scan_price_alerts(ledger: EncryptedLedger, threshold: Decimal) -> list[dict[str, str]]:
     alerts = []
     for item in list_items(ledger):
-        alert = price_move_alert(item.instrument.key, historical_prices(ledger, item.instrument.key), threshold)
+        alert = price_move_alert(
+            item.instrument.key, historical_prices(ledger, item.instrument.key), threshold
+        )
         if alert is not None:
             alerts.append(
                 {
@@ -2158,7 +2282,9 @@ def _send_telegram_artifact(
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     if not records:
-        raise typer.BadParameter("Telegram delivery is disabled or the artifact event is not enabled")
+        raise typer.BadParameter(
+            "Telegram delivery is disabled or the artifact event is not enabled"
+        )
     console.print_json(
         json.dumps(
             {
@@ -2365,7 +2491,9 @@ def dividend_configure(
         raise typer.BadParameter(str(error)) from error
     config = replace(load_profile(profile), dividends=settings)
     save_profile(config)
-    console.print_json(json.dumps({"profile": profile, "dividends": _dividend_settings_data(settings)}))
+    console.print_json(
+        json.dumps({"profile": profile, "dividends": _dividend_settings_data(settings)})
+    )
 
 
 @app.command("drawdown-configure")
@@ -2413,7 +2541,9 @@ def fx_configure(
         raise typer.BadParameter(str(error)) from error
     save_profile(config)
     console.print_json(
-        json.dumps({"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)})
+        json.dumps(
+            {"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)}
+        )
     )
 
 
@@ -2421,7 +2551,9 @@ def fx_configure(
 def fx_settings(profile: str) -> None:
     config = load_profile(profile)
     console.print_json(
-        json.dumps({"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)})
+        json.dumps(
+            {"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)}
+        )
     )
 
 
@@ -2493,7 +2625,9 @@ def _universe_decision_data(decision: EODUniverseDecision) -> dict[str, object]:
         if decision.quote is None
         else {
             "status": decision.quote.status.value,
-            "as_of": None if decision.quote.as_of_at is None else decision.quote.as_of_at.isoformat(),
+            "as_of": None
+            if decision.quote.as_of_at is None
+            else decision.quote.as_of_at.isoformat(),
             "order_book_as_of": None
             if decision.quote.order_book_as_of is None
             else decision.quote.order_book_as_of.isoformat(),
@@ -2525,12 +2659,21 @@ def universe_configure(
     except ProfileError as error:
         raise typer.BadParameter(str(error)) from error
     save_profile(config)
-    console.print_json(json.dumps({"profile": profile, "universe": _universe_settings_data(config.universe)}))
+    console.print_json(
+        json.dumps({"profile": profile, "universe": _universe_settings_data(config.universe)})
+    )
 
 
 @app.command("universe-settings")
 def universe_settings(profile: str) -> None:
-    console.print_json(json.dumps({"profile": profile, "universe": _universe_settings_data(load_profile(profile).universe)}))
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "universe": _universe_settings_data(load_profile(profile).universe),
+            }
+        )
+    )
 
 
 @app.command("universe-evaluate")
@@ -2607,7 +2750,9 @@ def benchmark_configure(
 
 @app.command("benchmark-settings")
 def benchmark_settings(profile: str) -> None:
-    console.print_json(json.dumps(_benchmark_settings_data(profile, load_profile(profile).benchmark)))
+    console.print_json(
+        json.dumps(_benchmark_settings_data(profile, load_profile(profile).benchmark))
+    )
 
 
 @app.command("benchmark-templates")
@@ -2672,7 +2817,9 @@ def benchmark_template_import(profile: str, template_id: str) -> None:
 def benchmark_audit(profile: str, key_file: Path | None = typer.Option(None)) -> None:
     records = blend_audits(EncryptedLedger(_profile(profile, key_file)))
     console.print_json(
-        json.dumps({"profile": profile, "records": [_benchmark_audit_data(record) for record in records]})
+        json.dumps(
+            {"profile": profile, "records": [_benchmark_audit_data(record) for record in records]}
+        )
     )
 
 
@@ -2774,8 +2921,7 @@ def moomoo_dividend_status(
     config = _profile(profile, key_file)
     ledger = EncryptedLedger(config)
     mapped = {
-        mapping.declaration_source_key: mapping
-        for mapping in list_dividend_credit_mappings(ledger)
+        mapping.declaration_source_key: mapping for mapping in list_dividend_credit_mappings(ledger)
     }
     declarations = [
         declaration
@@ -2798,7 +2944,9 @@ def moomoo_dividend_status(
                             else declaration.announced_at.isoformat()
                         ),
                         "record_date": (
-                            None if declaration.record_date is None else declaration.record_date.isoformat()
+                            None
+                            if declaration.record_date is None
+                            else declaration.record_date.isoformat()
                         ),
                         "payable_date": (
                             None
@@ -2981,6 +3129,8 @@ def moomoo_cash_flows(
             }
         )
     )
+
+
 @app.command("moomoo-probe")
 def moomoo_probe(host: str = typer.Option("127.0.0.1"), port: int = typer.Option(11111)) -> None:
     probe = MoomooReadOnlyProvider.probe(OpenDConnection(host, port))

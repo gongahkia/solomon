@@ -75,6 +75,8 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "strategy-advisory-journal-list",
         "strategy-advisory-journal-configure",
         "strategy-advisory-journal-settings",
+        "strategy-configure",
+        "strategy-settings",
         "watchlist-add",
         "watchlist-configure",
         "watchlist-remove",
@@ -192,7 +194,9 @@ def test_cli_records_profile_scoped_advisory_journal_settings_and_disposition(
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
 
-    opened = runner.invoke(app, ["strategy-advisory-journal-open", "personal", "advisory-1", "strategy:1"])
+    opened = runner.invoke(
+        app, ["strategy-advisory-journal-open", "personal", "advisory-1", "strategy:1"]
+    )
 
     assert opened.exit_code == 0, opened.output
     entry_id = json.loads(opened.output)["entry"]["entry_id"]
@@ -225,6 +229,45 @@ def test_cli_records_profile_scoped_advisory_journal_settings_and_disposition(
 
     assert listed.exit_code == 0, listed.output
     assert json.loads(listed.output)["entries"][0]["reason"] == "manual review"
+
+
+def test_cli_configures_versioned_fail_closed_strategy_settings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    before = runner.invoke(app, ["strategy-settings", "personal"])
+
+    assert before.exit_code == 0, before.output
+    assert json.loads(before.output)["practical_effects"]["advisory_status"] == (
+        "disabled_pending_explicit_risk_tolerance_confirmation"
+    )
+    rejected = runner.invoke(
+        app,
+        ["strategy-configure", "personal", "--settings", '{"advisories_enabled":true}'],
+    )
+    assert rejected.exit_code != 0
+
+    configured = runner.invoke(
+        app,
+        [
+            "strategy-configure",
+            "personal",
+            "--settings",
+            '{"risk_tolerance":"balanced","advisories_enabled":true}',
+        ],
+    )
+
+    assert configured.exit_code == 0, configured.output
+    payload = json.loads(configured.output)
+    assert payload["configuration_version"] == 2
+    assert payload["practical_effects"]["risk_breach_action"] == "manual_sell_advisory"
+    listed = runner.invoke(app, ["strategy-settings", "personal"])
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output)["audit"][0]["configuration_version"] == 2
 
 
 def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:
@@ -375,7 +418,10 @@ def test_cli_reports_weighted_total_return_benchmark_in_reporting_currency(
         "2026-01-02,USD,SGD,1.35,2026-01-02T12:00:00+00:00,mas\n"
         "2026-01-03,USD,SGD,1.40,2026-01-03T12:00:00+00:00,mas\n"
     )
-    assert runner.invoke(app, ["import-benchmark-total-returns", "personal", str(returns)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["import-benchmark-total-returns", "personal", str(returns)]).exit_code
+        == 0
+    )
     assert runner.invoke(app, ["import-fx", "personal", str(fx)]).exit_code == 0
 
     result = runner.invoke(
@@ -462,7 +508,9 @@ def test_cli_reports_sdk_status_without_connecting(monkeypatch) -> None:
     }
 
 
-def test_cli_configures_local_llm_and_keeps_agent_wrappers_manual(tmp_path: Path, monkeypatch) -> None:
+def test_cli_configures_local_llm_and_keeps_agent_wrappers_manual(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     key = tmp_path / "key"
@@ -546,7 +594,9 @@ def test_cli_refreshes_moomoo_quotes_with_fail_closed_status(tmp_path: Path, mon
             )
 
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
+    monkeypatch.setattr(
+        cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider()
+    )
     runner = CliRunner()
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
@@ -558,7 +608,9 @@ def test_cli_refreshes_moomoo_quotes_with_fail_closed_status(tmp_path: Path, mon
     assert json.loads(result.output)["quote_statuses"] == {"unavailable": 1}
 
 
-def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path, monkeypatch) -> None:
+def test_cli_portfolio_reports_quote_status_separately_from_value(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     key = tmp_path / "key"
@@ -648,7 +700,9 @@ def test_cli_reports_usd_nav_with_explicit_base_currency(tmp_path: Path, monkeyp
     }
 
 
-def test_cli_reports_default_sgd_nav_with_fresh_rate_provenance(tmp_path: Path, monkeypatch) -> None:
+def test_cli_reports_default_sgd_nav_with_fresh_rate_provenance(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     key = tmp_path / "key"
@@ -725,7 +779,10 @@ def test_cli_withholds_sgd_nav_for_stale_or_missing_fx(tmp_path: Path, monkeypat
     missing_home = tmp_path / "missing-home"
     monkeypatch.setenv("STONKS_CLI_HOME", str(missing_home))
     missing_key = tmp_path / "missing-key"
-    assert runner.invoke(app, ["init-profile", "missing", "--key-file", str(missing_key)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["init-profile", "missing", "--key-file", str(missing_key)]).exit_code
+        == 0
+    )
     assert runner.invoke(app, ["import-csv", "missing", str(events)]).exit_code == 0
     missing_result = runner.invoke(app, ["portfolio", "missing", "--json"])
 
@@ -792,7 +849,9 @@ def test_cli_refreshes_mas_fx_with_explicit_date_range(tmp_path: Path, monkeypat
     }
 
 
-def test_cli_performance_attributes_dividends_and_fees_by_currency(tmp_path: Path, monkeypatch) -> None:
+def test_cli_performance_attributes_dividends_and_fees_by_currency(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     key = tmp_path / "key"
@@ -821,17 +880,24 @@ def test_cli_performance_attributes_dividends_and_fees_by_currency(tmp_path: Pat
     }
 
 
-def test_cli_delivers_telegram_only_after_profile_configuration(tmp_path: Path, monkeypatch) -> None:
+def test_cli_delivers_telegram_only_after_profile_configuration(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("STONKS_CLI_TELEGRAM_TOKEN", "token")
     monkeypatch.setenv("STONKS_CLI_TELEGRAM_RECIPIENT", "recipient")
     monkeypatch.setattr(telegram_delivery.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(telegram_delivery, "notify_telegram", lambda token, chat_id, title, message: True)
+    monkeypatch.setattr(
+        telegram_delivery, "notify_telegram", lambda token, chat_id, title, message: True
+    )
     runner = CliRunner()
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
     assert runner.invoke(app, ["telegram-recipient-add", "personal", "primary"]).exit_code == 0
-    assert runner.invoke(app, ["telegram-configure", "personal", "--recipient", "primary"]).exit_code == 0
+    assert (
+        runner.invoke(app, ["telegram-configure", "personal", "--recipient", "primary"]).exit_code
+        == 0
+    )
 
     result = runner.invoke(
         app,
@@ -859,9 +925,10 @@ def test_cli_manages_a_paper_portfolio(tmp_path: Path, monkeypatch) -> None:
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
     assert runner.invoke(app, ["paper-deposit", "personal", "1000", "USD"]).exit_code == 0
-    assert runner.invoke(
-        app, ["paper-open", "personal", "SPY", "US", "USD", "2", "100"]
-    ).exit_code == 0
+    assert (
+        runner.invoke(app, ["paper-open", "personal", "SPY", "US", "USD", "2", "100"]).exit_code
+        == 0
+    )
 
     result = runner.invoke(app, ["paper-portfolio", "personal"])
 
@@ -869,7 +936,9 @@ def test_cli_manages_a_paper_portfolio(tmp_path: Path, monkeypatch) -> None:
     assert json.loads(result.output)["positions"] == {"US:SPY": "2"}
 
 
-def test_monitor_refreshes_without_environment_telegram_delivery(tmp_path: Path, monkeypatch) -> None:
+def test_monitor_refreshes_without_environment_telegram_delivery(
+    tmp_path: Path, monkeypatch
+) -> None:
     class Provider:
         def daily_prices(self, instruments, start, end):
             return (
@@ -878,7 +947,9 @@ def test_monitor_refreshes_without_environment_telegram_delivery(tmp_path: Path,
             )
 
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
+    monkeypatch.setattr(
+        cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider()
+    )
     runner = CliRunner()
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
@@ -898,7 +969,9 @@ def test_monitor_refreshes_without_environment_telegram_delivery(tmp_path: Path,
     assert payload["telegram_delivered"] is False
 
 
-def test_schedule_artifact_renders_persisted_content_and_status(tmp_path: Path, monkeypatch) -> None:
+def test_schedule_artifact_renders_persisted_content_and_status(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(
         cli,
@@ -931,7 +1004,9 @@ def test_monitor_persists_failed_scheduled_artifact(tmp_path: Path, monkeypatch)
             raise RuntimeError("unavailable")
 
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
+    monkeypatch.setattr(
+        cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider()
+    )
     runner = CliRunner()
     key = tmp_path / "key"
     assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0

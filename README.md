@@ -195,6 +195,29 @@ $ stonks-cli portfolio personal --base-currency SGD --json
 have independently calculated the benchmark return for the same period; the default `0` is cash,
 not a market benchmark. `strategy-journal` records the manual rationale for later review.
 
+## Strategy settings
+
+`strategy-settings` displays the active, versioned strategy contract and encrypted change audit.
+The default risk tolerance is `balanced`, but advisory output remains disabled until it is explicitly
+confirmed with `strategy-configure`. Defaults are growth, dividend income, then capital preservation;
+a one-to-two-year horizon; 50% individual equities, 25% REITs, and 25% broad-index ETFs; and a
+75% US / 25% Singapore split in each asset class. Cash-funded, long-only US/SG listed common equity,
+non-levered/non-inverse ETF, and REIT boundaries cannot be relaxed. Listing and Moomoo cash-eligibility
+checks remain required.
+
+```console
+$ stonks-cli strategy-configure personal --settings '{"risk_tolerance":"balanced","advisories_enabled":true}'
+$ stonks-cli strategy-settings personal
+```
+
+`--settings` accepts a partial JSON object for configurable values. The baseline uses price trend as
+the primary algorithm, with relative-strength and dividend-quality ranking enabled; two completed
+closes below the 200-day SMA; a 25% drawdown threshold; a 5 percentage-point rebalance observation;
+5% individual/REIT/sector/narrow/unknown caps; 20% broad-index ETF caps; no cash reserve; and
+signal-directed, case-by-case dividend reinvestment. Conservative and balanced profiles may produce a manual sell
+advisory on a risk breach; growth profiles remain alert-only. This release stores and exposes policy
+only; it does not generate or execute recommendations.
+
 ## Reference benchmarks
 
 Each profile stores a versioned, non-tradable reference blend: 75% `US:SPX` (S&P 500 Index, USD)

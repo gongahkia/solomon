@@ -25,6 +25,7 @@ from stonks_cli.config import (
     benchmark_settings_from_data,
     profile_dir,
     save_profile,
+    strategy_settings_from_data,
 )
 from stonks_cli.errors import EncryptedStorageError, KeyFileError
 from stonks_cli.types import Currency
@@ -188,7 +189,8 @@ class EncryptedLedger:
         return tuple(
             path.stem
             for path in sorted(self.sources.glob("*.enc"))
-            if len(path.stem) == 64 and all(character in "0123456789abcdef" for character in path.stem)
+            if len(path.stem) == 64
+            and all(character in "0123456789abcdef" for character in path.stem)
         )
 
     def _load(self) -> sqlite3.Connection:
@@ -260,6 +262,7 @@ def _backup_profile(source: Path) -> ProfileConfig:
             drawdown=DrawdownSettings(**value.get("drawdown", {})),
             journal=JournalSettings(**value.get("journal", {})),
             universe=EODUniverseSettings(**value.get("universe", {})),
+            strategy=strategy_settings_from_data(value.get("strategy")),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise EncryptedStorageError("backup profile configuration is invalid") from error

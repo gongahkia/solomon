@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import encrypted_ledger
 
-from stonks_cli.config import JournalSettings
+from stonks_cli.config import JournalSettings, StrategySettings
 from stonks_cli.ledger import append
 from stonks_cli.strategy import (
     AdvisoryJournalDisposition,
@@ -23,9 +23,11 @@ from stonks_cli.strategy import (
     open_advisory_journal,
     record_advisory_journal_disposition,
     record_journal_settings_audit,
+    record_strategy_settings_audit,
     run_csv_backtest,
     simulate_eod_long_only,
     store_artifact,
+    strategy_settings_audit,
 )
 from stonks_cli.types import Account, Currency, EventKind, Instrument, LedgerEvent, SourceProvenance
 
@@ -165,6 +167,23 @@ def test_advisory_journal_honors_settings_retention_and_audit(tmp_path: Path, mo
     )
 
     assert journal_settings_audit(ledger) == (record,)
-    assert list_advisory_journal_entries(
-        ledger, retention_days=settings.retention_days, now=datetime(2026, 1, 10, tzinfo=UTC)
-    ) == ()
+    assert (
+        list_advisory_journal_entries(
+            ledger, retention_days=settings.retention_days, now=datetime(2026, 1, 10, tzinfo=UTC)
+        )
+        == ()
+    )
+
+
+def test_strategy_settings_audit_is_profile_scoped_and_encrypted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    settings = StrategySettings(risk_tolerance_selected=True, advisories_enabled=True, version=2)
+
+    record = record_strategy_settings_audit(
+        ledger, settings, changed_at=datetime(2026, 1, 10, tzinfo=UTC)
+    )
+
+    assert strategy_settings_audit(ledger) == (record,)
+    assert b"manual_sell_advisory" not in ledger.path.read_bytes()

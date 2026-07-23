@@ -4,7 +4,9 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 from platformdirs import user_data_path
@@ -18,6 +20,363 @@ _BENCHMARK_IDENTIFIER = re.compile(r"^[A-Z][A-Z0-9]{1,9}:[A-Z0-9][A-Z0-9._-]{0,3
 _LLM_PROVIDERS = frozenset(("ollama", "openai", "anthropic", "gemini"))
 _BUDGET_PERIODS = frozenset(("none", "daily", "monthly"))
 _BENCHMARK_RETURN_BASES = frozenset(("price_return", "total_return"))
+_STRATEGY_ASSET_CLASSES = frozenset(("individual_equities", "reits", "broad_index_etfs"))
+
+
+class RiskTolerance(StrEnum):
+    CONSERVATIVE = "conservative"
+    BALANCED = "balanced"
+    GROWTH = "growth"
+
+
+class StrategyAlgorithm(StrEnum):
+    PRICE_TREND = "price_trend"
+    RELATIVE_STRENGTH = "relative_strength"
+    DIVIDEND_QUALITY = "dividend_quality"
+
+
+class RelativeStrengthActionMode(StrEnum):
+    RANKING_ONLY = "ranking_only"
+    INDEPENDENT_BUY_SELL = "independent_buy_sell"
+
+
+class InsufficientDividendHistoryPolicy(StrEnum):
+    ABSTAIN = "abstain"
+    LOWER_RANK = "lower_rank"
+
+
+class StrategyObjective(StrEnum):
+    GROWTH = "growth"
+    DIVIDEND_INCOME = "dividend_income"
+    CAPITAL_PRESERVATION = "capital_preservation"
+
+
+class DecisionPriority(StrEnum):
+    STRATEGY_POLICY = "strategy_policy"
+    ALLOCATION_MAINTENANCE = "allocation_maintenance"
+    PROFIT_TAKING = "profit_taking"
+
+
+class DividendReinvestmentPolicy(StrEnum):
+    SIGNAL_DIRECTED = "signal_directed_case_by_case"
+    REINVEST = "reinvest"
+    HOLD_CASH = "hold_cash"
+
+
+class RebalancePolicy(StrEnum):
+    OBSERVE_AND_REVIEW = "observe_and_review"
+    MANUAL_ADVISORY = "manual_advisory"
+
+
+def _strategy_fraction(value: str, field: str) -> Decimal:
+    if not isinstance(value, str) or not value.strip():
+        raise ProfileError(f"{field} must be decimal")
+    try:
+        fraction = Decimal(value)
+    except InvalidOperation as error:
+        raise ProfileError(f"{field} must be decimal") from error
+    if not fraction.is_finite() or not Decimal("0") <= fraction <= Decimal("1"):
+        raise ProfileError(f"{field} must be between zero and one")
+    return fraction
+
+
+@dataclass(frozen=True)
+class StrategyAllocationTarget:
+    asset_class: str
+    target_weight: str
+
+    def __post_init__(self) -> None:
+        asset_class = self.asset_class.strip().lower() if isinstance(self.asset_class, str) else ""
+        if asset_class not in _STRATEGY_ASSET_CLASSES:
+            raise ProfileError("strategy allocation asset class is invalid")
+        weight = _strategy_fraction(self.target_weight, "strategy allocation target")
+        if weight <= 0:
+            raise ProfileError("strategy allocation target must be positive")
+        object.__setattr__(self, "asset_class", asset_class)
+        object.__setattr__(self, "target_weight", format(weight, "f"))
+
+    @property
+    def weight(self) -> Decimal:
+        return Decimal(self.target_weight)
+
+
+@dataclass(frozen=True)
+class StrategyMarketAllocation:
+    asset_class: str
+    us_weight: str
+    sg_weight: str
+
+    def __post_init__(self) -> None:
+        asset_class = self.asset_class.strip().lower() if isinstance(self.asset_class, str) else ""
+        if asset_class not in _STRATEGY_ASSET_CLASSES:
+            raise ProfileError("strategy market allocation asset class is invalid")
+        us_weight = _strategy_fraction(self.us_weight, "strategy US market allocation")
+        sg_weight = _strategy_fraction(self.sg_weight, "strategy SG market allocation")
+        if us_weight <= 0 or sg_weight <= 0 or us_weight + sg_weight != Decimal("1"):
+            raise ProfileError("strategy market allocation weights must be positive and total one")
+        object.__setattr__(self, "asset_class", asset_class)
+        object.__setattr__(self, "us_weight", format(us_weight, "f"))
+        object.__setattr__(self, "sg_weight", format(sg_weight, "f"))
+
+
+_DEFAULT_STRATEGY_ALLOCATION_TARGETS = (
+    StrategyAllocationTarget("individual_equities", "0.50"),
+    StrategyAllocationTarget("reits", "0.25"),
+    StrategyAllocationTarget("broad_index_etfs", "0.25"),
+)
+_DEFAULT_STRATEGY_MARKET_ALLOCATIONS = tuple(
+    StrategyMarketAllocation(item.asset_class, "0.75", "0.25")
+    for item in _DEFAULT_STRATEGY_ALLOCATION_TARGETS
+)
+
+
+def _strategy_enum_tuple(value: object, enum: type[StrEnum], field: str) -> tuple[StrEnum, ...]:
+    if not isinstance(value, tuple) or not value:
+        raise ProfileError(f"{field} is required")
+    try:
+        values = tuple(enum(item) for item in value)
+    except ValueError as error:
+        raise ProfileError(f"{field} is invalid") from error
+    if len(set(values)) != len(values):
+        raise ProfileError(f"{field} must not contain duplicates")
+    return values
+
+
+@dataclass(frozen=True)
+class StrategySettings:
+    risk_tolerance: RiskTolerance = RiskTolerance.BALANCED
+    risk_tolerance_selected: bool = False
+    advisories_enabled: bool = False
+    cash_funded_only: bool = True
+    long_only: bool = True
+    eligible_markets: tuple[str, ...] = ("US", "SG")
+    eligible_instrument_types: tuple[str, ...] = (
+        "common_equity",
+        "non_levered_non_inverse_etf",
+        "reit",
+    )
+    requires_listing: bool = True
+    requires_moomoo_cash_eligibility: bool = True
+    objective_priority: tuple[StrategyObjective, ...] = (
+        StrategyObjective.GROWTH,
+        StrategyObjective.DIVIDEND_INCOME,
+        StrategyObjective.CAPITAL_PRESERVATION,
+    )
+    investment_horizon_years: tuple[int, int] = (1, 2)
+    allocation_targets: tuple[StrategyAllocationTarget, ...] = _DEFAULT_STRATEGY_ALLOCATION_TARGETS
+    market_allocations: tuple[StrategyMarketAllocation, ...] = _DEFAULT_STRATEGY_MARKET_ALLOCATIONS
+    enabled_algorithms: tuple[StrategyAlgorithm, ...] = (
+        StrategyAlgorithm.PRICE_TREND,
+        StrategyAlgorithm.RELATIVE_STRENGTH,
+        StrategyAlgorithm.DIVIDEND_QUALITY,
+    )
+    primary_algorithm: StrategyAlgorithm = StrategyAlgorithm.PRICE_TREND
+    relative_strength_action_mode: RelativeStrengthActionMode = (
+        RelativeStrengthActionMode.RANKING_ONLY
+    )
+    dividend_reduction_or_omission_downrank: bool = True
+    insufficient_dividend_history_policy: InsufficientDividendHistoryPolicy = (
+        InsufficientDividendHistoryPolicy.ABSTAIN
+    )
+    trend_exit_consecutive_closes: int = 2
+    trend_exit_sma_days: int = 200
+    drawdown_threshold: str = "0.25"
+    sell_on_risk_breach: bool = True
+    rebalance_deviation_threshold: str = "0.05"
+    rebalance_policy: RebalancePolicy = RebalancePolicy.OBSERVE_AND_REVIEW
+    decision_priority: tuple[DecisionPriority, ...] = (
+        DecisionPriority.STRATEGY_POLICY,
+        DecisionPriority.ALLOCATION_MAINTENANCE,
+        DecisionPriority.PROFIT_TAKING,
+    )
+    minimum_cash_reserve: str = "0"
+    individual_position_limit: str = "0.05"
+    broad_etf_position_limit: str = "0.20"
+    instrument_restrictions: tuple[str, ...] = ()
+    dividend_reinvestment_policy: DividendReinvestmentPolicy = (
+        DividendReinvestmentPolicy.SIGNAL_DIRECTED
+    )
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        try:
+            risk_tolerance = RiskTolerance(self.risk_tolerance)
+            primary_algorithm = StrategyAlgorithm(self.primary_algorithm)
+            relative_strength_action_mode = RelativeStrengthActionMode(
+                self.relative_strength_action_mode
+            )
+            insufficient_history_policy = InsufficientDividendHistoryPolicy(
+                self.insufficient_dividend_history_policy
+            )
+            dividend_reinvestment_policy = DividendReinvestmentPolicy(
+                self.dividend_reinvestment_policy
+            )
+            rebalance_policy = RebalancePolicy(self.rebalance_policy)
+        except ValueError as error:
+            raise ProfileError("strategy setting is invalid") from error
+        if not all(
+            isinstance(value, bool)
+            for value in (
+                self.risk_tolerance_selected,
+                self.advisories_enabled,
+                self.cash_funded_only,
+                self.long_only,
+                self.requires_listing,
+                self.requires_moomoo_cash_eligibility,
+            )
+        ):
+            raise ProfileError("strategy advisory settings must be boolean")
+        if self.advisories_enabled and not self.risk_tolerance_selected:
+            raise ProfileError(
+                "explicit risk tolerance selection is required before enabling advisories"
+            )
+        if not self.cash_funded_only or not self.long_only:
+            raise ProfileError("strategy must remain cash-funded and long-only")
+        if self.eligible_markets != ("US", "SG"):
+            raise ProfileError("strategy eligible markets must be US and SG")
+        if self.eligible_instrument_types != (
+            "common_equity",
+            "non_levered_non_inverse_etf",
+            "reit",
+        ):
+            raise ProfileError("strategy eligible instruments are fixed")
+        if not self.requires_listing or not self.requires_moomoo_cash_eligibility:
+            raise ProfileError("strategy eligibility checks must remain required")
+        objective_priority = _strategy_enum_tuple(
+            self.objective_priority, StrategyObjective, "strategy objective priority"
+        )
+        if set(objective_priority) != set(StrategyObjective):
+            raise ProfileError("strategy objective priority must include every objective once")
+        if (
+            not isinstance(self.investment_horizon_years, tuple)
+            or len(self.investment_horizon_years) != 2
+            or any(
+                not isinstance(year, int) or isinstance(year, bool)
+                for year in self.investment_horizon_years
+            )
+            or self.investment_horizon_years[0] < 1
+            or self.investment_horizon_years[1] < self.investment_horizon_years[0]
+            or self.investment_horizon_years[1] > 30
+        ):
+            raise ProfileError("strategy investment horizon is invalid")
+        if not isinstance(self.allocation_targets, tuple) or not all(
+            isinstance(item, StrategyAllocationTarget) for item in self.allocation_targets
+        ):
+            raise ProfileError("strategy allocation targets are invalid")
+        target_classes = tuple(item.asset_class for item in self.allocation_targets)
+        if set(target_classes) != _STRATEGY_ASSET_CLASSES or len(set(target_classes)) != len(
+            target_classes
+        ):
+            raise ProfileError(
+                "strategy allocation targets must cover the configured asset classes once"
+            )
+        if sum((item.weight for item in self.allocation_targets), Decimal("0")) != Decimal("1"):
+            raise ProfileError("strategy allocation targets must total one")
+        if not isinstance(self.market_allocations, tuple) or not all(
+            isinstance(item, StrategyMarketAllocation) for item in self.market_allocations
+        ):
+            raise ProfileError("strategy market allocations are invalid")
+        market_classes = tuple(item.asset_class for item in self.market_allocations)
+        if set(market_classes) != _STRATEGY_ASSET_CLASSES or len(set(market_classes)) != len(
+            market_classes
+        ):
+            raise ProfileError(
+                "strategy market allocations must cover the configured asset classes once"
+            )
+        enabled_algorithms = _strategy_enum_tuple(
+            self.enabled_algorithms, StrategyAlgorithm, "strategy algorithms"
+        )
+        if primary_algorithm not in enabled_algorithms:
+            raise ProfileError("strategy primary algorithm must be enabled")
+        if not isinstance(self.dividend_reduction_or_omission_downrank, bool) or not isinstance(
+            self.sell_on_risk_breach, bool
+        ):
+            raise ProfileError("strategy policy settings must be boolean")
+        if (
+            not isinstance(self.trend_exit_consecutive_closes, int)
+            or isinstance(self.trend_exit_consecutive_closes, bool)
+            or not 1 <= self.trend_exit_consecutive_closes <= 30
+        ):
+            raise ProfileError("strategy trend exit closes must be between 1 and 30")
+        if (
+            not isinstance(self.trend_exit_sma_days, int)
+            or isinstance(self.trend_exit_sma_days, bool)
+            or not 2 <= self.trend_exit_sma_days <= 1_000
+        ):
+            raise ProfileError("strategy trend exit SMA days must be between 2 and 1000")
+        drawdown_threshold = _strategy_fraction(
+            self.drawdown_threshold, "strategy drawdown threshold"
+        )
+        rebalance_deviation_threshold = _strategy_fraction(
+            self.rebalance_deviation_threshold, "strategy rebalance deviation threshold"
+        )
+        minimum_cash_reserve = _strategy_fraction(
+            self.minimum_cash_reserve, "strategy minimum cash reserve"
+        )
+        individual_position_limit = _strategy_fraction(
+            self.individual_position_limit, "strategy individual position limit"
+        )
+        broad_etf_position_limit = _strategy_fraction(
+            self.broad_etf_position_limit, "strategy broad ETF position limit"
+        )
+        if drawdown_threshold <= 0 or rebalance_deviation_threshold <= 0:
+            raise ProfileError("strategy drawdown and rebalance thresholds must be positive")
+        if individual_position_limit <= 0 or broad_etf_position_limit <= 0:
+            raise ProfileError("strategy position limits must be positive")
+        if broad_etf_position_limit < individual_position_limit:
+            raise ProfileError(
+                "strategy broad ETF position limit must not be below individual limit"
+            )
+        decision_priority = _strategy_enum_tuple(
+            self.decision_priority, DecisionPriority, "strategy decision priority"
+        )
+        if set(decision_priority) != set(DecisionPriority):
+            raise ProfileError("strategy decision priority must include every priority once")
+        if not isinstance(self.instrument_restrictions, tuple) or not all(
+            isinstance(item, str) and 0 < len(item.strip()) <= 128
+            for item in self.instrument_restrictions
+        ):
+            raise ProfileError("strategy instrument restrictions are invalid")
+        restrictions = tuple(item.strip().upper() for item in self.instrument_restrictions)
+        if len(set(restrictions)) != len(restrictions):
+            raise ProfileError("strategy instrument restrictions must not contain duplicates")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("strategy settings version must be a positive integer")
+        object.__setattr__(self, "risk_tolerance", risk_tolerance)
+        object.__setattr__(
+            self, "objective_priority", cast(tuple[StrategyObjective, ...], objective_priority)
+        )
+        object.__setattr__(
+            self, "enabled_algorithms", cast(tuple[StrategyAlgorithm, ...], enabled_algorithms)
+        )
+        object.__setattr__(self, "primary_algorithm", primary_algorithm)
+        object.__setattr__(self, "relative_strength_action_mode", relative_strength_action_mode)
+        object.__setattr__(
+            self, "insufficient_dividend_history_policy", insufficient_history_policy
+        )
+        object.__setattr__(self, "rebalance_policy", rebalance_policy)
+        object.__setattr__(self, "drawdown_threshold", format(drawdown_threshold, "f"))
+        object.__setattr__(
+            self, "rebalance_deviation_threshold", format(rebalance_deviation_threshold, "f")
+        )
+        object.__setattr__(
+            self, "decision_priority", cast(tuple[DecisionPriority, ...], decision_priority)
+        )
+        object.__setattr__(self, "minimum_cash_reserve", format(minimum_cash_reserve, "f"))
+        object.__setattr__(
+            self, "individual_position_limit", format(individual_position_limit, "f")
+        )
+        object.__setattr__(self, "broad_etf_position_limit", format(broad_etf_position_limit, "f"))
+        object.__setattr__(self, "instrument_restrictions", restrictions)
+        object.__setattr__(self, "dividend_reinvestment_policy", dividend_reinvestment_policy)
+
+    @property
+    def effective_risk_breach_action(self) -> str:
+        if not self.advisories_enabled:
+            return "advisories_disabled"
+        if self.sell_on_risk_breach and self.risk_tolerance is not RiskTolerance.GROWTH:
+            return "manual_sell_advisory"
+        return "alert_only"
 
 
 def canonical_benchmark_identifier(identifier: str) -> str:
@@ -94,7 +453,9 @@ class JournalSettings:
     version: int = 1
 
     def __post_init__(self) -> None:
-        if not isinstance(self.open_on_advisory, bool) or not isinstance(self.display_reasons, bool):
+        if not isinstance(self.open_on_advisory, bool) or not isinstance(
+            self.display_reasons, bool
+        ):
             raise ProfileError("journal settings flags must be boolean")
         if self.retention_days is not None and (
             not isinstance(self.retention_days, int)
@@ -181,7 +542,9 @@ class BenchmarkComponent:
             or parsed.password is not None
         ):
             raise ProfileError("benchmark source URL must be an HTTPS URL without credentials")
-        return_basis = self.return_basis.strip().lower() if isinstance(self.return_basis, str) else ""
+        return_basis = (
+            self.return_basis.strip().lower() if isinstance(self.return_basis, str) else ""
+        )
         if return_basis not in _BENCHMARK_RETURN_BASES:
             raise ProfileError("benchmark return basis is invalid")
         object.__setattr__(self, "identifier", identifier)
@@ -219,7 +582,9 @@ class BenchmarkSettings:
     version: int = 1
 
     def __post_init__(self) -> None:
-        if not self.components or not all(isinstance(item, BenchmarkComponent) for item in self.components):
+        if not self.components or not all(
+            isinstance(item, BenchmarkComponent) for item in self.components
+        ):
             raise ProfileError("benchmark components are required")
         identifiers = tuple(item.identifier for item in self.components)
         if len(set(identifiers)) != len(identifiers):
@@ -326,6 +691,7 @@ class ProfileConfig:
     journal: JournalSettings = JournalSettings()
     benchmark: BenchmarkSettings = BenchmarkSettings()
     universe: EODUniverseSettings = EODUniverseSettings()
+    strategy: StrategySettings = StrategySettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -349,6 +715,8 @@ class ProfileConfig:
             raise ProfileError("profile journal settings are invalid")
         if not isinstance(self.universe, EODUniverseSettings):
             raise ProfileError("profile universe settings are invalid")
+        if not isinstance(self.strategy, StrategySettings):
+            raise ProfileError("profile strategy settings are invalid")
         object.__setattr__(self, "providers", providers)
 
 
@@ -386,6 +754,7 @@ def save_profile(config: ProfileConfig) -> None:
         ],
         "version": config.benchmark.version,
     }
+    data["strategy"] = strategy_settings_to_data(config.strategy)
     if config.drawdown == DrawdownSettings():
         data.pop("drawdown")
     if config.fx_reporting == FxReportingSettings():
@@ -394,6 +763,8 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("journal")
     if config.universe == EODUniverseSettings():
         data.pop("universe")
+    if config.strategy == StrategySettings():
+        data.pop("strategy")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -419,9 +790,7 @@ def configure_drawdown(
         policy = DrawdownResponsePolicy(response_policy)
     except ValueError as error:
         raise ProfileError("drawdown response policy is invalid") from error
-    candidate = DrawdownSettings(
-        warning_threshold, policy, config.drawdown.version
-    )
+    candidate = DrawdownSettings(warning_threshold, policy, config.drawdown.version)
     if candidate == config.drawdown:
         return config
     return replace(config, drawdown=replace(candidate, version=config.drawdown.version + 1))
@@ -486,6 +855,15 @@ def configure_universe(
     return replace(config, universe=replace(candidate, version=config.universe.version + 1))
 
 
+def configure_strategy(config: ProfileConfig, settings: StrategySettings) -> ProfileConfig:
+    if not isinstance(settings, StrategySettings):
+        raise ProfileError("strategy settings are invalid")
+    candidate = replace(settings, version=config.strategy.version)
+    if candidate == config.strategy:
+        return config
+    return replace(config, strategy=replace(candidate, version=config.strategy.version + 1))
+
+
 def benchmark_settings_from_data(value: object) -> BenchmarkSettings:
     if value is None:
         return BenchmarkSettings()
@@ -512,6 +890,132 @@ def benchmark_settings_from_data(value: object) -> BenchmarkSettings:
     )
 
 
+def strategy_settings_to_data(settings: StrategySettings) -> dict[str, object]:
+    if not isinstance(settings, StrategySettings):
+        raise TypeError("strategy settings are invalid")
+    return {
+        "risk_tolerance": settings.risk_tolerance.value,
+        "risk_tolerance_selected": settings.risk_tolerance_selected,
+        "advisories_enabled": settings.advisories_enabled,
+        "cash_funded_only": settings.cash_funded_only,
+        "long_only": settings.long_only,
+        "eligible_markets": list(settings.eligible_markets),
+        "eligible_instrument_types": list(settings.eligible_instrument_types),
+        "requires_listing": settings.requires_listing,
+        "requires_moomoo_cash_eligibility": settings.requires_moomoo_cash_eligibility,
+        "objective_priority": [item.value for item in settings.objective_priority],
+        "investment_horizon_years": list(settings.investment_horizon_years),
+        "allocation_targets": [
+            {"asset_class": item.asset_class, "target_weight": item.target_weight}
+            for item in settings.allocation_targets
+        ],
+        "market_allocations": [
+            {
+                "asset_class": item.asset_class,
+                "us_weight": item.us_weight,
+                "sg_weight": item.sg_weight,
+            }
+            for item in settings.market_allocations
+        ],
+        "enabled_algorithms": [item.value for item in settings.enabled_algorithms],
+        "primary_algorithm": settings.primary_algorithm.value,
+        "relative_strength_action_mode": settings.relative_strength_action_mode.value,
+        "dividend_reduction_or_omission_downrank": (
+            settings.dividend_reduction_or_omission_downrank
+        ),
+        "insufficient_dividend_history_policy": settings.insufficient_dividend_history_policy.value,
+        "trend_exit_consecutive_closes": settings.trend_exit_consecutive_closes,
+        "trend_exit_sma_days": settings.trend_exit_sma_days,
+        "drawdown_threshold": settings.drawdown_threshold,
+        "sell_on_risk_breach": settings.sell_on_risk_breach,
+        "rebalance_deviation_threshold": settings.rebalance_deviation_threshold,
+        "rebalance_policy": settings.rebalance_policy.value,
+        "decision_priority": [item.value for item in settings.decision_priority],
+        "minimum_cash_reserve": settings.minimum_cash_reserve,
+        "individual_position_limit": settings.individual_position_limit,
+        "broad_etf_position_limit": settings.broad_etf_position_limit,
+        "instrument_restrictions": list(settings.instrument_restrictions),
+        "dividend_reinvestment_policy": settings.dividend_reinvestment_policy.value,
+        "version": settings.version,
+    }
+
+
+def strategy_settings_from_data(value: object) -> StrategySettings:
+    if value is None:
+        return StrategySettings()
+    if not isinstance(value, dict):
+        raise TypeError("strategy must be an object")
+    allocation_targets = value.get("allocation_targets", _DEFAULT_STRATEGY_ALLOCATION_TARGETS)
+    market_allocations = value.get("market_allocations", _DEFAULT_STRATEGY_MARKET_ALLOCATIONS)
+    if not isinstance(allocation_targets, (list, tuple)) or not isinstance(
+        market_allocations, (list, tuple)
+    ):
+        raise TypeError("strategy allocations must be lists")
+    return StrategySettings(
+        risk_tolerance=RiskTolerance(value.get("risk_tolerance", RiskTolerance.BALANCED)),
+        risk_tolerance_selected=value.get("risk_tolerance_selected", False),
+        advisories_enabled=value.get("advisories_enabled", False),
+        cash_funded_only=value.get("cash_funded_only", True),
+        long_only=value.get("long_only", True),
+        eligible_markets=tuple(value.get("eligible_markets", ("US", "SG"))),
+        eligible_instrument_types=tuple(
+            value.get(
+                "eligible_instrument_types",
+                ("common_equity", "non_levered_non_inverse_etf", "reit"),
+            )
+        ),
+        requires_listing=value.get("requires_listing", True),
+        requires_moomoo_cash_eligibility=value.get("requires_moomoo_cash_eligibility", True),
+        objective_priority=tuple(value.get("objective_priority", tuple(StrategyObjective))),
+        investment_horizon_years=tuple(value.get("investment_horizon_years", (1, 2))),
+        allocation_targets=tuple(
+            item
+            if isinstance(item, StrategyAllocationTarget)
+            else StrategyAllocationTarget(item["asset_class"], item["target_weight"])
+            for item in allocation_targets
+        ),
+        market_allocations=tuple(
+            item
+            if isinstance(item, StrategyMarketAllocation)
+            else StrategyMarketAllocation(item["asset_class"], item["us_weight"], item["sg_weight"])
+            for item in market_allocations
+        ),
+        enabled_algorithms=tuple(value.get("enabled_algorithms", tuple(StrategyAlgorithm))),
+        primary_algorithm=StrategyAlgorithm(
+            value.get("primary_algorithm", StrategyAlgorithm.PRICE_TREND)
+        ),
+        relative_strength_action_mode=RelativeStrengthActionMode(
+            value.get("relative_strength_action_mode", RelativeStrengthActionMode.RANKING_ONLY)
+        ),
+        dividend_reduction_or_omission_downrank=value.get(
+            "dividend_reduction_or_omission_downrank", True
+        ),
+        insufficient_dividend_history_policy=InsufficientDividendHistoryPolicy(
+            value.get(
+                "insufficient_dividend_history_policy",
+                InsufficientDividendHistoryPolicy.ABSTAIN,
+            )
+        ),
+        trend_exit_consecutive_closes=value.get("trend_exit_consecutive_closes", 2),
+        trend_exit_sma_days=value.get("trend_exit_sma_days", 200),
+        drawdown_threshold=value.get("drawdown_threshold", "0.25"),
+        sell_on_risk_breach=value.get("sell_on_risk_breach", True),
+        rebalance_deviation_threshold=value.get("rebalance_deviation_threshold", "0.05"),
+        rebalance_policy=RebalancePolicy(
+            value.get("rebalance_policy", RebalancePolicy.OBSERVE_AND_REVIEW)
+        ),
+        decision_priority=tuple(value.get("decision_priority", tuple(DecisionPriority))),
+        minimum_cash_reserve=value.get("minimum_cash_reserve", "0"),
+        individual_position_limit=value.get("individual_position_limit", "0.05"),
+        broad_etf_position_limit=value.get("broad_etf_position_limit", "0.20"),
+        instrument_restrictions=tuple(value.get("instrument_restrictions", ())),
+        dividend_reinvestment_policy=DividendReinvestmentPolicy(
+            value.get("dividend_reinvestment_policy", DividendReinvestmentPolicy.SIGNAL_DIRECTED)
+        ),
+        version=value.get("version", 1),
+    )
+
+
 def load_profile(name: str) -> ProfileConfig:
     path = config_path(name)
     if not path.is_file():
@@ -533,6 +1037,7 @@ def load_profile(name: str) -> ProfileConfig:
             fx_reporting=FxReportingSettings(**value.get("fx_reporting", {})),
             journal=JournalSettings(**value.get("journal", {})),
             universe=EODUniverseSettings(**value.get("universe", {})),
+            strategy=strategy_settings_from_data(value.get("strategy")),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

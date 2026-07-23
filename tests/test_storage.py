@@ -13,10 +13,13 @@ from stonks_cli.config import (
     EODUniverseSettings,
     JournalSettings,
     ProfileConfig,
+    RiskTolerance,
+    StrategySettings,
     config_path,
     configure_benchmark,
     configure_drawdown,
     configure_journal,
+    configure_strategy,
     configure_universe,
     disable_provider,
     enable_provider,
@@ -122,7 +125,9 @@ def test_profile_directory_layout_uses_expected_paths(
     assert root.stat().st_mode & 0o077 == 0
 
 
-def test_archived_source_history_exposes_only_hashes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_archived_source_history_exposes_only_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     key = tmp_path / "personal.key"
     generate_key_file(key)
@@ -323,6 +328,37 @@ def test_profile_journal_settings_are_versioned_and_round_trip(
     }
     with pytest.raises(ProfileError, match="retention"):
         JournalSettings(retention_days=0)
+
+
+def test_profile_strategy_settings_fail_closed_are_versioned_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"))
+
+    assert config.strategy.risk_tolerance is RiskTolerance.BALANCED
+    assert not config.strategy.risk_tolerance_selected
+    assert config.strategy.effective_risk_breach_action == "advisories_disabled"
+    with pytest.raises(ProfileError, match="explicit risk tolerance"):
+        StrategySettings(advisories_enabled=True)
+
+    configured = configure_strategy(
+        config,
+        StrategySettings(
+            risk_tolerance=RiskTolerance.BALANCED,
+            risk_tolerance_selected=True,
+            advisories_enabled=True,
+            version=99,
+        ),
+    )
+    save_profile(configured)
+
+    assert configured.strategy.version == 2
+    assert configured.strategy.effective_risk_breach_action == "manual_sell_advisory"
+    assert load_profile("personal") == configured
+    assert json.loads(config_path("personal").read_text())["strategy"]["version"] == 2
+    with pytest.raises(ProfileError, match="cash-funded"):
+        StrategySettings(cash_funded_only=False)
 
 
 def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: Path) -> None:

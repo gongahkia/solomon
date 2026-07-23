@@ -83,6 +83,7 @@ from stonks_cli.market_data import (
     archive_and_store_daily_prices,
     archive_and_store_quote_snapshots,
     fx_rates_for_session,
+    historical_daily_price_records,
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
@@ -139,7 +140,11 @@ from stonks_cli.storage import (
 from stonks_cli.strategy import (
     AdvisoryJournalDisposition,
     AdvisoryJournalEntry,
+    AlgorithmSignal,
+    DividendObservation,
     StrategyRunCard,
+    StrategySignalArtifact,
+    StrategySignalInput,
     append_journal_entry,
     link_advisory_journal_evidence,
     list_advisory_journal_entries,
@@ -151,6 +156,7 @@ from stonks_cli.strategy import (
     record_journal_settings_audit,
     record_strategy_settings_audit,
     run_csv_backtest,
+    run_daily_bar_signals,
     store_artifact,
     strategy_settings_audit,
 )
@@ -1071,6 +1077,85 @@ def _strategy_settings_patch(value: str) -> dict[str, object]:
     return patch
 
 
+def _algorithm_signal_data(signal: AlgorithmSignal) -> dict[str, object]:
+    return {
+        "algorithm": signal.declaration.algorithm.value,
+        "algorithm_version": signal.declaration.version,
+        "required_inputs": list(signal.declaration.required_inputs),
+        "parameters": dict(signal.declaration.parameters),
+        "supported_asset_classes": [
+            item.value for item in signal.declaration.supported_asset_classes
+        ],
+        "supported_markets": list(signal.declaration.supported_markets),
+        "action": signal.action.value,
+        "score": None if signal.score is None else str(signal.score),
+        "confidence": signal.confidence.value,
+        "status": signal.status.value,
+        "rationale": list(signal.rationale),
+        "input_hash": signal.input_hash,
+    }
+
+
+def _strategy_signal_artifact_data(
+    profile: str, artifact: StrategySignalArtifact
+) -> dict[str, object]:
+    return {
+        "profile": profile,
+        "configuration_version": artifact.configuration_version,
+        "configuration_reference": f"strategy:{artifact.configuration_version}",
+        "input_hash": artifact.input_hash,
+        "summaries": [
+            {
+                "instrument": summary.instrument_key,
+                "primary": _algorithm_signal_data(summary.primary_signal),
+                "policy_results": [_algorithm_signal_data(item) for item in summary.policy_signals],
+                "conflict_status": "conflict" if summary.conflict else "none",
+                "displayed_confidence": summary.displayed_confidence.value,
+            }
+            for summary in artifact.summaries
+        ],
+        "advisory": False,
+        "execution": "denied",
+    }
+
+
+def _strategy_signal_input_from_ledger(
+    ledger: EncryptedLedger, canonical_id: str
+) -> StrategySignalInput:
+    identifier = canonical_id.strip().upper()
+    master = latest_instrument_masters(ledger).get(identifier)
+    if master is None:
+        raise ValueError("instrument master is required for strategy signals")
+    observations_by_date: dict[date, DividendObservation] = {}
+    for declaration in list_dividend_declarations(ledger):
+        if (
+            declaration.instrument.key != identifier
+            or declaration.ex_date is None
+            or declaration.amount_per_share is None
+            or declaration.currency is None
+        ):
+            continue
+        observed = DividendObservation(
+            declaration.ex_date,
+            declaration.amount_per_share,
+            declaration.currency,
+            declaration.raw_source_hash,
+        )
+        existing = observations_by_date.get(observed.observation_date)
+        if existing is not None and (
+            existing.amount_per_share != observed.amount_per_share
+            or existing.currency != observed.currency
+        ):
+            raise ValueError("conflicting sourced distributions share an ex-date")
+        if existing is None or observed.source_hash < existing.source_hash:
+            observations_by_date[observed.observation_date] = observed
+    return StrategySignalInput(
+        master,
+        historical_daily_price_records(ledger, identifier),
+        tuple(observations_by_date[item] for item in sorted(observations_by_date)),
+    )
+
+
 def _benchmark_settings_data(profile: str, settings: BenchmarkSettings) -> dict[str, object]:
     return {
         "profile": profile,
@@ -1426,6 +1511,26 @@ def strategy_settings(profile: str, key_file: Path | None = typer.Option(None)) 
         for record in strategy_settings_audit(EncryptedLedger(config))
     ]
     console.print_json(json.dumps(payload))
+
+
+@app.command("strategy-signals")
+def strategy_signals(
+    profile: str,
+    instrument: list[str] = typer.Option(
+        ..., "--instrument", help="canonical US:SYMBOL or SG:SYMBOL"
+    ),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
+    try:
+        inputs = tuple(
+            _strategy_signal_input_from_ledger(ledger, identifier) for identifier in instrument
+        )
+        artifact = run_daily_bar_signals(inputs, config.strategy)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(json.dumps(_strategy_signal_artifact_data(profile, artifact)))
 
 
 @app.command("watchlist-add")

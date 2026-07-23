@@ -1,18 +1,31 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from conftest import encrypted_ledger
 
-from stonks_cli.config import JournalSettings, StrategySettings
+from stonks_cli.config import (
+    InsufficientDividendHistoryPolicy,
+    JournalSettings,
+    RelativeStrengthActionMode,
+    StrategyAlgorithm,
+    StrategySettings,
+)
 from stonks_cli.ledger import append
+from stonks_cli.market_data import DailyPrice
 from stonks_cli.strategy import (
     AdvisoryJournalDisposition,
     DailyBar,
+    DividendObservation,
+    SignalAction,
+    SignalConfidence,
+    SignalStatus,
     StrategyRunCard,
+    StrategySignalInput,
     append_journal_entry,
     buy_and_hold_return,
     journal_settings_audit,
@@ -25,11 +38,52 @@ from stonks_cli.strategy import (
     record_journal_settings_audit,
     record_strategy_settings_audit,
     run_csv_backtest,
+    run_daily_bar_signals,
     simulate_eod_long_only,
     store_artifact,
     strategy_settings_audit,
 )
-from stonks_cli.types import Account, Currency, EventKind, Instrument, LedgerEvent, SourceProvenance
+from stonks_cli.types import (
+    Account,
+    AssetClass,
+    Currency,
+    EventKind,
+    Instrument,
+    InstrumentMaster,
+    LedgerEvent,
+    ListingStatus,
+    SourceProvenance,
+)
+
+
+def _signal_input(
+    symbol: str,
+    closes: tuple[str, ...],
+    *,
+    dividends: tuple[DividendObservation, ...] = (),
+) -> StrategySignalInput:
+    instrument = InstrumentMaster(
+        f"US:{symbol}",
+        "NASDAQ",
+        "US",
+        Currency.USD,
+        AssetClass.EQUITY,
+        f"US.{symbol}",
+        ListingStatus.LISTED,
+        "fixture-1",
+        "a" * 64,
+    )
+    start = date(2026, 1, 1)
+    prices = tuple(
+        DailyPrice(
+            Instrument(symbol, "US", Currency.USD),
+            start + timedelta(days=index),
+            Decimal(close),
+            "b" * 64,
+        )
+        for index, close in enumerate(closes)
+    )
+    return StrategySignalInput(instrument, prices, dividends)
 
 
 def test_strategy_uses_prior_close_signal_only() -> None:
@@ -60,6 +114,105 @@ def test_strategy_split_ratio_prevents_a_false_split_loss() -> None:
     assert buy_and_hold_return(
         (DailyBar(Decimal("100"), True), DailyBar(Decimal("50"), True, Decimal("2")))
     ) == Decimal("0")
+
+
+def test_price_trend_signal_requires_completed_closes_and_preserves_exit_rule() -> None:
+    settings = StrategySettings(
+        enabled_algorithms=(StrategyAlgorithm.PRICE_TREND,),
+        primary_algorithm=StrategyAlgorithm.PRICE_TREND,
+        trend_exit_sma_days=3,
+        trend_exit_consecutive_closes=2,
+        version=4,
+    )
+    input_value = _signal_input("AAA", ("100", "100", "100", "90", "89"))
+
+    artifact = run_daily_bar_signals((input_value,), settings)
+
+    signal = artifact.summaries[0].primary_signal
+    assert artifact.configuration_version == 4
+    assert signal.action is SignalAction.SELL
+    assert signal.confidence is SignalConfidence.HIGH
+    assert signal.status is SignalStatus.AVAILABLE
+    assert "profit alone is not an exit condition" in signal.rationale
+    assert run_daily_bar_signals((input_value,), settings) == artifact
+
+
+def test_relative_strength_ranking_can_become_an_explicit_conflicting_policy() -> None:
+    inputs = (
+        _signal_input("AAA", ("100", "100", "101")),
+        _signal_input("BBB", ("100", "150", "200")),
+    )
+    settings = StrategySettings(
+        trend_exit_sma_days=2,
+        trend_exit_consecutive_closes=2,
+        relative_strength_lookback_sessions=2,
+    )
+
+    ranking = run_daily_bar_signals(inputs, settings)
+    ranking_summary = ranking.summaries[0]
+    ranking_signal = next(
+        item
+        for item in ranking_summary.policy_signals
+        if item.declaration.algorithm is StrategyAlgorithm.RELATIVE_STRENGTH
+    )
+    assert ranking_signal.action is SignalAction.HOLD
+    assert not ranking_summary.conflict
+
+    independent = run_daily_bar_signals(
+        inputs,
+        replace(
+            settings,
+            relative_strength_action_mode=RelativeStrengthActionMode.INDEPENDENT_BUY_SELL,
+            version=2,
+        ),
+    )
+    summary = independent.summaries[0]
+    relative_strength = next(
+        item
+        for item in summary.policy_signals
+        if item.declaration.algorithm is StrategyAlgorithm.RELATIVE_STRENGTH
+    )
+
+    assert summary.primary_signal.action is SignalAction.BUY
+    assert relative_strength.action is SignalAction.SELL
+    assert summary.conflict
+    assert summary.displayed_confidence is SignalConfidence.CONFLICTED
+
+
+def test_dividend_quality_abstains_or_downranks_without_treating_cash_as_available() -> None:
+    input_value = _signal_input(
+        "AAA",
+        ("100", "101", "102"),
+        dividends=(
+            DividendObservation(date(2025, 1, 1), Decimal("1"), Currency.USD, "c" * 64),
+            DividendObservation(date(2025, 4, 1), Decimal("1"), Currency.USD, "d" * 64),
+        ),
+    )
+    settings = StrategySettings(
+        enabled_algorithms=(StrategyAlgorithm.DIVIDEND_QUALITY,),
+        primary_algorithm=StrategyAlgorithm.DIVIDEND_QUALITY,
+        dividend_quality_minimum_observations=3,
+    )
+
+    abstained = run_daily_bar_signals((input_value,), settings).summaries[0].primary_signal
+    lowered = (
+        run_daily_bar_signals(
+            (input_value,),
+            replace(
+                settings,
+                insufficient_dividend_history_policy=InsufficientDividendHistoryPolicy.LOWER_RANK,
+                version=2,
+            ),
+        )
+        .summaries[0]
+        .primary_signal
+    )
+
+    assert abstained.action is SignalAction.ABSTAIN
+    assert abstained.status is SignalStatus.INSUFFICIENT_HISTORY
+    assert lowered.action is SignalAction.HOLD
+    assert lowered.status is SignalStatus.INSUFFICIENT_HISTORY_DOWNRANKED
+    assert "dividend quality does not create available cash" in lowered.rationale
 
 
 def test_csv_backtest_archives_source(tmp_path: Path, monkeypatch) -> None:

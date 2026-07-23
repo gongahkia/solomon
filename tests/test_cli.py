@@ -19,6 +19,7 @@ from stonks_cli.market_data import (
     QuoteSnapshot,
     QuoteStatus,
     archive_and_store_quote_snapshots,
+    store_daily_prices,
     store_instrument_masters,
 )
 from stonks_cli.moomoo import OpenDSDKStatus
@@ -77,6 +78,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "strategy-advisory-journal-settings",
         "strategy-configure",
         "strategy-settings",
+        "strategy-signals",
         "watchlist-add",
         "watchlist-configure",
         "watchlist-remove",
@@ -268,6 +270,45 @@ def test_cli_configures_versioned_fail_closed_strategy_settings(
     listed = runner.invoke(app, ["strategy-settings", "personal"])
     assert listed.exit_code == 0, listed.output
     assert json.loads(listed.output)["audit"][0]["configuration_version"] == 2
+
+
+def test_cli_reports_non_executing_daily_bar_strategy_signals(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    ledger = EncryptedLedger(load_profile("personal"))
+    master = InstrumentMaster(
+        "US:AAA",
+        "NASDAQ",
+        "US",
+        Currency.USD,
+        AssetClass.EQUITY,
+        "US.AAA",
+        ListingStatus.LISTED,
+        "fixture-1",
+        "a" * 64,
+    )
+    store_instrument_masters(ledger, (master,))
+    store_daily_prices(
+        ledger,
+        [
+            DailyPrice(
+                Instrument("AAA", "US", Currency.USD),
+                date(2026, 1, 2),
+                Decimal("100"),
+                "b" * 64,
+            )
+        ],
+    )
+
+    result = runner.invoke(app, ["strategy-signals", "personal", "--instrument", "US:AAA"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["advisory"] is False
+    assert payload["execution"] == "denied"
+    assert payload["summaries"][0]["primary"]["status"] == "insufficient_history"
 
 
 def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:

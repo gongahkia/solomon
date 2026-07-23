@@ -653,6 +653,32 @@ def historical_prices(ledger: EncryptedLedger, instrument_key: str) -> tuple[tup
     return tuple((date.fromisoformat(row[0]), Decimal(row[1])) for row in rows)
 
 
+def historical_daily_price_records(
+    ledger: EncryptedLedger, instrument_key: str
+) -> tuple[DailyPrice, ...]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT instrument_key, session_date, close, open, high, low, currency, source_hash
+            FROM daily_prices WHERE instrument_key = ? ORDER BY session_date
+            """,
+            (instrument_key.upper(),),
+        ).fetchall()
+    return tuple(
+        DailyPrice(
+            _instrument_from_key(row["instrument_key"], Currency(row["currency"])),
+            date.fromisoformat(row["session_date"]),
+            Decimal(row["close"]),
+            row["source_hash"],
+            Decimal(row["open"]) if row["open"] is not None else None,
+            Decimal(row["high"]) if row["high"] is not None else None,
+            Decimal(row["low"]) if row["low"] is not None else None,
+        )
+        for row in rows
+    )
+
+
 def price_revisions(ledger: EncryptedLedger, instrument_key: str) -> tuple[DailyPrice, ...]:
     with ledger.connection() as connection:
         _initialize(connection)

@@ -218,6 +218,18 @@ signal-directed, case-by-case dividend reinvestment. Conservative and balanced p
 advisory on a risk breach; growth profiles remain alert-only. This release stores and exposes policy
 only; it does not generate or execute recommendations.
 
+`strategy-signals` evaluates explicitly named, sourced daily-bar inputs as a read-only research
+artifact. Price trend uses completed closes only; relative strength uses a configurable 126-session
+return by default and is ranking-only unless explicitly changed; dividend quality uses sourced
+distribution history only and never treats it as credited cash. Every policy result carries its
+algorithm version, required inputs, parameters, source-input hash, action, score, confidence, and
+rationale. Conflicting action-capable policies retain the primary output but mark displayed confidence
+as `conflicted`.
+
+```console
+$ stonks-cli strategy-signals personal --instrument US:SPY --instrument US:VTI
+```
+
 ## Reference benchmarks
 
 Each profile stores a versioned, non-tradable reference blend: 75% `US:SPX` (S&P 500 Index, USD)

@@ -174,10 +174,12 @@ class StrategySettings:
     relative_strength_action_mode: RelativeStrengthActionMode = (
         RelativeStrengthActionMode.RANKING_ONLY
     )
+    relative_strength_lookback_sessions: int = 126
     dividend_reduction_or_omission_downrank: bool = True
     insufficient_dividend_history_policy: InsufficientDividendHistoryPolicy = (
         InsufficientDividendHistoryPolicy.ABSTAIN
     )
+    dividend_quality_minimum_observations: int = 3
     trend_exit_consecutive_closes: int = 2
     trend_exit_sma_days: int = 200
     drawdown_threshold: str = "0.25"
@@ -288,6 +290,20 @@ class StrategySettings:
         )
         if primary_algorithm not in enabled_algorithms:
             raise ProfileError("strategy primary algorithm must be enabled")
+        if (
+            not isinstance(self.relative_strength_lookback_sessions, int)
+            or isinstance(self.relative_strength_lookback_sessions, bool)
+            or not 2 <= self.relative_strength_lookback_sessions <= 1_260
+        ):
+            raise ProfileError(
+                "strategy relative strength lookback must be between 2 and 1260 sessions"
+            )
+        if (
+            not isinstance(self.dividend_quality_minimum_observations, int)
+            or isinstance(self.dividend_quality_minimum_observations, bool)
+            or not 2 <= self.dividend_quality_minimum_observations <= 100
+        ):
+            raise ProfileError("strategy dividend history minimum must be between 2 and 100")
         if not isinstance(self.dividend_reduction_or_omission_downrank, bool) or not isinstance(
             self.sell_on_risk_breach, bool
         ):
@@ -920,10 +936,12 @@ def strategy_settings_to_data(settings: StrategySettings) -> dict[str, object]:
         "enabled_algorithms": [item.value for item in settings.enabled_algorithms],
         "primary_algorithm": settings.primary_algorithm.value,
         "relative_strength_action_mode": settings.relative_strength_action_mode.value,
+        "relative_strength_lookback_sessions": settings.relative_strength_lookback_sessions,
         "dividend_reduction_or_omission_downrank": (
             settings.dividend_reduction_or_omission_downrank
         ),
         "insufficient_dividend_history_policy": settings.insufficient_dividend_history_policy.value,
+        "dividend_quality_minimum_observations": settings.dividend_quality_minimum_observations,
         "trend_exit_consecutive_closes": settings.trend_exit_consecutive_closes,
         "trend_exit_sma_days": settings.trend_exit_sma_days,
         "drawdown_threshold": settings.drawdown_threshold,
@@ -987,6 +1005,7 @@ def strategy_settings_from_data(value: object) -> StrategySettings:
         relative_strength_action_mode=RelativeStrengthActionMode(
             value.get("relative_strength_action_mode", RelativeStrengthActionMode.RANKING_ONLY)
         ),
+        relative_strength_lookback_sessions=value.get("relative_strength_lookback_sessions", 126),
         dividend_reduction_or_omission_downrank=value.get(
             "dividend_reduction_or_omission_downrank", True
         ),
@@ -996,6 +1015,7 @@ def strategy_settings_from_data(value: object) -> StrategySettings:
                 InsufficientDividendHistoryPolicy.ABSTAIN,
             )
         ),
+        dividend_quality_minimum_observations=value.get("dividend_quality_minimum_observations", 3),
         trend_exit_consecutive_closes=value.get("trend_exit_consecutive_closes", 2),
         trend_exit_sma_days=value.get("trend_exit_sma_days", 200),
         drawdown_threshold=value.get("drawdown_threshold", "0.25"),

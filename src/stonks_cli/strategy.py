@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -14,15 +15,26 @@ from typing import cast
 from uuid import uuid4
 
 from stonks_cli.config import (
+    InsufficientDividendHistoryPolicy,
     JournalSettings,
+    RelativeStrengthActionMode,
+    StrategyAlgorithm,
     StrategySettings,
     strategy_settings_from_data,
     strategy_settings_to_data,
 )
 from stonks_cli.errors import ProviderError
 from stonks_cli.ledger import list_events
+from stonks_cli.market_data import DailyPrice
 from stonks_cli.storage import EncryptedLedger
-from stonks_cli.types import EventKind, EventLifecycle
+from stonks_cli.types import (
+    AssetClass,
+    Currency,
+    EventKind,
+    EventLifecycle,
+    InstrumentMaster,
+    ListingStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -214,6 +226,612 @@ class StrategySettingsAuditRecord:
             raise ValueError("strategy settings audit record is invalid")
         object.__setattr__(self, "profile", self.profile.strip())
         object.__setattr__(self, "changed_at", self.changed_at.astimezone(UTC))
+
+
+class SignalAction(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
+    ABSTAIN = "abstain"
+
+
+class SignalConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNAVAILABLE = "unavailable"
+    CONFLICTED = "conflicted"
+
+
+class SignalStatus(StrEnum):
+    AVAILABLE = "available"
+    INSUFFICIENT_HISTORY = "insufficient_history"
+    INSUFFICIENT_COMPARABLE_INSTRUMENTS = "insufficient_comparable_instruments"
+    INSUFFICIENT_HISTORY_DOWNRANKED = "insufficient_history_downranked"
+    DOWNRANKED = "downranked"
+    UNSUPPORTED_INSTRUMENT = "unsupported_instrument"
+    CONFLICT = "conflict"
+
+
+_SIGNAL_SUPPORTED_ASSET_CLASSES = (AssetClass.EQUITY, AssetClass.ETF, AssetClass.REIT)
+_SIGNAL_SUPPORTED_MARKETS = ("US", "SG")
+
+
+@dataclass(frozen=True)
+class DividendObservation:
+    observation_date: date
+    amount_per_share: Decimal
+    currency: Currency
+    source_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.observation_date, date) or not isinstance(self.currency, Currency):
+            raise ValueError("dividend observation date and currency are required")
+        if self.amount_per_share <= 0:
+            raise ValueError("dividend observation amount must be positive")
+        object.__setattr__(self, "amount_per_share", Decimal(self.amount_per_share))
+        object.__setattr__(self, "source_hash", _signal_source_hash(self.source_hash))
+
+
+@dataclass(frozen=True)
+class StrategySignalInput:
+    instrument: InstrumentMaster
+    daily_prices: tuple[DailyPrice, ...]
+    dividend_observations: tuple[DividendObservation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.instrument, InstrumentMaster):
+            raise ValueError("strategy signal instrument is required")
+        if not isinstance(self.daily_prices, tuple) or not self.daily_prices:
+            raise ValueError("strategy signal daily prices are required")
+        if not all(isinstance(item, DailyPrice) for item in self.daily_prices):
+            raise ValueError("strategy signal daily prices are invalid")
+        if any(item.instrument.key != self.instrument.canonical_id for item in self.daily_prices):
+            raise ValueError("strategy signal daily prices must match the instrument")
+        dates = tuple(item.session_date for item in self.daily_prices)
+        if dates != tuple(sorted(dates)) or len(set(dates)) != len(dates):
+            raise ValueError("strategy signal daily prices must be ordered and unique")
+        if not isinstance(self.dividend_observations, tuple) or not all(
+            isinstance(item, DividendObservation) for item in self.dividend_observations
+        ):
+            raise ValueError("strategy dividend observations are invalid")
+        dividend_dates = tuple(item.observation_date for item in self.dividend_observations)
+        if dividend_dates != tuple(sorted(dividend_dates)) or len(set(dividend_dates)) != len(
+            dividend_dates
+        ):
+            raise ValueError("strategy dividend observations must be ordered and unique")
+        if len({item.currency for item in self.dividend_observations}) > 1:
+            raise ValueError("strategy dividend observations require one currency")
+
+    @property
+    def input_hash(self) -> str:
+        return _signal_hash(_strategy_signal_input_data(self))
+
+
+@dataclass(frozen=True)
+class StrategyAlgorithmDeclaration:
+    algorithm: StrategyAlgorithm
+    version: int
+    required_inputs: tuple[str, ...]
+    parameters: tuple[tuple[str, str], ...]
+    supported_asset_classes: tuple[AssetClass, ...] = _SIGNAL_SUPPORTED_ASSET_CLASSES
+    supported_markets: tuple[str, ...] = _SIGNAL_SUPPORTED_MARKETS
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.algorithm, StrategyAlgorithm) or self.version < 1:
+            raise ValueError("strategy algorithm declaration is invalid")
+        if not self.required_inputs or not all(
+            isinstance(item, str) and item for item in self.required_inputs
+        ):
+            raise ValueError("strategy algorithm required inputs are invalid")
+        if not all(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and all(isinstance(value, str) and value for value in item)
+            for item in self.parameters
+        ):
+            raise ValueError("strategy algorithm parameters are invalid")
+        if not self.supported_asset_classes or not all(
+            isinstance(item, AssetClass) for item in self.supported_asset_classes
+        ):
+            raise ValueError("strategy algorithm asset classes are invalid")
+        if self.supported_markets != _SIGNAL_SUPPORTED_MARKETS:
+            raise ValueError("strategy algorithm markets are invalid")
+
+
+@dataclass(frozen=True)
+class AlgorithmSignal:
+    instrument_key: str
+    declaration: StrategyAlgorithmDeclaration
+    action: SignalAction
+    score: Decimal | None
+    confidence: SignalConfidence
+    status: SignalStatus
+    rationale: tuple[str, ...]
+    input_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.instrument_key, str) or not self.instrument_key.strip():
+            raise ValueError("strategy signal instrument is required")
+        if not isinstance(self.declaration, StrategyAlgorithmDeclaration):
+            raise ValueError("strategy signal declaration is required")
+        if not isinstance(self.action, SignalAction) or not isinstance(
+            self.confidence, SignalConfidence
+        ):
+            raise ValueError("strategy signal action and confidence are required")
+        if not isinstance(self.status, SignalStatus):
+            raise ValueError("strategy signal status is required")
+        if self.score is not None and not self.score.is_finite():
+            raise ValueError("strategy signal score must be finite")
+        if not self.rationale or not all(isinstance(item, str) and item for item in self.rationale):
+            raise ValueError("strategy signal rationale is required")
+        object.__setattr__(self, "instrument_key", self.instrument_key.strip().upper())
+        if self.score is not None:
+            object.__setattr__(self, "score", Decimal(self.score))
+        object.__setattr__(self, "input_hash", _signal_source_hash(self.input_hash))
+
+
+@dataclass(frozen=True)
+class InstrumentSignalSummary:
+    instrument_key: str
+    primary_signal: AlgorithmSignal
+    policy_signals: tuple[AlgorithmSignal, ...]
+    conflict: bool
+    displayed_confidence: SignalConfidence
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.primary_signal, AlgorithmSignal):
+            raise ValueError("strategy primary signal is required")
+        if not isinstance(self.policy_signals, tuple) or not self.policy_signals:
+            raise ValueError("strategy policy signals are required")
+        if any(
+            item.instrument_key != self.primary_signal.instrument_key
+            for item in self.policy_signals
+        ):
+            raise ValueError("strategy policy signals must match the primary signal")
+        if not isinstance(self.conflict, bool) or not isinstance(
+            self.displayed_confidence, SignalConfidence
+        ):
+            raise ValueError("strategy summary is invalid")
+        if self.conflict != (self.displayed_confidence is SignalConfidence.CONFLICTED):
+            raise ValueError("strategy conflict confidence is invalid")
+        object.__setattr__(self, "instrument_key", self.primary_signal.instrument_key)
+
+
+@dataclass(frozen=True)
+class StrategySignalArtifact:
+    configuration_version: int
+    input_hash: str
+    summaries: tuple[InstrumentSignalSummary, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.configuration_version, int) or self.configuration_version < 1:
+            raise ValueError("strategy signal configuration version is invalid")
+        if not isinstance(self.summaries, tuple) or not self.summaries:
+            raise ValueError("strategy signal summaries are required")
+        keys = tuple(item.instrument_key for item in self.summaries)
+        if keys != tuple(sorted(keys)) or len(set(keys)) != len(keys):
+            raise ValueError("strategy signal summaries must be ordered and unique")
+        object.__setattr__(self, "input_hash", _signal_source_hash(self.input_hash))
+
+
+def run_daily_bar_signals(
+    inputs: Sequence[StrategySignalInput], settings: StrategySettings
+) -> StrategySignalArtifact:
+    if not isinstance(settings, StrategySettings):
+        raise ValueError("strategy settings are required")
+    if not inputs or not all(isinstance(item, StrategySignalInput) for item in inputs):
+        raise ValueError("strategy signal inputs are required")
+    ordered_inputs = tuple(sorted(inputs, key=lambda item: item.instrument.canonical_id))
+    keys = tuple(item.instrument.canonical_id for item in ordered_inputs)
+    if len(set(keys)) != len(keys):
+        raise ValueError("strategy signal inputs must be unique")
+    signals: dict[str, list[AlgorithmSignal]] = {
+        item.instrument.canonical_id: [] for item in ordered_inputs
+    }
+    for item in ordered_inputs:
+        if StrategyAlgorithm.PRICE_TREND in settings.enabled_algorithms:
+            signals[item.instrument.canonical_id].append(_price_trend_signal(item, settings))
+        if StrategyAlgorithm.DIVIDEND_QUALITY in settings.enabled_algorithms:
+            signals[item.instrument.canonical_id].append(_dividend_quality_signal(item, settings))
+    if StrategyAlgorithm.RELATIVE_STRENGTH in settings.enabled_algorithms:
+        for signal in _relative_strength_signals(ordered_inputs, settings):
+            signals[signal.instrument_key].append(signal)
+    summaries = tuple(
+        _signal_summary(
+            item.instrument.canonical_id, tuple(signals[item.instrument.canonical_id]), settings
+        )
+        for item in ordered_inputs
+    )
+    return StrategySignalArtifact(
+        settings.version,
+        _signal_hash(
+            {
+                "settings": strategy_settings_to_data(settings),
+                "inputs": [_strategy_signal_input_data(item) for item in ordered_inputs],
+            }
+        ),
+        summaries,
+    )
+
+
+def _signal_summary(
+    instrument_key: str, signals: tuple[AlgorithmSignal, ...], settings: StrategySettings
+) -> InstrumentSignalSummary:
+    by_algorithm = {item.declaration.algorithm: item for item in signals}
+    primary = by_algorithm[settings.primary_algorithm]
+    comparable_actions = {
+        item.action
+        for item in signals
+        if _participates_in_conflict(item, settings)
+        and item.status is SignalStatus.AVAILABLE
+        and item.action is not SignalAction.ABSTAIN
+    }
+    conflict = len(comparable_actions) > 1
+    return InstrumentSignalSummary(
+        instrument_key,
+        primary,
+        tuple(sorted(signals, key=lambda item: item.declaration.algorithm.value)),
+        conflict,
+        SignalConfidence.CONFLICTED if conflict else primary.confidence,
+    )
+
+
+def _participates_in_conflict(signal: AlgorithmSignal, settings: StrategySettings) -> bool:
+    if signal.declaration.algorithm is StrategyAlgorithm.PRICE_TREND:
+        return True
+    return (
+        signal.declaration.algorithm is StrategyAlgorithm.RELATIVE_STRENGTH
+        and settings.relative_strength_action_mode
+        is RelativeStrengthActionMode.INDEPENDENT_BUY_SELL
+    )
+
+
+def _price_trend_signal(
+    input_value: StrategySignalInput, settings: StrategySettings
+) -> AlgorithmSignal:
+    declaration = _algorithm_declaration(StrategyAlgorithm.PRICE_TREND, settings)
+    if not _signal_supported(input_value):
+        return _unsupported_signal(input_value, declaration)
+    required_history = settings.trend_exit_sma_days + settings.trend_exit_consecutive_closes - 1
+    if len(input_value.daily_prices) < required_history:
+        return _unavailable_signal(
+            input_value,
+            declaration,
+            SignalStatus.INSUFFICIENT_HISTORY,
+            f"requires {required_history} completed daily closes",
+        )
+    closes = tuple(item.close for item in input_value.daily_prices)
+    below_sma = all(
+        closes[end - 1]
+        < sum(closes[end - settings.trend_exit_sma_days : end], Decimal("0"))
+        / settings.trend_exit_sma_days
+        for end in range(
+            len(closes) - settings.trend_exit_consecutive_closes + 1,
+            len(closes) + 1,
+        )
+    )
+    latest_sma = (
+        sum(closes[-settings.trend_exit_sma_days :], Decimal("0")) / settings.trend_exit_sma_days
+    )
+    score = closes[-1] / latest_sma - Decimal("1")
+    if below_sma:
+        return AlgorithmSignal(
+            input_value.instrument.canonical_id,
+            declaration,
+            SignalAction.SELL,
+            score,
+            SignalConfidence.HIGH,
+            SignalStatus.AVAILABLE,
+            (
+                f"{settings.trend_exit_consecutive_closes} completed closes are below the "
+                f"{settings.trend_exit_sma_days}-session SMA",
+                "profit alone is not an exit condition",
+            ),
+            input_value.input_hash,
+        )
+    if closes[-1] > latest_sma:
+        return AlgorithmSignal(
+            input_value.instrument.canonical_id,
+            declaration,
+            SignalAction.BUY,
+            score,
+            SignalConfidence.MEDIUM,
+            SignalStatus.AVAILABLE,
+            (f"latest completed close is above the {settings.trend_exit_sma_days}-session SMA",),
+            input_value.input_hash,
+        )
+    return AlgorithmSignal(
+        input_value.instrument.canonical_id,
+        declaration,
+        SignalAction.HOLD,
+        score,
+        SignalConfidence.LOW,
+        SignalStatus.AVAILABLE,
+        (
+            "latest completed close is not above the SMA",
+            "trend exit remains inactive until the configured completed-close count is met",
+        ),
+        input_value.input_hash,
+    )
+
+
+def _relative_strength_signals(
+    inputs: tuple[StrategySignalInput, ...], settings: StrategySettings
+) -> tuple[AlgorithmSignal, ...]:
+    declaration = _algorithm_declaration(StrategyAlgorithm.RELATIVE_STRENGTH, settings)
+    values: dict[str, Decimal] = {}
+    groups: dict[tuple[AssetClass, str], list[StrategySignalInput]] = {}
+    output: dict[str, AlgorithmSignal] = {}
+    for item in inputs:
+        if not _signal_supported(item):
+            output[item.instrument.canonical_id] = _unsupported_signal(item, declaration)
+            continue
+        if len(item.daily_prices) <= settings.relative_strength_lookback_sessions:
+            output[item.instrument.canonical_id] = _unavailable_signal(
+                item,
+                declaration,
+                SignalStatus.INSUFFICIENT_HISTORY,
+                f"requires {settings.relative_strength_lookback_sessions + 1} completed daily closes",
+            )
+            continue
+        values[item.instrument.canonical_id] = item.daily_prices[-1].close / item.daily_prices[
+            -settings.relative_strength_lookback_sessions - 1
+        ].close - Decimal("1")
+        groups.setdefault((item.instrument.asset_class, item.instrument.market), []).append(item)
+    for group in groups.values():
+        eligible = tuple(item for item in group if item.instrument.canonical_id in values)
+        if len(eligible) < 2:
+            for item in eligible:
+                output[item.instrument.canonical_id] = _unavailable_signal(
+                    item,
+                    declaration,
+                    SignalStatus.INSUFFICIENT_COMPARABLE_INSTRUMENTS,
+                    "requires at least two comparable eligible instruments",
+                )
+            continue
+        ranked = tuple(
+            sorted(
+                eligible,
+                key=lambda item: (
+                    -values[item.instrument.canonical_id],
+                    item.instrument.canonical_id,
+                ),
+            )
+        )
+        best = values[ranked[0].instrument.canonical_id]
+        worst = values[ranked[-1].instrument.canonical_id]
+        for index, item in enumerate(ranked, start=1):
+            score = values[item.instrument.canonical_id]
+            if settings.relative_strength_action_mode is RelativeStrengthActionMode.RANKING_ONLY:
+                action = SignalAction.HOLD
+            elif best == worst:
+                action = SignalAction.HOLD
+            elif score == best:
+                action = SignalAction.BUY
+            elif score == worst:
+                action = SignalAction.SELL
+            else:
+                action = SignalAction.HOLD
+            output[item.instrument.canonical_id] = AlgorithmSignal(
+                item.instrument.canonical_id,
+                declaration,
+                action,
+                score,
+                SignalConfidence.MEDIUM if len(ranked) >= 3 else SignalConfidence.LOW,
+                SignalStatus.AVAILABLE,
+                (
+                    f"rank {index} of {len(ranked)} by {settings.relative_strength_lookback_sessions}-session return",
+                    f"action mode is {settings.relative_strength_action_mode.value}",
+                ),
+                item.input_hash,
+            )
+    return tuple(output[item.instrument.canonical_id] for item in inputs)
+
+
+def _dividend_quality_signal(
+    input_value: StrategySignalInput, settings: StrategySettings
+) -> AlgorithmSignal:
+    declaration = _algorithm_declaration(StrategyAlgorithm.DIVIDEND_QUALITY, settings)
+    if not _signal_supported(input_value):
+        return _unsupported_signal(input_value, declaration)
+    observations = input_value.dividend_observations
+    if len(observations) < settings.dividend_quality_minimum_observations:
+        if (
+            settings.insufficient_dividend_history_policy
+            is InsufficientDividendHistoryPolicy.ABSTAIN
+        ):
+            return _unavailable_signal(
+                input_value,
+                declaration,
+                SignalStatus.INSUFFICIENT_HISTORY,
+                f"requires {settings.dividend_quality_minimum_observations} sourced distributions",
+            )
+        return AlgorithmSignal(
+            input_value.instrument.canonical_id,
+            declaration,
+            SignalAction.HOLD,
+            Decimal("-1"),
+            SignalConfidence.LOW,
+            SignalStatus.INSUFFICIENT_HISTORY_DOWNRANKED,
+            (
+                f"fewer than {settings.dividend_quality_minimum_observations} sourced distributions",
+                "insufficient history is configured to lower rank",
+                "dividend quality does not create available cash",
+            ),
+            input_value.input_hash,
+        )
+    prior_amount = _decimal_median(tuple(item.amount_per_share for item in observations[:-1]))
+    latest_amount = observations[-1].amount_per_share
+    intervals = tuple(
+        (right.observation_date - left.observation_date).days
+        for left, right in zip(observations, observations[1:], strict=True)
+    )
+    expected_interval = _integer_median(intervals)
+    omitted = input_value.daily_prices[-1].session_date >= observations[
+        -1
+    ].observation_date + timedelta(days=expected_interval * 2)
+    reduced = latest_amount < prior_amount
+    downranked = settings.dividend_reduction_or_omission_downrank and (reduced or omitted)
+    rationale = ["dividend quality is ranking-only and does not create available cash"]
+    if reduced:
+        rationale.append("latest sourced distribution is below the historical median")
+    if omitted:
+        rationale.append("distribution timing is beyond twice the sourced median interval")
+    if not reduced and not omitted:
+        rationale.append("latest sourced distribution is not reduced against the historical median")
+    return AlgorithmSignal(
+        input_value.instrument.canonical_id,
+        declaration,
+        SignalAction.HOLD,
+        Decimal("0") if omitted else latest_amount / prior_amount - Decimal("1"),
+        SignalConfidence.LOW if downranked else SignalConfidence.MEDIUM,
+        SignalStatus.DOWNRANKED if downranked else SignalStatus.AVAILABLE,
+        tuple(rationale),
+        input_value.input_hash,
+    )
+
+
+def _algorithm_declaration(
+    algorithm: StrategyAlgorithm, settings: StrategySettings
+) -> StrategyAlgorithmDeclaration:
+    if algorithm is StrategyAlgorithm.PRICE_TREND:
+        return StrategyAlgorithmDeclaration(
+            algorithm,
+            1,
+            ("completed_daily_closes",),
+            (
+                ("sma_days", str(settings.trend_exit_sma_days)),
+                ("consecutive_closes", str(settings.trend_exit_consecutive_closes)),
+            ),
+        )
+    if algorithm is StrategyAlgorithm.RELATIVE_STRENGTH:
+        return StrategyAlgorithmDeclaration(
+            algorithm,
+            1,
+            ("completed_daily_closes", "comparable_eligible_instruments"),
+            (
+                ("lookback_sessions", str(settings.relative_strength_lookback_sessions)),
+                ("action_mode", settings.relative_strength_action_mode.value),
+            ),
+        )
+    return StrategyAlgorithmDeclaration(
+        algorithm,
+        1,
+        ("sourced_distribution_history", "completed_daily_closes"),
+        (
+            ("minimum_observations", str(settings.dividend_quality_minimum_observations)),
+            ("insufficient_history_policy", settings.insufficient_dividend_history_policy.value),
+            (
+                "reduction_or_omission_downrank",
+                str(settings.dividend_reduction_or_omission_downrank).lower(),
+            ),
+        ),
+    )
+
+
+def _unavailable_signal(
+    input_value: StrategySignalInput,
+    declaration: StrategyAlgorithmDeclaration,
+    status: SignalStatus,
+    reason: str,
+) -> AlgorithmSignal:
+    return AlgorithmSignal(
+        input_value.instrument.canonical_id,
+        declaration,
+        SignalAction.ABSTAIN,
+        None,
+        SignalConfidence.UNAVAILABLE,
+        status,
+        (reason,),
+        input_value.input_hash,
+    )
+
+
+def _unsupported_signal(
+    input_value: StrategySignalInput, declaration: StrategyAlgorithmDeclaration
+) -> AlgorithmSignal:
+    return _unavailable_signal(
+        input_value,
+        declaration,
+        SignalStatus.UNSUPPORTED_INSTRUMENT,
+        "instrument is unlisted, restricted, or outside supported asset classes or markets",
+    )
+
+
+def _signal_supported(input_value: StrategySignalInput) -> bool:
+    return (
+        input_value.instrument.asset_class in _SIGNAL_SUPPORTED_ASSET_CLASSES
+        and input_value.instrument.market in _SIGNAL_SUPPORTED_MARKETS
+        and input_value.instrument.listing_status is ListingStatus.LISTED
+        and not any(
+            (
+                input_value.instrument.margin_only,
+                input_value.instrument.short_only,
+                input_value.instrument.leveraged,
+                input_value.instrument.inverse,
+            )
+        )
+    )
+
+
+def _strategy_signal_input_data(input_value: StrategySignalInput) -> dict[str, object]:
+    return {
+        "instrument": {
+            "canonical_id": input_value.instrument.canonical_id,
+            "asset_class": input_value.instrument.asset_class.value,
+            "market": input_value.instrument.market,
+            "metadata_version": input_value.instrument.metadata_version,
+            "metadata_source_hash": input_value.instrument.metadata_source_hash,
+            "classification_version": input_value.instrument.classification_version,
+            "sector_version": input_value.instrument.sector_version,
+            "sector_source_hash": input_value.instrument.sector_source_hash,
+        },
+        "daily_prices": [
+            {
+                "session_date": item.session_date.isoformat(),
+                "close": str(item.close),
+                "source_hash": _signal_source_hash(item.source_hash),
+            }
+            for item in input_value.daily_prices
+        ],
+        "dividend_observations": [
+            {
+                "observation_date": item.observation_date.isoformat(),
+                "amount_per_share": str(item.amount_per_share),
+                "currency": item.currency.value,
+                "source_hash": item.source_hash,
+            }
+            for item in input_value.dividend_observations
+        ],
+    }
+
+
+def _signal_hash(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+
+
+def _signal_source_hash(value: str) -> str:
+    normalized = value.lower() if isinstance(value, str) else ""
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        raise ValueError("strategy signal source hash must be a SHA-256 digest")
+    return normalized
+
+
+def _decimal_median(values: tuple[Decimal, ...]) -> Decimal:
+    ordered = tuple(sorted(values))
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _integer_median(values: tuple[int, ...]) -> int:
+    ordered = tuple(sorted(values))
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) // 2
 
 
 def simulate_eod_long_only(

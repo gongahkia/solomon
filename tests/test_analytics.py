@@ -22,6 +22,7 @@ from stonks_cli.analytics import (
     maximum_drawdown,
     money_weighted_return,
     portfolio_health,
+    portfolio_nav,
     portfolio_return_attribution,
     realized_profile_drawdown,
     realized_rolling_drawdown,
@@ -78,6 +79,20 @@ def test_analytics_does_not_combine_unconverted_currencies() -> None:
         Currency.SGD,
         {(Currency.USD, Currency.SGD): FxRate(Currency.USD, Currency.SGD, datetime(2026, 1, 1).date(), Decimal("1.35"), "a" * 64)},
     )[("test:main", "US:SPY")] == Decimal("270")
+
+
+def test_analytics_calculates_currency_converted_nav() -> None:
+    rate = FxRate(Currency.USD, Currency.SGD, datetime(2026, 1, 1).date(), "1.35", "a" * 64)
+    nav = portfolio_nav(
+        {("main", Currency.USD): Decimal("10"), ("main", Currency.SGD): Decimal("135")},
+        {Currency.USD: {("main", "US:SPY"): Decimal("20")}},
+        Currency.USD,
+        {(Currency.USD, Currency.SGD): rate},
+    )
+
+    assert nav.cash == Decimal("110")
+    assert nav.market_value == Decimal("20")
+    assert nav.total == Decimal("130")
 
 
 def test_analytics_reports_returns_drawdown_concentration_and_missing_prices() -> None:

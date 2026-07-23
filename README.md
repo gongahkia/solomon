@@ -162,7 +162,8 @@ stale, malformed, unentitled, and unknown snapshots expose a status with no curr
 JSON keeps `quote_snapshots` and `valuation_price_sources` separate from calculated values. Portfolio
 allocation is reported separately by currency by default. To produce a base-currency view, import a
 sourced FX CSV with `date,base_currency,quote_currency,rate` and request it explicitly; missing direct
-or inverse rates fail the report rather than using an implied conversion.
+or inverse rates fail the report rather than using an implied conversion. An explicit base-currency view
+includes cash, market value, and total NAV in that currency.
 
 ```console
 $ stonks-cli import-fx personal /absolute/path/usd-sgd.csv

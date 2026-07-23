@@ -221,6 +221,17 @@ class ValuationFreshness(StrEnum):
 
 
 @dataclass(frozen=True)
+class PortfolioNAV:
+    currency: Currency
+    cash: Decimal
+    market_value: Decimal
+
+    @property
+    def total(self) -> Decimal:
+        return self.cash + self.market_value
+
+
+@dataclass(frozen=True)
 class PortfolioValuation:
     as_of: datetime
     currency: Currency
@@ -327,6 +338,32 @@ def convert_values_to_currency(
         for key, value in values.items():
             converted[key] = convert_currency(value, currency, target_currency, rates)
     return converted
+
+
+def portfolio_nav(
+    cash: dict[tuple[str, Currency], Decimal],
+    market_values: dict[Currency, dict[tuple[str, str], Decimal]],
+    target_currency: Currency,
+    rates: dict[tuple[Currency, Currency], FxRate],
+) -> PortfolioNAV:
+    if not isinstance(target_currency, Currency):
+        raise ValueError("portfolio NAV currency is invalid")
+    converted_cash = sum(
+        (
+            convert_currency(amount, currency, target_currency, rates)
+            for (_, currency), amount in cash.items()
+        ),
+        Decimal("0"),
+    )
+    converted_market_value = sum(
+        (
+            convert_currency(value, currency, target_currency, rates)
+            for currency, values in market_values.items()
+            for value in values.values()
+        ),
+        Decimal("0"),
+    )
+    return PortfolioNAV(target_currency, converted_cash, converted_market_value)
 
 
 def concentration_hhi(values: dict[tuple[str, str], Decimal]) -> Decimal:

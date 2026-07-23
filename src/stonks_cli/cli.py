@@ -24,6 +24,7 @@ from stonks_cli.analytics import (
     convert_values_to_currency,
     dividend_and_fee_attribution,
     market_values_by_currency,
+    portfolio_nav,
     sector_concentration,
     sector_concentrations_by_currency,
 )
@@ -408,12 +409,20 @@ def portfolio(
             target_currency = Currency(base_currency.upper())
         except ValueError as error:
             raise typer.BadParameter("base-currency is invalid") from error
+        rates = latest_fx_rates(EncryptedLedger(_profile(profile, key_file)))
         converted_values = convert_values_to_currency(
             values_by_currency,
             target_currency,
-            latest_fx_rates(EncryptedLedger(_profile(profile, key_file))),
+            rates,
         )
         payload["base_currency"] = target_currency.value
+        nav = portfolio_nav(cash, values_by_currency, target_currency, rates)
+        payload["nav"] = {
+            "currency": nav.currency.value,
+            "cash": str(nav.cash),
+            "market_value": str(nav.market_value),
+            "total": str(nav.total),
+        }
         payload["market_values"] = {
             f"{account}:{instrument}": str(value)
             for (account, instrument), value in converted_values.items()

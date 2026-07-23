@@ -613,6 +613,33 @@ def test_cli_portfolio_reports_quote_status_separately_from_value(tmp_path: Path
     }
 
 
+def test_cli_reports_usd_nav_with_explicit_base_currency(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    events = tmp_path / "events.csv"
+    events.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,instrument_currency\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,,,\n"
+        "main,2026-01-02T00:00:00+00:00,buy,USD,50,1,SPY,US,USD\n"
+    )
+    prices = tmp_path / "prices.csv"
+    prices.write_text("date,symbol,market,currency,close\n2026-01-02,SPY,US,USD,50\n")
+    assert runner.invoke(app, ["import-csv", "personal", str(events)]).exit_code == 0
+    assert runner.invoke(app, ["import-prices", "personal", str(prices)]).exit_code == 0
+
+    result = runner.invoke(app, ["portfolio", "personal", "--base-currency", "USD", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["nav"] == {
+        "currency": "USD",
+        "cash": "50",
+        "market_value": "50",
+        "total": "100",
+    }
+
+
 def test_cli_performance_attributes_dividends_and_fees_by_currency(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
     runner = CliRunner()

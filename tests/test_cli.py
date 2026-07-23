@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from base64 import b64encode
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -115,6 +115,8 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "disable-provider",
         "dividend-configure",
         "drawdown-configure",
+        "fx-configure",
+        "fx-settings",
         "universe-configure",
         "universe-settings",
         "universe-evaluate",
@@ -644,6 +646,113 @@ def test_cli_reports_usd_nav_with_explicit_base_currency(tmp_path: Path, monkeyp
         "market_value": "50",
         "total": "100",
     }
+
+
+def test_cli_reports_default_sgd_nav_with_fresh_rate_provenance(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    events = tmp_path / "events.csv"
+    events.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,instrument_currency\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,,,\n"
+        "main,2026-01-02T00:00:00+00:00,buy,USD,50,1,SPY,US,USD\n"
+    )
+    prices = tmp_path / "prices.csv"
+    prices.write_text("date,symbol,market,currency,close\n2026-01-02,SPY,US,USD,50\n")
+    current = datetime.now(UTC).replace(microsecond=0)
+    fx = tmp_path / "fx.csv"
+    fx.write_text(
+        "date,base_currency,quote_currency,rate,as_of_at,provider_id\n"
+        f"{current.date().isoformat()},USD,SGD,1.35,{current.isoformat()},mas\n"
+    )
+    assert runner.invoke(app, ["import-csv", "personal", str(events)]).exit_code == 0
+    assert runner.invoke(app, ["import-prices", "personal", str(prices)]).exit_code == 0
+    assert runner.invoke(app, ["import-fx", "personal", str(fx)]).exit_code == 0
+
+    result = runner.invoke(app, ["portfolio", "personal", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["reporting_currency"] == "SGD"
+    assert payload["reporting_status"] == "available"
+    assert payload["nav"] == {
+        "currency": "SGD",
+        "cash": "67.50",
+        "market_value": "67.50",
+        "total": "135.00",
+    }
+    converted_value = next(iter(payload["converted_market_values"].values()))
+    assert converted_value["source_currency"] == "USD"
+    assert converted_value["source_value"] == "50"
+    assert converted_value["reporting_value"] == "67.50"
+    assert converted_value["fx"]["rate"]["provider_id"] == "mas"
+    assert converted_value["fx"]["rate"]["session_date"] == current.date().isoformat()
+    assert converted_value["fx"]["freshness"]["status"] == "fresh"
+
+
+def test_cli_withholds_sgd_nav_for_stale_or_missing_fx(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    events = tmp_path / "events.csv"
+    events.write_text(
+        "account_id,occurred_at,kind,currency,amount,quantity,symbol,market,instrument_currency\n"
+        "main,2026-01-01T00:00:00+00:00,cash_deposit,USD,100,,,,\n"
+    )
+    stale = (datetime.now(UTC) - timedelta(days=4)).replace(microsecond=0)
+    fx = tmp_path / "fx.csv"
+    fx.write_text(
+        "date,base_currency,quote_currency,rate,as_of_at,provider_id\n"
+        f"{stale.date().isoformat()},USD,SGD,1.35,{stale.isoformat()},mas\n"
+    )
+    assert runner.invoke(app, ["import-csv", "personal", str(events)]).exit_code == 0
+    assert runner.invoke(app, ["import-fx", "personal", str(fx)]).exit_code == 0
+
+    stale_result = runner.invoke(app, ["portfolio", "personal", "--json"])
+
+    assert stale_result.exit_code == 0, stale_result.output
+    stale_payload = json.loads(stale_result.output)
+    assert stale_payload["reporting_status"] == "unavailable"
+    assert stale_payload["reporting_reason"] == ["stale_fx:USD:SGD"]
+    assert stale_payload["nav"] is None
+    assert "converted_cash" not in stale_payload
+    assert stale_payload["cash"]
+    assert stale_payload["fx_conversions"]["USD"]["freshness"]["status"] == "stale"
+
+    missing_home = tmp_path / "missing-home"
+    monkeypatch.setenv("STONKS_CLI_HOME", str(missing_home))
+    missing_key = tmp_path / "missing-key"
+    assert runner.invoke(app, ["init-profile", "missing", "--key-file", str(missing_key)]).exit_code == 0
+    assert runner.invoke(app, ["import-csv", "missing", str(events)]).exit_code == 0
+    missing_result = runner.invoke(app, ["portfolio", "missing", "--json"])
+
+    assert missing_result.exit_code == 0, missing_result.output
+    missing_payload = json.loads(missing_result.output)
+    assert missing_payload["reporting_reason"] == ["missing_fx:USD:SGD"]
+    assert missing_payload["nav"] is None
+
+
+def test_cli_configures_fx_reporting_freshness_limit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    initial = runner.invoke(app, ["fx-settings", "personal"])
+    result = runner.invoke(app, ["fx-configure", "personal", "--maximum-age-calendar-days", "5"])
+
+    assert initial.exit_code == 0, initial.output
+    assert json.loads(initial.output)["fx_reporting"]["maximum_age_calendar_days"] == 3
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["fx_reporting"] == {
+        "maximum_age_calendar_days": 5,
+        "version": 2,
+        "execution": "denied",
+    }
+    assert load_profile("personal").fx_reporting.maximum_age_calendar_days == 5
 
 
 def test_cli_refreshes_mas_fx_with_explicit_date_range(tmp_path: Path, monkeypatch) -> None:

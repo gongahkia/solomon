@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -8,6 +8,7 @@ import pytest
 
 from stonks_cli.accounting import fifo_lots, unrealized_pnl
 from stonks_cli.analytics import (
+    FxConversionStatus,
     PortfolioValuation,
     ValuationFreshness,
     allocations_by_currency,
@@ -26,6 +27,7 @@ from stonks_cli.analytics import (
     portfolio_return_attribution,
     realized_profile_drawdown,
     realized_rolling_drawdown,
+    reporting_fx_conversions,
     sector_concentration,
     sector_concentrations_by_currency,
     time_weighted_return,
@@ -93,6 +95,63 @@ def test_analytics_calculates_currency_converted_nav() -> None:
     assert nav.cash == Decimal("110")
     assert nav.market_value == Decimal("20")
     assert nav.total == Decimal("130")
+
+
+def test_reporting_fx_conversions_fail_closed_for_missing_or_stale_rates() -> None:
+    rate = FxRate(
+        Currency.USD,
+        Currency.SGD,
+        datetime(2026, 1, 1).date(),
+        "1.35",
+        "a" * 64,
+        datetime(2026, 1, 1, 4, tzinfo=UTC),
+        "mas",
+    )
+    available = reporting_fx_conversions(
+        (Currency.USD, Currency.SGD),
+        Currency.SGD,
+        {(Currency.USD, Currency.SGD): rate},
+        as_of=datetime(2026, 1, 4, 4, tzinfo=UTC),
+        maximum_age=timedelta(days=3),
+    )
+
+    assert available[0].status is FxConversionStatus.SAME_CURRENCY
+    assert available[1].status is FxConversionStatus.AVAILABLE
+    assert available[1].freshness is not None
+    assert available[1].freshness.age == timedelta(days=3)
+    stale = reporting_fx_conversions(
+        (Currency.USD,),
+        Currency.SGD,
+        {(Currency.USD, Currency.SGD): rate},
+        as_of=datetime(2026, 1, 4, 4, 1, tzinfo=UTC),
+        maximum_age=timedelta(days=3),
+    )
+    missing = reporting_fx_conversions(
+        (Currency.USD,),
+        Currency.SGD,
+        {},
+        as_of=datetime(2026, 1, 1, 4, tzinfo=UTC),
+        maximum_age=timedelta(days=3),
+    )
+
+    assert stale[0].status is FxConversionStatus.STALE
+    assert missing[0].status is FxConversionStatus.MISSING
+
+
+def test_currency_reporting_does_not_require_fx_for_zero_source_values() -> None:
+    converted = convert_values_to_currency(
+        {Currency.USD: {("main", "US:SPY"): Decimal("0")}}, Currency.SGD, {}
+    )
+    nav = portfolio_nav(
+        {("main", Currency.USD): Decimal("0"), ("main", Currency.SGD): Decimal("10")},
+        {Currency.USD: {("main", "US:SPY"): Decimal("0")}},
+        Currency.SGD,
+        {},
+    )
+
+    assert converted == {("main", "US:SPY"): Decimal("0")}
+    assert nav.cash == Decimal("10")
+    assert nav.market_value == Decimal("0")
 
 
 def test_analytics_reports_returns_drawdown_concentration_and_missing_prices() -> None:

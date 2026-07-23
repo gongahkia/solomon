@@ -71,6 +71,22 @@ class DrawdownSettings:
 
 
 @dataclass(frozen=True)
+class FxReportingSettings:
+    maximum_age_calendar_days: int = 3
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.maximum_age_calendar_days, int)
+            or isinstance(self.maximum_age_calendar_days, bool)
+            or not 0 <= self.maximum_age_calendar_days <= 365
+        ):
+            raise ProfileError("FX maximum age must be between 0 and 365 calendar days")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("FX reporting settings version must be a positive integer")
+
+
+@dataclass(frozen=True)
 class JournalSettings:
     open_on_advisory: bool = True
     retention_days: int | None = None
@@ -306,6 +322,7 @@ class ProfileConfig:
     dividends: DividendSettings = DividendSettings()
     reporting_currency: Currency = Currency.SGD
     drawdown: DrawdownSettings = DrawdownSettings()
+    fx_reporting: FxReportingSettings = FxReportingSettings()
     journal: JournalSettings = JournalSettings()
     benchmark: BenchmarkSettings = BenchmarkSettings()
     universe: EODUniverseSettings = EODUniverseSettings()
@@ -326,6 +343,8 @@ class ProfileConfig:
             raise ProfileError("profile benchmark settings are invalid")
         if not isinstance(self.drawdown, DrawdownSettings):
             raise ProfileError("profile drawdown settings are invalid")
+        if not isinstance(self.fx_reporting, FxReportingSettings):
+            raise ProfileError("profile FX reporting settings are invalid")
         if not isinstance(self.journal, JournalSettings):
             raise ProfileError("profile journal settings are invalid")
         if not isinstance(self.universe, EODUniverseSettings):
@@ -369,6 +388,8 @@ def save_profile(config: ProfileConfig) -> None:
     }
     if config.drawdown == DrawdownSettings():
         data.pop("drawdown")
+    if config.fx_reporting == FxReportingSettings():
+        data.pop("fx_reporting")
     if config.journal == JournalSettings():
         data.pop("journal")
     if config.universe == EODUniverseSettings():
@@ -404,6 +425,16 @@ def configure_drawdown(
     if candidate == config.drawdown:
         return config
     return replace(config, drawdown=replace(candidate, version=config.drawdown.version + 1))
+
+
+def configure_fx_reporting(config: ProfileConfig, maximum_age_calendar_days: int) -> ProfileConfig:
+    candidate = FxReportingSettings(maximum_age_calendar_days, config.fx_reporting.version)
+    if candidate == config.fx_reporting:
+        return config
+    return replace(
+        config,
+        fx_reporting=replace(candidate, version=config.fx_reporting.version + 1),
+    )
 
 
 def configure_benchmark(
@@ -499,6 +530,7 @@ def load_profile(name: str) -> ProfileConfig:
             dividends=DividendSettings(**value.get("dividends", {})),
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
             drawdown=DrawdownSettings(**value.get("drawdown", {})),
+            fx_reporting=FxReportingSettings(**value.get("fx_reporting", {})),
             journal=JournalSettings(**value.get("journal", {})),
             universe=EODUniverseSettings(**value.get("universe", {})),
         )

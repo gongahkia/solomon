@@ -17,6 +17,7 @@ from stonks_cli import __version__, advisory, llm, ml, paper
 from stonks_cli.accounting import fifo_lots
 from stonks_cli.alerts import price_move_alert
 from stonks_cli.analytics import (
+    FxConversion,
     allocation,
     allocations_by_currency,
     asset_class_allocation,
@@ -25,6 +26,7 @@ from stonks_cli.analytics import (
     dividend_and_fee_attribution,
     market_values_by_currency,
     portfolio_nav,
+    reporting_fx_conversions,
     sector_concentration,
     sector_concentrations_by_currency,
 )
@@ -45,11 +47,13 @@ from stonks_cli.config import (
     BenchmarkSettings,
     DividendSettings,
     EODUniverseSettings,
+    FxReportingSettings,
     JournalSettings,
     LLMSettings,
     ProfileConfig,
     configure_benchmark,
     configure_drawdown,
+    configure_fx_reporting,
     configure_journal,
     configure_universe,
     disable_provider,
@@ -208,6 +212,55 @@ def _profile(name: str, key_file: Path | None) -> ProfileConfig:
         if key_file is None
         else replace(config, key_file=str(key_file.expanduser().resolve()))
     )
+
+
+def _fx_conversion_data(
+    conversion: FxConversion, maximum_age_calendar_days: int
+) -> dict[str, object]:
+    rate = conversion.rate
+    freshness = conversion.freshness
+    return {
+        "source_currency": conversion.source_currency.value,
+        "target_currency": conversion.target_currency.value,
+        "status": conversion.status.value,
+        "conversion_rate": None if conversion.conversion_rate is None else str(conversion.conversion_rate),
+        "inverted": conversion.inverted,
+        "maximum_age_calendar_days": maximum_age_calendar_days,
+        "rate": None
+        if rate is None
+        else {
+            "value": str(rate.rate),
+            "session_date": rate.session_date.isoformat(),
+            "as_of": None if rate.as_of_at is None else rate.as_of_at.isoformat(),
+            "provider_id": rate.provider_id,
+            "source_hash": rate.source_hash,
+        },
+        "freshness": None
+        if freshness is None
+        else {
+            "checked_at": freshness.as_of_at.isoformat(),
+            "age_seconds": int(freshness.age.total_seconds()),
+            "status": "stale" if freshness.stale else "fresh",
+        },
+    }
+
+
+def _converted_value_data(
+    source_value: Decimal,
+    source_currency: Currency,
+    target_currency: Currency,
+    conversion: FxConversion,
+    maximum_age_calendar_days: int,
+) -> dict[str, object]:
+    conversion_rate = conversion.conversion_rate
+    assert conversion_rate is not None
+    return {
+        "source_currency": source_currency.value,
+        "source_value": str(source_value),
+        "reporting_currency": target_currency.value,
+        "reporting_value": str(source_value * conversion_rate),
+        "fx": _fx_conversion_data(conversion, maximum_age_calendar_days),
+    }
 
 
 def _instrument(symbol: str, market: str, currency: str, name: str | None) -> Instrument:
@@ -378,7 +431,8 @@ def portfolio(
     base_currency: str | None = typer.Option(None),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    ledger = EncryptedLedger(_profile(profile, key_file))
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
     events = list_events(ledger)
     cash = cash_balances(events)
     holdings = positions(events)
@@ -456,18 +510,51 @@ def portfolio(
         }
     except ProviderError:
         payload["sector_concentration_status"] = "unavailable"
-    if base_currency is not None:
-        try:
-            target_currency = Currency(base_currency.upper())
-        except ValueError as error:
-            raise typer.BadParameter("base-currency is invalid") from error
-        rates = latest_fx_rates(EncryptedLedger(_profile(profile, key_file)))
-        converted_values = convert_values_to_currency(
-            values_by_currency,
-            target_currency,
-            rates,
+    try:
+        target_currency = (
+            config.reporting_currency if base_currency is None else Currency(base_currency.upper())
         )
+    except ValueError as error:
+        raise typer.BadParameter("base-currency is invalid") from error
+    source_currencies = {
+        currency for (_, currency), amount in cash.items() if amount != 0
+    }
+    source_currencies.update(
+        currency
+        for currency, values in values_by_currency.items()
+        if any(value != 0 for value in values.values())
+    )
+    reporting_at = datetime.now(UTC)
+    rates = latest_fx_rates(ledger)
+    conversions = reporting_fx_conversions(
+        source_currencies,
+        target_currency,
+        rates,
+        as_of=reporting_at,
+        maximum_age=timedelta(days=config.fx_reporting.maximum_age_calendar_days),
+    )
+    conversion_by_currency = {item.source_currency: item for item in conversions}
+    payload["reporting_currency"] = target_currency.value
+    payload["reporting_as_of"] = reporting_at.isoformat()
+    payload["fx_conversions"] = {
+        item.source_currency.value: _fx_conversion_data(
+            item, config.fx_reporting.maximum_age_calendar_days
+        )
+        for item in conversions
+    }
+    if base_currency is not None:
         payload["base_currency"] = target_currency.value
+    unavailable = tuple(item for item in conversions if not item.available)
+    if unavailable:
+        payload["reporting_status"] = "unavailable"
+        payload["reporting_reason"] = [
+            f"{item.status.value}_fx:{item.source_currency.value}:{target_currency.value}"
+            for item in unavailable
+        ]
+        payload["nav"] = None
+    else:
+        payload["reporting_status"] = "available"
+        converted_values = convert_values_to_currency(values_by_currency, target_currency, rates)
         nav = portfolio_nav(cash, values_by_currency, target_currency, rates)
         payload["nav"] = {
             "currency": nav.currency.value,
@@ -478,6 +565,29 @@ def portfolio(
         payload["market_values"] = {
             f"{account}:{instrument}": str(value)
             for (account, instrument), value in converted_values.items()
+        }
+        payload["converted_market_values"] = {
+            f"{account}:{instrument}": _converted_value_data(
+                value,
+                currency,
+                target_currency,
+                conversion_by_currency[currency],
+                config.fx_reporting.maximum_age_calendar_days,
+            )
+            for currency, values in values_by_currency.items()
+            for (account, instrument), value in values.items()
+            if value != 0
+        }
+        payload["converted_cash"] = {
+            f"{account}:{currency.value}": _converted_value_data(
+                amount,
+                currency,
+                target_currency,
+                conversion_by_currency[currency],
+                config.fx_reporting.maximum_age_calendar_days,
+            )
+            for (account, currency), amount in cash.items()
+            if amount != 0
         }
         payload["allocation"] = {
             f"{account}:{instrument}": str(value)
@@ -505,6 +615,12 @@ def portfolio(
     if as_json:
         console.print_json(json.dumps(payload))
         return
+    nav_data = payload["nav"]
+    nav_text = (
+        "unavailable"
+        if not isinstance(nav_data, dict)
+        else f"{nav_data['total']} {nav_data['currency']}"
+    )
     console.print(
         render_table(
             TerminalTable(
@@ -514,6 +630,14 @@ def portfolio(
                     ("Events", str(payload["event_count"])),
                     ("Cash balances", str(len(cash))),
                     ("Open positions", str(len(holdings))),
+                    (
+                        "Reporting",
+                        f"{payload['reporting_currency']} ({payload['reporting_status']})",
+                    ),
+                    (
+                        "NAV",
+                        nav_text,
+                    ),
                 ),
             )
         )
@@ -2267,6 +2391,37 @@ def drawdown_configure(
                 },
             }
         )
+    )
+
+
+def _fx_reporting_settings_data(settings: FxReportingSettings) -> dict[str, object]:
+    return {
+        "maximum_age_calendar_days": settings.maximum_age_calendar_days,
+        "version": settings.version,
+        "execution": "denied",
+    }
+
+
+@app.command("fx-configure")
+def fx_configure(
+    profile: str,
+    maximum_age_calendar_days: int = typer.Option(3, min=0, max=365),
+) -> None:
+    try:
+        config = configure_fx_reporting(load_profile(profile), maximum_age_calendar_days)
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    save_profile(config)
+    console.print_json(
+        json.dumps({"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)})
+    )
+
+
+@app.command("fx-settings")
+def fx_settings(profile: str) -> None:
+    config = load_profile(profile)
+    console.print_json(
+        json.dumps({"profile": profile, "fx_reporting": _fx_reporting_settings_data(config.fx_reporting)})
     )
 
 

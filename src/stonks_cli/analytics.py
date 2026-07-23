@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
 from stonks_cli.config import ProfileConfig
 from stonks_cli.errors import ProviderError
-from stonks_cli.market_data import FxRate, convert_currency
+from stonks_cli.market_data import (
+    FxRate,
+    FxRateFreshness,
+    convert_currency,
+    fx_rate_freshness,
+    resolve_fx_rate,
+)
 from stonks_cli.types import (
     AssetClass,
     Currency,
@@ -231,6 +237,29 @@ class PortfolioNAV:
         return self.cash + self.market_value
 
 
+class FxConversionStatus(StrEnum):
+    SAME_CURRENCY = "same_currency"
+    AVAILABLE = "available"
+    MISSING = "missing"
+    STALE = "stale"
+    INCONSISTENT = "inconsistent"
+
+
+@dataclass(frozen=True)
+class FxConversion:
+    source_currency: Currency
+    target_currency: Currency
+    status: FxConversionStatus
+    conversion_rate: Decimal | None
+    inverted: bool
+    rate: FxRate | None
+    freshness: FxRateFreshness | None
+
+    @property
+    def available(self) -> bool:
+        return self.status in {FxConversionStatus.SAME_CURRENCY, FxConversionStatus.AVAILABLE}
+
+
 @dataclass(frozen=True)
 class PortfolioValuation:
     as_of: datetime
@@ -336,8 +365,100 @@ def convert_values_to_currency(
     converted: dict[tuple[str, str], Decimal] = {}
     for currency, values in values_by_currency.items():
         for key, value in values.items():
-            converted[key] = convert_currency(value, currency, target_currency, rates)
+            converted[key] = (
+                Decimal("0")
+                if value == 0
+                else convert_currency(value, currency, target_currency, rates)
+            )
     return converted
+
+
+def reporting_fx_conversions(
+    source_currencies: Iterable[Currency],
+    target_currency: Currency,
+    rates: Mapping[tuple[Currency, Currency], FxRate],
+    *,
+    as_of: datetime,
+    maximum_age: timedelta,
+) -> tuple[FxConversion, ...]:
+    if not isinstance(target_currency, Currency):
+        raise ValueError("reporting currency is invalid")
+    if as_of.tzinfo is None:
+        raise ValueError("FX reporting time must be timezone-aware")
+    if maximum_age < timedelta(0):
+        raise ValueError("FX maximum age must be non-negative")
+    values: list[FxConversion] = []
+    for source_currency in sorted(set(source_currencies), key=lambda item: item.value):
+        if not isinstance(source_currency, Currency):
+            raise ValueError("FX source currency is invalid")
+        if source_currency is target_currency:
+            values.append(
+                FxConversion(
+                    source_currency,
+                    target_currency,
+                    FxConversionStatus.SAME_CURRENCY,
+                    Decimal("1"),
+                    False,
+                    None,
+                    None,
+                )
+            )
+            continue
+        try:
+            resolution = resolve_fx_rate(source_currency, target_currency, dict(rates))
+        except ProviderError:
+            values.append(
+                FxConversion(
+                    source_currency,
+                    target_currency,
+                    FxConversionStatus.MISSING,
+                    None,
+                    False,
+                    None,
+                    None,
+                )
+            )
+            continue
+        if resolution.rate is None:
+            values.append(
+                FxConversion(
+                    source_currency,
+                    target_currency,
+                    FxConversionStatus.INCONSISTENT,
+                    None,
+                    False,
+                    None,
+                    None,
+                )
+            )
+            continue
+        try:
+            freshness = fx_rate_freshness(resolution.rate, as_of=as_of, maximum_age=maximum_age)
+        except (ProviderError, ValueError):
+            values.append(
+                FxConversion(
+                    source_currency,
+                    target_currency,
+                    FxConversionStatus.INCONSISTENT,
+                    resolution.conversion_rate,
+                    resolution.inverted,
+                    resolution.rate,
+                    None,
+                )
+            )
+            continue
+        values.append(
+            FxConversion(
+                source_currency,
+                target_currency,
+                FxConversionStatus.STALE if freshness.stale else FxConversionStatus.AVAILABLE,
+                resolution.conversion_rate,
+                resolution.inverted,
+                resolution.rate,
+                freshness,
+            )
+        )
+    return tuple(values)
 
 
 def portfolio_nav(
@@ -352,6 +473,7 @@ def portfolio_nav(
         (
             convert_currency(amount, currency, target_currency, rates)
             for (_, currency), amount in cash.items()
+            if amount != 0
         ),
         Decimal("0"),
     )
@@ -360,6 +482,7 @@ def portfolio_nav(
             convert_currency(value, currency, target_currency, rates)
             for currency, values in market_values.items()
             for value in values.values()
+            if value != 0
         ),
         Decimal("0"),
     )

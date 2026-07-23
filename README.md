@@ -160,10 +160,13 @@ provider state, bid/ask-derived spread, provider fingerprint, and subscription m
 entitled, fresh, non-excessive-spread status can supply a current valuation; delayed, unavailable,
 stale, malformed, unentitled, and unknown snapshots expose a status with no current price. Portfolio
 JSON keeps `quote_snapshots` and `valuation_price_sources` separate from calculated values. Portfolio
-allocation is reported separately by currency by default. To produce a base-currency view, import a
-sourced FX CSV with `date,base_currency,quote_currency,rate` and request it explicitly; missing direct
-or inverse rates fail the report rather than using an implied conversion. An explicit base-currency view
-includes cash, market value, and total NAV in that currency.
+allocation is reported separately by currency. Portfolio reporting defaults to SGD; import a sourced FX
+CSV with `date,base_currency,quote_currency,rate` or retrieve MAS reference rates first. Each converted
+cash or market value records its source currency, source value, rate provider, source hash, session date,
+as-of time, and freshness. The default three-calendar-day limit is profile-configurable with
+`fx-configure`; missing or stale FX leaves source-currency facts visible but withholds the
+synthetic reporting-currency NAV total. `--base-currency` explicitly overrides the profile reporting
+currency for that view.
 
 ## EOD universe
 
@@ -182,6 +185,7 @@ inside the requested range; a malformed, empty, duplicate, or non-positive respo
 ```console
 $ stonks-cli import-fx personal /absolute/path/usd-sgd.csv
 $ stonks-cli refresh-mas-fx personal 2026-07-01 2026-07-22
+$ stonks-cli fx-configure personal --maximum-age-calendar-days 3
 $ stonks-cli portfolio personal --base-currency SGD --json
 ```
 

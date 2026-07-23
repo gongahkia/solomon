@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -89,6 +90,16 @@ class BenchmarkPeriodReport:
     status: str
 
 
+@dataclass(frozen=True)
+class BenchmarkBlendAudit:
+    configuration_version: int
+    origin: str
+    source_retrieved_at: datetime
+    source_provenance: tuple[str, ...]
+    data_status: str
+    components: tuple[BenchmarkComponent, ...]
+
+
 def _initialize(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -101,6 +112,19 @@ def _initialize(connection: sqlite3.Connection) -> None:
             as_of_at TEXT NOT NULL,
             provider_id TEXT NOT NULL,
             UNIQUE(identifier, session_date, source_hash)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS benchmark_blend_audits (
+            configuration_version INTEGER NOT NULL,
+            origin TEXT NOT NULL,
+            source_retrieved_at TEXT NOT NULL,
+            source_provenance_json TEXT NOT NULL,
+            data_status TEXT NOT NULL,
+            components_json TEXT NOT NULL,
+            UNIQUE(configuration_version, origin, source_retrieved_at)
         )
         """
     )
@@ -197,6 +221,119 @@ def latest_total_return_points(
                 row["provider_id"],
             )
     return points
+
+
+def component_data_availability(
+    settings: BenchmarkSettings, points: dict[tuple[str, date], BenchmarkTotalReturnPoint]
+) -> tuple[str, ...]:
+    component_currencies = {
+        component.identifier: component.currency for component in settings.components
+    }
+    available = {
+        identifier
+        for (identifier, _), point in points.items()
+        if component_currencies.get(identifier) is point.currency
+    }
+    return tuple(
+        component.identifier for component in settings.components if component.identifier not in available
+    )
+
+
+def record_blend_audit(
+    ledger: EncryptedLedger,
+    settings: BenchmarkSettings,
+    *,
+    origin: str,
+    source_retrieved_at: datetime,
+    source_provenance: tuple[str, ...],
+    data_status: str,
+) -> BenchmarkBlendAudit:
+    if source_retrieved_at.tzinfo is None:
+        raise ValueError("benchmark source retrieval time must be timezone-aware")
+    origin = origin.strip().lower()
+    if not _PROVIDER.fullmatch(origin.replace("-", "_")):
+        raise ValueError("benchmark audit origin is invalid")
+    if not source_provenance or not all(isinstance(item, str) and item.strip() for item in source_provenance):
+        raise ValueError("benchmark source provenance is required")
+    if data_status not in {"available", "unavailable"}:
+        raise ValueError("benchmark data status is invalid")
+    retrieved_at = source_retrieved_at.astimezone(UTC)
+    audit = BenchmarkBlendAudit(
+        settings.version,
+        origin,
+        retrieved_at,
+        tuple(item.strip() for item in source_provenance),
+        data_status,
+        settings.components,
+    )
+    components_json = json.dumps(
+        [
+            {
+                "identifier": component.identifier,
+                "name": component.name,
+                "currency": component.currency.value,
+                "weight": component.weight,
+                "source_url": component.source_url,
+                "return_basis": component.return_basis,
+            }
+            for component in settings.components
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with ledger.connection() as connection:
+        _initialize(connection)
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO benchmark_blend_audits (
+                configuration_version, origin, source_retrieved_at, source_provenance_json, data_status,
+                components_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audit.configuration_version,
+                audit.origin,
+                audit.source_retrieved_at.isoformat(),
+                json.dumps(audit.source_provenance, separators=(",", ":")),
+                audit.data_status,
+                components_json,
+            ),
+        )
+    return audit
+
+
+def blend_audits(ledger: EncryptedLedger) -> tuple[BenchmarkBlendAudit, ...]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT configuration_version, origin, source_retrieved_at, source_provenance_json, data_status,
+                   components_json
+            FROM benchmark_blend_audits
+            ORDER BY configuration_version, source_retrieved_at
+            """
+        ).fetchall()
+    return tuple(
+        BenchmarkBlendAudit(
+            int(row["configuration_version"]),
+            row["origin"],
+            datetime.fromisoformat(row["source_retrieved_at"]),
+            tuple(json.loads(row["source_provenance_json"])),
+            row["data_status"],
+            tuple(
+                BenchmarkComponent(
+                    item["identifier"],
+                    item["name"],
+                    Currency(item["currency"]),
+                    item["weight"],
+                    item["source_url"],
+                    item["return_basis"],
+                )
+                for item in json.loads(row["components_json"])
+            ),
+        )
+        for row in rows
+    )
 
 
 def calculate_period_report(

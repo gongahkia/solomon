@@ -188,6 +188,18 @@ total-return levels and exact-date FX records for the profile reporting currency
 `unavailable` or `stale` rather than calculating from missing inputs. Legacy `benchmarks` profile entries remain
 stored for compatibility but are not used as reference components.
 
+`benchmark-templates` displays informational (not personalised investment-advice) comparisons for the
+default US/Singapore blend, global equity, global listed real estate, US dividend growth, and US aggregate
+bonds. Sources captured on 2026-07-23 are [S&P 500](https://www.spglobal.com/spdji/en/indices/equity/sp-500/),
+[Straits Times Index](https://www.lseg.com/content/dam/ftse-russell/en_us/documents/ground-rules/straits-times-index-ground-rules.pdf),
+[MSCI ACWI](https://www.msci.com/indexes/index/892400/msci-acwi-index),
+[FTSE EPRA Nareit Developed](https://research.ftserussell.com/Analytics/FactSheets/temp/aad58f07-6527-411d-a871-99f09b77afa4.pdf),
+[VIG](https://investor.vanguard.com/investment-products/etfs/profile/vig), and
+[AGG](https://www.ishares.com/us/products/239458/ishares-core-us-aggregate-bond-etf). `benchmark-template-import`
+requires a sourced total-return observation for each selected component before activation and records encrypted
+source provenance, retrieval time, data status, components, and configuration version. `benchmark-configure`
+creates or edits a custom blend and records the same local audit fields.
+
 `research-candidates` stores encrypted, deterministic ML screening artifacts. Each item is labelled
 `research_candidate` with `experimental_price_only_model` and `no_execution` flags; it is never a
 broker instruction, allocation target, or automated action. `strategy-advisory-journal-*` stores

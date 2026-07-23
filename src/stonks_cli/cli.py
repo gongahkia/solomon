@@ -28,12 +28,17 @@ from stonks_cli.analytics import (
     sector_concentrations_by_currency,
 )
 from stonks_cli.benchmark import (
+    BenchmarkBlendAudit,
     BenchmarkComponentPeriod,
     BenchmarkPeriodReport,
+    blend_audits,
     calculate_period_report,
+    component_data_availability,
     import_total_return_csv,
     latest_total_return_points,
+    record_blend_audit,
 )
+from stonks_cli.benchmark_templates import BenchmarkTemplate, get_template, list_templates
 from stonks_cli.config import (
     BenchmarkComponent,
     BenchmarkSettings,
@@ -916,6 +921,53 @@ def _benchmark_period_data(profile: str, report: BenchmarkPeriodReport) -> dict[
         "status": report.status,
         "reference_only": True,
         "execution": "denied",
+    }
+
+
+def _benchmark_template_data(template: BenchmarkTemplate) -> dict[str, object]:
+    return {
+        "identifier": template.identifier,
+        "name": template.name,
+        "components": [
+            {
+                "identifier": component.identifier,
+                "name": component.name,
+                "currency": component.currency.value,
+                "weight": component.weight,
+                "source_url": component.source_url,
+                "return_basis": component.return_basis,
+            }
+            for component in template.components
+        ],
+        "coverage": template.coverage,
+        "return_methodology": template.return_methodology,
+        "cost_availability": template.cost_availability,
+        "diversification": template.diversification,
+        "pros": list(template.pros),
+        "cons": list(template.cons),
+        "source_provenance": list(template.source_provenance),
+        "retrieved_at": template.retrieved_at,
+        "informational_only": True,
+        "personalised_investment_advice": False,
+    }
+
+
+def _benchmark_audit_data(record: BenchmarkBlendAudit) -> dict[str, object]:
+    return {
+        "configuration_version": record.configuration_version,
+        "origin": record.origin,
+        "source_retrieved_at": record.source_retrieved_at.isoformat(),
+        "source_provenance": list(record.source_provenance),
+        "data_status": record.data_status,
+        "components": [
+            {
+                "identifier": component.identifier,
+                "currency": component.currency.value,
+                "weight": component.weight,
+                "source_url": component.source_url,
+            }
+            for component in record.components
+        ],
     }
 
 
@@ -2173,16 +2225,96 @@ def benchmark_configure(
             if reset_defaults
             else tuple(_benchmark_component_option(value) for value in component)
         )
-        config = configure_benchmark(load_profile(profile), components)
+        current = load_profile(profile)
+        config = configure_benchmark(current, components)
     except ProfileError as error:
         raise typer.BadParameter(str(error)) from error
     save_profile(config)
-    console.print_json(json.dumps(_benchmark_settings_data(profile, config.benchmark)))
+    ledger = EncryptedLedger(config)
+    missing = component_data_availability(config.benchmark, latest_total_return_points(ledger))
+    record_blend_audit(
+        ledger,
+        config.benchmark,
+        origin="custom",
+        source_retrieved_at=datetime.now(UTC),
+        source_provenance=("user-configured",),
+        data_status="available" if not missing else "unavailable",
+    )
+    payload = _benchmark_settings_data(profile, config.benchmark)
+    payload["data_status"] = "available" if not missing else "unavailable"
+    payload["missing_total_return_components"] = list(missing)
+    console.print_json(json.dumps(payload))
 
 
 @app.command("benchmark-settings")
 def benchmark_settings(profile: str) -> None:
     console.print_json(json.dumps(_benchmark_settings_data(profile, load_profile(profile).benchmark)))
+
+
+@app.command("benchmark-templates")
+def benchmark_templates() -> None:
+    console.print_json(
+        json.dumps(
+            {
+                "templates": [_benchmark_template_data(template) for template in list_templates()],
+                "informational_only": True,
+                "personalised_investment_advice": False,
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("benchmark-template-import")
+def benchmark_template_import(profile: str, template_id: str) -> None:
+    try:
+        template = get_template(template_id)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    current = load_profile(profile)
+    candidate = configure_benchmark(current, template.components)
+    ledger = EncryptedLedger(candidate)
+    missing = component_data_availability(candidate.benchmark, latest_total_return_points(ledger))
+    if missing:
+        console.print_json(
+            json.dumps(
+                {
+                    "profile": profile,
+                    "template": template.identifier,
+                    "activated": False,
+                    "data_status": "unavailable",
+                    "missing_total_return_components": list(missing),
+                    "execution": "denied",
+                }
+            )
+        )
+        raise typer.Exit(1)
+    save_profile(candidate)
+    record_blend_audit(
+        ledger,
+        candidate.benchmark,
+        origin=template.identifier,
+        source_retrieved_at=datetime.fromisoformat(template.retrieved_at),
+        source_provenance=template.source_provenance,
+        data_status="available",
+    )
+    payload = _benchmark_settings_data(profile, candidate.benchmark)
+    payload.update(
+        {
+            "template": template.identifier,
+            "activated": True,
+            "data_status": "available",
+        }
+    )
+    console.print_json(json.dumps(payload))
+
+
+@app.command("benchmark-audit")
+def benchmark_audit(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    records = blend_audits(EncryptedLedger(_profile(profile, key_file)))
+    console.print_json(
+        json.dumps({"profile": profile, "records": [_benchmark_audit_data(record) for record in records]})
+    )
 
 
 @app.command("benchmark-performance")

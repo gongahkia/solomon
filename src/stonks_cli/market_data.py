@@ -7,10 +7,15 @@ import re
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from stonks_cli.errors import ProviderError
 from stonks_cli.storage import EncryptedLedger
@@ -29,6 +34,39 @@ from stonks_cli.types import (
 
 _US_TICKER = re.compile(r"[A-Z0-9][A-Z0-9.-]*\Z")
 _SG_TICKER = re.compile(r"[A-Z0-9][A-Z0-9.-]*\Z")
+_MAS_EXCHANGE_RATES_URL = "https://eservices.mas.gov.sg/statistics/msb/exchangerates.aspx"
+_MAS_PROVIDER_ID = "mas"
+_MAS_TIMEZONE = ZoneInfo("Asia/Singapore")
+_MAS_MONTHS = {
+    "Jan": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Apr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Aug": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dec": 12,
+}
+_MAS_FORM_HIDDEN_FIELDS = frozenset({"__VIEWSTATE", "__EVENTVALIDATION", "__VIEWSTATEGENERATOR"})
+
+
+class _MasExchangeRatesFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fields: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "input":
+            return
+        values = {name.lower(): value for name, value in attrs}
+        name = values.get("name")
+        value = values.get("value")
+        if name in _MAS_FORM_HIDDEN_FIELDS and value:
+            self.fields[name] = value
 
 
 @dataclass(frozen=True)
@@ -270,6 +308,17 @@ class FxRateResolution:
     rate: FxRate | None
     conversion_rate: Decimal
     inverted: bool
+
+
+@dataclass(frozen=True)
+class FxReferenceRefresh:
+    provider_id: str
+    source_url: str
+    start_date: date
+    end_date: date
+    source_hash: str
+    fetched_rates: int
+    persisted_rates: int
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
@@ -755,6 +804,146 @@ def latest_quote_snapshots(ledger: EncryptedLedger) -> dict[str, QuoteSnapshot]:
         )
         snapshots[snapshot.instrument.key] = snapshot
     return snapshots
+
+
+def refresh_mas_usd_sgd_reference_rates(
+    ledger: EncryptedLedger,
+    start_date: date,
+    end_date: date,
+    *,
+    timeout: float = 20,
+) -> FxReferenceRefresh:
+    if not isinstance(start_date, date) or not isinstance(end_date, date):
+        raise ValueError("MAS FX date range is required")
+    if start_date > end_date:
+        raise ValueError("MAS FX start date must not be after end date")
+    if timeout <= 0:
+        raise ValueError("MAS FX timeout must be positive")
+    content = _download_mas_usd_sgd_csv(start_date, end_date, timeout)
+    observations = _parse_mas_usd_sgd_csv(content, start_date, end_date)
+    source_hash = ledger.archive_source(content)
+    rates = tuple(
+        FxRate(
+            Currency.USD,
+            Currency.SGD,
+            session_date,
+            rate,
+            source_hash,
+            datetime.combine(session_date, time(12), tzinfo=_MAS_TIMEZONE),
+            _MAS_PROVIDER_ID,
+            FxAsOfPrecision.INSTANT,
+        )
+        for session_date, rate in observations
+    )
+    return FxReferenceRefresh(
+        _MAS_PROVIDER_ID,
+        _MAS_EXCHANGE_RATES_URL,
+        start_date,
+        end_date,
+        source_hash,
+        len(rates),
+        store_fx_rates(ledger, rates),
+    )
+
+
+def _download_mas_usd_sgd_csv(start_date: date, end_date: date, timeout: float) -> bytes:
+    form_request = Request(_MAS_EXCHANGE_RATES_URL, headers={"Accept": "text/html"})
+    form = _read_mas_response(form_request, timeout, expected_content_type="text/html")
+    parser = _MasExchangeRatesFormParser()
+    try:
+        parser.feed(form.decode("utf-8"))
+        parser.close()
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ProviderError("MAS FX form is malformed") from error
+    missing = {"__VIEWSTATE", "__EVENTVALIDATION"} - set(parser.fields)
+    if missing:
+        raise ProviderError("MAS FX form is missing required fields")
+    payload = {
+        **parser.fields,
+        "ctl00$ContentPlaceHolder1$StartYearDropDownList": str(start_date.year),
+        "ctl00$ContentPlaceHolder1$EndYearDropDownList": str(end_date.year),
+        "ctl00$ContentPlaceHolder1$StartMonthDropDownList": str(start_date.month),
+        "ctl00$ContentPlaceHolder1$EndMonthDropDownList": str(end_date.month),
+        "ctl00$ContentPlaceHolder1$FrequencyDropDownList": "D",
+        "ctl00$ContentPlaceHolder1$EndOfPeriodPerUnitCheckBoxList$2": "on",
+        "ctl00$ContentPlaceHolder1$DownloadButton": "Download",
+    }
+    download_request = Request(
+        _MAS_EXCHANGE_RATES_URL,
+        data=urlencode(payload).encode("ascii"),
+        headers={"Accept": "text/csv"},
+        method="POST",
+    )
+    return _read_mas_response(download_request, timeout, expected_content_type="text/csv")
+
+
+def _read_mas_response(request: Request, timeout: float, *, expected_content_type: str) -> bytes:
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get_content_type()
+            content = bytes(response.read())
+    except (HTTPError, OSError, URLError) as error:
+        raise ProviderError("MAS FX request failed") from error
+    if content_type != expected_content_type:
+        raise ProviderError("MAS FX response has an unexpected content type")
+    if not content:
+        raise ProviderError("MAS FX response is empty")
+    return content
+
+
+def _parse_mas_usd_sgd_csv(
+    content: bytes, start_date: date, end_date: date
+) -> tuple[tuple[date, Decimal], ...]:
+    try:
+        rows = tuple(csv.reader(io.StringIO(content.decode("utf-8-sig"))))
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise ProviderError("MAS FX CSV is malformed") from error
+    title_seen = False
+    daily_seen = False
+    header_seen = False
+    current_year: int | None = None
+    current_month: int | None = None
+    observations: list[tuple[date, Decimal]] = []
+    seen_dates: set[date] = set()
+    for raw_row in rows:
+        row = tuple(value.strip() for value in raw_row)
+        if row == ("MAS: Financial Database - Exchange Rates",):
+            title_seen = True
+            continue
+        if row == ("Exchange Rates (Daily)",):
+            daily_seen = True
+            continue
+        if row == ("End of Period", "", "", "S$ Per Unit of US Dollar"):
+            header_seen = True
+            continue
+        if not header_seen or not any(row) or row[0].startswith("*"):
+            continue
+        if len(row) != 4:
+            raise ProviderError("MAS FX CSV contains an invalid rate row")
+        year_text, month_text, day_text, rate_text = row
+        try:
+            if year_text:
+                current_year = int(year_text)
+            if month_text:
+                current_month = _MAS_MONTHS[month_text]
+            if current_year is None or current_month is None:
+                raise ValueError("rate date is incomplete")
+            session_date = date(current_year, current_month, int(day_text))
+            rate = decimal(rate_text)
+        except (KeyError, ValueError) as error:
+            raise ProviderError("MAS FX CSV contains an invalid rate") from error
+        if rate <= 0:
+            raise ProviderError("MAS FX CSV contains a non-positive rate")
+        if session_date in seen_dates:
+            raise ProviderError("MAS FX CSV contains duplicate rate dates")
+        seen_dates.add(session_date)
+        if start_date <= session_date <= end_date:
+            observations.append((session_date, rate))
+    if not title_seen or not daily_seen or not header_seen:
+        raise ProviderError("MAS FX CSV does not match the expected daily USD/SGD format")
+    if not observations:
+        raise ProviderError("MAS FX CSV contains no rates for the requested range")
+    return tuple(observations)
 
 
 def store_fx_rates(ledger: EncryptedLedger, rates: tuple[FxRate, ...]) -> int:

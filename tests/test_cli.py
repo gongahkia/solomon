@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from base64 import b64encode
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,6 +14,7 @@ from stonks_cli.cli import app
 from stonks_cli.config import load_profile
 from stonks_cli.market_data import (
     DailyPrice,
+    FxReferenceRefresh,
     QuoteQuality,
     QuoteSnapshot,
     QuoteStatus,
@@ -46,6 +47,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "import-prices",
         "import-liquidity",
         "import-fx",
+        "refresh-mas-fx",
         "import-benchmark-total-returns",
         "portfolio",
         "daily-report",
@@ -641,6 +643,43 @@ def test_cli_reports_usd_nav_with_explicit_base_currency(tmp_path: Path, monkeyp
         "cash": "50",
         "market_value": "50",
         "total": "100",
+    }
+
+
+def test_cli_refreshes_mas_fx_with_explicit_date_range(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    calls = []
+
+    def refresh(ledger, start_date: date, end_date: date) -> FxReferenceRefresh:
+        calls.append((ledger.config.name, start_date, end_date))
+        return FxReferenceRefresh(
+            "mas",
+            "https://eservices.mas.gov.sg/statistics/msb/exchangerates.aspx",
+            start_date,
+            end_date,
+            "a" * 64,
+            2,
+            1,
+        )
+
+    monkeypatch.setattr(cli, "refresh_mas_usd_sgd_reference_rates", refresh)
+
+    result = runner.invoke(app, ["refresh-mas-fx", "personal", "2026-07-01", "2026-07-02"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("personal", date(2026, 7, 1), date(2026, 7, 2))]
+    assert json.loads(result.output) == {
+        "profile": "personal",
+        "provider_id": "mas",
+        "source_url": "https://eservices.mas.gov.sg/statistics/msb/exchangerates.aspx",
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-02",
+        "source_hash": "a" * 64,
+        "fetched_rates": 2,
+        "persisted_rates": 1,
     }
 
 

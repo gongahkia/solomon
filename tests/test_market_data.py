@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import pytest
 from conftest import encrypted_ledger
 
+from stonks_cli import market_data
 from stonks_cli.errors import ProviderError
 from stonks_cli.market_data import (
     DailyPrice,
@@ -20,6 +22,7 @@ from stonks_cli.market_data import (
     archive_and_store_quote_snapshots,
     convert_currency,
     fx_rate_freshness,
+    fx_rates_for_session,
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
@@ -32,6 +35,7 @@ from stonks_cli.market_data import (
     latest_quote_snapshots,
     price_freshness,
     price_revisions,
+    refresh_mas_usd_sgd_reference_rates,
     resolve_fx_rate,
     resolve_sg_equity_or_etf,
     resolve_us_equity_or_etf,
@@ -313,6 +317,129 @@ def test_fx_rate_storage_migrates_legacy_csv_rows_with_date_precision(tmp_path: 
     assert rate.provider_id == "csv"
     assert rate.as_of_at == datetime(2026, 1, 2, tzinfo=UTC)
     assert rate.as_of_precision is FxAsOfPrecision.DATE
+
+
+def test_mas_fx_refresh_archives_validated_daily_usd_sgd_rates(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+    form = b'''<form><input name="__VIEWSTATE" value="viewstate"><input name="__EVENTVALIDATION" value="validation"><input name="__VIEWSTATEGENERATOR" value="generator"></form>'''
+    source = b'''MAS: Financial Database - Exchange Rates
+
+Exchange Rates (Daily)
+Jul 2026 to Jul 2026
+
+
+End of Period,,,S$ Per Unit of US Dollar
+2026,Jul,01,1.2964
+,,02,1.2950
+,,03,1.2942
+
+"* Daily figures are values as of noon."
+'''
+    requests = []
+
+    class Headers:
+        def __init__(self, content_type: str) -> None:
+            self.content_type = content_type
+
+        def get_content_type(self) -> str:
+            return self.content_type
+
+    class Response:
+        def __init__(self, content: bytes, content_type: str) -> None:
+            self.content = content
+            self.headers = Headers(content_type)
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.content
+
+    responses = [Response(form, "text/html"), Response(source, "text/csv")]
+
+    def open_request(request, timeout: float):
+        requests.append((request, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(market_data, "urlopen", open_request)
+
+    result = refresh_mas_usd_sgd_reference_rates(
+        ledger, date(2026, 7, 1), date(2026, 7, 2), timeout=7
+    )
+
+    assert result.provider_id == "mas"
+    assert result.fetched_rates == 2
+    assert result.persisted_rates == 2
+    assert requests[0][0].get_method() == "GET"
+    assert requests[1][0].get_method() == "POST"
+    assert requests[0][1] == requests[1][1] == 7
+    payload = parse_qs(requests[1][0].data.decode("ascii"))
+    assert payload == {
+        "__VIEWSTATE": ["viewstate"],
+        "__EVENTVALIDATION": ["validation"],
+        "__VIEWSTATEGENERATOR": ["generator"],
+        "ctl00$ContentPlaceHolder1$StartYearDropDownList": ["2026"],
+        "ctl00$ContentPlaceHolder1$EndYearDropDownList": ["2026"],
+        "ctl00$ContentPlaceHolder1$StartMonthDropDownList": ["7"],
+        "ctl00$ContentPlaceHolder1$EndMonthDropDownList": ["7"],
+        "ctl00$ContentPlaceHolder1$FrequencyDropDownList": ["D"],
+        "ctl00$ContentPlaceHolder1$EndOfPeriodPerUnitCheckBoxList$2": ["on"],
+        "ctl00$ContentPlaceHolder1$DownloadButton": ["Download"],
+    }
+    rate = fx_rates_for_session(ledger, date(2026, 7, 2))[(Currency.USD, Currency.SGD)]
+    assert rate.rate == Decimal("1.2950")
+    assert rate.as_of_at == datetime(2026, 7, 2, 4, tzinfo=UTC)
+    assert rate.provider_id == "mas"
+    assert rate.as_of_precision is FxAsOfPrecision.INSTANT
+    raw = decrypt(
+        ledger.key,
+        (ledger.sources / f"{result.source_hash}.enc").read_bytes(),
+        profile=ledger.config.name,
+        label=f"source:{result.source_hash}",
+    )
+    assert raw == source
+
+
+def test_mas_fx_refresh_rejects_malformed_csv_before_archiving(tmp_path: Path, monkeypatch) -> None:
+    ledger = encrypted_ledger(tmp_path, monkeypatch)
+
+    class Headers:
+        def __init__(self, content_type: str) -> None:
+            self.content_type = content_type
+
+        def get_content_type(self) -> str:
+            return self.content_type
+
+    class Response:
+        def __init__(self, content: bytes, content_type: str) -> None:
+            self.content = content
+            self.headers = Headers(content_type)
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.content
+
+    responses = [
+        Response(
+            b'<input name="__VIEWSTATE" value="viewstate"><input name="__EVENTVALIDATION" value="validation">',
+            "text/html",
+        ),
+        Response(b"MAS: Financial Database - Exchange Rates\\nExchange Rates (Daily)\\n", "text/csv"),
+    ]
+
+    monkeypatch.setattr(market_data, "urlopen", lambda _request, timeout: responses.pop(0))
+
+    with pytest.raises(ProviderError, match="expected daily USD/SGD format"):
+        refresh_mas_usd_sgd_reference_rates(ledger, date(2026, 7, 1), date(2026, 7, 2))
+    assert ledger.archived_source_hashes() == ()
 
 
 def test_instrument_master_versions_us_sg_records_and_defaults_unknown_etfs_to_narrow(

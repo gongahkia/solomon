@@ -174,8 +174,14 @@ CSVs, and `universe-evaluate` reports every supported US/SG listed equity, ETF, 
 excluded with its cash-eligibility, price, liquidity, quote, FX, source, as-of, and configuration facts.
 Indexes, restricted products, unavailable inputs, delayed/unentitled quotes, and missing source data fail closed.
 
+`refresh-mas-fx` retrieves the Monetary Authority of Singapore's published daily USD/SGD CSV for an
+explicit date range. It accepts only the daily S$-per-US$ response contract, persists each noon-SGT rate
+with MAS provenance, and encrypts the exact downloaded CSV before storing any rate. It retains only dates
+inside the requested range; a malformed, empty, duplicate, or non-positive response stores no rate.
+
 ```console
 $ stonks-cli import-fx personal /absolute/path/usd-sgd.csv
+$ stonks-cli refresh-mas-fx personal 2026-07-01 2026-07-22
 $ stonks-cli portfolio personal --base-currency SGD --json
 ```
 

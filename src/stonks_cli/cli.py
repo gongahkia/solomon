@@ -84,6 +84,7 @@ from stonks_cli.market_data import (
     latest_moomoo_instrument_eligibility,
     latest_prices,
     latest_quote_snapshots,
+    refresh_mas_usd_sgd_reference_rates,
 )
 from stonks_cli.moomoo import (
     MoomooReadOnlyProvider,
@@ -313,6 +314,37 @@ def import_fx(
 ) -> None:
     count = import_fx_rates_csv(EncryptedLedger(_profile(profile, key_file)), path)
     console.print_json(json.dumps({"profile": profile, "rates": count}))
+
+
+@app.command("refresh-mas-fx")
+def refresh_mas_fx(
+    profile: str,
+    start_date: str = typer.Argument(...),
+    end_date: str = typer.Argument(...),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+        result = refresh_mas_usd_sgd_reference_rates(
+            EncryptedLedger(_profile(profile, key_file)), start, end
+        )
+    except (ProviderError, ValueError) as error:
+        raise typer.BadParameter(f"MAS FX dates must use YYYY-MM-DD: {error}") from error
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "provider_id": result.provider_id,
+                "source_url": result.source_url,
+                "start_date": result.start_date.isoformat(),
+                "end_date": result.end_date.isoformat(),
+                "source_hash": result.source_hash,
+                "fetched_rates": result.fetched_rates,
+                "persisted_rates": result.persisted_rates,
+            }
+        )
+    )
 
 
 @app.command("import-benchmark-total-returns")

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.table import Table
 
 from stonks_cli import __version__, advisory, llm, ml, paper
 from stonks_cli.accounting import fifo_lots
@@ -142,6 +141,7 @@ from stonks_cli.terminal_delivery import (
     persist_scheduled_artifact,
     render_terminal,
 )
+from stonks_cli.terminal_table import TerminalTable, render_table
 from stonks_cli.types import Account, Currency, DrawdownResponsePolicy, Instrument
 from stonks_cli.watchlist import (
     WatchlistItem,
@@ -404,13 +404,19 @@ def portfolio(
     if as_json:
         console.print_json(json.dumps(payload))
         return
-    table = Table(title=f"Portfolio: {profile}")
-    table.add_column("Metric")
-    table.add_column("Value")
-    table.add_row("Events", str(payload["event_count"]))
-    table.add_row("Cash balances", str(len(cash)))
-    table.add_row("Open positions", str(len(holdings)))
-    console.print(table)
+    console.print(
+        render_table(
+            TerminalTable(
+                f"Portfolio: {profile}",
+                ("Metric", "Value"),
+                (
+                    ("Events", str(payload["event_count"])),
+                    ("Cash balances", str(len(cash))),
+                    ("Open positions", str(len(holdings))),
+                ),
+            )
+        )
+    )
 
 
 @app.command("daily-report")

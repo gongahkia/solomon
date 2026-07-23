@@ -138,6 +138,40 @@ def test_eod_universe_excludes_missing_or_unsuitable_filter_inputs() -> None:
     )
 
 
+def test_eod_universe_missing_price_fx_fails_closed() -> None:
+    account = Account("moomoo", "selected")
+    instrument = InstrumentMaster(
+        "US:ABC",
+        "NASDAQ",
+        "US",
+        Currency.USD,
+        AssetClass.EQUITY,
+        "US.ABC",
+        ListingStatus.LISTED,
+        "provider-1",
+        "a" * 64,
+    )
+    session = date(2026, 1, 20)
+    price = DailyPrice(Instrument("ABC", "US", Currency.USD), session, Decimal("10"), "b" * 64)
+    eligibility = MoomooInstrumentEligibility(
+        "US:ABC", account, datetime(2026, 1, 20, tzinfo=UTC), "c" * 64, True, True, True
+    )
+
+    decision = evaluate_eod_universe(
+        (instrument,),
+        {"US:ABC": eligibility},
+        account,
+        {"US:ABC": price},
+        {},
+        {},
+        {},
+        EODUniverseSettings(),
+    )[0]
+
+    assert decision.included is False
+    assert decision.reasons == ("missing_price_fx", "insufficient_liquidity_sessions", "missing_quote")
+
+
 def test_daily_liquidity_import_is_encrypted_and_retains_source_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

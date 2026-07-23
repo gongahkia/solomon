@@ -286,7 +286,7 @@ def _apply_price_filter(
         return
     try:
         resolution = resolve_fx_rate(price.instrument.currency, Currency.USD, fx_rates_by_session[price.session_date])
-    except (KeyError, ValueError):
+    except (KeyError, ProviderError, ValueError):
         reasons.append("missing_price_fx")
         return
     if price.close * resolution.conversion_rate < Decimal(settings.individual_price_floor_usd):
@@ -315,7 +315,7 @@ def _apply_liquidity_filter(
             resolution = resolve_fx_rate(
                 observation.currency, Currency.SGD, fx_rates_by_session[observation.session_date]
             )
-        except (KeyError, ValueError):
+        except (KeyError, ProviderError, ValueError):
             reasons.append("missing_liquidity_fx")
             return
         values.append(observation.traded_value * resolution.conversion_rate)

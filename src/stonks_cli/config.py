@@ -91,6 +91,47 @@ class JournalSettings:
 
 
 @dataclass(frozen=True)
+class EODUniverseSettings:
+    individual_price_floor_usd: str = "5"
+    liquidity_floor_sgd: str = "500000"
+    liquidity_window_sessions: int = 20
+    liquidity_minimum_sessions: int = 15
+    maximum_spread_fraction: str = "0.01"
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        try:
+            price_floor = Decimal(self.individual_price_floor_usd)
+            liquidity_floor = Decimal(self.liquidity_floor_sgd)
+            spread = Decimal(self.maximum_spread_fraction)
+        except InvalidOperation as error:
+            raise ProfileError("universe thresholds must be decimal") from error
+        if not price_floor.is_finite() or price_floor <= 0:
+            raise ProfileError("universe individual price floor must be positive")
+        if not liquidity_floor.is_finite() or liquidity_floor <= 0:
+            raise ProfileError("universe liquidity floor must be positive")
+        if not spread.is_finite() or not Decimal("0") < spread <= Decimal("1"):
+            raise ProfileError("universe maximum spread must be between zero and one")
+        if (
+            not isinstance(self.liquidity_window_sessions, int)
+            or isinstance(self.liquidity_window_sessions, bool)
+            or self.liquidity_window_sessions < 1
+        ):
+            raise ProfileError("universe liquidity window must be a positive integer")
+        if (
+            not isinstance(self.liquidity_minimum_sessions, int)
+            or isinstance(self.liquidity_minimum_sessions, bool)
+            or not 1 <= self.liquidity_minimum_sessions <= self.liquidity_window_sessions
+        ):
+            raise ProfileError("universe liquidity minimum sessions is invalid")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("universe settings version must be positive")
+        object.__setattr__(self, "individual_price_floor_usd", format(price_floor, "f"))
+        object.__setattr__(self, "liquidity_floor_sgd", format(liquidity_floor, "f"))
+        object.__setattr__(self, "maximum_spread_fraction", format(spread, "f"))
+
+
+@dataclass(frozen=True)
 class BenchmarkComponent:
     identifier: str
     name: str
@@ -267,6 +308,7 @@ class ProfileConfig:
     drawdown: DrawdownSettings = DrawdownSettings()
     journal: JournalSettings = JournalSettings()
     benchmark: BenchmarkSettings = BenchmarkSettings()
+    universe: EODUniverseSettings = EODUniverseSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -286,6 +328,8 @@ class ProfileConfig:
             raise ProfileError("profile drawdown settings are invalid")
         if not isinstance(self.journal, JournalSettings):
             raise ProfileError("profile journal settings are invalid")
+        if not isinstance(self.universe, EODUniverseSettings):
+            raise ProfileError("profile universe settings are invalid")
         object.__setattr__(self, "providers", providers)
 
 
@@ -327,6 +371,8 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("drawdown")
     if config.journal == JournalSettings():
         data.pop("journal")
+    if config.universe == EODUniverseSettings():
+        data.pop("universe")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -387,6 +433,28 @@ def configure_journal(
     return replace(config, journal=replace(candidate, version=config.journal.version + 1))
 
 
+def configure_universe(
+    config: ProfileConfig,
+    *,
+    individual_price_floor_usd: str,
+    liquidity_floor_sgd: str,
+    liquidity_window_sessions: int,
+    liquidity_minimum_sessions: int,
+    maximum_spread_fraction: str,
+) -> ProfileConfig:
+    candidate = EODUniverseSettings(
+        individual_price_floor_usd,
+        liquidity_floor_sgd,
+        liquidity_window_sessions,
+        liquidity_minimum_sessions,
+        maximum_spread_fraction,
+        config.universe.version,
+    )
+    if candidate == config.universe:
+        return config
+    return replace(config, universe=replace(candidate, version=config.universe.version + 1))
+
+
 def benchmark_settings_from_data(value: object) -> BenchmarkSettings:
     if value is None:
         return BenchmarkSettings()
@@ -432,6 +500,7 @@ def load_profile(name: str) -> ProfileConfig:
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
             drawdown=DrawdownSettings(**value.get("drawdown", {})),
             journal=JournalSettings(**value.get("journal", {})),
+            universe=EODUniverseSettings(**value.get("universe", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

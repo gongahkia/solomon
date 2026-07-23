@@ -566,6 +566,34 @@ def latest_prices(ledger: EncryptedLedger) -> dict[str, Decimal]:
     return {row[0]: Decimal(row[1]) for row in rows}
 
 
+def latest_daily_price_records(ledger: EncryptedLedger) -> dict[str, DailyPrice]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT first.instrument_key, first.session_date, first.close, first.open, first.high, first.low,
+                   first.currency, first.source_hash
+            FROM daily_prices AS first
+            JOIN (
+                SELECT instrument_key, MAX(session_date) AS session_date
+                FROM daily_prices GROUP BY instrument_key
+            ) AS latest USING (instrument_key, session_date)
+            """
+        ).fetchall()
+    return {
+        row["instrument_key"]: DailyPrice(
+            _instrument_from_key(row["instrument_key"], Currency(row["currency"])),
+            date.fromisoformat(row["session_date"]),
+            Decimal(row["close"]),
+            row["source_hash"],
+            Decimal(row["open"]) if row["open"] is not None else None,
+            Decimal(row["high"]) if row["high"] is not None else None,
+            Decimal(row["low"]) if row["low"] is not None else None,
+        )
+        for row in rows
+    }
+
+
 def historical_prices(ledger: EncryptedLedger, instrument_key: str) -> tuple[tuple[date, Decimal], ...]:
     with ledger.connection() as connection:
         _initialize(connection)

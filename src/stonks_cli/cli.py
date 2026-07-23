@@ -44,12 +44,14 @@ from stonks_cli.config import (
     BenchmarkComponent,
     BenchmarkSettings,
     DividendSettings,
+    EODUniverseSettings,
     JournalSettings,
     LLMSettings,
     ProfileConfig,
     configure_benchmark,
     configure_drawdown,
     configure_journal,
+    configure_universe,
     disable_provider,
     enable_provider,
     load_profile,
@@ -76,8 +78,10 @@ from stonks_cli.market_data import (
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
+    latest_daily_price_records,
     latest_fx_rates,
     latest_instrument_masters,
+    latest_moomoo_instrument_eligibility,
     latest_prices,
     latest_quote_snapshots,
 )
@@ -174,6 +178,12 @@ from stonks_cli.terminal_delivery import (
 )
 from stonks_cli.terminal_table import TerminalTable, render_table
 from stonks_cli.types import Account, Currency, DrawdownResponsePolicy, Instrument
+from stonks_cli.universe import (
+    EODUniverseDecision,
+    evaluate_eod_universe,
+    import_daily_liquidity_csv,
+    latest_daily_liquidity,
+)
 from stonks_cli.watchlist import (
     WatchlistItem,
     audit_history,
@@ -283,6 +293,16 @@ def import_prices(
 ) -> None:
     count = import_daily_prices_csv(EncryptedLedger(_profile(profile, key_file)), path)
     console.print_json(json.dumps({"profile": profile, "prices": count}))
+
+
+@app.command("import-liquidity")
+def import_liquidity(
+    profile: str,
+    path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    count = import_daily_liquidity_csv(EncryptedLedger(_profile(profile, key_file)), path)
+    console.print_json(json.dumps({"profile": profile, "liquidity_observations": count}))
 
 
 @app.command("import-fx")
@@ -2213,6 +2233,149 @@ def drawdown_configure(
                     "version": config.drawdown.version,
                     "execution": "denied",
                 },
+            }
+        )
+    )
+
+
+def _universe_settings_data(settings: EODUniverseSettings) -> dict[str, object]:
+    return {
+        "individual_price_floor_usd": settings.individual_price_floor_usd,
+        "liquidity_floor_sgd": settings.liquidity_floor_sgd,
+        "liquidity_window_sessions": settings.liquidity_window_sessions,
+        "liquidity_minimum_sessions": settings.liquidity_minimum_sessions,
+        "maximum_spread_fraction": settings.maximum_spread_fraction,
+        "version": settings.version,
+        "execution": "denied",
+    }
+
+
+def _universe_decision_data(decision: EODUniverseDecision) -> dict[str, object]:
+    return {
+        "identifier": decision.canonical_id,
+        "instrument": {
+            "asset_class": decision.instrument.asset_class.value,
+            "listing_status": decision.instrument.listing_status.value,
+            "metadata_version": decision.instrument.metadata_version,
+            "metadata_source_hash": decision.instrument.metadata_source_hash,
+        },
+        "eligibility": None
+        if decision.eligibility is None
+        else {
+            "observed_at": decision.eligibility.observed_at.isoformat(),
+            "available": decision.eligibility.available,
+            "cash_buy_eligible": decision.eligibility.cash_buy_eligible,
+            "settled_cash_available": decision.eligibility.settled_cash_available,
+            "source_hash": decision.eligibility.source_hash,
+        },
+        "included": decision.included,
+        "reasons": list(decision.reasons),
+        "configuration_version": decision.configuration_version,
+        "price": None
+        if decision.price is None
+        else {
+            "session_date": decision.price.session_date.isoformat(),
+            "close": str(decision.price.close),
+            "currency": decision.price.instrument.currency.value,
+            "source_hash": decision.price.source_hash,
+        },
+        "liquidity": [
+            {
+                "session_date": item.session_date.isoformat(),
+                "traded_value": str(item.traded_value),
+                "currency": item.currency.value,
+                "as_of": item.as_of_at.isoformat(),
+                "provider_id": item.provider_id,
+                "source_hash": item.source_hash,
+            }
+            for item in decision.liquidity
+        ],
+        "fx_rates": [
+            {
+                "base_currency": rate.base_currency.value,
+                "quote_currency": rate.quote_currency.value,
+                "session_date": rate.session_date.isoformat(),
+                "rate": str(rate.rate),
+                "as_of": None if rate.as_of_at is None else rate.as_of_at.isoformat(),
+                "provider_id": rate.provider_id,
+                "source_hash": rate.source_hash,
+            }
+            for rate in decision.fx_rates
+        ],
+        "quote": None
+        if decision.quote is None
+        else {
+            "status": decision.quote.status.value,
+            "as_of": None if decision.quote.as_of_at is None else decision.quote.as_of_at.isoformat(),
+            "order_book_as_of": None
+            if decision.quote.order_book_as_of is None
+            else decision.quote.order_book_as_of.isoformat(),
+            "spread": None if decision.quote.spread is None else str(decision.quote.spread),
+            "midpoint": None if decision.quote.midpoint is None else str(decision.quote.midpoint),
+            "source_hash": decision.quote.source_hash,
+        },
+    }
+
+
+@app.command("universe-configure")
+def universe_configure(
+    profile: str,
+    individual_price_floor_usd: str = typer.Option("5"),
+    liquidity_floor_sgd: str = typer.Option("500000"),
+    liquidity_window_sessions: int = typer.Option(20, min=1),
+    liquidity_minimum_sessions: int = typer.Option(15, min=1),
+    maximum_spread_fraction: str = typer.Option("0.01"),
+) -> None:
+    try:
+        config = configure_universe(
+            load_profile(profile),
+            individual_price_floor_usd=individual_price_floor_usd,
+            liquidity_floor_sgd=liquidity_floor_sgd,
+            liquidity_window_sessions=liquidity_window_sessions,
+            liquidity_minimum_sessions=liquidity_minimum_sessions,
+            maximum_spread_fraction=maximum_spread_fraction,
+        )
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    save_profile(config)
+    console.print_json(json.dumps({"profile": profile, "universe": _universe_settings_data(config.universe)}))
+
+
+@app.command("universe-settings")
+def universe_settings(profile: str) -> None:
+    console.print_json(json.dumps({"profile": profile, "universe": _universe_settings_data(load_profile(profile).universe)}))
+
+
+@app.command("universe-evaluate")
+def universe_evaluate(
+    profile: str,
+    account_id: str,
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
+    prices = latest_daily_price_records(ledger)
+    liquidity = latest_daily_liquidity(ledger)
+    sessions = {item.session_date for item in prices.values()}
+    sessions.update(item.session_date for items in liquidity.values() for item in items)
+    decisions = evaluate_eod_universe(
+        tuple(latest_instrument_masters(ledger).values()),
+        latest_moomoo_instrument_eligibility(ledger, Account("moomoo", account_id)),
+        Account("moomoo", account_id),
+        prices,
+        liquidity,
+        latest_quote_snapshots(ledger),
+        {session: fx_rates_for_session(ledger, session) for session in sessions},
+        config.universe,
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "account": f"moomoo:{account_id}",
+                "configuration_version": config.universe.version,
+                "decisions": [_universe_decision_data(item) for item in decisions],
+                "execution": "denied",
             }
         )
     )

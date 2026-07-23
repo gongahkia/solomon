@@ -10,12 +10,14 @@ from stonks_cli.config import (
     BenchmarkSettings,
     DividendSettings,
     DrawdownSettings,
+    EODUniverseSettings,
     JournalSettings,
     ProfileConfig,
     config_path,
     configure_benchmark,
     configure_drawdown,
     configure_journal,
+    configure_universe,
     disable_provider,
     enable_provider,
     load_profile,
@@ -272,6 +274,26 @@ def test_profile_drawdown_settings_are_versioned_and_round_trip(
     }
     with pytest.raises(ProfileError, match="between zero and one"):
         DrawdownSettings("1")
+
+
+def test_profile_universe_settings_are_versioned_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"))
+    configured = configure_universe(
+        config,
+        individual_price_floor_usd="6",
+        liquidity_floor_sgd="600000",
+        liquidity_window_sessions=20,
+        liquidity_minimum_sessions=16,
+        maximum_spread_fraction="0.02",
+    )
+    save_profile(configured)
+
+    assert configured.universe == EODUniverseSettings("6", "600000", 20, 16, "0.02", 2)
+    assert load_profile("personal") == configured
+    assert json.loads(config_path("personal").read_text())["universe"]["version"] == 2
 
 
 def test_profile_journal_settings_are_versioned_and_round_trip(

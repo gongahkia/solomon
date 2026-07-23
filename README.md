@@ -165,6 +165,15 @@ sourced FX CSV with `date,base_currency,quote_currency,rate` and request it expl
 or inverse rates fail the report rather than using an implied conversion. An explicit base-currency view
 includes cash, market value, and total NAV in that currency.
 
+## EOD universe
+
+`universe-configure` stores versioned profile filters: US$5 individual-equity price floor, S$500,000
+average daily traded-value floor across 15 of the latest 20 sessions, and 1% maximum fresh entitled
+bid/ask spread by default. `import-liquidity` accepts sourced daily `date,identifier,currency,traded_value`
+CSVs, and `universe-evaluate` reports every supported US/SG listed equity, ETF, or REIT as included or
+excluded with its cash-eligibility, price, liquidity, quote, FX, source, as-of, and configuration facts.
+Indexes, restricted products, unavailable inputs, delayed/unentitled quotes, and missing source data fail closed.
+
 ```console
 $ stonks-cli import-fx personal /absolute/path/usd-sgd.csv
 $ stonks-cli portfolio personal --base-currency SGD --json

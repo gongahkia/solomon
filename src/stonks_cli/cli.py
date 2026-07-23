@@ -136,6 +136,12 @@ from stonks_cli.telegram_delivery import (
 from stonks_cli.telegram_delivery import (
     settings_audit as telegram_settings_audit,
 )
+from stonks_cli.terminal_delivery import (
+    create_artifact,
+    latest_scheduled_artifact,
+    persist_scheduled_artifact,
+    render_terminal,
+)
 from stonks_cli.types import Account, Currency, DrawdownResponsePolicy, Instrument
 from stonks_cli.watchlist import (
     WatchlistItem,
@@ -1373,10 +1379,11 @@ def monitor(
     if threshold < 0:
         raise typer.BadParameter("threshold-percent must be non-negative")
     ledger = EncryptedLedger(_profile(profile, key_file))
-    count, source_hash, instruments = _refresh_moomoo_watchlist(ledger, days, host, port)
-    alerts = _scan_price_alerts(ledger, threshold)
-    console.print_json(
-        json.dumps(
+    job_label = ScheduleDefinition(profile, 8, 30).label
+    try:
+        count, source_hash, instruments = _refresh_moomoo_watchlist(ledger, days, host, port)
+        alerts = _scan_price_alerts(ledger, threshold)
+        content = json.dumps(
             {
                 "profile": profile,
                 "instruments": len(instruments),
@@ -1387,7 +1394,23 @@ def monitor(
                 "execution": "denied",
             }
         )
-    )
+        artifact = create_artifact("monitor", content)
+        persist_scheduled_artifact(ledger, job_label, artifact, "succeeded")
+    except Exception as error:
+        artifact = create_artifact(
+            "monitor",
+            json.dumps(
+                {
+                    "profile": profile,
+                    "status": "failed",
+                    "error_classification": type(error).__name__,
+                    "execution": "denied",
+                }
+            ),
+        )
+        persist_scheduled_artifact(ledger, job_label, artifact, "failed")
+        raise
+    typer.echo(render_terminal(artifact))
 
 
 @app.command("schedule-render")
@@ -1430,9 +1453,36 @@ def schedule_status(
         if platform.system() == "Darwin"
         else linux_schedule_status(definition)
     )
+    artifact = latest_scheduled_artifact(EncryptedLedger(_profile(profile, None)), definition.label)
     console.print_json(
-        json.dumps({"label": status.label, "enabled": status.enabled, "active": status.active})
+        json.dumps(
+            {
+                "label": status.label,
+                "enabled": status.enabled,
+                "active": status.active,
+                "last_artifact": None
+                if artifact is None
+                else {
+                    "artifact_id": artifact.artifact.artifact_id,
+                    "status": artifact.status,
+                    "created_at": artifact.artifact.created_at.isoformat(),
+                },
+            }
+        )
     )
+
+
+@app.command("schedule-artifact")
+def schedule_artifact(
+    profile: str,
+    hour_singapore: int = typer.Option(8),
+    minute_singapore: int = typer.Option(30),
+) -> None:
+    definition = ScheduleDefinition(profile, hour_singapore, minute_singapore)
+    artifact = latest_scheduled_artifact(EncryptedLedger(_profile(profile, None)), definition.label)
+    if artifact is None:
+        raise typer.BadParameter("no scheduled artifact is available")
+    typer.echo(render_terminal(artifact.artifact))
 
 
 @app.command("notify-local")

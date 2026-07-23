@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from stonks_cli import cli, telegram_delivery
 from stonks_cli.cli import app
+from stonks_cli.config import load_profile
 from stonks_cli.market_data import (
     DailyPrice,
     QuoteQuality,
@@ -20,8 +21,10 @@ from stonks_cli.market_data import (
     store_instrument_masters,
 )
 from stonks_cli.moomoo import OpenDSDKStatus
+from stonks_cli.operator import ScheduleStatus
 from stonks_cli.plugins import PluginDiscovery, PluginLoadDiagnostic
 from stonks_cli.storage import EncryptedLedger
+from stonks_cli.terminal_delivery import latest_scheduled_artifact
 from stonks_cli.types import (
     AssetClass,
     Currency,
@@ -71,6 +74,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "schedule-render",
         "schedule-install",
         "schedule-status",
+        "schedule-artifact",
         "notify-local",
         "notify-telegram",
         "telegram-recipient-add",
@@ -552,9 +556,65 @@ def test_monitor_refreshes_without_environment_telegram_delivery(tmp_path: Path,
     result = runner.invoke(app, ["monitor", "personal", "--days", "2"])
 
     assert result.exit_code == 0, result.output
+    artifact = latest_scheduled_artifact(
+        EncryptedLedger(load_profile("personal")), "com.stonks-cli.personal"
+    )
+    assert artifact is not None
+    assert artifact.status == "succeeded"
+    assert result.output == f"{artifact.artifact.content}\n"
     payload = json.loads(result.output)
     assert payload["alerts"][0]["instrument"] == "US:SPY"
     assert payload["telegram_delivered"] is False
+
+
+def test_schedule_artifact_renders_persisted_content_and_status(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        cli,
+        "macos_schedule_status",
+        lambda definition: ScheduleStatus(definition.label, True, False),
+    )
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    ledger = EncryptedLedger(load_profile("personal"))
+    persisted = cli.create_artifact("report", '{"profile":"personal"}')
+    cli.persist_scheduled_artifact(ledger, "com.stonks-cli.personal", persisted, "succeeded")
+
+    artifact_result = runner.invoke(app, ["schedule-artifact", "personal"])
+    status_result = runner.invoke(app, ["schedule-status", "personal"])
+
+    assert artifact_result.exit_code == 0, artifact_result.output
+    assert artifact_result.output == '{"profile":"personal"}\n'
+    assert status_result.exit_code == 0, status_result.output
+    assert json.loads(status_result.output)["last_artifact"] == {
+        "artifact_id": persisted.artifact_id,
+        "status": "succeeded",
+        "created_at": persisted.created_at.isoformat(),
+    }
+
+
+def test_monitor_persists_failed_scheduled_artifact(tmp_path: Path, monkeypatch) -> None:
+    class Provider:
+        def daily_prices(self, instruments, start, end):
+            raise RuntimeError("unavailable")
+
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cli.MoomooReadOnlyProvider, "from_installed_sdk", lambda endpoint: Provider())
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    assert runner.invoke(app, ["watchlist-add", "personal", "SPY", "US", "USD"]).exit_code == 0
+
+    result = runner.invoke(app, ["monitor", "personal", "--days", "2"])
+
+    assert result.exit_code != 0
+    artifact = latest_scheduled_artifact(
+        EncryptedLedger(load_profile("personal")), "com.stonks-cli.personal"
+    )
+    assert artifact is not None
+    assert artifact.status == "failed"
+    assert "RuntimeError" in artifact.artifact.content
 
 
 def test_cli_restores_encrypted_profile_backup(tmp_path: Path, monkeypatch) -> None:

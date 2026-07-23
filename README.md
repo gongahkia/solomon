@@ -28,6 +28,9 @@ after the Pi boots, never while it is powered off.
 On macOS, `schedule-install` writes a private LaunchAgent and bootstraps it with `launchctl`;
 inspect it with `schedule-status` or `launchctl print gui/<uid>/com.stonks-cli.<profile>`.
 
+For either scheduler, report content and its terminal-delivery status are encrypted in the profile;
+retrieve the latest content with `schedule-artifact`.
+
 ## Start
 
 ```console

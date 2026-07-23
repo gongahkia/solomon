@@ -27,6 +27,13 @@ from stonks_cli.analytics import (
     sector_concentration,
     sector_concentrations_by_currency,
 )
+from stonks_cli.benchmark import (
+    BenchmarkComponentPeriod,
+    BenchmarkPeriodReport,
+    calculate_period_report,
+    import_total_return_csv,
+    latest_total_return_points,
+)
 from stonks_cli.config import (
     BenchmarkComponent,
     BenchmarkSettings,
@@ -56,8 +63,10 @@ from stonks_cli.ledger import (
     positions,
 )
 from stonks_cli.market_data import (
+    FxRateResolution,
     archive_and_store_daily_prices,
     archive_and_store_quote_snapshots,
+    fx_rates_for_session,
     historical_prices,
     import_daily_prices_csv,
     import_fx_rates_csv,
@@ -278,6 +287,16 @@ def import_fx(
 ) -> None:
     count = import_fx_rates_csv(EncryptedLedger(_profile(profile, key_file)), path)
     console.print_json(json.dumps({"profile": profile, "rates": count}))
+
+
+@app.command("import-benchmark-total-returns")
+def import_benchmark_total_returns(
+    profile: str,
+    path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    count = import_total_return_csv(EncryptedLedger(_profile(profile, key_file)), path)
+    console.print_json(json.dumps({"profile": profile, "total_return_points": count}))
 
 
 @app.command("import-history")
@@ -832,6 +851,72 @@ def _benchmark_component_option(value: str) -> BenchmarkComponent:
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError, ProfileError) as error:
         raise typer.BadParameter("component must be a valid benchmark JSON object") from error
+
+
+def _benchmark_fx_data(resolution: FxRateResolution | None) -> dict[str, object] | None:
+    if resolution is None:
+        return None
+    rate = resolution.rate
+    if rate is None:
+        return {"rate": "1", "source": "same_currency"}
+    return {
+        "rate": str(resolution.conversion_rate),
+        "inverted": resolution.inverted,
+        "session_date": rate.session_date.isoformat(),
+        "as_of": None if rate.as_of_at is None else rate.as_of_at.isoformat(),
+        "provider_id": rate.provider_id,
+        "source_hash": rate.source_hash,
+    }
+
+
+def _benchmark_period_component_data(item: BenchmarkComponentPeriod) -> dict[str, object]:
+    return {
+        "identifier": item.component.identifier,
+        "name": item.component.name,
+        "currency": item.component.currency.value,
+        "weight": item.component.weight,
+        "return_basis": item.component.return_basis,
+        "source_url": item.component.source_url,
+        "status": item.status,
+        "reason": item.reason,
+        "start": None
+        if item.start is None
+        else {
+            "date": item.start.session_date.isoformat(),
+            "index_level": str(item.start.index_level),
+            "as_of": None if item.start.as_of_at is None else item.start.as_of_at.isoformat(),
+            "provider_id": item.start.provider_id,
+            "source_hash": item.start.source_hash,
+        },
+        "end": None
+        if item.end is None
+        else {
+            "date": item.end.session_date.isoformat(),
+            "index_level": str(item.end.index_level),
+            "as_of": None if item.end.as_of_at is None else item.end.as_of_at.isoformat(),
+            "provider_id": item.end.provider_id,
+            "source_hash": item.end.source_hash,
+        },
+        "native_return": None if item.native_return is None else str(item.native_return),
+        "reporting_return": None if item.reporting_return is None else str(item.reporting_return),
+        "start_fx": _benchmark_fx_data(item.start_fx),
+        "end_fx": _benchmark_fx_data(item.end_fx),
+    }
+
+
+def _benchmark_period_data(profile: str, report: BenchmarkPeriodReport) -> dict[str, object]:
+    return {
+        "profile": profile,
+        "start_date": report.start_date.isoformat(),
+        "end_date": report.end_date.isoformat(),
+        "reporting_currency": report.reporting_currency.value,
+        "configuration_version": report.configuration_version,
+        "components": [_benchmark_period_component_data(item) for item in report.components],
+        "aggregate_return": None if report.aggregate_return is None else str(report.aggregate_return),
+        "status": report.status,
+        "reference_only": True,
+        "execution": "denied",
+    }
 
 
 def _advisory_journal_entry_data(
@@ -2098,6 +2183,35 @@ def benchmark_configure(
 @app.command("benchmark-settings")
 def benchmark_settings(profile: str) -> None:
     console.print_json(json.dumps(_benchmark_settings_data(profile, load_profile(profile).benchmark)))
+
+
+@app.command("benchmark-performance")
+def benchmark_performance(
+    profile: str,
+    start_date: str = typer.Option(..., "--start-date"),
+    end_date: str = typer.Option(..., "--end-date"),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError as error:
+        raise typer.BadParameter("benchmark dates must use YYYY-MM-DD") from error
+    config = _profile(profile, key_file)
+    ledger = EncryptedLedger(config)
+    try:
+        report = calculate_period_report(
+            config.benchmark,
+            latest_total_return_points(ledger),
+            start_date=start,
+            end_date=end,
+            reporting_currency=config.reporting_currency,
+            start_fx_rates=fx_rates_for_session(ledger, start),
+            end_fx_rates=fx_rates_for_session(ledger, end),
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(json.dumps(_benchmark_period_data(profile, report)))
 
 
 @app.command("moomoo-accounts")

@@ -182,8 +182,11 @@ and 25% `SG:STI` (Straits Times Index, SGD). Components record an explicit canon
 source URL, currency, return basis, and weight; `benchmark-configure` replaces the full component
 set from repeated JSON `--component` values, while `benchmark-settings` displays the active version.
 Benchmark configuration is never a held-security inference or a trade recommendation. Total-return
-series ingestion, FX conversion, and performance comparison are separate market-data work. Legacy
-`benchmarks` profile entries remain stored for compatibility but are not used as reference components.
+series import accepts sourced `date,identifier,currency,total_return_index` CSVs; optional
+`as_of_at,provider_id` fields retain data provenance. `benchmark-performance` uses exact start/end
+total-return levels and exact-date FX records for the profile reporting currency, and reports
+`unavailable` or `stale` rather than calculating from missing inputs. Legacy `benchmarks` profile entries remain
+stored for compatibility but are not used as reference components.
 
 `research-candidates` stores encrypted, deterministic ML screening artifacts. Each item is labelled
 `research_candidate` with `experimental_price_only_model` and `no_execution` flags; it is never a

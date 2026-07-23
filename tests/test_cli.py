@@ -45,6 +45,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "import-history",
         "import-prices",
         "import-fx",
+        "import-benchmark-total-returns",
         "portfolio",
         "daily-report",
         "holdings",
@@ -113,6 +114,7 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "drawdown-configure",
         "benchmark-configure",
         "benchmark-settings",
+        "benchmark-performance",
         "moomoo-accounts",
         "moomoo-dividends",
         "moomoo-dividend-status",
@@ -339,6 +341,56 @@ def test_cli_configures_explicit_reference_benchmarks(tmp_path: Path, monkeypatc
     assert json.loads(result.output)["configuration_version"] == 2
     assert json.loads(result.output)["reference_only"] is True
     assert runner.invoke(app, ["benchmark-configure", "personal"]).exit_code != 0
+
+
+def test_cli_reports_weighted_total_return_benchmark_in_reporting_currency(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+    returns = tmp_path / "returns.csv"
+    returns.write_text(
+        "date,identifier,currency,total_return_index,as_of_at,provider_id\n"
+        "2026-01-02,US:SPX,USD,100,2026-01-02T12:00:00+00:00,spdj\n"
+        "2026-01-03,US:SPX,USD,110,2026-01-03T12:00:00+00:00,spdj\n"
+        "2026-01-02,SG:STI,SGD,100,2026-01-02T12:00:00+00:00,ftse\n"
+        "2026-01-03,SG:STI,SGD,105,2026-01-03T12:00:00+00:00,ftse\n"
+    )
+    fx = tmp_path / "fx.csv"
+    fx.write_text(
+        "date,base_currency,quote_currency,rate,as_of_at,provider_id\n"
+        "2026-01-02,USD,SGD,1.35,2026-01-02T12:00:00+00:00,mas\n"
+        "2026-01-03,USD,SGD,1.40,2026-01-03T12:00:00+00:00,mas\n"
+    )
+    assert runner.invoke(app, ["import-benchmark-total-returns", "personal", str(returns)]).exit_code == 0
+    assert runner.invoke(app, ["import-fx", "personal", str(fx)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-performance",
+            "personal",
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-03",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "available"
+    assert payload["reporting_currency"] == "SGD"
+    assert payload["components"][0]["reporting_return"] == str(
+        Decimal("110") * Decimal("1.4") / Decimal("135") - Decimal("1")
+    )
+    assert payload["aggregate_return"] == str(
+        Decimal("0.75") * (Decimal("110") * Decimal("1.4") / Decimal("135") - Decimal("1"))
+        + Decimal("0.25") * Decimal("0.05")
+    )
+    assert payload["execution"] == "denied"
 
 
 def test_cli_exports_portfolio_only_to_explicit_recipient(tmp_path: Path, monkeypatch) -> None:

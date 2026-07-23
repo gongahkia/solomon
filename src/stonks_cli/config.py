@@ -20,6 +20,13 @@ _BUDGET_PERIODS = frozenset(("none", "daily", "monthly"))
 _BENCHMARK_RETURN_BASES = frozenset(("price_return", "total_return"))
 
 
+def canonical_benchmark_identifier(identifier: str) -> str:
+    value = identifier.strip().upper() if isinstance(identifier, str) else ""
+    if not _BENCHMARK_IDENTIFIER.fullmatch(value):
+        raise ProfileError("benchmark identifier must be canonical MARKET:SYMBOL")
+    return value
+
+
 @dataclass(frozen=True)
 class DividendSettings:
     allow_explicit_credit: bool = False
@@ -93,9 +100,7 @@ class BenchmarkComponent:
     return_basis: str = "total_return"
 
     def __post_init__(self) -> None:
-        identifier = self.identifier.strip().upper() if isinstance(self.identifier, str) else ""
-        if not _BENCHMARK_IDENTIFIER.fullmatch(identifier):
-            raise ProfileError("benchmark identifier must be canonical MARKET:SYMBOL")
+        identifier = canonical_benchmark_identifier(self.identifier)
         if not isinstance(self.name, str) or not self.name.strip() or len(self.name.strip()) > 256:
             raise ProfileError("benchmark name is invalid")
         if not isinstance(self.currency, Currency):

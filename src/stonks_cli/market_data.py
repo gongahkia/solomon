@@ -823,6 +823,38 @@ def latest_fx_rates(ledger: EncryptedLedger) -> dict[tuple[Currency, Currency], 
     return values
 
 
+def fx_rates_for_session(
+    ledger: EncryptedLedger, session_date: date
+) -> dict[tuple[Currency, Currency], FxRate]:
+    with ledger.connection() as connection:
+        _initialize(connection)
+        rows = connection.execute(
+            """
+            SELECT base_currency, quote_currency, session_date, rate, source_hash, as_of_at, provider_id,
+                   as_of_precision
+            FROM fx_rates
+            WHERE session_date = ?
+            ORDER BY base_currency, quote_currency, as_of_at DESC, source_hash ASC
+            """,
+            (session_date.isoformat(),),
+        ).fetchall()
+    values: dict[tuple[Currency, Currency], FxRate] = {}
+    for row in rows:
+        key = (Currency(row["base_currency"]), Currency(row["quote_currency"]))
+        if key not in values:
+            values[key] = FxRate(
+                key[0],
+                key[1],
+                date.fromisoformat(row["session_date"]),
+                Decimal(row["rate"]),
+                row["source_hash"],
+                datetime.fromisoformat(row["as_of_at"]),
+                row["provider_id"],
+                FxAsOfPrecision(row["as_of_precision"]),
+            )
+    return values
+
+
 def store_instrument_masters(ledger: EncryptedLedger, instruments: tuple[InstrumentMaster, ...]) -> int:
     inserted = 0
     with ledger.connection() as connection:

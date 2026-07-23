@@ -177,7 +177,9 @@ not a market benchmark. `strategy-journal` records the manual rationale for late
 
 `research-candidates` stores encrypted, deterministic ML screening artifacts. Each item is labelled
 `research_candidate` with `experimental_price_only_model` and `no_execution` flags; it is never a
-broker instruction, allocation target, or automated action.
+broker instruction, allocation target, or automated action. `strategy-advisory-journal-*` stores
+profile-scoped encrypted manual advisory dispositions and may link only an imported posted buy/sell
+ledger fingerprint; it cannot submit, alter, or cancel a broker order.
 
 `stonks-mcp` exposes read status plus confirmation-bound local CSV import, provider configuration,
 and encrypted backup. Confirmation IDs are single-use and expire after five minutes; MCP exposes no

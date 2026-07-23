@@ -62,6 +62,26 @@ class DrawdownSettings:
 
 
 @dataclass(frozen=True)
+class JournalSettings:
+    open_on_advisory: bool = True
+    retention_days: int | None = None
+    display_reasons: bool = False
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.open_on_advisory, bool) or not isinstance(self.display_reasons, bool):
+            raise ProfileError("journal settings flags must be boolean")
+        if self.retention_days is not None and (
+            not isinstance(self.retention_days, int)
+            or isinstance(self.retention_days, bool)
+            or not 1 <= self.retention_days <= 36_500
+        ):
+            raise ProfileError("journal retention days must be between 1 and 36500")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("journal settings version must be a positive integer")
+
+
+@dataclass(frozen=True)
 class LLMSettings:
     provider: str | None = None
     model: str | None = None
@@ -153,6 +173,7 @@ class ProfileConfig:
     dividends: DividendSettings = DividendSettings()
     reporting_currency: Currency = Currency.SGD
     drawdown: DrawdownSettings = DrawdownSettings()
+    journal: JournalSettings = JournalSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -168,6 +189,8 @@ class ProfileConfig:
             raise ProfileError("profile reporting currency is invalid")
         if not isinstance(self.drawdown, DrawdownSettings):
             raise ProfileError("profile drawdown settings are invalid")
+        if not isinstance(self.journal, JournalSettings):
+            raise ProfileError("profile journal settings are invalid")
         object.__setattr__(self, "providers", providers)
 
 
@@ -193,6 +216,8 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("reporting_currency")
     if config.drawdown == DrawdownSettings():
         data.pop("drawdown")
+    if config.journal == JournalSettings():
+        data.pop("journal")
     payload = json.dumps(data, sort_keys=True, indent=2).encode() + b"\n"
     path.write_bytes(payload)
     path.chmod(0o600)
@@ -200,17 +225,7 @@ def save_profile(config: ProfileConfig) -> None:
 
 def enable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = (*config.providers, provider_id)
-    return ProfileConfig(
-        config.name,
-        config.key_file,
-        providers,
-        config.benchmarks,
-        config.schema_version,
-        config.llm,
-        config.dividends,
-        config.reporting_currency,
-        config.drawdown,
-    )
+    return replace(config, providers=providers)
 
 
 def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
@@ -218,17 +233,7 @@ def disable_provider(config: ProfileConfig, provider_id: str) -> ProfileConfig:
     providers = tuple(item for item in config.providers if item != identifier)
     if len(providers) == len(config.providers):
         raise ProfileError("provider is not enabled")
-    return ProfileConfig(
-        config.name,
-        config.key_file,
-        providers,
-        config.benchmarks,
-        config.schema_version,
-        config.llm,
-        config.dividends,
-        config.reporting_currency,
-        config.drawdown,
-    )
+    return replace(config, providers=providers)
 
 
 def configure_drawdown(
@@ -244,6 +249,24 @@ def configure_drawdown(
     if candidate == config.drawdown:
         return config
     return replace(config, drawdown=replace(candidate, version=config.drawdown.version + 1))
+
+
+def configure_journal(
+    config: ProfileConfig,
+    *,
+    open_on_advisory: bool,
+    retention_days: int | None,
+    display_reasons: bool,
+) -> ProfileConfig:
+    candidate = JournalSettings(
+        open_on_advisory,
+        retention_days,
+        display_reasons,
+        config.journal.version,
+    )
+    if candidate == config.journal:
+        return config
+    return replace(config, journal=replace(candidate, version=config.journal.version + 1))
 
 
 def load_profile(name: str) -> ProfileConfig:
@@ -262,6 +285,7 @@ def load_profile(name: str) -> ProfileConfig:
             dividends=DividendSettings(**value.get("dividends", {})),
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
             drawdown=DrawdownSettings(**value.get("drawdown", {})),
+            journal=JournalSettings(**value.get("journal", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ProfileError("invalid profile") from error

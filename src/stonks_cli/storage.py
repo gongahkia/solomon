@@ -10,7 +10,7 @@ import stat
 import tempfile
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from stonks_cli.config import (
     DividendSettings,
     DrawdownSettings,
+    JournalSettings,
     LLMSettings,
     ProfileConfig,
     profile_dir,
@@ -254,6 +255,7 @@ def _backup_profile(source: Path) -> ProfileConfig:
             dividends=DividendSettings(**value.get("dividends", {})),
             reporting_currency=Currency(value.get("reporting_currency", Currency.SGD)),
             drawdown=DrawdownSettings(**value.get("drawdown", {})),
+            journal=JournalSettings(**value.get("journal", {})),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise EncryptedStorageError("backup profile configuration is invalid") from error
@@ -308,16 +310,6 @@ def rotate_key(config: ProfileConfig, new_key_file: Path) -> ProfileConfig:
             staged_path.unlink(missing_ok=True)
         new_key_file.unlink(missing_ok=True)
         raise
-    updated = ProfileConfig(
-        config.name,
-        str(new_key_file),
-        config.providers,
-        config.benchmarks,
-        config.schema_version,
-        config.llm,
-        config.dividends,
-        config.reporting_currency,
-        config.drawdown,
-    )
+    updated = replace(config, key_file=str(new_key_file))
     save_profile(updated)
     return updated

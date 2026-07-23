@@ -8,9 +8,11 @@ import pytest
 from stonks_cli.config import (
     DividendSettings,
     DrawdownSettings,
+    JournalSettings,
     ProfileConfig,
     config_path,
     configure_drawdown,
+    configure_journal,
     disable_provider,
     enable_provider,
     load_profile,
@@ -206,6 +208,35 @@ def test_profile_drawdown_settings_are_versioned_and_round_trip(
         DrawdownSettings("1")
 
 
+def test_profile_journal_settings_are_versioned_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"))
+
+    configured = configure_journal(
+        config, open_on_advisory=False, retention_days=30, display_reasons=True
+    )
+    save_profile(configured)
+
+    assert configured.journal == JournalSettings(False, 30, True, 2)
+    assert (
+        configure_journal(
+            configured, open_on_advisory=False, retention_days=30, display_reasons=True
+        )
+        == configured
+    )
+    assert load_profile("personal") == configured
+    assert json.loads(config_path("personal").read_text())["journal"] == {
+        "display_reasons": True,
+        "open_on_advisory": False,
+        "retention_days": 30,
+        "version": 2,
+    }
+    with pytest.raises(ProfileError, match="retention"):
+        JournalSettings(retention_days=0)
+
+
 def test_profile_config_canonicalizes_configured_provider_identifiers(tmp_path: Path) -> None:
     config = ProfileConfig(
         "personal", str(tmp_path / "personal.key"), providers=(" CSV ", " Moomoo ")
@@ -372,6 +403,9 @@ def test_backup_and_key_rotation_preserve_encrypted_data(
     config = configure_drawdown(
         ProfileConfig("personal", str(old_key)), "0.30", DrawdownResponsePolicy.RECORD_ONLY
     )
+    config = configure_journal(
+        config, open_on_advisory=False, retention_days=30, display_reasons=True
+    )
     save_profile(config)
     ledger = EncryptedLedger(config)
     digest = ledger.archive_source(b"source")
@@ -389,6 +423,7 @@ def test_backup_and_key_rotation_preserve_encrypted_data(
     updated = rotate_key(config, tmp_path / "new.key")
     assert load_profile("personal") == updated
     assert updated.drawdown == config.drawdown
+    assert updated.journal == config.journal
     assert (
         decrypt(
             read_key_file(Path(updated.key_file)),

@@ -65,6 +65,12 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "strategy-artifacts",
         "strategy-journal",
         "strategy-journal-list",
+        "strategy-advisory-journal-open",
+        "strategy-advisory-journal-dispose",
+        "strategy-advisory-journal-link-evidence",
+        "strategy-advisory-journal-list",
+        "strategy-advisory-journal-configure",
+        "strategy-advisory-journal-settings",
         "watchlist-add",
         "watchlist-configure",
         "watchlist-remove",
@@ -161,6 +167,49 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     assert json.loads(result.output)["exposure"] == [
         {"currency": "USD", "cash": "100", "market_value": "0", "exposure": "100"}
     ]
+
+
+def test_cli_records_profile_scoped_advisory_journal_settings_and_disposition(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    opened = runner.invoke(app, ["strategy-advisory-journal-open", "personal", "advisory-1", "strategy:1"])
+
+    assert opened.exit_code == 0, opened.output
+    entry_id = json.loads(opened.output)["entry"]["entry_id"]
+    disposed = runner.invoke(
+        app,
+        [
+            "strategy-advisory-journal-dispose",
+            "personal",
+            entry_id,
+            "accepted",
+            "--reason",
+            "manual review",
+        ],
+    )
+    assert disposed.exit_code == 0, disposed.output
+    assert "reason" not in json.loads(disposed.output)
+    configured = runner.invoke(
+        app,
+        [
+            "strategy-advisory-journal-configure",
+            "personal",
+            "--retention-days",
+            "30",
+            "--display-reasons",
+        ],
+    )
+    assert configured.exit_code == 0, configured.output
+    assert json.loads(configured.output)["configuration_version"] == 2
+    listed = runner.invoke(app, ["strategy-advisory-journal-list", "personal"])
+
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output)["entries"][0]["reason"] == "manual review"
 
 
 def test_plugins_command_reports_plugin_load_diagnostics(monkeypatch) -> None:

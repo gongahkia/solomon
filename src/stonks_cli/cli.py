@@ -29,9 +29,11 @@ from stonks_cli.analytics import (
 )
 from stonks_cli.config import (
     DividendSettings,
+    JournalSettings,
     LLMSettings,
     ProfileConfig,
     configure_drawdown,
+    configure_journal,
     disable_provider,
     enable_provider,
     load_profile,
@@ -104,12 +106,23 @@ from stonks_cli.storage import (
     rotate_key,
 )
 from stonks_cli.strategy import (
+    AdvisoryJournalDisposition,
+    AdvisoryJournalEntry,
     StrategyRunCard,
     append_journal_entry,
+    link_advisory_journal_evidence,
+    list_advisory_journal_entries,
     list_artifacts,
     list_journal_entries,
+    open_advisory_journal,
+    purge_expired_advisory_journal_entries,
+    record_advisory_journal_disposition,
+    record_journal_settings_audit,
     run_csv_backtest,
     store_artifact,
+)
+from stonks_cli.strategy import (
+    journal_settings_audit as advisory_journal_settings_audit,
 )
 from stonks_cli.telegram_delivery import (
     TelegramArtifact,
@@ -769,6 +782,170 @@ def strategy_journal_list(profile: str, key_file: Path | None = typer.Option(Non
             }
         )
     )
+
+
+def _journal_settings_data(profile: str, settings: JournalSettings) -> dict[str, object]:
+    return {
+        "profile": profile,
+        "open_on_advisory": settings.open_on_advisory,
+        "retention_days": settings.retention_days,
+        "display_reasons": settings.display_reasons,
+        "configuration_version": settings.version,
+    }
+
+
+def _advisory_journal_entry_data(
+    entry: AdvisoryJournalEntry, *, display_reasons: bool
+) -> dict[str, object]:
+    data: dict[str, object] = {
+        "entry_id": entry.entry_id,
+        "advisory_id": entry.advisory_id,
+        "profile": entry.profile,
+        "configuration_version": entry.configuration_version,
+        "opened_at": entry.opened_at.isoformat(),
+        "updated_at": entry.updated_at.isoformat(),
+        "disposition": None if entry.disposition is None else entry.disposition.value,
+        "disposition_at": None if entry.disposition_at is None else entry.disposition_at.isoformat(),
+        "evidence_fingerprints": list(entry.evidence_fingerprints),
+        "disposition_history": [
+            {
+                "recorded_at": item.recorded_at.isoformat(),
+                "disposition": item.disposition.value,
+                **({"reason": item.reason} if display_reasons else {}),
+            }
+            for item in entry.disposition_history
+        ],
+    }
+    if display_reasons:
+        data["reason"] = entry.reason
+    return data
+
+
+@app.command("strategy-advisory-journal-open")
+def strategy_advisory_journal_open(
+    profile: str,
+    advisory_id: str,
+    configuration_version: str,
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    entry = open_advisory_journal(
+        EncryptedLedger(config), advisory_id, configuration_version, config.journal
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "opened": entry is not None,
+                "entry": None
+                if entry is None
+                else _advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons),
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("strategy-advisory-journal-dispose")
+def strategy_advisory_journal_dispose(
+    profile: str,
+    entry_id: str,
+    disposition: AdvisoryJournalDisposition,
+    reason: str | None = typer.Option(None),
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    try:
+        entry = record_advisory_journal_disposition(
+            EncryptedLedger(config), entry_id, disposition, reason=reason
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(
+        json.dumps(_advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons))
+    )
+
+
+@app.command("strategy-advisory-journal-link-evidence")
+def strategy_advisory_journal_link_evidence(
+    profile: str,
+    entry_id: str,
+    event_fingerprint: str,
+    key_file: Path | None = typer.Option(None),
+) -> None:
+    config = _profile(profile, key_file)
+    try:
+        entry = link_advisory_journal_evidence(EncryptedLedger(config), entry_id, event_fingerprint)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    console.print_json(
+        json.dumps(_advisory_journal_entry_data(entry, display_reasons=config.journal.display_reasons))
+    )
+
+
+@app.command("strategy-advisory-journal-list")
+def strategy_advisory_journal_list(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    config = _profile(profile, key_file)
+    entries = list_advisory_journal_entries(
+        EncryptedLedger(config), retention_days=config.journal.retention_days
+    )
+    console.print_json(
+        json.dumps(
+            {
+                "profile": profile,
+                "entries": [
+                    _advisory_journal_entry_data(item, display_reasons=config.journal.display_reasons)
+                    for item in entries
+                ],
+                "execution": "denied",
+            }
+        )
+    )
+
+
+@app.command("strategy-advisory-journal-configure")
+def strategy_advisory_journal_configure(
+    profile: str,
+    open_on_advisory: bool = typer.Option(True, "--open-on-advisory/--no-open-on-advisory"),
+    retention_days: int | None = typer.Option(None, min=1, max=36_500),
+    display_reasons: bool = typer.Option(False, "--display-reasons/--hide-reasons"),
+) -> None:
+    current = load_profile(profile)
+    try:
+        configured = configure_journal(
+            current,
+            open_on_advisory=open_on_advisory,
+            retention_days=retention_days,
+            display_reasons=display_reasons,
+        )
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    ledger = EncryptedLedger(configured)
+    if configured != current:
+        save_profile(configured)
+        record_journal_settings_audit(ledger, configured.journal)
+    purged = purge_expired_advisory_journal_entries(ledger, configured.journal.retention_days)
+    payload = _journal_settings_data(profile, configured.journal)
+    payload["purged_entries"] = purged
+    console.print_json(json.dumps(payload))
+
+
+@app.command("strategy-advisory-journal-settings")
+def strategy_advisory_journal_settings(profile: str, key_file: Path | None = typer.Option(None)) -> None:
+    config = _profile(profile, key_file)
+    records = advisory_journal_settings_audit(EncryptedLedger(config))
+    payload = _journal_settings_data(profile, config.journal)
+    payload["audit"] = [
+        {
+            "changed_at": record.changed_at.isoformat(),
+            "open_on_advisory": record.settings.open_on_advisory,
+            "retention_days": record.settings.retention_days,
+            "display_reasons": record.settings.display_reasons,
+            "configuration_version": record.settings.version,
+        }
+        for record in records
+    ]
+    console.print_json(json.dumps(payload))
 
 
 @app.command("watchlist-add")

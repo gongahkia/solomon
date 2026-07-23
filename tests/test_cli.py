@@ -188,6 +188,58 @@ def test_cli_initializes_imports_and_reports(tmp_path: Path, monkeypatch) -> Non
     ]
 
 
+def test_cli_initialization_previews_and_confirms_risk_configuration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    preview_key = tmp_path / "preview.key"
+
+    preview = runner.invoke(
+        app,
+        [
+            "init-profile",
+            "personal",
+            "--key-file",
+            str(preview_key),
+            "--risk-tolerance",
+            "balanced",
+            "--preview",
+        ],
+    )
+
+    assert preview.exit_code == 0, preview.output
+    assert not preview_key.exists()
+    assert json.loads(preview.output)["risk_configuration"]["selection_status"] == "configured"
+    rejected = runner.invoke(
+        app,
+        ["init-profile", "personal", "--key-file", str(preview_key), "--enable-advisories"],
+    )
+    assert rejected.exit_code != 0
+
+    initialized = runner.invoke(
+        app,
+        [
+            "init-profile",
+            "personal",
+            "--key-file",
+            str(preview_key),
+            "--risk-tolerance",
+            "growth",
+            "--enable-advisories",
+        ],
+    )
+
+    assert initialized.exit_code == 0, initialized.output
+    payload = json.loads(initialized.output)
+    assert payload["risk_configuration"]["selection_status"] == "configured"
+    assert load_profile("personal").strategy.advisories_enabled
+    assert load_profile("personal").strategy.effective_risk_breach_action == "alert_only"
+    audited = runner.invoke(app, ["strategy-settings", "personal"])
+    assert audited.exit_code == 0, audited.output
+    assert json.loads(audited.output)["audit"][0]["configuration_version"] == 1
+
+
 def test_cli_records_profile_scoped_advisory_journal_settings_and_disposition(
     tmp_path: Path, monkeypatch
 ) -> None:

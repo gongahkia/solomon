@@ -34,12 +34,16 @@ retrieve the latest content with `schedule-artifact`.
 ## Start
 
 ```console
-$ stonks-cli init-profile personal --key-file /absolute/path/personal.key
+$ stonks-cli init-profile personal --key-file /absolute/path/personal.key --risk-tolerance balanced --preview
+$ stonks-cli init-profile personal --key-file /absolute/path/personal.key --risk-tolerance balanced
 $ stonks-cli import-csv personal /absolute/path/export.csv --key-file /absolute/path/personal.key
 $ stonks-cli portfolio personal --key-file /absolute/path/personal.key
 ```
 
-`init-profile` generates a 256-bit key file with private permissions. Losing the key makes encrypted data unrecoverable. This private repository has no public license.
+`init-profile` generates a 256-bit key file with private permissions. `--preview` explains the selected
+risk tolerance, allocation, limits, and cash reserve without writing a profile or key. Omitting
+`--risk-tolerance` leaves advisory output fail-closed; `--enable-advisories` requires an explicit selection.
+Losing the key makes encrypted data unrecoverable. This private repository has no public license.
 
 ## Raspberry Pi workflow
 

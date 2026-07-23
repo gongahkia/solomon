@@ -51,6 +51,7 @@ from stonks_cli.config import (
     JournalSettings,
     LLMSettings,
     ProfileConfig,
+    RiskTolerance,
     StrategySettings,
     configure_benchmark,
     configure_drawdown,
@@ -331,14 +332,70 @@ def _llm_result_data(profile: str, result: llm.LLMResult) -> dict[str, object]:
     }
 
 
+def _initialization_risk_data(settings: StrategySettings) -> dict[str, object]:
+    if not settings.risk_tolerance_selected:
+        selection_status = "incomplete"
+        risk_effect = "Advisory output is disabled until you explicitly select a risk tolerance."
+    elif settings.risk_tolerance is RiskTolerance.GROWTH:
+        selection_status = "configured"
+        risk_effect = "Growth keeps risk-limit breaches alert-only; any action remains manual."
+    else:
+        selection_status = "configured"
+        risk_effect = (
+            "This tolerance can surface a manual sell advisory on a configured risk breach; "
+            "it never submits an order."
+        )
+    return {
+        "selection_status": selection_status,
+        "risk_tolerance": settings.risk_tolerance.value,
+        "advisories_enabled": settings.advisories_enabled,
+        "configuration_version": settings.version,
+        "plain_language": [
+            risk_effect,
+            "Initial allocation targets are 50% individual equities, 25% REITs, and 25% broad-index ETFs.",
+            "Each target uses a 75% US and 25% Singapore market split.",
+            "Maximum projected weight is 5% for individual equities, REITs, sectors, narrow ETFs, and unknown ETFs; broad-index ETFs are capped at 20%.",
+            "The optional cash reserve starts at 0%, so no cash is automatically reserved.",
+        ],
+        "next_step": (
+            "Use strategy-configure to select a tolerance before enabling advisories."
+            if not settings.risk_tolerance_selected
+            else "Use strategy-settings to review or strategy-configure to change these settings."
+        ),
+    }
+
+
 @app.command("init-profile")
-def init_profile(name: str, key_file: Path = typer.Option(..., exists=False)) -> None:
+def init_profile(
+    name: str,
+    key_file: Path = typer.Option(..., exists=False),
+    risk_tolerance: RiskTolerance | None = typer.Option(None),
+    enable_advisories: bool = typer.Option(False, "--enable-advisories"),
+    preview: bool = typer.Option(False, "--preview"),
+) -> None:
     key_file = key_file.expanduser().resolve()
-    generate_key_file(key_file)
-    save_profile(ProfileConfig(name=name, key_file=str(key_file)))
-    console.print_json(
-        json.dumps({"profile": name, "key_file": str(key_file), "status": "initialized"})
+    if enable_advisories and risk_tolerance is None:
+        raise typer.BadParameter("risk-tolerance is required before enabling advisories")
+    settings = StrategySettings(
+        risk_tolerance=RiskTolerance.BALANCED if risk_tolerance is None else risk_tolerance,
+        risk_tolerance_selected=risk_tolerance is not None,
+        advisories_enabled=enable_advisories,
     )
+    config = ProfileConfig(name=name, key_file=str(key_file), strategy=settings)
+    payload = {
+        "profile": name,
+        "key_file": str(key_file),
+        "status": "preview" if preview else "initialized",
+        "risk_configuration": _initialization_risk_data(settings),
+    }
+    if preview:
+        console.print_json(json.dumps(payload))
+        return
+    generate_key_file(key_file)
+    save_profile(config)
+    if risk_tolerance is not None:
+        record_strategy_settings_audit(EncryptedLedger(config), config.strategy)
+    console.print_json(json.dumps(payload))
 
 
 @app.command("import-csv")

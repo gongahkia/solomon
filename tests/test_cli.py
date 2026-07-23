@@ -111,6 +111,8 @@ def test_cli_public_command_contract_excludes_execution() -> None:
         "disable-provider",
         "dividend-configure",
         "drawdown-configure",
+        "benchmark-configure",
+        "benchmark-settings",
         "moomoo-accounts",
         "moomoo-dividends",
         "moomoo-dividend-status",
@@ -295,6 +297,48 @@ def test_cli_configures_drawdown_without_execution(tmp_path: Path, monkeypatch) 
         "version": 2,
         "execution": "denied",
     }
+
+
+def test_cli_configures_explicit_reference_benchmarks(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    key = tmp_path / "key"
+    assert runner.invoke(app, ["init-profile", "personal", "--key-file", str(key)]).exit_code == 0
+
+    initial = runner.invoke(app, ["benchmark-settings", "personal"])
+    assert initial.exit_code == 0, initial.output
+    assert json.loads(initial.output)["components"] == [
+        {
+            "identifier": "US:SPX",
+            "name": "S&P 500 Index",
+            "currency": "USD",
+            "weight": "0.75",
+            "source_url": "https://www.spglobal.com/spdji/en/indices/equity/sp-500/",
+            "return_basis": "total_return",
+        },
+        {
+            "identifier": "SG:STI",
+            "name": "Straits Times Index",
+            "currency": "SGD",
+            "weight": "0.25",
+            "source_url": "https://www.lseg.com/content/dam/ftse-russell/en_us/documents/ground-rules/straits-times-index-ground-rules.pdf",
+            "return_basis": "total_return",
+        },
+    ]
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-configure",
+            "personal",
+            "--component",
+            '{"identifier":"US:SPTR","name":"S&P 500 Total Return Index","currency":"USD","weight":"1","source_url":"https://www.spglobal.com/spdji/en/indices/equity/sp-500/"}',
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["configuration_version"] == 2
+    assert json.loads(result.output)["reference_only"] is True
+    assert runner.invoke(app, ["benchmark-configure", "personal"]).exit_code != 0
 
 
 def test_cli_exports_portfolio_only_to_explicit_recipient(tmp_path: Path, monkeypatch) -> None:

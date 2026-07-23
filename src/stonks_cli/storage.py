@@ -21,6 +21,7 @@ from stonks_cli.config import (
     JournalSettings,
     LLMSettings,
     ProfileConfig,
+    benchmark_settings_from_data,
     profile_dir,
     save_profile,
 )
@@ -250,6 +251,7 @@ def _backup_profile(source: Path) -> ProfileConfig:
             key_file=value["key_file"],
             providers=tuple(value.get("providers", ("csv", "moomoo"))),
             benchmarks=tuple(value.get("benchmarks", ())),
+            benchmark=benchmark_settings_from_data(value.get("benchmark")),
             schema_version=int(value.get("schema_version", 1)),
             llm=LLMSettings(**value.get("llm", {})),
             dividends=DividendSettings(**value.get("dividends", {})),

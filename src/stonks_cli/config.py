@@ -14,8 +14,10 @@ from stonks_cli.types import Currency, DrawdownResponsePolicy
 
 _PROFILE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENVIRONMENT_VARIABLE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_BENCHMARK_IDENTIFIER = re.compile(r"^[A-Z][A-Z0-9]{1,9}:[A-Z0-9][A-Z0-9._-]{0,31}$")
 _LLM_PROVIDERS = frozenset(("ollama", "openai", "anthropic", "gemini"))
 _BUDGET_PERIODS = frozenset(("none", "daily", "monthly"))
+_BENCHMARK_RETURN_BASES = frozenset(("price_return", "total_return"))
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,91 @@ class JournalSettings:
             raise ProfileError("journal retention days must be between 1 and 36500")
         if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
             raise ProfileError("journal settings version must be a positive integer")
+
+
+@dataclass(frozen=True)
+class BenchmarkComponent:
+    identifier: str
+    name: str
+    currency: Currency
+    weight: str
+    source_url: str
+    return_basis: str = "total_return"
+
+    def __post_init__(self) -> None:
+        identifier = self.identifier.strip().upper() if isinstance(self.identifier, str) else ""
+        if not _BENCHMARK_IDENTIFIER.fullmatch(identifier):
+            raise ProfileError("benchmark identifier must be canonical MARKET:SYMBOL")
+        if not isinstance(self.name, str) or not self.name.strip() or len(self.name.strip()) > 256:
+            raise ProfileError("benchmark name is invalid")
+        if not isinstance(self.currency, Currency):
+            raise ProfileError("benchmark currency is invalid")
+        if not isinstance(self.weight, str) or not self.weight.strip():
+            raise ProfileError("benchmark weight must be decimal")
+        try:
+            weight = Decimal(self.weight)
+        except InvalidOperation as error:
+            raise ProfileError("benchmark weight must be decimal") from error
+        if not weight.is_finite() or not Decimal("0") < weight <= Decimal("1"):
+            raise ProfileError("benchmark weight must be between zero and one")
+        if not isinstance(self.source_url, str):
+            raise ProfileError("benchmark source URL is invalid")
+        source_url = self.source_url.strip()
+        parsed = urlsplit(source_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ProfileError("benchmark source URL must be an HTTPS URL without credentials")
+        return_basis = self.return_basis.strip().lower() if isinstance(self.return_basis, str) else ""
+        if return_basis not in _BENCHMARK_RETURN_BASES:
+            raise ProfileError("benchmark return basis is invalid")
+        object.__setattr__(self, "identifier", identifier)
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(self, "weight", format(weight, "f"))
+        object.__setattr__(self, "source_url", source_url)
+        object.__setattr__(self, "return_basis", return_basis)
+
+    @property
+    def decimal_weight(self) -> Decimal:
+        return Decimal(self.weight)
+
+
+_DEFAULT_BENCHMARK_COMPONENTS = (
+    BenchmarkComponent(
+        "US:SPX",
+        "S&P 500 Index",
+        Currency.USD,
+        "0.75",
+        "https://www.spglobal.com/spdji/en/indices/equity/sp-500/",
+    ),
+    BenchmarkComponent(
+        "SG:STI",
+        "Straits Times Index",
+        Currency.SGD,
+        "0.25",
+        "https://www.lseg.com/content/dam/ftse-russell/en_us/documents/ground-rules/straits-times-index-ground-rules.pdf",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class BenchmarkSettings:
+    components: tuple[BenchmarkComponent, ...] = _DEFAULT_BENCHMARK_COMPONENTS
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.components or not all(isinstance(item, BenchmarkComponent) for item in self.components):
+            raise ProfileError("benchmark components are required")
+        identifiers = tuple(item.identifier for item in self.components)
+        if len(set(identifiers)) != len(identifiers):
+            raise ProfileError("benchmark components must be unique")
+        if sum((item.decimal_weight for item in self.components), Decimal("0")) != Decimal("1"):
+            raise ProfileError("benchmark component weights must total one")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ProfileError("benchmark settings version must be a positive integer")
 
 
 @dataclass(frozen=True)
@@ -174,6 +261,7 @@ class ProfileConfig:
     reporting_currency: Currency = Currency.SGD
     drawdown: DrawdownSettings = DrawdownSettings()
     journal: JournalSettings = JournalSettings()
+    benchmark: BenchmarkSettings = BenchmarkSettings()
 
     def __post_init__(self) -> None:
         validate_profile_name(self.name)
@@ -187,6 +275,8 @@ class ProfileConfig:
             raise ProfileError(str(error)) from error
         if not isinstance(self.reporting_currency, Currency):
             raise ProfileError("profile reporting currency is invalid")
+        if not isinstance(self.benchmark, BenchmarkSettings):
+            raise ProfileError("profile benchmark settings are invalid")
         if not isinstance(self.drawdown, DrawdownSettings):
             raise ProfileError("profile drawdown settings are invalid")
         if not isinstance(self.journal, JournalSettings):
@@ -214,6 +304,20 @@ def save_profile(config: ProfileConfig) -> None:
         data.pop("dividends")
     if config.reporting_currency is Currency.SGD:
         data.pop("reporting_currency")
+    data["benchmark"] = {
+        "components": [
+            {
+                "identifier": component.identifier,
+                "name": component.name,
+                "currency": component.currency.value,
+                "weight": component.weight,
+                "source_url": component.source_url,
+                "return_basis": component.return_basis,
+            }
+            for component in config.benchmark.components
+        ],
+        "version": config.benchmark.version,
+    }
     if config.drawdown == DrawdownSettings():
         data.pop("drawdown")
     if config.journal == JournalSettings():
@@ -251,6 +355,15 @@ def configure_drawdown(
     return replace(config, drawdown=replace(candidate, version=config.drawdown.version + 1))
 
 
+def configure_benchmark(
+    config: ProfileConfig, components: tuple[BenchmarkComponent, ...]
+) -> ProfileConfig:
+    candidate = BenchmarkSettings(components, config.benchmark.version)
+    if candidate == config.benchmark:
+        return config
+    return replace(config, benchmark=replace(candidate, version=config.benchmark.version + 1))
+
+
 def configure_journal(
     config: ProfileConfig,
     *,
@@ -269,17 +382,45 @@ def configure_journal(
     return replace(config, journal=replace(candidate, version=config.journal.version + 1))
 
 
+def benchmark_settings_from_data(value: object) -> BenchmarkSettings:
+    if value is None:
+        return BenchmarkSettings()
+    if not isinstance(value, dict):
+        raise TypeError("benchmark must be an object")
+    if "components" not in value:
+        return BenchmarkSettings()
+    component_values = value["components"]
+    if not isinstance(component_values, list):
+        raise TypeError("benchmark components must be a list")
+    return BenchmarkSettings(
+        tuple(
+            BenchmarkComponent(
+                identifier=item["identifier"],
+                name=item["name"],
+                currency=Currency(item["currency"]),
+                weight=item["weight"],
+                source_url=item["source_url"],
+                return_basis=item.get("return_basis", "total_return"),
+            )
+            for item in component_values
+        ),
+        int(value.get("version", 1)),
+    )
+
+
 def load_profile(name: str) -> ProfileConfig:
     path = config_path(name)
     if not path.is_file():
         raise ProfileError("profile not found")
     try:
         value = json.loads(path.read_text())
+        benchmark = benchmark_settings_from_data(value.get("benchmark"))
         return ProfileConfig(
             name=value["name"],
             key_file=value["key_file"],
             providers=tuple(value.get("providers", ("csv", "moomoo"))),
             benchmarks=tuple(value.get("benchmarks", ())),
+            benchmark=benchmark,
             schema_version=int(value.get("schema_version", 1)),
             llm=LLMSettings(**value.get("llm", {})),
             dividends=DividendSettings(**value.get("dividends", {})),

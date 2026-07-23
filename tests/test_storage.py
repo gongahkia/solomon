@@ -6,11 +6,14 @@ from pathlib import Path
 import pytest
 
 from stonks_cli.config import (
+    BenchmarkComponent,
+    BenchmarkSettings,
     DividendSettings,
     DrawdownSettings,
     JournalSettings,
     ProfileConfig,
     config_path,
+    configure_benchmark,
     configure_drawdown,
     configure_journal,
     disable_provider,
@@ -142,12 +145,75 @@ def test_profile_config_schema_round_trips_versioned_fields(
     save_profile(config)
     assert load_profile("personal") == config
     assert json.loads(config_path("personal").read_text()) == {
+        "benchmark": {
+            "components": [
+                {
+                    "currency": "USD",
+                    "identifier": "US:SPX",
+                    "name": "S&P 500 Index",
+                    "return_basis": "total_return",
+                    "source_url": "https://www.spglobal.com/spdji/en/indices/equity/sp-500/",
+                    "weight": "0.75",
+                },
+                {
+                    "currency": "SGD",
+                    "identifier": "SG:STI",
+                    "name": "Straits Times Index",
+                    "return_basis": "total_return",
+                    "source_url": "https://www.lseg.com/content/dam/ftse-russell/en_us/documents/ground-rules/straits-times-index-ground-rules.pdf",
+                    "weight": "0.25",
+                },
+            ],
+            "version": 1,
+        },
         "benchmarks": ["SPY"],
         "key_file": str(tmp_path / "personal.key"),
         "name": "personal",
         "providers": ["csv"],
         "schema_version": 1,
     }
+
+
+def test_profile_benchmark_settings_are_explicit_versioned_and_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STONKS_CLI_HOME", str(tmp_path / "home"))
+    config = ProfileConfig("personal", str(tmp_path / "personal.key"))
+    assert config.benchmark == BenchmarkSettings()
+    assert [item.identifier for item in config.benchmark.components] == ["US:SPX", "SG:STI"]
+
+    configured = configure_benchmark(
+        config,
+        (
+            BenchmarkComponent(
+                "US:SPTR",
+                "S&P 500 Total Return Index",
+                Currency.USD,
+                "1",
+                "https://www.spglobal.com/spdji/en/indices/equity/sp-500/",
+            ),
+        ),
+    )
+    save_profile(configured)
+
+    assert configured.benchmark.version == 2
+    assert configure_benchmark(configured, configured.benchmark.components) == configured
+    assert load_profile("personal") == configured
+    assert json.loads(config_path("personal").read_text())["benchmark"]["version"] == 2
+    with pytest.raises(ProfileError, match="total one"):
+        BenchmarkSettings(
+            (
+                BenchmarkComponent(
+                    "US:SPX",
+                    "S&P 500 Index",
+                    Currency.USD,
+                    "0.75",
+                    "https://www.spglobal.com/spdji/en/indices/equity/sp-500/",
+                ),
+            )
+        )
+    with pytest.raises(ProfileError, match="HTTPS"):
+        BenchmarkComponent("US:SPX", "S&P 500 Index", Currency.USD, "1", "http://example.com")
 
 
 def test_profile_default_reporting_currency_is_sgd_and_is_versioned_when_changed(

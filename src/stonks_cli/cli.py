@@ -28,10 +28,13 @@ from stonks_cli.analytics import (
     sector_concentrations_by_currency,
 )
 from stonks_cli.config import (
+    BenchmarkComponent,
+    BenchmarkSettings,
     DividendSettings,
     JournalSettings,
     LLMSettings,
     ProfileConfig,
+    configure_benchmark,
     configure_drawdown,
     configure_journal,
     disable_provider,
@@ -792,6 +795,43 @@ def _journal_settings_data(profile: str, settings: JournalSettings) -> dict[str,
         "display_reasons": settings.display_reasons,
         "configuration_version": settings.version,
     }
+
+
+def _benchmark_settings_data(profile: str, settings: BenchmarkSettings) -> dict[str, object]:
+    return {
+        "profile": profile,
+        "components": [
+            {
+                "identifier": component.identifier,
+                "name": component.name,
+                "currency": component.currency.value,
+                "weight": component.weight,
+                "source_url": component.source_url,
+                "return_basis": component.return_basis,
+            }
+            for component in settings.components
+        ],
+        "configuration_version": settings.version,
+        "reference_only": True,
+        "execution": "denied",
+    }
+
+
+def _benchmark_component_option(value: str) -> BenchmarkComponent:
+    try:
+        item = json.loads(value)
+        if not isinstance(item, dict):
+            raise TypeError("component must be an object")
+        return BenchmarkComponent(
+            identifier=item["identifier"],
+            name=item["name"],
+            currency=Currency(item["currency"]),
+            weight=item["weight"],
+            source_url=item["source_url"],
+            return_basis=item.get("return_basis", "total_return"),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, ProfileError) as error:
+        raise typer.BadParameter("component must be a valid benchmark JSON object") from error
 
 
 def _advisory_journal_entry_data(
@@ -2030,6 +2070,34 @@ def drawdown_configure(
             }
         )
     )
+
+
+@app.command("benchmark-configure")
+def benchmark_configure(
+    profile: str,
+    component: list[str] = typer.Option([], "--component"),
+    reset_defaults: bool = typer.Option(False, "--reset-defaults"),
+) -> None:
+    if component and reset_defaults:
+        raise typer.BadParameter("component and reset-defaults cannot be used together")
+    if not component and not reset_defaults:
+        raise typer.BadParameter("provide at least one component or reset-defaults")
+    try:
+        components = (
+            BenchmarkSettings().components
+            if reset_defaults
+            else tuple(_benchmark_component_option(value) for value in component)
+        )
+        config = configure_benchmark(load_profile(profile), components)
+    except ProfileError as error:
+        raise typer.BadParameter(str(error)) from error
+    save_profile(config)
+    console.print_json(json.dumps(_benchmark_settings_data(profile, config.benchmark)))
+
+
+@app.command("benchmark-settings")
+def benchmark_settings(profile: str) -> None:
+    console.print_json(json.dumps(_benchmark_settings_data(profile, load_profile(profile).benchmark)))
 
 
 @app.command("moomoo-accounts")

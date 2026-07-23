@@ -175,6 +175,16 @@ $ stonks-cli portfolio personal --base-currency SGD --json
 have independently calculated the benchmark return for the same period; the default `0` is cash,
 not a market benchmark. `strategy-journal` records the manual rationale for later review.
 
+## Reference benchmarks
+
+Each profile stores a versioned, non-tradable reference blend: 75% `US:SPX` (S&P 500 Index, USD)
+and 25% `SG:STI` (Straits Times Index, SGD). Components record an explicit canonical identifier,
+source URL, currency, return basis, and weight; `benchmark-configure` replaces the full component
+set from repeated JSON `--component` values, while `benchmark-settings` displays the active version.
+Benchmark configuration is never a held-security inference or a trade recommendation. Total-return
+series ingestion, FX conversion, and performance comparison are separate market-data work. Legacy
+`benchmarks` profile entries remain stored for compatibility but are not used as reference components.
+
 `research-candidates` stores encrypted, deterministic ML screening artifacts. Each item is labelled
 `research_candidate` with `experimental_price_only_model` and `no_execution` flags; it is never a
 broker instruction, allocation target, or automated action. `strategy-advisory-journal-*` stores

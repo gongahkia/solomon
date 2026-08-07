@@ -56,6 +56,17 @@ render() {
   "$shisa" prompt --socket "$1" --cwd "$tmp/repo" --shell zsh --cols 80 --rows 24 --no-async
 }
 
+wait_for_render() {
+  local socket_path="$1"
+  for _ in {1..200}; do
+    if render "$socket_path" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.01
+  done
+  return 1
+}
+
 # A bind/close leaves a real Unix socket node without a listener, matching the
 # post-crash condition that the daemon must repair before it can listen.
 python3 - "$stale_sock" <<'PY'
@@ -72,7 +83,10 @@ wait_for_socket "$stale_sock" || {
   printf 'lifecycle acceptance: stale socket was not replaced\n' >&2
   exit 1
 }
-[[ -n "$(render "$stale_sock")" ]]
+wait_for_render "$stale_sock" || {
+  printf 'lifecycle acceptance: stale socket did not accept renders\n' >&2
+  exit 1
+}
 kill "$stale_pid"
 wait "$stale_pid" || true
 unset stale_pid
@@ -95,7 +109,7 @@ kill -9 "$first_child"
 replacement_child=""
 for _ in {1..200}; do
   candidate="$(pgrep -P "$supervisor_pid" 2>/dev/null | head -n 1 || true)"
-  if [[ -n "$candidate" && "$candidate" != "$first_child" && -S "$supervised_sock" ]]; then
+  if [[ -n "$candidate" && "$candidate" != "$first_child" ]] && wait_for_render "$supervised_sock"; then
     replacement_child="$candidate"
     break
   fi

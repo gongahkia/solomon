@@ -7,10 +7,6 @@ pub fn build(b: *std.Build) void {
     const vcs_extra = b.option(bool, "vcs_extra", "compile hg/jj/sl/stack/worktree CLI verbs (default: false)") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "vcs_extra", vcs_extra);
-    const marketplace_index_source = std.fs.cwd().readFileAlloc(b.allocator, "marketplace/index.toml", 1024 * 1024) catch |err| {
-        std.debug.panic("failed to read marketplace/index.toml: {s}", .{@errorName(err)});
-    };
-    build_options.addOption([]const u8, "marketplace_index", marketplace_index_source);
     const build_options_module = build_options.createModule();
 
     const vcs_worktree_module = b.createModule(.{

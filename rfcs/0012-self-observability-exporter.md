@@ -172,5 +172,5 @@ Prometheus schema is explicitly unstable in the first release. Metric names may 
 
 - Whether multi-user hosts need a token even for loopback.
 - Whether exporter bind failure should fail daemon startup or only disable exporter. This RFC recommends fail startup for explicit config errors.
-- Whether plugin ids should be labels before plugin marketplace trust metadata is mature.
+- Whether plugin ids should be labels before plugin trust metadata is mature.
 - Whether `shisad --metrics --prometheus` and the HTTP endpoint should share exactly one serializer.

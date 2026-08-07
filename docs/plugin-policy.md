@@ -1,10 +1,10 @@
-# Plugin Catalog Policy
+# Plugin Distribution Policy
 
-Shisa's plugin catalog is a directory of local example plugins in this repo. External plugin repositories can still be installed directly by URL, but they are not catalog entries.
+Shisa does not operate a plugin catalog or remote installer. Plugin authors distribute a source directory or a `.shisa-plugin` bundle through their own release channel; users choose the exact local path they install.
 
-## Listing Requirements
+## Distribution Requirements
 
-Catalog entries must:
+Published plugins should:
 
 - expose a valid `plugin.lua` manifest
 - use a license compatible with redistribution
@@ -15,17 +15,17 @@ Catalog entries must:
 
 Plugins that handle secrets, cloud accounts, kubeconfigs, SSH config, or production context must describe their local data flow in the README.
 
-The catalog index is checked in at `marketplace/index.toml`. Entries stay out of the index until the local path, manifest, capability list, and optional signing metadata can be reviewed.
+Bundles must be produced with `shisa plugin pack`. Installation verifies the bundle payload hashes, manifest name/version, and included Ed25519 signature. This validates bundle structure and detects accidental corruption; it does not establish author identity because the public key travels inside the bundle.
 
 ## Verified Badge
 
-`verified` means the latest submitted manifest passed maintainer review for identity, capability scope, and obvious abuse. It does not mean the code is bug-free, safe for every environment, or endorsed for production use.
+`verified` means a locally installed plugin has been marked after maintainer review for capability scope and obvious abuse. It does not mean the code is bug-free, safe for every environment, or endorsed for production use.
 
 Verified status can be removed when a plugin changes ownership, expands sensitive capabilities, stops publishing source, or has unresolved security reports.
 
 ## Moderation
 
-Maintainers may delist or hide plugins for:
+Maintainers may remove a local `verified` marker or withdraw an official recommendation for:
 
 - malware, credential theft, or covert telemetry
 - misleading names that impersonate Shisa or another maintainer
@@ -34,8 +34,8 @@ Maintainers may delist or hide plugins for:
 - abandoned security reports
 - harassment or abuse tied to the plugin project
 
-Delisting is reversible when the owner fixes the issue and publishes a reviewable release.
+The status change is reversible when the owner fixes the issue and publishes a reviewable release.
 
 ## Appeals
 
-Plugin owners may appeal with a regular project issue once the plugin has published a reviewable remediation. Appeals must include the plugin id, disputed action, and remediation evidence.
+Plugin owners may request a renewed review with a regular project issue once they have published a reviewable remediation. Requests must include the plugin id, disputed action, and remediation evidence.

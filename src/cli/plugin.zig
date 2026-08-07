@@ -1,12 +1,10 @@
 const std = @import("std");
-const build_options = @import("build_options");
 const cli_util = @import("util.zig");
 const daemon_json = @import("../daemon/json.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
 
 const plugin_slow_strike_limit: u8 = 3;
-const bundled_marketplace_index = build_options.marketplace_index;
 
 pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len == 0) return error.UnknownPluginArgument;
@@ -40,17 +38,6 @@ pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (std.mem.eql(u8, args[0], "verify")) {
         if (args.len != 2) return error.UnknownPluginArgument;
         const output = try pluginVerifyAlloc(allocator, args[1]);
-        defer allocator.free(output);
-        try std.fs.File.stdout().writeAll(output);
-        return;
-    }
-
-    if (std.mem.eql(u8, args[0], "search")) {
-        const config = try parsePluginSearchArgs(args[1..]);
-        const output = if (config.index_path) |path|
-            try pluginSearchPathAlloc(allocator, path, config.query)
-        else
-            try pluginSearchAlloc(allocator, bundled_marketplace_index, config.query);
         defer allocator.free(output);
         try std.fs.File.stdout().writeAll(output);
         return;
@@ -116,33 +103,6 @@ const PluginTrustConfig = struct {
     name: []const u8,
     net: ?[]const u8 = null,
 };
-
-const PluginSearchConfig = struct {
-    query: []const u8,
-    index_path: ?[]const u8 = null,
-};
-
-fn parsePluginSearchArgs(args: []const []const u8) !PluginSearchConfig {
-    var config: PluginSearchConfig = undefined;
-    config.index_path = null;
-    var seen_query = false;
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-        if (std.mem.eql(u8, arg, "--index")) {
-            i += 1;
-            if (i >= args.len) return error.UnknownPluginArgument;
-            config.index_path = args[i];
-        } else if (!seen_query) {
-            config.query = arg;
-            seen_query = true;
-        } else {
-            return error.UnknownPluginArgument;
-        }
-    }
-    if (!seen_query) return error.UnknownPluginArgument;
-    return config;
-}
 
 fn parsePluginTrustArgs(args: []const []const u8) !PluginTrustConfig {
     if (args.len == 0) return error.UnknownPluginArgument;
@@ -361,6 +321,31 @@ const PluginBundleFile = struct {
     sha256_hex: [std.crypto.hash.sha2.Sha256.digest_length * 2]u8,
 };
 
+const PluginBundleMetadata = struct {
+    format: []const u8,
+    name: []const u8,
+    version: []const u8,
+    files: []const PluginBundleMetadataFile,
+    signature: PluginBundleSignature,
+};
+
+const PluginBundleMetadataFile = struct {
+    path: []const u8,
+    size: u64,
+    sha256: []const u8,
+};
+
+const PluginBundleSignature = struct {
+    algorithm: []const u8,
+    public_key: []const u8,
+    signature: []const u8,
+};
+
+const PluginBundleMetadataPolicy = enum {
+    reject,
+    skip,
+};
+
 fn pluginPack(allocator: std.mem.Allocator, path: []const u8, out_dir: []const u8) ![]u8 {
     const manifest_path = try pluginManifestPathAlloc(allocator, path);
     defer allocator.free(manifest_path);
@@ -373,7 +358,7 @@ fn pluginPack(allocator: std.mem.Allocator, path: []const u8, out_dir: []const u
     var loaded = try runtime.loadManifestStrict(source);
     defer loaded.deinit(allocator);
 
-    var files = try collectPluginBundleFiles(allocator, plugin_dir);
+    var files = try collectPluginBundleFiles(allocator, plugin_dir, .reject);
     defer deinitPluginBundleFiles(allocator, &files);
     const canonical = try canonicalPluginBundleManifestAlloc(allocator, loaded.manifest, files.items);
     defer allocator.free(canonical);
@@ -390,7 +375,7 @@ fn pluginPack(allocator: std.mem.Allocator, path: []const u8, out_dir: []const u
     return output_path;
 }
 
-fn collectPluginBundleFiles(allocator: std.mem.Allocator, plugin_dir: []const u8) !std.ArrayList(PluginBundleFile) {
+fn collectPluginBundleFiles(allocator: std.mem.Allocator, plugin_dir: []const u8, metadata_policy: PluginBundleMetadataPolicy) !std.ArrayList(PluginBundleFile) {
     var dir = try openIterableDir(plugin_dir);
     defer dir.close();
     var walker = try dir.walk(allocator);
@@ -400,7 +385,10 @@ fn collectPluginBundleFiles(allocator: std.mem.Allocator, plugin_dir: []const u8
     errdefer deinitPluginBundleFiles(allocator, &files);
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
-        if (std.mem.eql(u8, entry.path, "SHISA_PLUGIN_BUNDLE.json")) return error.PluginPackReservedPath;
+        if (std.mem.eql(u8, entry.path, "SHISA_PLUGIN_BUNDLE.json")) {
+            if (metadata_policy == .reject) return error.PluginPackReservedPath;
+            continue;
+        }
         if (std.mem.eql(u8, entry.path, ".git") or std.mem.startsWith(u8, entry.path, ".git/")) continue;
         const full_path = try std.fs.path.join(allocator, &.{ plugin_dir, entry.path });
         defer allocator.free(full_path);
@@ -536,15 +524,14 @@ fn writeTarPadding(output: std.fs.File, len: usize) !void {
 }
 
 const PluginInstallConfig = struct {
-    url: []const u8,
+    source: []const u8,
     yes: bool = false,
     strict: bool = false,
-    index_path: ?[]const u8 = null,
 };
 
 const PluginInstallSourceKind = enum {
     local_path,
-    git_url,
+    bundle_path,
 };
 
 const PluginInstallSource = struct {
@@ -558,10 +545,9 @@ const PluginInstallSource = struct {
 
 fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
     var config: PluginInstallConfig = undefined;
-    var seen_url = false;
+    var seen_source = false;
     config.yes = false;
     config.strict = false;
-    config.index_path = null;
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -570,18 +556,14 @@ fn parsePluginInstallArgs(args: []const []const u8) !PluginInstallConfig {
             config.yes = true;
         } else if (std.mem.eql(u8, arg, "--plugin-sandbox-strict")) {
             config.strict = true;
-        } else if (std.mem.eql(u8, arg, "--index")) {
-            i += 1;
-            if (i >= args.len) return error.UnknownPluginArgument;
-            config.index_path = args[i];
-        } else if (!seen_url) {
-            config.url = arg;
-            seen_url = true;
+        } else if (!seen_source) {
+            config.source = arg;
+            seen_source = true;
         } else {
             return error.UnknownPluginArgument;
         }
     }
-    if (!seen_url) return error.UnknownPluginArgument;
+    if (!seen_source) return error.UnknownPluginArgument;
     return config;
 }
 
@@ -597,8 +579,10 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
 
     switch (source.kind) {
         .local_path => try copyPluginTree(allocator, source.value, temp_path),
-        .git_url => try runGitClone(allocator, source.value, temp_path),
+        .bundle_path => try extractPluginBundle(allocator, source.value, temp_path),
     }
+
+    if (source.kind == .bundle_path) try verifyExtractedPluginBundle(allocator, temp_path);
 
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{temp_path});
     defer allocator.free(manifest_path);
@@ -631,32 +615,12 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
 }
 
 fn pluginInstallSourceAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) !PluginInstallSource {
-    if (!pluginInstallSourceNeedsMarketplace(config.url)) {
-        const kind: PluginInstallSourceKind = if (pluginInstallSourceIsGit(config.url)) .git_url else .local_path;
-        const value = if (kind == .local_path) try expandPluginPathAlloc(allocator, config.url) else try allocator.dupe(u8, config.url);
-        return .{ .kind = kind, .value = value };
+    if (std.mem.indexOf(u8, config.source, "://") != null or std.mem.endsWith(u8, config.source, ".git")) {
+        return error.PluginRemoteInstallUnsupported;
     }
-    if (config.index_path) |path| {
-        const source = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
-        defer allocator.free(source);
-        return .{ .kind = .local_path, .value = try marketplacePluginPathAlloc(allocator, source, config.url) };
-    }
-    return .{ .kind = .local_path, .value = try marketplacePluginPathAlloc(allocator, bundled_marketplace_index, config.url) };
-}
-
-fn pluginInstallSourceNeedsMarketplace(source: []const u8) bool {
-    if (!plugin_manifest.isValidPluginName(source)) return false;
-    if (std.mem.startsWith(u8, source, ".") or std.mem.startsWith(u8, source, "/") or std.mem.startsWith(u8, source, "~")) return false;
-    if (std.mem.indexOf(u8, source, "://") != null) return false;
-    if (std.mem.indexOfScalar(u8, source, ':') != null) return false;
-    if (std.mem.endsWith(u8, source, ".git")) return false;
-    return true;
-}
-
-fn pluginInstallSourceIsGit(source: []const u8) bool {
-    if (std.mem.indexOf(u8, source, "://") != null) return true;
-    if (std.mem.endsWith(u8, source, ".git")) return true;
-    return false;
+    const value = try expandPluginPathAlloc(allocator, config.source);
+    const kind: PluginInstallSourceKind = if (std.mem.endsWith(u8, value, ".shisa-plugin")) .bundle_path else .local_path;
+    return .{ .kind = kind, .value = value };
 }
 
 fn expandPluginPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -669,16 +633,146 @@ fn expandPluginPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return allocator.dupe(u8, path);
 }
 
-fn runGitClone(allocator: std.mem.Allocator, url: []const u8, target_path: []const u8) !void {
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "git", "clone", "--depth", "1", url, target_path },
-        .max_output_bytes = 1024 * 1024,
-        .expand_arg0 = .expand,
-    });
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    if (!cli_util.exitedZero(result.term)) return error.PluginCloneFailed;
+const plugin_bundle_max_bytes = 64 * 1024 * 1024;
+const plugin_bundle_max_files = 256;
+
+fn extractPluginBundle(allocator: std.mem.Allocator, bundle_path: []const u8, target_path: []const u8) !void {
+    const archive = try std.fs.cwd().readFileAlloc(allocator, bundle_path, plugin_bundle_max_bytes);
+    defer allocator.free(archive);
+
+    try std.fs.cwd().makePath(target_path);
+    errdefer std.fs.cwd().deleteTree(target_path) catch {};
+
+    var offset: usize = 0;
+    var entry_count: usize = 0;
+    var metadata_seen = false;
+    while (offset + 512 <= archive.len) {
+        const header = archive[offset .. offset + 512];
+        if (tarBlockIsZero(header)) {
+            if (!metadata_seen) return error.PluginBundleMetadataMissing;
+            return;
+        }
+        if (!tarHeaderChecksumValid(header)) return error.PluginBundleInvalidArchive;
+        if (header[156] != '0' and header[156] != 0) return error.PluginBundleInvalidArchive;
+        if (entry_count == plugin_bundle_max_files) return error.PluginBundleTooManyFiles;
+        entry_count += 1;
+
+        const name = tarHeaderName(header) orelse return error.PluginBundleInvalidArchive;
+        if (!validPluginBundlePath(name)) return error.PluginBundleInvalidArchive;
+        const size_u64 = tarOctal(header[124..136]) catch return error.PluginBundleInvalidArchive;
+        const size = std.math.cast(usize, size_u64) orelse return error.PluginBundleInvalidArchive;
+        if (size > plugin_bundle_max_bytes) return error.PluginBundleInvalidArchive;
+        const padded_size = std.mem.alignForward(usize, size, 512);
+        const data_offset = std.math.add(usize, offset, 512) catch return error.PluginBundleInvalidArchive;
+        const next_offset = std.math.add(usize, data_offset, padded_size) catch return error.PluginBundleInvalidArchive;
+        if (next_offset > archive.len) return error.PluginBundleInvalidArchive;
+
+        if (std.mem.eql(u8, name, "SHISA_PLUGIN_BUNDLE.json")) {
+            if (metadata_seen) return error.PluginBundleInvalidArchive;
+            metadata_seen = true;
+        }
+
+        const output_path = try std.fs.path.join(allocator, &.{ target_path, name });
+        defer allocator.free(output_path);
+        if (std.fs.path.dirname(output_path)) |parent| try std.fs.cwd().makePath(parent);
+        var output = std.fs.cwd().createFile(output_path, .{ .exclusive = true }) catch |err| switch (err) {
+            error.PathAlreadyExists => return error.PluginBundleInvalidArchive,
+            else => return err,
+        };
+        defer output.close();
+        try output.writeAll(archive[data_offset .. data_offset + size]);
+        offset = next_offset;
+    }
+    return error.PluginBundleInvalidArchive;
+}
+
+fn verifyExtractedPluginBundle(allocator: std.mem.Allocator, plugin_dir: []const u8) !void {
+    const metadata_path = try std.fs.path.join(allocator, &.{ plugin_dir, "SHISA_PLUGIN_BUNDLE.json" });
+    defer allocator.free(metadata_path);
+    const source = std.fs.cwd().readFileAlloc(allocator, metadata_path, 1024 * 1024) catch return error.PluginBundleIntegrityInvalid;
+    defer allocator.free(source);
+    var parsed = std.json.parseFromSlice(PluginBundleMetadata, allocator, source, .{ .ignore_unknown_fields = false }) catch return error.PluginBundleIntegrityInvalid;
+    defer parsed.deinit();
+    const metadata = parsed.value;
+
+    if (!std.mem.eql(u8, metadata.format, "shisa-plugin-bundle-v1") or
+        !std.mem.eql(u8, metadata.signature.algorithm, "Ed25519")) return error.PluginBundleIntegrityInvalid;
+
+    var files = collectPluginBundleFiles(allocator, plugin_dir, .skip) catch return error.PluginBundleIntegrityInvalid;
+    defer deinitPluginBundleFiles(allocator, &files);
+    if (files.items.len != metadata.files.len) return error.PluginBundleIntegrityInvalid;
+    for (files.items, metadata.files) |file, expected| {
+        if (!std.mem.eql(u8, file.path, expected.path) or file.size != expected.size or
+            !std.mem.eql(u8, file.sha256_hex[0..], expected.sha256)) return error.PluginBundleIntegrityInvalid;
+    }
+
+    const manifest_path = try std.fs.path.join(allocator, &.{ plugin_dir, "plugin.lua" });
+    defer allocator.free(manifest_path);
+    const manifest_source = std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024) catch return error.PluginBundleIntegrityInvalid;
+    defer allocator.free(manifest_source);
+    var runtime = plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir }) catch return error.PluginBundleIntegrityInvalid;
+    defer runtime.deinit();
+    var loaded = runtime.loadManifestStrict(manifest_source) catch return error.PluginBundleIntegrityInvalid;
+    defer loaded.deinit(allocator);
+    if (!std.mem.eql(u8, loaded.manifest.name, metadata.name) or !std.mem.eql(u8, loaded.manifest.version, metadata.version)) {
+        return error.PluginBundleIntegrityInvalid;
+    }
+
+    const canonical = canonicalPluginBundleManifestAlloc(allocator, loaded.manifest, files.items) catch return error.PluginBundleIntegrityInvalid;
+    defer allocator.free(canonical);
+    const Ed25519 = std.crypto.sign.Ed25519;
+    var public_key_bytes: [Ed25519.PublicKey.encoded_length]u8 = undefined;
+    var signature_bytes: [Ed25519.Signature.encoded_length]u8 = undefined;
+    _ = std.fmt.hexToBytes(&public_key_bytes, metadata.signature.public_key) catch return error.PluginBundleIntegrityInvalid;
+    _ = std.fmt.hexToBytes(&signature_bytes, metadata.signature.signature) catch return error.PluginBundleIntegrityInvalid;
+    const public_key = Ed25519.PublicKey.fromBytes(public_key_bytes) catch return error.PluginBundleIntegrityInvalid;
+    const signature = Ed25519.Signature.fromBytes(signature_bytes);
+    signature.verify(canonical, public_key) catch return error.PluginBundleIntegrityInvalid;
+}
+
+fn tarBlockIsZero(block: []const u8) bool {
+    for (block) |byte| if (byte != 0) return false;
+    return true;
+}
+
+fn tarHeaderChecksumValid(header: []const u8) bool {
+    if (header.len != 512) return false;
+    const expected = tarOctal(header[148..156]) catch return false;
+    var actual: u64 = 0;
+    for (header, 0..) |byte, index| actual += if (index >= 148 and index < 156) ' ' else byte;
+    return actual == expected;
+}
+
+fn tarHeaderName(header: []const u8) ?[]const u8 {
+    const end = std.mem.indexOfScalar(u8, header[0..100], 0) orelse 100;
+    if (end == 0) return null;
+    return header[0..end];
+}
+
+fn tarOctal(field: []const u8) !u64 {
+    var result: u64 = 0;
+    var digits_seen = false;
+    var terminated = false;
+    for (field) |byte| {
+        if (byte >= '0' and byte <= '7') {
+            if (terminated) return error.InvalidTarOctal;
+            result = std.math.mul(u64, result, 8) catch return error.InvalidTarOctal;
+            result = std.math.add(u64, result, byte - '0') catch return error.InvalidTarOctal;
+            digits_seen = true;
+        } else if (byte == 0 or byte == ' ') {
+            if (digits_seen) terminated = true;
+        } else return error.InvalidTarOctal;
+    }
+    return result;
+}
+
+fn validPluginBundlePath(path: []const u8) bool {
+    if (path.len == 0 or std.fs.path.isAbsolute(path) or std.mem.indexOfScalar(u8, path, '\\') != null) return false;
+    var parts = std.mem.splitScalar(u8, path, '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
 }
 
 fn copyPluginTree(allocator: std.mem.Allocator, source_path: []const u8, target_path: []const u8) !void {
@@ -784,291 +878,6 @@ fn pluginListAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8, disabl
         }
     }
     return out.toOwnedSlice(allocator);
-}
-
-const PluginMarketplaceEntry = struct {
-    name: []const u8,
-    path: []const u8,
-    homepage: ?[]const u8 = null,
-    version: []const u8,
-    capabilities: []const []const u8,
-    sigstore_key: ?[]const u8 = null,
-    status: []const u8,
-    description: ?[]const u8 = null,
-    keywords: []const []const u8 = &.{},
-};
-
-const PluginMarketplaceIndex = struct {
-    plugins: []PluginMarketplaceEntry,
-
-    fn deinit(self: PluginMarketplaceIndex, allocator: std.mem.Allocator) void {
-        for (self.plugins) |entry| {
-            allocator.free(entry.capabilities);
-            allocator.free(entry.keywords);
-        }
-        allocator.free(self.plugins);
-    }
-};
-
-const PluginMarketplaceEntryBuilder = struct {
-    name: ?[]const u8 = null,
-    path: ?[]const u8 = null,
-    homepage: ?[]const u8 = null,
-    version: ?[]const u8 = null,
-    capabilities: ?[]const []const u8 = null,
-    sigstore_key: ?[]const u8 = null,
-    status: ?[]const u8 = null,
-    description: ?[]const u8 = null,
-    keywords: ?[]const []const u8 = null,
-
-    fn deinit(self: *PluginMarketplaceEntryBuilder, allocator: std.mem.Allocator) void {
-        if (self.capabilities) |items| allocator.free(items);
-        if (self.keywords) |items| allocator.free(items);
-    }
-};
-
-fn pluginSearchPathAlloc(allocator: std.mem.Allocator, index_path: []const u8, query: []const u8) ![]u8 {
-    const source = try std.fs.cwd().readFileAlloc(allocator, index_path, 1024 * 1024);
-    defer allocator.free(source);
-    return pluginSearchAlloc(allocator, source, query);
-}
-
-fn pluginSearchAlloc(allocator: std.mem.Allocator, source: []const u8, query: []const u8) ![]u8 {
-    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
-    defer parsed.deinit(allocator);
-
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    for (parsed.plugins) |entry| {
-        if (!marketplaceEntryMatches(entry, query)) continue;
-        const sigstore_badge = if (entry.sigstore_key != null) " sigstore" else "";
-        const location = entry.homepage orelse entry.path;
-        try cli_util.appendFmt(allocator, &out, "{s} {s}{s} {s} {s}", .{ entry.name, entry.status, sigstore_badge, entry.version, location });
-        if (entry.description) |description| try cli_util.appendFmt(allocator, &out, " - {s}", .{description});
-        if (entry.capabilities.len != 0) {
-            try out.appendSlice(allocator, " [");
-            for (entry.capabilities, 0..) |capability, i| {
-                if (i != 0) try out.append(allocator, ',');
-                try out.appendSlice(allocator, capability);
-            }
-            try out.append(allocator, ']');
-        }
-        try out.append(allocator, '\n');
-    }
-    return out.toOwnedSlice(allocator);
-}
-
-fn marketplacePluginPathAlloc(allocator: std.mem.Allocator, source: []const u8, name: []const u8) ![]u8 {
-    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
-    defer parsed.deinit(allocator);
-    for (parsed.plugins) |entry| {
-        if (std.mem.eql(u8, entry.name, name)) return allocator.dupe(u8, entry.path);
-    }
-    return error.PluginMarketplaceEntryNotFound;
-}
-
-fn marketplaceEntryMatches(entry: PluginMarketplaceEntry, query: []const u8) bool {
-    if (containsIgnoreAsciiCase(entry.name, query)) return true;
-    if (containsIgnoreAsciiCase(entry.path, query)) return true;
-    if (entry.homepage) |homepage| if (containsIgnoreAsciiCase(homepage, query)) return true;
-    if (containsIgnoreAsciiCase(entry.status, query)) return true;
-    if (containsIgnoreAsciiCase(entry.version, query)) return true;
-    if (entry.description) |description| if (containsIgnoreAsciiCase(description, query)) return true;
-    for (entry.capabilities) |capability| if (containsIgnoreAsciiCase(capability, query)) return true;
-    for (entry.keywords) |keyword| if (containsIgnoreAsciiCase(keyword, query)) return true;
-    return false;
-}
-
-fn parseMarketplaceIndexAlloc(allocator: std.mem.Allocator, source: []const u8) !PluginMarketplaceIndex {
-    var entries: std.ArrayList(PluginMarketplaceEntry) = .empty;
-    errdefer {
-        for (entries.items) |entry| {
-            allocator.free(entry.capabilities);
-            allocator.free(entry.keywords);
-        }
-        entries.deinit(allocator);
-    }
-
-    var builder = PluginMarketplaceEntryBuilder{};
-    var have_entry = false;
-    defer builder.deinit(allocator);
-
-    var lines = std.mem.splitScalar(u8, source, '\n');
-    while (lines.next()) |raw_line| {
-        const line = stripTomlComment(std.mem.trim(u8, raw_line, " \t\r"));
-        if (line.len == 0) continue;
-        if (std.mem.eql(u8, line, "[[plugins]]")) {
-            if (have_entry) {
-                try entries.append(allocator, try finishMarketplaceEntryAlloc(allocator, &builder));
-                builder = .{};
-            }
-            have_entry = true;
-            continue;
-        }
-        if (!have_entry) return error.InvalidMarketplaceIndex;
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse return error.InvalidMarketplaceIndex;
-        const key = std.mem.trim(u8, line[0..eq], " \t");
-        const value = std.mem.trim(u8, line[eq + 1 ..], " \t");
-        try setMarketplaceEntryField(allocator, &builder, key, value);
-    }
-    if (have_entry) try entries.append(allocator, try finishMarketplaceEntryAlloc(allocator, &builder));
-    return .{ .plugins = try entries.toOwnedSlice(allocator) };
-}
-
-fn setMarketplaceEntryField(allocator: std.mem.Allocator, builder: *PluginMarketplaceEntryBuilder, key: []const u8, value: []const u8) !void {
-    if (std.mem.eql(u8, key, "name")) {
-        if (builder.name != null) return error.InvalidMarketplaceIndex;
-        builder.name = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "path")) {
-        if (builder.path != null) return error.InvalidMarketplaceIndex;
-        builder.path = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "homepage")) {
-        if (builder.homepage != null) return error.InvalidMarketplaceIndex;
-        builder.homepage = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "version")) {
-        if (builder.version != null) return error.InvalidMarketplaceIndex;
-        builder.version = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "capabilities")) {
-        if (builder.capabilities != null) return error.InvalidMarketplaceIndex;
-        builder.capabilities = try parseTomlStringArrayAlloc(allocator, value);
-    } else if (std.mem.eql(u8, key, "sigstore_key")) {
-        if (builder.sigstore_key != null) return error.InvalidMarketplaceIndex;
-        builder.sigstore_key = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "status")) {
-        if (builder.status != null) return error.InvalidMarketplaceIndex;
-        builder.status = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "description")) {
-        if (builder.description != null) return error.InvalidMarketplaceIndex;
-        builder.description = try parseTomlString(value);
-    } else if (std.mem.eql(u8, key, "keywords")) {
-        if (builder.keywords != null) return error.InvalidMarketplaceIndex;
-        builder.keywords = try parseTomlStringArrayAlloc(allocator, value);
-    } else {
-        return error.InvalidMarketplaceIndex;
-    }
-}
-
-fn finishMarketplaceEntryAlloc(allocator: std.mem.Allocator, builder: *PluginMarketplaceEntryBuilder) !PluginMarketplaceEntry {
-    const capabilities = builder.capabilities orelse return error.InvalidMarketplaceIndex;
-    builder.capabilities = null;
-    errdefer allocator.free(capabilities);
-    const keywords = builder.keywords orelse try allocator.alloc([]const u8, 0);
-    builder.keywords = null;
-    errdefer allocator.free(keywords);
-
-    const entry = PluginMarketplaceEntry{
-        .name = builder.name orelse return error.InvalidMarketplaceIndex,
-        .path = builder.path orelse return error.InvalidMarketplaceIndex,
-        .homepage = builder.homepage,
-        .version = builder.version orelse return error.InvalidMarketplaceIndex,
-        .capabilities = capabilities,
-        .sigstore_key = builder.sigstore_key,
-        .status = builder.status orelse return error.InvalidMarketplaceIndex,
-        .description = builder.description,
-        .keywords = keywords,
-    };
-    try validateMarketplaceEntry(entry);
-    return entry;
-}
-
-fn validateMarketplaceEntry(entry: PluginMarketplaceEntry) !void {
-    if (!plugin_manifest.isValidPluginName(entry.name)) return error.InvalidMarketplaceIndex;
-    if (!validMarketplacePath(entry.path)) return error.InvalidMarketplaceIndex;
-    if (entry.homepage) |homepage| {
-        if (!std.mem.startsWith(u8, homepage, "https://")) return error.InvalidMarketplaceIndex;
-    }
-    if (!validMarketplaceStatus(entry.status)) return error.InvalidMarketplaceIndex;
-    if (entry.capabilities.len == 0) return error.InvalidMarketplaceIndex;
-    for (entry.capabilities) |capability| {
-        if (!validMarketplaceCapability(capability)) return error.InvalidMarketplaceIndex;
-    }
-}
-
-fn validMarketplacePath(path: []const u8) bool {
-    if (path.len == 0 or std.fs.path.isAbsolute(path)) return false;
-    if (std.mem.indexOfAny(u8, path, " \t\r\n") != null) return false;
-    var components = std.mem.splitScalar(u8, path, '/');
-    while (components.next()) |component| {
-        if (component.len == 0 or std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return false;
-    }
-    return true;
-}
-
-fn validMarketplaceStatus(status: []const u8) bool {
-    return std.mem.eql(u8, status, "community") or std.mem.eql(u8, status, "official") or std.mem.eql(u8, status, "archived");
-}
-
-fn validMarketplaceCapability(capability: []const u8) bool {
-    inline for (.{
-        "fs_read",
-        "fs_watch",
-        "exec",
-        "net",
-        "secrets",
-        "env_read",
-        "pre_exec",
-    }) |known| {
-        if (std.mem.eql(u8, capability, known)) return true;
-    }
-    return false;
-}
-
-fn stripTomlComment(line: []const u8) []const u8 {
-    var in_string = false;
-    var escaped = false;
-    for (line, 0..) |byte, i| {
-        if (escaped) {
-            escaped = false;
-        } else if (byte == '\\' and in_string) {
-            escaped = true;
-        } else if (byte == '"') {
-            in_string = !in_string;
-        } else if (byte == '#' and !in_string) {
-            return std.mem.trim(u8, line[0..i], " \t");
-        }
-    }
-    return std.mem.trim(u8, line, " \t");
-}
-
-fn parseTomlString(value: []const u8) ![]const u8 {
-    const trimmed = std.mem.trim(u8, value, " \t");
-    if (trimmed.len < 2 or trimmed[0] != '"' or trimmed[trimmed.len - 1] != '"') return error.InvalidMarketplaceIndex;
-    const inner = trimmed[1 .. trimmed.len - 1];
-    if (std.mem.indexOfScalar(u8, inner, '\\') != null) return error.InvalidMarketplaceIndex;
-    return inner;
-}
-
-fn parseTomlStringArrayAlloc(allocator: std.mem.Allocator, value: []const u8) ![]const []const u8 {
-    const trimmed = std.mem.trim(u8, value, " \t");
-    if (trimmed.len < 2 or trimmed[0] != '[' or trimmed[trimmed.len - 1] != ']') return error.InvalidMarketplaceIndex;
-    var rest = std.mem.trim(u8, trimmed[1 .. trimmed.len - 1], " \t");
-    var items: std.ArrayList([]const u8) = .empty;
-    errdefer items.deinit(allocator);
-    while (rest.len != 0) {
-        if (rest[0] != '"') return error.InvalidMarketplaceIndex;
-        const close = std.mem.indexOfScalar(u8, rest[1..], '"') orelse return error.InvalidMarketplaceIndex;
-        const item = rest[1 .. close + 1];
-        if (std.mem.indexOfScalar(u8, item, '\\') != null) return error.InvalidMarketplaceIndex;
-        try items.append(allocator, item);
-        rest = std.mem.trim(u8, rest[close + 2 ..], " \t");
-        if (rest.len == 0) break;
-        if (rest[0] != ',') return error.InvalidMarketplaceIndex;
-        rest = std.mem.trim(u8, rest[1..], " \t");
-    }
-    return items.toOwnedSlice(allocator);
-}
-
-fn containsIgnoreAsciiCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len == 0) return true;
-    if (needle.len > haystack.len) return false;
-    var start: usize = 0;
-    while (start + needle.len <= haystack.len) : (start += 1) {
-        var index: usize = 0;
-        while (index < needle.len) : (index += 1) {
-            if (std.ascii.toLower(haystack[start + index]) != std.ascii.toLower(needle[index])) break;
-        } else return true;
-    }
-    return false;
 }
 
 fn setPluginDisabled(allocator: std.mem.Allocator, disabled_path: []const u8, name: []const u8, disabled: bool) !void {
@@ -1534,75 +1343,17 @@ test "plugin list reports enabled disabled and slow plugins" {
 }
 
 test "parses plugin install args" {
-    const config = try parsePluginInstallArgs(&.{ "https://example.com/plugin.git", "--yes", "--plugin-sandbox-strict", "--index", "/tmp/plugins.index.toml" });
-    try std.testing.expectEqualStrings("https://example.com/plugin.git", config.url);
+    const config = try parsePluginInstallArgs(&.{ "./demo-plugin.shisa-plugin", "--yes", "--plugin-sandbox-strict" });
+    try std.testing.expectEqualStrings("./demo-plugin.shisa-plugin", config.source);
     try std.testing.expect(config.yes);
     try std.testing.expect(config.strict);
-    try std.testing.expectEqualStrings("/tmp/plugins.index.toml", config.index_path.?);
     try std.testing.expectError(error.UnknownPluginArgument, parsePluginInstallArgs(&.{"--yes"}));
-}
-
-test "plugin search filters marketplace index" {
     const allocator = std.testing.allocator;
-    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-search-{x}", .{std.crypto.random.int(u64)});
-    defer allocator.free(dir_path);
-    defer std.fs.cwd().deleteTree(dir_path) catch {};
-    try std.fs.cwd().makePath(dir_path);
-
-    const index_path = try std.fmt.allocPrint(allocator, "{s}/plugins.index.toml", .{dir_path});
-    defer allocator.free(index_path);
-    try std.fs.cwd().writeFile(.{
-        .sub_path = index_path,
-        .data =
-        \\[[plugins]]
-        \\name = "git-tools"
-        \\path = "examples/plugins/git"
-        \\homepage = "https://example.com/git-tools"
-        \\version = "0.1.0"
-        \\capabilities = ["fs_read"]
-        \\status = "community"
-        \\description = "Git prompt helpers"
-        \\
-        \\[[plugins]]
-        \\name = "cloud-risk"
-        \\path = "examples/plugin-packs/cloud-safety"
-        \\homepage = "https://example.com/cloud-risk"
-        \\version = "0.2.0"
-        \\capabilities = ["fs_read", "env_read"]
-        \\status = "community"
-        \\description = "Kubernetes and AWS risk"
-        ,
-    });
-
-    const output = try pluginSearchPathAlloc(allocator, index_path, "git");
-    defer allocator.free(output);
-    try std.testing.expectEqualStrings("git-tools community 0.1.0 https://example.com/git-tools - Git prompt helpers [fs_read]\n", output);
-
-    const config = try parsePluginSearchArgs(&.{ "risk", "--index", index_path });
-    try std.testing.expectEqualStrings("risk", config.query);
-    try std.testing.expectEqualStrings(index_path, config.index_path.?);
-
-    const install_config = try parsePluginInstallArgs(&.{ "cloud-risk", "--index", index_path, "--yes" });
+    const install_config = try parsePluginInstallArgs(&.{ "./demo-plugin.shisa-plugin", "--yes" });
     const resolved_source = try pluginInstallSourceAlloc(allocator, install_config);
     defer resolved_source.deinit(allocator);
-    try std.testing.expectEqual(.local_path, resolved_source.kind);
-    try std.testing.expectEqualStrings("examples/plugin-packs/cloud-safety", resolved_source.value);
-    try std.testing.expect(pluginInstallSourceNeedsMarketplace("cloud-risk"));
-    try std.testing.expect(!pluginInstallSourceNeedsMarketplace("https://example.com/cloud-risk.git"));
-}
-
-test "checked-in marketplace index parses" {
-    const allocator = std.testing.allocator;
-    const source = try std.fs.cwd().readFileAlloc(allocator, "marketplace/index.toml", 64 * 1024);
-    defer allocator.free(source);
-    var parsed = try parseMarketplaceIndexAlloc(allocator, source);
-    defer parsed.deinit(allocator);
-    try std.testing.expectEqual(@as(usize, 1), parsed.plugins.len);
-    try std.testing.expectEqualStrings("kubectx", parsed.plugins[0].name);
-
-    const output = try pluginSearchAlloc(allocator, bundled_marketplace_index, "k8s");
-    defer allocator.free(output);
-    try std.testing.expect(std.mem.indexOf(u8, output, "kubectx official 0.1.0") != null);
+    try std.testing.expectEqual(.bundle_path, resolved_source.kind);
+    try std.testing.expectError(error.PluginRemoteInstallUnsupported, pluginInstallSourceAlloc(allocator, .{ .source = "https://example.com/demo.git" }));
 }
 
 test "plugin verify rejects direct shell execution" {
@@ -1763,6 +1514,27 @@ test "plugin pack writes signed bundle" {
     try std.testing.expect(std.mem.indexOf(u8, bundle, "SHISA_PLUGIN_BUNDLE.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, bundle, "\"algorithm\":\"Ed25519\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bundle, "\"signature\":\"") != null);
+
+    const extracted_path = try std.fmt.allocPrint(allocator, "{s}/extracted", .{dir_path});
+    defer allocator.free(extracted_path);
+    defer std.fs.cwd().deleteTree(extracted_path) catch {};
+    try extractPluginBundle(allocator, bundle_path, extracted_path);
+    try verifyExtractedPluginBundle(allocator, extracted_path);
+
+    const install_root = try std.fmt.allocPrint(allocator, "{s}/installed", .{dir_path});
+    defer allocator.free(install_root);
+    defer std.fs.cwd().deleteTree(install_root) catch {};
+    const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
+    defer allocator.free(trusted_path);
+    try pluginInstall(allocator, install_root, trusted_path, .{ .source = bundle_path, .yes = true });
+    const installed_manifest = try std.fmt.allocPrint(allocator, "{s}/pack-plugin/plugin.lua", .{install_root});
+    defer allocator.free(installed_manifest);
+    try std.fs.cwd().access(installed_manifest, .{});
+
+    const extracted_manifest = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{extracted_path});
+    defer allocator.free(extracted_manifest);
+    try std.fs.cwd().writeFile(.{ .sub_path = extracted_manifest, .data = "return {}\n" });
+    try std.testing.expectError(error.PluginBundleIntegrityInvalid, verifyExtractedPluginBundle(allocator, extracted_path));
 }
 
 test "plugin enable disable is duplicate safe" {

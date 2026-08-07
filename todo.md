@@ -35,7 +35,7 @@ Triggered after empirical verification: `shisad` boots, renders, async path work
 - [x] T15 — Write `docs/internals/rfc-0008-daemon-lifecycle.md` decision summary (required by `scripts/rfc-internals-gate.sh` once RFC-0008 is Accepted)
 - [x] T16 — Finish T7b–e main.zig split (config / doctor / plugin / stack+worktree)
 - [ ] T17 — *Needs user approval (destructive)*: squash or rewrite the two stray `adde`/`added` commits with descriptive messages
-- [x] T18 — Freeze additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin exists
+- [x] T18 — Freeze additions to plugin infrastructure (signing, bundle validation, manifest CI) until ≥ 1 third-party plugin exists
 - [x] T19 — First-run smoke integration test: fresh `$HOME` → `shisa init` → boot shisad → assert working `shisa prompt` output + `shisa doctor` exit 0. Lives at `test/integration/first_run_smoke.sh`, wired into `ci.yml` first-run-smoke job.
 - [x] T20 — Read `docs/why-zig.md` and reconcile any claims against the empirical state
 
@@ -88,20 +88,20 @@ The packs in north-star §18–21 are deferred. No code or docs added under thes
 - `shisa.ai` (nextcmd, nl2cmd, explain, risk, errfix, histsearch, cdhint) — code deleted in T4; spec lives in north-star §18
 - `shisa.activity` (long_running, cmd_complete_bell, tmux_pane, right_prompt)
 
-## Plugin marketplace (phase 14; do not work on until MVP ships)
+## Plugin distribution (phase 14; do not work on until MVP ships)
 
-**Freeze** (T18): no further additions to plugin infrastructure (signing, marketplace validation, manifest CI) until ≥ 1 third-party plugin actually exists. Current `src/plugin/lua.zig` is 1090 lines and `plugins=0` in daemon metrics — the runtime is built ahead of any consumer. Phase-4 maintenance pressure should be deferred behind real-user signal.
+**Freeze** (T18): no further additions to plugin infrastructure (signing, bundle validation, manifest CI) until ≥ 1 third-party plugin actually exists. Current `src/plugin/lua.zig` is 1090 lines and `plugins=0` in daemon metrics — the runtime is built ahead of any consumer. Phase-4 maintenance pressure should be deferred behind real-user signal.
 
-- [ ] Stand up plugin marketplace index in-repo without hosted-site dependency
-- [ ] Seed marketplace with vetted community plugin entries
-- [ ] Link community-tier VCS templates from the marketplace index
-- [ ] Add marketplace entry validation to CI
-- [ ] Document marketplace index format in local repo docs
+- [x] Keep plugin installation explicit: local directory or signed bundle only
+- [ ] Publish publisher-identity guidance for direct release bundles
+- [ ] Link community-tier VCS templates directly from owner repositories
+- [ ] Add bundle verification fixtures to CI
+- [ ] Document direct bundle release workflow in local repo docs
 
 ## Local repo docs
 
 - [ ] Keep `README.md` as the canonical public overview
-- [ ] Keep local repo docs aligned with packaging, update, marketplace, and feature changes
+- [ ] Keep local repo docs aligned with packaging, update, direct distribution, and feature changes
 - [ ] Remove stale hosted publishing references when touched
 - [ ] Extract all user-facing strings to the gettext catalog
 

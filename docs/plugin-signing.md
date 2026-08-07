@@ -1,26 +1,19 @@
-# Plugin Signing
+# Plugin Bundle Integrity
 
-Catalog entries may include `sigstore_key` metadata while signing remains review-only. The TOML index does not enforce signatures during install yet.
+`shisa plugin pack <path>` creates a `.shisa-plugin` tar bundle. The bundle records every payload file's SHA-256 value and an Ed25519 signature over a canonical manifest of those values. `shisa plugin install ./plugin.shisa-plugin` verifies both before installing.
 
-## Minisign
+The current signature is an integrity check, not publisher identity: the bundle contains its own public key. Obtain the bundle from a release channel you trust and review declared capabilities before installation.
 
-Use Minisign's prehashed signature format:
+## Publisher identity
+
+Authors who need independently verifiable publisher identity should sign release artifacts outside Shisa. Minisign is one suitable option:
 
 ```sh
 minisign -Sm plugin.lua -t 'shisa-plugin:<plugin-id>:<manifest-sha256>'
 ```
 
-Historical Minisign review metadata used:
-
-- `scheme`: `minisign`
-- `public_key`: the `RW...` Minisign public key
-- `signature_url`: URL for `plugin.lua.minisig`
-- `trusted_comment`: the signed comment, expected to include the plugin id and manifest hash
-
 ## Sigstore
 
-Use a Sigstore bundle for `plugin.lua` or its digest. During review, `sigstore_key` may record the expected identity or key reference.
-
-Shisa treats signatures as listing metadata until a verifier is wired into install. Maintainers must verify signatures before adding or updating signed catalog entries.
+Sigstore bundles are also appropriate for publisher identity. Shisa does not currently consume Minisign or Sigstore metadata at install time; verify those signatures in the publisher's documented release workflow.
 
 Sources: [Minisign](https://jedisct1.github.io/minisign/), [Sigstore Bundle Format](https://docs.sigstore.dev/about/bundle/).

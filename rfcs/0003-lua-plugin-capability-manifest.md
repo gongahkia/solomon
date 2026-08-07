@@ -115,4 +115,4 @@ The daemon supports the last two plugin API majors after v1. Additive capability
 ## Unresolved Questions
 
 - Exact glob syntax for cross-platform path matching.
-- Whether marketplace signatures bind to the normalized manifest bytes or the full plugin bundle.
+- Whether future publisher-identity signatures should bind to normalized manifest bytes or the full plugin bundle.

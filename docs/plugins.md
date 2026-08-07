@@ -57,7 +57,7 @@ Optional fields:
 See `docs/plugin-manifest.md` for exact validation rules.
 Lifecycle hook wall-time limits are documented in [Plugin Manifest](plugin-manifest.md).
 
-New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Catalog review and delisting rules live in [Plugin Policy](plugin-policy.md).
+New plugin authors should start with [Authoring Plugins](authoring-plugins.md). Direct-distribution capability and support expectations live in [Plugin Policy](plugin-policy.md).
 
 ## Sandbox
 
@@ -123,30 +123,23 @@ Common commands:
 shisa plugin new demo-plugin
 shisa plugin lint demo-plugin
 shisa plugin doctor demo-plugin
-shisa plugin search git
-shisa plugin install kubectx
 shisa plugin pack demo-plugin
+shisa plugin install ./demo-plugin-0.1.0.shisa-plugin
 shisa plugin list
 shisa plugin disable demo-plugin
 shisa plugin enable demo-plugin
 shisa plugin trust demo-plugin
 ```
 
-`shisa plugin pack <path>` writes `<name>-<version>.shisa-plugin`, a tar bundle with `SHISA_PLUGIN_BUNDLE.json` containing file SHA-256 values and an Ed25519 signature over the canonical bundle manifest.
+`shisa plugin pack <path>` writes `<name>-<version>.shisa-plugin`, a tar bundle with `SHISA_PLUGIN_BUNDLE.json` containing file SHA-256 values and an Ed25519 signature over the canonical bundle manifest. `shisa plugin install <directory-or-bundle>` accepts only an explicit local directory or `.shisa-plugin` bundle; it rejects named entries, indexes, and remote Git URLs. Bundle installation accepts regular files only, rejects traversal paths, and verifies the payload hashes, manifest identity, and signature before installation.
 
 `shisa plugin doctor [path]` defaults to the current directory and prefixes strict lint output with `doctor ok` or `doctor warnings`.
 
 `shisa plugin verify <path>` strict-loads the manifest and rejects direct `os.execute` or `io.popen` use in `plugin.lua`.
 
-`shisa plugin search <query> [--index <path>]` reads the bundled TOML catalog index from `marketplace/index.toml`, or an explicit TOML index path.
-
-`shisa plugin install <name> [--index <path>]` resolves `<name>` through the catalog index, then copies the listed local plugin directory. Direct Git URLs and explicit paths still bypass the index.
-
 `shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. Core prompt configuration never enables network access; plugins require their own explicit capability and trust grants.
 
-`shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Catalog sync is expected to maintain that file once the index workflow lands.
-
-Catalog schema and submission workflow live in [Plugin Catalog](plugin-marketplace.md).
+`shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`; this is a local maintainer-review marker, not a registry listing or a statement that a plugin is safe in every environment.
 
 ## Current Limits
 

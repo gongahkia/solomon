@@ -23,7 +23,7 @@ Current release blockers:
 - Quiet first-run profile: cwd, compact Git state, failures, jobs, duration, and SSH user/host.
 - Opt-in zsh command-aware context in the right prompt or ZLE message area.
 - Experimental, opt-in cloud, IaC, SSH, container, SSO, cost, VPN, and risk modules.
-- Capability-gated Lua plugins (experimental; marketplace work is frozen pending external use).
+- Capability-gated Lua plugins (experimental; install from an explicit local directory or signed bundle).
 - Starship, Powerlevel10k, Oh My Posh, Tide, and Pure migration helpers.
 - `shisa doctor` for local diagnostics, repair hints, and machine-readable lint.
 - Zero telemetry.

@@ -6,7 +6,7 @@ Pack lifecycle:
 | --- | --- | --- |
 | `incubation` | Experimental plugin pack or template. | Basic docs, smoke test, owner. |
 | `graduated` | Supported pack with stable manifest/API usage. | Benchmarks, compatibility docs, release notes. |
-| `vetted` | Maintainer-reviewed pack eligible for verified catalog badge. | Signed manifest, capability review, security owner. |
+| `vetted` | Maintainer-reviewed pack with a local verified marker. | Signed bundle, capability review, security owner. |
 | `eol` | Deprecated or unsupported pack. | Migration path or removal note. |
 
 Current packs:
@@ -16,7 +16,7 @@ Current packs:
 | `shisa.vcs` | incubation | core | core repo | jj/sapling core support plus fossil/pijul/bazaar community templates. |
 | `shisa.cloud` | incubation | core | core repo | AWS, cached GCP, cached Azure, and cached Kubernetes context landed; no network by default. |
 | `shisa.ai` | incubation | core | core repo | Optional local-first hint pack; outside core. |
-| community templates | incubation | community | template owner repo | Templates planned before catalog verification. |
+| community templates | incubation | community | template owner repo | Templates distributed from their owner repositories. |
 
 ## Issue Routing
 
@@ -25,7 +25,7 @@ Incubation packs are triaged in the core repo until they have a stable owner, re
 A pack cannot move to `graduated` unless its row lists a pack-level issue tracker. After graduation:
 
 - pack module bugs, feature requests, and pack-specific performance reports move to the pack repo
-- core keeps host API, protocol, security, catalog, and cross-pack compatibility issues
+- core keeps host API, protocol, security, and cross-pack compatibility issues
 - misplaced core issues should be closed with a link to the pack tracker or transferred when GitHub supports it
 - pack owners must include core issue links when a pack bug exposes a core host/API defect
 

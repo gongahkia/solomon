@@ -23,7 +23,7 @@ docs_changed=0
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    src/main.zig|src/config.zig|src/daemon/modules/*|src/theme/*|themes/*.toml|init/*|src/ai/*|src/plugin/*|examples/plugins/*|marketplace/index.toml)
+    src/main.zig|src/config.zig|src/daemon/modules/*|src/theme/*|themes/*.toml|init/*|src/ai/*|src/plugin/*|examples/plugins/*)
       user_facing_changed=1
       ;;
   esac

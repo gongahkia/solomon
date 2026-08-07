@@ -181,7 +181,7 @@ Performance wins are surfaced through:
 - **Phase 5 — Nu + PowerShell.** Wider shell support, Linux hardening.
 - **Phase 6 — Theming + starship importer.** Theme spec, local preview, `shisa import-starship`.
 - **Phase 7 — Distribution + supply chain.** Package channels, signing, SBOM/SLSA, installer, self-update verification.
-- **Phase 8 — Deferred features.** Plugin marketplace, optional local-LLM hint plugin, advanced VCS integrations.
+- **Phase 8 — Deferred features.** Optional local-LLM hint plugin and advanced VCS integrations.
 
 ## 15. Success criteria
 
@@ -359,7 +359,7 @@ Small, well-defined pack covering the few non-stateful UX wins that don't fit el
 Pack lifecycle:
 
 1. **Incubation:** Pack lives in `incubator/<pack>` directory of main repo. Marked experimental. No stability guarantee.
-2. **Graduation:** Pack is split into its own repo (`shisa-<pack>`), gets its own release cadence, and is published to the marketplace index.
+2. **Graduation:** Pack is split into its own repo (`shisa-<pack>`), gets its own release cadence, and publishes signed release bundles from its own project.
 3. **Vetted:** Pack is signed by maintainers and earns the `verified` badge in `shisa plugin list`.
 4. **EOL:** Pack is moved to an archive list, kept installable, but new installs surface a warning.
 
@@ -372,7 +372,7 @@ Pack version is independent of core. Core declares `min_pack_api_version`. Packs
 - **Phase 11 — Cloud-safety pack (`shisa.cloud`).** Multi-cloud context + risk_tier + prod_guard first. Cost / drift / SSO last.
 - **Phase 12 — AI pack (`shisa.ai`).** Local Ollama integration. Ship `nextcmd`, `nl2cmd`, `risk`, `explain`, `errfix` in order of user value.
 - **Phase 13 — Activity & focus pack (`shisa.activity`).** Smaller. Slot in opportunistically.
-- **Phase 14 — Plugin marketplace polish.** Verified badges, signed manifests, installable from `shisa plugin install <name>`.
+- **Phase 14 — Plugin distribution polish.** Signed release bundles, publisher identity guidance, and reproducible local installs.
 
 These phases run in parallel to continuous core hardening. Pack work must not regress core perf targets.
 
@@ -702,7 +702,7 @@ STRIDE-flavored survey of the surface area:
 | Category    | Concrete threat                              | Mitigation                                                                 |
 |-------------|----------------------------------------------|----------------------------------------------------------------------------|
 | Spoofing    | Other user attaches to my daemon socket      | Socket in `$XDG_RUNTIME_DIR` (Linux) / user Library cache (macOS), 0700.   |
-| Spoofing    | Malicious plugin impersonates a vetted one   | Marketplace requires signed manifests; daemon checks signature on install. |
+| Spoofing    | Malicious plugin impersonates a vetted one   | Install only explicit local paths; verify external publisher signatures before installation. |
 | Tampering   | Plugin modifies host process state           | Sandbox; capability gates; stripped Lua stdlib.                            |
 | Repudiation | "I didn't run that destructive command"      | prod_guard audit log; opt-in shisa.history adapter.                        |
 | Info disc.  | Plugin reads `.env`, sends to attacker       | `net` capability gated; `fs_read` scoped; redaction rules.                 |
@@ -787,7 +787,7 @@ BDFL-start with explicit transition triggers. The transition is *committed in wr
 ### 35.2 Triggers
 
 - 5 active contributors (≥ 10 merged PRs each over 12 months) → form a 3-person Steering Group via PEP-13 style vote.
-- 1,000 GitHub stars + 100 plugin authors → spin up the marketplace stewardship sub-team.
+- 1,000 GitHub stars + 100 plugin authors → publish stronger direct-distribution and publisher-identity guidance.
 - Either trigger met → bring on a co-maintainer with full commit rights.
 
 ### 35.3 Commit access via Vouch
@@ -1005,7 +1005,7 @@ Each state has an inline glyph + ASCII fallback + a11y label. Jujutsu / Sapling 
 - **Persistent daemon across reboots** (system service install).
 - **Encrypted, opt-in dotfile sync** via age + git remote (no Shisa server involved).
 - **Per-project Shisa config layering** (`./shisa.toml` overrides) with secure precedence rules.
-- **Plugin marketplace 2.0** (search, ratings, audit reports).
+- **Plugin publisher identity** (external release signatures and audit guidance).
 - **Mobile (Termux, iSH) basic support** if community asks for it.
 - **Web preview** (`shisa web preview <config>`) for sharing prompt designs.
 - **MCP-bridge plugin** (separate repo) for power users who want their AI agent to consult Shisa's cached cloud / VCS state.

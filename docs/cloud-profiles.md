@@ -32,6 +32,14 @@ shisa cloud explain api-prd-use1
 
 It prints the tier, source, and matching rule. This is an explanation of classification, not a policy decision or an authorization check.
 
+To explain whether the command-aware panel itself should be visible, including a hidden result, run:
+
+```sh
+shisa explain --command 'kubectl get pods'
+```
+
+The result names the safe executable, target, selected modules, and the configuration rule that matched (or the reason the panel is hidden).
+
 ## Deliberate boundaries
 
 The profile is local-first, not a cloud control plane. It does not refresh SSO credentials, query current cost, store secrets, or enforce organizational policy. `prod_guard` remains a typed-confirmation safety rail; it is bypassable by design.

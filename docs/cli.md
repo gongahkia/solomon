@@ -85,6 +85,15 @@ options:
   --report PATH          write a redacted doctor report JSON
 ```
 
+### `shisa explain`
+
+```text
+usage: shisa explain [--command COMMAND]
+
+Print the resolved prompt pipeline. With --command, explain whether
+command-aware context is shown or hidden and list the selected modules.
+```
+
 ### `shisa font`
 
 ```text

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const cli_theme = @import("theme.zig");
 const cli_util = @import("util.zig");
+const prompt_payload = @import("prompt_payload.zig");
 const shisa_config = @import("../config.zig");
 const theme_loader = @import("theme_loader");
 
@@ -829,12 +830,29 @@ fn topLevelKeyMatches(trimmed: []const u8, key: []const u8) bool {
     return std.mem.eql(u8, lhs, key);
 }
 
+pub const explain_help_text =
+    \\usage: shisa explain [--command COMMAND]
+    \\
+    \\Print the resolved prompt pipeline. With --command, explain whether
+    \\command-aware context is shown or hidden and list the selected modules.
+    \\
+;
+
+const ExplainArgs = struct {
+    help: bool = false,
+    commandline: ?[]const u8 = null,
+};
+
 /// explains the effective config as a stable text summary.
-/// args must be empty; stdout receives the rendered explanation.
+/// stdout receives the rendered explanation.
 /// ownership: all temporary allocations are freed before return.
 /// errors: UnknownExplainArgument, InvalidConfig, config read errors, and allocation errors.
 pub fn explainCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    if (args.len != 0) return error.UnknownExplainArgument;
+    const explain_args = try parseExplainArgs(args);
+    if (explain_args.help) {
+        try std.fs.File.stdout().writeAll(explain_help_text);
+        return;
+    }
 
     const path = try cli_util.defaultConfigPath(allocator);
     defer allocator.free(path);
@@ -853,9 +871,28 @@ pub fn explainCmd(allocator: std.mem.Allocator, args: []const []const u8) !void 
     };
     defer parsed.deinit(allocator);
 
-    const output = try explainAlloc(allocator, parsed);
+    const output = if (explain_args.commandline) |commandline|
+        try explainCommandContextAlloc(allocator, parsed, commandline)
+    else
+        try explainAlloc(allocator, parsed);
     defer allocator.free(output);
     try std.fs.File.stdout().writeAll(output);
+}
+
+fn parseExplainArgs(args: []const []const u8) !ExplainArgs {
+    var parsed: ExplainArgs = .{};
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const arg = args[index];
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            parsed.help = true;
+        } else if (std.mem.eql(u8, arg, "--command")) {
+            parsed.commandline = try cli_util.nextValue(args, &index);
+        } else {
+            return error.UnknownExplainArgument;
+        }
+    }
+    return parsed;
 }
 
 fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8 {
@@ -874,6 +911,34 @@ fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8
     }
 
     return try out.toOwnedSlice(allocator);
+}
+
+fn explainCommandContextAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config, commandline: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    try out.appendSlice(allocator, "command_context:\n");
+    try cli_util.appendFmt(allocator, &out, "  command: {s}\n", .{commandline});
+    if (parsed.command_context.target == .off) {
+        try out.appendSlice(allocator, "  state: hidden\n  reason: command_context is off\n");
+        return out.toOwnedSlice(allocator);
+    }
+    const executable = prompt_payload.commandContextExecutable(commandline) orelse {
+        try out.appendSlice(allocator, "  state: hidden\n  reason: command line has no safe executable token\n");
+        return out.toOwnedSlice(allocator);
+    };
+    try cli_util.appendFmt(allocator, &out, "  executable: {s}\n", .{executable});
+    for (parsed.command_context.commands) |command| {
+        if (!std.mem.eql(u8, command, executable)) continue;
+        try cli_util.appendFmt(allocator, &out, "  state: shown\n  target: {s}\n  reason: executable matches command_context_commands\n  modules:", .{@tagName(parsed.command_context.target)});
+        for (parsed.command_context.modules) |module_id| {
+            try cli_util.appendFmt(allocator, &out, " {s}", .{shisa_config.moduleIdName(module_id)});
+        }
+        try out.append(allocator, '\n');
+        return out.toOwnedSlice(allocator);
+    }
+    try out.appendSlice(allocator, "  state: hidden\n  reason: executable is not in command_context_commands\n");
+    return out.toOwnedSlice(allocator);
 }
 
 test "config set args accept locale assignment only" {
@@ -1034,4 +1099,41 @@ test "explain output dumps pipeline" {
     try std.testing.expect(std.mem.indexOf(u8, output, "theme: plain\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "1. cwd (sync)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "2. git_branch (async)") != null);
+}
+
+test "explain command context reports shown and hidden reasons" {
+    const source =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["cwd"]
+        \\command_context = "right"
+        \\command_context_commands = ["kubectl"]
+        \\command_context_modules = ["cloud_ctx", "risk_tier"]
+        \\
+    ;
+    var diagnostic: shisa_config.Diagnostic = .{};
+    var parsed = try shisa_config.parse(std.testing.allocator, source, &diagnostic);
+    defer parsed.deinit(std.testing.allocator);
+
+    const shown = try explainCommandContextAlloc(std.testing.allocator, parsed, "kubectl get pods");
+    defer std.testing.allocator.free(shown);
+    try std.testing.expect(std.mem.indexOf(u8, shown, "state: shown") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, "modules: cloud_ctx risk_tier") != null);
+
+    const hidden = try explainCommandContextAlloc(std.testing.allocator, parsed, "git status");
+    defer std.testing.allocator.free(hidden);
+    try std.testing.expect(std.mem.indexOf(u8, hidden, "state: hidden") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hidden, "not in command_context_commands") != null);
+
+    const unsafe = try explainCommandContextAlloc(std.testing.allocator, parsed, "kubectl get pods; rm -rf /");
+    defer std.testing.allocator.free(unsafe);
+    try std.testing.expect(std.mem.indexOf(u8, unsafe, "no safe executable token") != null);
+}
+
+test "explain arguments parse command" {
+    const args = try parseExplainArgs(&.{ "--command", "kubectl get pods" });
+    try std.testing.expectEqualStrings("kubectl get pods", args.commandline.?);
+    try std.testing.expectError(error.UnknownExplainArgument, parseExplainArgs(&.{"--wat"}));
 }

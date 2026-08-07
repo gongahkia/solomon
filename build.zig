@@ -869,6 +869,9 @@ pub fn build(b: *std.Build) void {
     const first_run_smoke = b.addSystemCommand(&.{ "bash", "test/integration/first_run_smoke.sh" });
     first_run_smoke.step.dependOn(&debug_install.step);
     first_run_smoke.step.dependOn(&debug_daemon_install.step);
+    const lifecycle_acceptance = b.addSystemCommand(&.{ "bash", "test/integration/lifecycle_acceptance.sh" });
+    lifecycle_acceptance.step.dependOn(&debug_install.step);
+    lifecycle_acceptance.step.dependOn(&debug_daemon_install.step);
     const init_wizard_smoke = b.addSystemCommand(&.{ "bash", "test/integration/init_wizard_smoke.sh" });
     init_wizard_smoke.step.dependOn(&debug_install.step);
     const rtl_locale_integration = b.addSystemCommand(&.{ "bash", "test/integration/rtl_locale_init.sh" });
@@ -972,6 +975,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&pwsh_integration.step);
     test_step.dependOn(&render_a11y_integration.step);
     test_step.dependOn(&first_run_smoke.step);
+    test_step.dependOn(&lifecycle_acceptance.step);
     test_step.dependOn(&init_wizard_smoke.step);
     test_step.dependOn(&rtl_locale_integration.step);
     test_step.dependOn(&preexec_expect_integration.step);

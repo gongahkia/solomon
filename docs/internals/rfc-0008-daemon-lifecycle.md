@@ -20,3 +20,7 @@ Daemon-prompt projects historically die on lifecycle, not on render speed (north
 - sudo'd shells connect to root's daemon by socket-path resolution, not by leaking the calling user's runtime dir. This is the documented behavior; `shisa doctor` surfaces it on first sudo'd render.
 - Crash recovery and supervisor heartbeat live in `src/supervisor.zig` (§29 of north-star).
 - L1 rendered-prompt LRU is in-memory and lost on restart; L2 module-output cache rehydrates from `~/.cache/shisa/cache.bin` on warm-start.
+
+## Executable acceptance coverage
+
+`test/integration/lifecycle_acceptance.sh` verifies stale Unix-socket replacement, supervisor restart after an unclean daemon exit, and a tmux-shaped session rendering through the replacement daemon. `test/integration/nix_shell_language_version.sh` verifies the Nix environment-hash path when `nix-shell` is available. SSH, real containers, and sudo require their native user/host boundary and remain documented manual acceptance environments rather than being falsely represented by local environment variables.

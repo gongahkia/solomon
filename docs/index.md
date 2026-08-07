@@ -6,6 +6,7 @@ Start with:
 
 - [Architecture](architecture.md)
 - [Config Schema](config-schema.md)
+- [Local Context API](context-api.md)
 - [Doctor](doctor.md)
 - [Shells](shells.md)
 - [Troubleshooting](troubleshooting.md)

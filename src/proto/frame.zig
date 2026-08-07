@@ -89,7 +89,7 @@ test "property wire protocol request frame roundtrip" {
     var prng = std.Random.DefaultPrng.init(0x574952455254);
     const random = prng.random();
 
-    const ops = [_]types.Op{ .render, .render_continue, .health, .metrics, .reload, .version, .subscribe };
+    const ops = [_]types.Op{ .render, .render_continue, .health, .context, .metrics, .reload, .version, .subscribe };
     const shells = [_]types.Shell{ .zsh, .bash, .fish, .nu, .pwsh };
     const color_caps = [_]types.ColorCaps{ .truecolor, .@"256", .@"16", .none };
     const glyph_caps = [_]types.GlyphCaps{ .nerdfont, .unicode, .ascii };

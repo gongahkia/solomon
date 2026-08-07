@@ -16,13 +16,13 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/main.zig:167
+#: src/main.zig:173
 msgid ""
 "shisa: unknown command; run `shisa --help`\n"
 msgstr ""
 "shisa: unknown command; run `shisa --help`\n"
 
-#: src/main.zig:176
+#: src/main.zig:182
 msgid ""
 "usage: shisa <command> [options]\n"
 "\n"
@@ -31,6 +31,7 @@ msgid ""
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
 "  config        set persistent config values\n"
+"  context       print a local read-only daemon context snapshot as JSON\n"
 "  doctor        diagnose socket, config, plugins, lua, fsnotify\n"
 "  explain       print resolved module pipeline\n"
 "  font          render glyph fallback probes\n"
@@ -69,6 +70,7 @@ msgstr ""
 "  cache         dump or clear cache state\n"
 "  cloud         cloud helpers: audit, doctor, explain, preexec\n"
 "  config        set persistent config values\n"
+"  context       print a local read-only daemon context snapshot as JSON\n"
 "  doctor        diagnose socket, config, plugins, lua, fsnotify\n"
 "  explain       print resolved module pipeline\n"
 "  font          render glyph fallback probes\n"

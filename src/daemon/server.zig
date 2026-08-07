@@ -105,6 +105,67 @@ const MetricsRequest = struct {
     format: []const u8 = "json",
 };
 
+/// `context` is a local, read-only snapshot of values already held by the
+/// daemon. It never probes the filesystem, environment, or network.
+const ContextRequest = struct {
+    v: u32 = protocol_version,
+    op: []const u8 = "context",
+    cwd: []const u8 = "",
+    request_id: []const u8 = "",
+};
+
+const ContextCacheState = enum {
+    unknown,
+    pending,
+    ready,
+    stale,
+};
+
+const ContextCacheValue = struct {
+    state: ContextCacheState = .unknown,
+    generation: u64 = 0,
+    value: ?[]u8 = null,
+
+    fn deinit(self: *ContextCacheValue, allocator: std.mem.Allocator) void {
+        if (self.value) |value| allocator.free(value);
+        self.* = .{};
+    }
+};
+
+const ContextCloudValues = struct {
+    gcp: ContextCacheValue = .{},
+    azure: ContextCacheValue = .{},
+    kubernetes: ContextCacheValue = .{},
+
+    fn deinit(self: *ContextCloudValues, allocator: std.mem.Allocator) void {
+        self.gcp.deinit(allocator);
+        self.azure.deinit(allocator);
+        self.kubernetes.deinit(allocator);
+    }
+};
+
+const ContextSnapshot = struct {
+    cwd: []const u8,
+    git: ContextCacheValue,
+    language: ContextCacheValue,
+    cloud: ContextCloudValues,
+    config_generation: u64,
+    plugin_generation: u64,
+
+    fn deinit(self: *ContextSnapshot, allocator: std.mem.Allocator) void {
+        self.git.deinit(allocator);
+        self.language.deinit(allocator);
+        self.cloud.deinit(allocator);
+    }
+};
+
+const ContextResponse = struct {
+    v: u32 = protocol_version,
+    schema: []const u8 = "shisa.context/v1",
+    request_id: []const u8,
+    context: ContextSnapshot,
+};
+
 const RenderCacheSnapshot = struct {
     git_valid: bool = false,
     git_in_flight: bool = false,
@@ -295,6 +356,10 @@ const PosixServer = struct {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
             try writeFrame(connection.stream.handle, line);
+        } else if (isOpRequest(request, "context")) {
+            const response = try self.contextResponseAlloc(std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrame(connection.stream.handle, response);
         } else if (isOpRequest(request, "metrics")) {
             const response = try self.metricsResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
@@ -692,6 +757,77 @@ const PosixServer = struct {
         );
     }
 
+    fn contextResponseAlloc(self: *Server, allocator: std.mem.Allocator, request: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(ContextRequest, allocator, request, .{ .ignore_unknown_fields = true }) catch {
+            return contextMalformedResponseAlloc(allocator, request, "request", "valid context request");
+        };
+        defer parsed.deinit();
+        if (parsed.value.v != protocol_version) return contextMalformedResponseAlloc(allocator, request, "v", "1");
+        if (!std.mem.eql(u8, parsed.value.op, "context")) return contextMalformedResponseAlloc(allocator, request, "op", "context");
+        if (parsed.value.cwd.len == 0) return contextMalformedResponseAlloc(allocator, request, "cwd", "non-empty absolute path");
+
+        var snapshot = try PosixServer.contextSnapshotAlloc(self, allocator, parsed.value.cwd);
+        defer snapshot.deinit(allocator);
+
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        errdefer output.deinit();
+        try std.json.Stringify.value(
+            ContextResponse{ .request_id = parsed.value.request_id, .context = snapshot },
+            .{ .emit_null_optional_fields = true },
+            &output.writer,
+        );
+        return output.toOwnedSlice();
+    }
+
+    fn contextSnapshotAlloc(self: *Server, allocator: std.mem.Allocator, cwd: []const u8) !ContextSnapshot {
+        const git = try PosixServer.contextValueForPathAlloc(allocator, &self.git_branch_cache, cwd);
+        errdefer {
+            var value = git;
+            value.deinit(allocator);
+        }
+        const language = try PosixServer.contextValueForPathAlloc(allocator, &self.language_versions_cache, cwd);
+        errdefer {
+            var value = language;
+            value.deinit(allocator);
+        }
+
+        var cloud: ContextCloudValues = .{};
+        errdefer cloud.deinit(allocator);
+        self.cloud_ctx_cache.mutex.lock();
+        defer self.cloud_ctx_cache.mutex.unlock();
+        cloud.gcp = try contextValueFromCloudCacheAlloc(allocator, self.cloud_ctx_cache.gcp_valid, self.cloud_ctx_cache.gcp_generation, self.cloud_ctx_cache.gcp_project);
+        errdefer cloud.gcp.deinit(allocator);
+        cloud.azure = try contextValueFromCloudCacheAlloc(allocator, self.cloud_ctx_cache.azure_valid, self.cloud_ctx_cache.azure_generation, self.cloud_ctx_cache.azure_subscription);
+        errdefer cloud.azure.deinit(allocator);
+        cloud.kubernetes = try contextValueFromCloudCacheAlloc(allocator, self.cloud_ctx_cache.kube_valid, self.cloud_ctx_cache.kube_generation, self.cloud_ctx_cache.kube_context);
+
+        const reload_snapshot = self.reload_state.snapshot();
+        return .{
+            .cwd = cwd,
+            .git = git,
+            .language = language,
+            .cloud = cloud,
+            .config_generation = reload_snapshot.config_generation,
+            .plugin_generation = reload_snapshot.plugin_generation,
+        };
+    }
+
+    fn contextValueForPathAlloc(allocator: std.mem.Allocator, cache: anytype, cwd: []const u8) !ContextCacheValue {
+        cache.mutex.lock();
+        defer cache.mutex.unlock();
+        const same_cwd = cache.cwd != null and std.mem.eql(u8, cache.cwd.?, cwd);
+        const state: ContextCacheState = if (same_cwd and cache.valid)
+            .ready
+        else if (same_cwd and cache.in_flight)
+            .pending
+        else if (cache.cwd != null)
+            .stale
+        else
+            .unknown;
+        const value = if (state == .ready and cache.segment != null) try allocator.dupe(u8, cache.segment.?) else null;
+        return .{ .state = state, .generation = cache.generation, .value = value };
+    }
+
     fn metricsPrometheusAlloc(self: *Server, allocator: std.mem.Allocator, git_valid: bool, git_in_flight: bool, git_generation: u64, language_valid: bool, language_in_flight: bool, language_generation: u64, gcp_valid: bool, azure_valid: bool, kube_valid: bool, plugin_count: usize) ![]u8 {
         return std.fmt.allocPrint(
             allocator,
@@ -1054,6 +1190,10 @@ const WindowsServer = struct {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
             try writeFrameFile(pipe, line);
+        } else if (isOpRequest(request, "context")) {
+            const response = try PosixServer.contextResponseAlloc(self, std.heap.page_allocator, request);
+            defer std.heap.page_allocator.free(response);
+            try writeFrameFile(pipe, response);
         } else if (isOpRequest(request, "metrics")) {
             const response = try PosixServer.metricsResponseAlloc(self, std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
@@ -1090,6 +1230,14 @@ const WindowsServer = struct {
 };
 
 pub const Server = if (builtin.os.tag == .windows) WindowsServer else PosixServer;
+
+fn contextValueFromCloudCacheAlloc(allocator: std.mem.Allocator, valid: bool, generation: u64, value: ?[]const u8) !ContextCacheValue {
+    return .{
+        .state = if (valid) .ready else .unknown,
+        .generation = generation,
+        .value = if (value) |item| try allocator.dupe(u8, item) else null,
+    };
+}
 
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
@@ -1415,6 +1563,22 @@ pub fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) !
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+}
+
+fn contextMalformedResponseAlloc(allocator: std.mem.Allocator, request: []const u8, field: []const u8, expected: []const u8) ![]u8 {
+    const request_id = try requestIdAlloc(allocator, request);
+    defer allocator.free(request_id);
+    const escaped_request_id = try json.escapeAlloc(allocator, request_id);
+    defer allocator.free(escaped_request_id);
+    const escaped_field = try json.escapeAlloc(allocator, field);
+    defer allocator.free(escaped_field);
+    const escaped_expected = try json.escapeAlloc(allocator, expected);
+    defer allocator.free(escaped_expected);
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"malformed context request\",\"context\":{{\"field\":\"{s}\",\"expected\":\"{s}\"}}}}}}",
+        .{ escaped_request_id, escaped_field, escaped_expected },
+    );
 }
 
 fn unsupportedSubscribeResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
@@ -2284,6 +2448,56 @@ test "metrics op returns JSON metrics dump" {
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_prompt_cache_entries 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_prompt_cache_hit_rate_ppm 750000") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_plugins 1") != null);
+}
+
+test "context op returns a read-only cache snapshot with freshness" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-context-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+
+    server.git_branch_cache.mutex.lock();
+    server.git_branch_cache.valid = true;
+    server.git_branch_cache.generation = 4;
+    server.git_branch_cache.cwd = try std.heap.page_allocator.dupe(u8, "/repo");
+    server.git_branch_cache.segment = try std.heap.page_allocator.dupe(u8, "git:main");
+    server.git_branch_cache.mutex.unlock();
+
+    server.language_versions_cache.mutex.lock();
+    server.language_versions_cache.generation = 2;
+    server.language_versions_cache.cwd = try std.heap.page_allocator.dupe(u8, "/other-repo");
+    server.language_versions_cache.segment = try std.heap.page_allocator.dupe(u8, "zig:0.15");
+    server.language_versions_cache.mutex.unlock();
+
+    server.cloud_ctx_cache.mutex.lock();
+    server.cloud_ctx_cache.gcp_valid = true;
+    server.cloud_ctx_cache.gcp_generation = 5;
+    server.cloud_ctx_cache.gcp_project = try std.heap.page_allocator.dupe(u8, "test-project");
+    server.cloud_ctx_cache.kube_valid = true;
+    server.cloud_ctx_cache.kube_generation = 9;
+    server.cloud_ctx_cache.kube_context = try std.heap.page_allocator.dupe(u8, "dev/default");
+    server.cloud_ctx_cache.mutex.unlock();
+
+    const response = try server.contextResponseAlloc(allocator, "{\"v\":1,\"op\":\"context\",\"cwd\":\"/repo\",\"request_id\":\"context-1\"}");
+    defer allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"context-1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"schema\":\"shisa.context/v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"git\":{\"state\":\"ready\",\"generation\":4,\"value\":\"git:main\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"language\":{\"state\":\"stale\",\"generation\":2,\"value\":null}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"gcp\":{\"state\":\"ready\",\"generation\":5,\"value\":\"test-project\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"azure\":{\"state\":\"unknown\",\"generation\":0,\"value\":null}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"kubernetes\":{\"state\":\"ready\",\"generation\":9,\"value\":\"dev/default\"}") != null);
+
+    const malformed = try server.contextResponseAlloc(allocator, "{\"v\":1,\"op\":\"context\",\"request_id\":\"missing-cwd\"}");
+    defer allocator.free(malformed);
+    try std.testing.expect(std.mem.indexOf(u8, malformed, "\"code\":\"E_MALFORMED\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, malformed, "\"field\":\"cwd\"") != null);
 }
 
 test "logs slow module warning" {

@@ -12,6 +12,7 @@ commands:
   cache         dump or clear cache state
   cloud         cloud helpers: audit, doctor, explain, preexec
   config        set persistent config values
+  context       print a local read-only daemon context snapshot as JSON
   doctor        diagnose socket, config, plugins, lua, fsnotify
   explain       print resolved module pipeline
   font          render glyph fallback probes
@@ -52,6 +53,16 @@ usage: shisa config set locale=<locale|auto>
 
 commands:
   set locale=<locale|auto> set locale override; auto uses LC_ALL, LC_CTYPE, then LANG
+```
+
+### `shisa context`
+
+```text
+usage: shisa context [--socket PATH] [--cwd PATH] [--json]
+
+Print a JSON snapshot of daemon-cached Git, language, and cloud context.
+The API is local and read-only: it never starts probes, reads the environment,
+or makes network requests. --json is accepted for explicit scripting use.
 ```
 
 ### `shisa doctor`

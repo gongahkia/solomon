@@ -6,6 +6,7 @@ const cli_prompt = @import("cli/prompt.zig");
 const cli_cache = @import("cli/cache.zig");
 const cli_cloud = @import("cli/cloud.zig");
 const cli_config = @import("cli/config.zig");
+const cli_context = @import("cli/context.zig");
 const cli_doctor = @import("cli/doctor.zig");
 const cli_font = @import("cli/font.zig");
 const cli_pin = @import("cli/pin.zig");
@@ -51,6 +52,11 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "config")) {
         try cli_config.setCmd(allocator, args[2..]);
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "context")) {
+        try cli_context.contextCmd(allocator, args[2..]);
         return;
     }
 
@@ -180,6 +186,7 @@ const help_text =
     \\  cache         dump or clear cache state
     \\  cloud         cloud helpers: audit, doctor, explain, preexec
     \\  config        set persistent config values
+    \\  context       print a local read-only daemon context snapshot as JSON
     \\  doctor        diagnose socket, config, plugins, lua, fsnotify
     \\  explain       print resolved module pipeline
     \\  font          render glyph fallback probes

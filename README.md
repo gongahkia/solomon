@@ -125,6 +125,7 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) and [docs/doctor.md](docs
 - [Quickstart](docs/quickstart.md)
 - [Shell support](docs/shells.md)
 - [Config schema](docs/config-schema.md)
+- [Local context API](docs/context-api.md)
 - [Migrate from Starship](docs/migrate-from-starship.md)
 - [Uninstall](docs/uninstall.md)
 - [Architecture](docs/architecture.md)

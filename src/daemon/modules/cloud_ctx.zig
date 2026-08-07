@@ -24,12 +24,15 @@ pub const Options = struct {
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     gcp_valid: bool = false,
+    gcp_generation: u64 = 0,
     gcp_path: ?[]u8 = null,
     gcp_project: ?[]u8 = null,
     azure_valid: bool = false,
+    azure_generation: u64 = 0,
     azure_path: ?[]u8 = null,
     azure_subscription: ?[]u8 = null,
     kube_valid: bool = false,
+    kube_generation: u64 = 0,
     kube_path: ?[]u8 = null,
     kube_context: ?[]u8 = null,
 
@@ -157,6 +160,7 @@ pub const Cache = struct {
         self.gcp_path = null;
         self.gcp_project = null;
         self.gcp_valid = false;
+        self.gcp_generation +%= 1;
     }
 
     fn clearAzureLocked(self: *Cache, allocator: std.mem.Allocator) void {
@@ -165,6 +169,7 @@ pub const Cache = struct {
         self.azure_path = null;
         self.azure_subscription = null;
         self.azure_valid = false;
+        self.azure_generation +%= 1;
     }
 
     fn clearKubeLocked(self: *Cache, allocator: std.mem.Allocator) void {
@@ -173,6 +178,7 @@ pub const Cache = struct {
         self.kube_path = null;
         self.kube_context = null;
         self.kube_valid = false;
+        self.kube_generation +%= 1;
     }
 };
 

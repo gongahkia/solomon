@@ -7,6 +7,7 @@ pub const Op = enum {
     render,
     render_continue,
     health,
+    context,
     metrics,
     reload,
     version,
@@ -518,7 +519,7 @@ fn fuzzRequestDecode(_: void, input: []const u8) !void {
 
 test "snapshots every op and protocol shape" {
     const allocator = std.testing.allocator;
-    const ops = [_]Op{ .render, .render_continue, .health, .metrics, .reload, .version, .subscribe };
+    const ops = [_]Op{ .render, .render_continue, .health, .context, .metrics, .reload, .version, .subscribe };
 
     for (ops) |op| {
         const op_name = @tagName(op);

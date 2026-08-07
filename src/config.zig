@@ -79,6 +79,100 @@ pub const context_rich_config_text =
     \\
 ;
 
+/// cloud keeps the prompt quiet during ordinary work, then exposes local cloud
+/// identity and risk context while a matching command is being composed.
+pub const cloud_config_text =
+    \\version = 1
+    \\theme = "plain"
+    \\locale = "auto"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\right_modules = []
+    \\rtl_reverse = false
+    \\command_context = "right"
+    \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl"]
+    \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry", "ssh_target"]
+    \\
+    \\[modules.cwd]
+    \\truncate_to = 3
+    \\home_tilde = true
+    \\max_width = 0
+    \\
+    \\[modules.git_branch]
+    \\show_dirty = true
+    \\cache_ttl_ms = 250
+    \\
+    \\[modules.cmd_duration]
+    \\threshold_ms = 1000
+    \\
+    \\[modules.user_host]
+    \\mode = "ssh"
+    \\
+    \\[modules.cloud_ctx]
+    \\aws = true
+    \\gcp = true
+    \\azure = true
+    \\kubernetes = true
+    \\
+    \\[modules.risk_tier]
+    \\unknown_bg = "muted"
+    \\dev_bg = "success"
+    \\staging_bg = "warning"
+    \\prod_bg = "danger"
+    \\
+    \\[modules.sso_expiry]
+    \\warning_minutes = 30
+    \\
+;
+
+/// infra extends cloud with local infrastructure workspace and environment
+/// checks. It intentionally leaves network-backed cost collection disabled.
+pub const infra_config_text =
+    \\version = 1
+    \\theme = "plain"
+    \\locale = "auto"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+    \\right_modules = []
+    \\rtl_reverse = false
+    \\command_context = "right"
+    \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+    \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry", "ssh_target", "iac_workspace", "region_drift", "vpn_status", "container_provenance"]
+    \\
+    \\[modules.cwd]
+    \\truncate_to = 3
+    \\home_tilde = true
+    \\max_width = 0
+    \\
+    \\[modules.git_branch]
+    \\show_dirty = true
+    \\cache_ttl_ms = 250
+    \\
+    \\[modules.cmd_duration]
+    \\threshold_ms = 1000
+    \\
+    \\[modules.user_host]
+    \\mode = "ssh"
+    \\
+    \\[modules.cloud_ctx]
+    \\aws = true
+    \\gcp = true
+    \\azure = true
+    \\kubernetes = true
+    \\
+    \\[modules.risk_tier]
+    \\unknown_bg = "muted"
+    \\dev_bg = "success"
+    \\staging_bg = "warning"
+    \\prod_bg = "danger"
+    \\
+    \\[modules.sso_expiry]
+    \\warning_minutes = 30
+    \\
+;
+
 pub const a11y_config_text =
     \\version = 1
     \\theme = "a11y"

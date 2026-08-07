@@ -100,7 +100,7 @@ shisa font check
 shisa theme preview nord-dark
 ```
 
-Use `--profile context-rich` at initialization, or add modules explicitly under `[prompt]`, when you want operational context beyond the quiet default.
+Choose an operating profile at initialization: `quiet` is the default; `cloud` reveals local identity and risk context while composing cloud commands; `infra` adds local IaC, region, VPN, and container checks for cloud and IaC commands. The older `context-rich` profile remains available for compatibility, but enables every local module continuously. Network-backed cost collection stays opt-in in every profile.
 
 ## Troubleshooting
 

@@ -20,7 +20,7 @@ pub const init_help_text =
     \\options:
     \\  --defaults      write default shisa.toml without prompting
     \\  --interactive   force first-run wizard
-    \\  --profile NAME  write quiet (default) or context-rich module defaults
+    \\  --profile NAME  write quiet (default), cloud, infra, or context-rich module defaults
     \\  --shell NAME    target zsh, bash, fish, nu, or pwsh for hook install
     \\  --theme THEME   write a built-in theme id
     \\  --async on|off  enable or disable async fill in generated shell prefs
@@ -64,6 +64,8 @@ pub const InitConfig = struct {
 
 pub const InitProfile = enum {
     quiet,
+    cloud,
+    infra,
     context_rich,
 };
 
@@ -233,6 +235,8 @@ fn renderInitConfigAlloc(allocator: std.mem.Allocator, config: InitConfig) ![]u8
         shisa_config.a11y_config_text
     else switch (config.profile) {
         .quiet => shisa_config.default_config_text,
+        .cloud => shisa_config.cloud_config_text,
+        .infra => shisa_config.infra_config_text,
         .context_rich => shisa_config.context_rich_config_text,
     };
     if (config.theme) |theme_id| return upsertTopLevelStringKeyAlloc(allocator, base, "theme", theme_id);
@@ -395,6 +399,8 @@ fn parseAsyncMode(value: []const u8) ?bool {
 
 fn parseInitProfile(value: []const u8) ?InitProfile {
     if (std.mem.eql(u8, value, "quiet")) return .quiet;
+    if (std.mem.eql(u8, value, "cloud")) return .cloud;
+    if (std.mem.eql(u8, value, "infra")) return .infra;
     if (std.mem.eql(u8, value, "context-rich")) return .context_rich;
     return null;
 }
@@ -959,6 +965,14 @@ test "init args parse first-run flags" {
     try std.testing.expectError(error.InvalidInitMode, parseInitArgs(&.{ "--a11y", "--profile", "context-rich" }));
 }
 
+test "init args parse named operating profiles" {
+    const cloud = try parseInitArgs(&.{ "--defaults", "--profile", "cloud" });
+    try std.testing.expectEqual(InitProfile.cloud, cloud.profile);
+
+    const infra = try parseInitArgs(&.{ "--defaults", "--profile", "infra" });
+    try std.testing.expectEqual(InitProfile.infra, infra.profile);
+}
+
 test "shell hook block includes marker and active env" {
     const block = try shellHookBlockAlloc(std.testing.allocator, "zsh", "/tmp/shisa", "/tmp/init", true);
     defer std.testing.allocator.free(block);
@@ -979,6 +993,20 @@ test "init config renderer selects context-rich profile" {
     defer std.testing.allocator.free(source);
     try std.testing.expect(std.mem.indexOf(u8, source, "command_context = \"right\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, source, "\"cloud_ctx\"") != null);
+}
+
+test "init config renderer selects cloud and infra profiles" {
+    const cloud = try renderInitConfigAlloc(std.testing.allocator, .{ .profile = .cloud });
+    defer std.testing.allocator.free(cloud);
+    try std.testing.expect(std.mem.indexOf(u8, cloud, "command_context = \"right\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cloud, "\"terraform\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, cloud, "\"cloud_ctx\"") != null);
+
+    const infra = try renderInitConfigAlloc(std.testing.allocator, .{ .profile = .infra });
+    defer std.testing.allocator.free(infra);
+    try std.testing.expect(std.mem.indexOf(u8, infra, "\"terraform\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, infra, "\"container_provenance\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, infra, "\"cost_glance\"") == null);
 }
 
 test "init shell preferences quote metacharacter messages" {

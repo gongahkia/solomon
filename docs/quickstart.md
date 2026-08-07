@@ -22,6 +22,8 @@ The first-run wizard previews built-in themes, writes `shisa.toml`, and can appe
 ./zig-out/bin/shisa init --defaults --shell zsh --theme nord-dark --async on --write-hook
 ```
 
+The default `quiet` profile is deliberately sparse. Use `--profile cloud` for command-aware cloud identity and risk context, or `--profile infra` to add local infrastructure checks for cloud and IaC commands. These profiles do not enable network-backed cost collection.
+
 ## 3. Start the daemon
 
 ```sh

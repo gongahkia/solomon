@@ -27,7 +27,7 @@ commands:
                 print the minimal Pure-compatible preset
   init          first-run wizard; --defaults writes without prompting
   pin           mark a path as never-evicted
-  plugin        new, lint, doctor, verify, search, pack, install, list, enable, disable, or trust plugins
+  plugin        new, lint, doctor, verify, pack, install, list, enable, disable, or trust plugins
   prompt        render prompt through shisad; --right or --transient select variants
   render        alias for prompt; --explain-a11y dumps segment labels
   report        write a redacted support bundle .tar.gz

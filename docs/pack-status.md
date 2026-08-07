@@ -8,13 +8,14 @@ Pack lifecycle:
 | `graduated` | Supported pack with stable manifest/API usage. | Benchmarks, compatibility docs, release notes. |
 | `vetted` | Maintainer-reviewed pack with a local verified marker. | Signed bundle, capability review, security owner. |
 | `eol` | Deprecated or unsupported pack. | Migration path or removal note. |
+| `supported core profile` | Release-supported configuration built into Shisa. | Stable profile name, deterministic tests, capability and no-network documentation. |
 
 Current packs:
 
 | Pack | State | Owner | Issue tracker | Notes |
 | --- | --- | --- | --- | --- |
 | `shisa.vcs` | incubation | core | core repo | jj/sapling core support plus fossil/pijul/bazaar community templates. |
-| `shisa.cloud` | incubation | core | core repo | AWS, cached GCP, cached Azure, and cached Kubernetes context landed; no network by default. |
+| `shisa.cloud` | supported core profile | core | core repo | `cloud` and `infra` are bounded command-aware profiles using local cached provider context; no marketplace or independent pack bundle. |
 | `shisa.ai` | incubation | core | core repo | Optional local-first hint pack; outside core. |
 | community templates | incubation | community | template owner repo | Templates distributed from their owner repositories. |
 
@@ -43,4 +44,4 @@ Pack changes that add a prompt path, parser, cache reader, local model pre/post-
 
 Status changes require a changelog entry and capability review when capabilities change.
 
-Adding a new official pack, graduating a pack, or expanding pack capabilities must update local capability docs in the same change.
+Adding a new official pack, graduating a pack, expanding pack capabilities, or changing a supported core profile must update local capability docs in the same change.

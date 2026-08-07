@@ -7,12 +7,14 @@
     { "$ref": "#/$defs/renderRequest" },
     { "$ref": "#/$defs/renderContinueRequest" },
     { "$ref": "#/$defs/healthRequest" },
+    { "$ref": "#/$defs/contextRequest" },
     { "$ref": "#/$defs/metricsRequest" },
     { "$ref": "#/$defs/reloadRequest" },
     { "$ref": "#/$defs/versionRequest" },
     { "$ref": "#/$defs/subscribeRequest" },
     { "$ref": "#/$defs/promptResponse" },
     { "$ref": "#/$defs/healthResponse" },
+    { "$ref": "#/$defs/contextResponse" },
     { "$ref": "#/$defs/metricsResponse" },
     { "$ref": "#/$defs/reloadResponse" },
     { "$ref": "#/$defs/versionResponse" },
@@ -22,7 +24,7 @@
   "$defs": {
     "op": {
       "type": "string",
-      "enum": ["render", "render_continue", "health", "metrics", "reload", "version", "subscribe"]
+      "enum": ["render", "render_continue", "health", "context", "metrics", "reload", "version", "subscribe"]
     },
     "shell": {
       "type": "string",
@@ -209,6 +211,17 @@
         { "properties": { "op": { "const": "version" } } }
       ]
     },
+    "contextRequest": {
+      "type": "object",
+      "required": ["v", "op", "request_id", "cwd"],
+      "additionalProperties": true,
+      "properties": {
+        "v": { "const": 1 },
+        "op": { "const": "context" },
+        "request_id": { "type": "string" },
+        "cwd": { "type": "string", "minLength": 1 }
+      }
+    },
     "subscribeRequest": {
       "type": "object",
       "required": ["v", "op", "request_id", "topics"],
@@ -274,6 +287,48 @@
         "v": { "const": 1 },
         "request_id": { "type": "string" },
         "ok": { "type": "boolean" }
+      }
+    },
+    "contextCacheValue": {
+      "type": "object",
+      "required": ["state", "generation", "value"],
+      "additionalProperties": true,
+      "properties": {
+        "state": { "type": "string", "enum": ["unknown", "pending", "ready", "stale"] },
+        "generation": { "type": "integer", "minimum": 0 },
+        "value": { "type": ["string", "null"] }
+      }
+    },
+    "contextResponse": {
+      "type": "object",
+      "required": ["v", "schema", "request_id", "context"],
+      "additionalProperties": true,
+      "properties": {
+        "v": { "const": 1 },
+        "schema": { "const": "shisa.context/v1" },
+        "request_id": { "type": "string" },
+        "context": {
+          "type": "object",
+          "required": ["cwd", "git", "language", "cloud", "config_generation", "plugin_generation"],
+          "additionalProperties": true,
+          "properties": {
+            "cwd": { "type": "string" },
+            "git": { "$ref": "#/$defs/contextCacheValue" },
+            "language": { "$ref": "#/$defs/contextCacheValue" },
+            "cloud": {
+              "type": "object",
+              "required": ["gcp", "azure", "kubernetes"],
+              "additionalProperties": true,
+              "properties": {
+                "gcp": { "$ref": "#/$defs/contextCacheValue" },
+                "azure": { "$ref": "#/$defs/contextCacheValue" },
+                "kubernetes": { "$ref": "#/$defs/contextCacheValue" }
+              }
+            },
+            "config_generation": { "type": "integer", "minimum": 0 },
+            "plugin_generation": { "type": "integer", "minimum": 0 }
+          }
+        }
       }
     },
     "metricsResponse": {

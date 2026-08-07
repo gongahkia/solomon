@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/).
 
 ### Added
 
+- `cloud` and `infra` command-aware core profiles, plus the local read-only `shisa context` API for cached Git, language, and cloud state.
+- Stable `shisa.context/v1` and history-interoperability documentation; Shisa does not capture or synchronize history.
 - Established the checked-in changelog and release gate.
 - RFC-0008 daemon lifecycle across SSH, containers, nix-shell, tmux, sudo. Status: Draft. Gates further `src/daemon/server.zig` growth until accepted.
 - Build option `-Dvcs_extra=true` re-enables the hg/jj/sl/stack/worktree CLI verbs and their test stanzas. Default off.

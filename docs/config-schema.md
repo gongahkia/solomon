@@ -141,7 +141,7 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | `azure` | bool | `true` | Show Azure subscription context. |
 | `kubernetes` | bool | `true` | Show Kubernetes context and namespace. |
 
-AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/` and invalidated when `~/.config/gcloud/` changes. Azure subscription is cached from `~/.azure/azureProfile.json` and invalidated when that file changes. Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`, and invalidated when that file changes. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
+AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/`; Azure subscription is cached from `~/.azure/azureProfile.json`; Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`. The daemon registers invalidation scopes for these paths, but native filesystem-event delivery is not wired into the running daemon yet; current invalidation coverage is exercised through daemon-received test events. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
 
 ### `[modules.cdhint]`
 

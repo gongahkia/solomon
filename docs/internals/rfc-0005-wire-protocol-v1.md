@@ -14,6 +14,7 @@ RFC-0001 defined the initial transport. RFC-0005 fixes the versioned request/res
 
 - Request and response schemas live in `docs/protocol/v1.schema.json`.
 - Request/response ops use length-prefixed JSON frames.
+- `context` returns only daemon-cached local state; it does not start probes or grant capabilities.
 - `subscribe` starts with one framed request, then switches to newline-delimited JSON on the open socket.
 - Unknown fields are ignored for forward compatibility.
 - Error responses use the documented protocol error codes in `docs/protocol/errors.md`.

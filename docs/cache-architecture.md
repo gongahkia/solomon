@@ -87,7 +87,7 @@ These are data-source caches, not entries in `src/daemon/cache.zig`.
 
 ### Filesystem scopes
 
-`src/daemon/fsnotify.zig` stores debounced watch registrations. It selects a backend label from the OS (`fsevents`, `inotify`, or `unsupported`), owns registered paths, deduplicates by module/cwd, and emits invalidations after the scope debounce window.
+`src/daemon/fsnotify.zig` stores debounced watch registrations. It selects a backend label from the OS (`fsevents`, `inotify`, or `unsupported`), owns registered paths, deduplicates by module/cwd, and emits invalidations after the scope debounce window when an event is delivered to it.
 
 `src/daemon/windows_fsnotify.zig` covers request planning, `FILE_NOTIFY_INFORMATION` parsing, and a Windows-only synchronous `ReadDirectoryChangesW` call wrapper. The daemon reports the Windows fsnotify backend on Windows; broader runtime event-loop integration remains tracked by the Windows native RFC.
 
@@ -98,7 +98,7 @@ Current registered scopes:
 - Azure: `~/.azure/azureProfile.json`.
 - Kubernetes: resolved kubeconfig path.
 
-`Server.renderResponse` drains pending invalidations before rendering, then registers git and cloud scopes for the current request. A filesystem invalidation clears matching daemon-owned caches.
+`Server.renderResponse` drains pending invalidations before rendering, then registers git and cloud scopes for the current request. A delivered filesystem invalidation clears matching daemon-owned caches. Native FSEvents/inotify event ingestion is not yet connected to this registration layer, so a running daemon does not currently observe host file changes on its own; tests exercise the invalidation contract through `Server.recordFsEvent`.
 
 ### TTL and LRU
 

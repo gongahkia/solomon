@@ -60,6 +60,7 @@ v1 operation names:
 | `render` | render-family request | prompt response |
 | `render_continue` | render-family request | prompt response |
 | `health` | common request | health response |
+| `context` | `cwd` plus common request | local read-only context response |
 | `metrics` | common request | metrics response |
 | `reload` | common request | reload response |
 | `version` | common request | version response |

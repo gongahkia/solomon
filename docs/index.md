@@ -7,6 +7,8 @@ Start with:
 - [Architecture](architecture.md)
 - [Config Schema](config-schema.md)
 - [Local Context API](context-api.md)
+- [Cloud and Infrastructure Profiles](cloud-profiles.md)
+- [History Interoperability](history-interoperability.md)
 - [Doctor](doctor.md)
 - [Shells](shells.md)
 - [Troubleshooting](troubleshooting.md)

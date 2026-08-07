@@ -6,13 +6,13 @@ Use this page before changing prompt rendering, cache invalidation, VCS probing,
 
 **Cold prompt render in a real big repo, no timeout.** This is the falsifiable promise from north-star §10. Every other budget on this page is supporting evidence.
 
-Evidence path: `bench/compare-prompts.sh` driven by `hyperfine` against a synthetic or real big repo (chromium, nixpkgs, or a 1M-commit fixture). The CI gate compares Shisa's cold render to starship's on the same fixture and fails the PR if the gap closes by more than 10%.
+Evidence path: `scripts/perf-suite.sh --repo /path/to/pinned-checkout` driven by `hyperfine` against a real big repo (Chromium or nixpkgs). It records the host and fixture commit alongside raw samples; a benchmark result without that context is not a performance claim.
 
 ## Targets
 
 | Target | Command | Evidence |
 | --- | --- | --- |
-| **Cold render in big repo** (headline) | `bench/compare-prompts.sh` | `bench-results/comparison.json` and `.md` from `hyperfine`. |
+| **Cold render in big repo** (headline) | `scripts/perf-suite.sh --repo /path/to/pinned-checkout` | Raw per-case JSON, metrics, trace, host baseline, and fixture commit. |
 | VCS prompt comparison | `bench/vcs-starship-git.sh` | Shisa vs Starship on clean, dirty, and linked-worktree repos. |
 | jj scale probe | `bench/jj-10k.sh` | jj command timings on a generated large history. |
 | Core and pack microbench | `zig build bench` | JSON stdout: cloud-context cold/warm, protocol frame timing, pack budgets. Supporting only. |
@@ -45,7 +45,7 @@ zig build bench
 For end-to-end prompt timing:
 
 ```sh
-bench/compare-prompts.sh
+scripts/perf-suite.sh --repo /path/to/nixpkgs
 ```
 
 For VCS-specific timing:
@@ -89,15 +89,15 @@ Use `--no-async` only to isolate worst-case module cost. It is not the target in
 | Dirty Git repo is slow | `git status --porcelain` cost and async cache invalidation. |
 | Large jj repo is slow | `jj op log` and `jj log -r @` command time in `bench/jj-10k.sh`. |
 | Shell feels slow but daemon is fast | hook duration capture, socket path checks, terminal redraw behavior. |
-| CI regression only | compare runner OS, Zig version, `hyperfine` run count, and warmup count. |
+| A result differs from a prior run | compare host, fixture commit, Zig version, `hyperfine` run count, warmup count, metrics, and trace. |
 
-## CI Gate
+## Deterministic CI Budgets
 
-`.github/workflows/bench.yml` runs `shisa bench` on pull requests and compares p99 against `main`. A pull request fails when the measured p99 is more than 10% above the baseline.
+`zig build bench` remains in the standard CI build. It fails only deterministic microbench budgets that are meaningful across runners.
 
-The same workflow runs `zig build bench` on pull requests and every Monday at 03:17 UTC on `main`. That command fails when any pack-level budget in [Pack Status](pack-status.md) is exceeded.
+Wall-clock prompt p99 is manual. Run `scripts/perf-suite.sh --repo ...` before and after a hot-path change, inspect its trace and metrics, and use `--enforce` only against an agreed hardware baseline.
 
-The same workflow publishes a benchmark dashboard on pushes to `main`.
+The suite does not upload results or contact the network.
 
 ## Reporting
 

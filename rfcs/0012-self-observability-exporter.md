@@ -139,7 +139,7 @@ Disabled path cost is zero after config parsing. Enabled path cost is bounded to
 No implementation should land unless:
 
 ```sh
-bash scripts/render-p99-gate.sh
+scripts/perf-suite.sh --repo /path/to/pinned-large-repo
 ```
 
 continues to pass with the exporter disabled.

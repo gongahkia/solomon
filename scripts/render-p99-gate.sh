@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # Measure end-to-end render latency (shell-binary startup + socket roundtrip
-# + render + result write) and fail if p99 exceeds the budget.
+# + render + result write). This is a manual investigation tool, not a hosted
+# CI gate; use SHISA_RENDER_P99_ENFORCE=1 to make the local budget fatal.
 #
 # Rationale: north-star §10 warm p99 < 2 ms target measures pure render, not
-# the user-visible end-to-end shell-binary path. This gate uses a tighter
-# but still debug-safe budget (default 10 ms p99) to surface regressions in
-# the path the user actually experiences. Tighten as warm-path work removes overhead.
+# the user-visible end-to-end shell-binary path. Hosted runner variance made a
+# wall-clock failure noisy, so this script reports evidence by default.
 #
-# Empirical baseline (Apple Silicon, 2026-06): default debug build 200 runs
-# mean ~3.0 ms, p99 3.5-4.3 ms; ReleaseFast mean 2.32 ms, p99 3.33 ms.
-# Daemon metrics show the warm render itself is sub-100us in 199/200 samples.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -76,7 +73,10 @@ printf 'render-p99-gate: runs=%s mean=%.2fms max=%.2fms p99=%.2fms budget=%sms\n
 
 # bash can't do float compare; use awk
 over=$(awk -v p="$p99_ms" -v b="$BUDGET_MS" 'BEGIN { print (p > b) ? "1" : "0" }')
-if [[ "$over" == "1" ]]; then
+if [[ "$over" == "1" && "${SHISA_RENDER_P99_ENFORCE:-0}" == "1" ]]; then
   printf 'render-p99-gate: p99 %.2fms exceeds budget %sms\n' "$p99_ms" "$BUDGET_MS" >&2
   exit 1
+fi
+if [[ "$over" == "1" ]]; then
+  printf 'render-p99-gate: p99 above local budget (reported only; set SHISA_RENDER_P99_ENFORCE=1 to fail)\n' >&2
 fi

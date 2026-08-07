@@ -160,7 +160,7 @@ Core render p99 must remain unchanged because no AI work runs in `render`. The c
 
 - zero model calls during `render`
 - no extra client request fields on the default prompt path
-- no p99 regression in `scripts/render-p99-gate.sh`
+- no material regression in a recorded `scripts/perf-suite.sh --repo ...` run
 
 ## Security
 

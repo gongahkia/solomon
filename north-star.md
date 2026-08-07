@@ -142,7 +142,7 @@ The daemon enforces capabilities. A plugin that asks for `net = true` requires e
 |-----------------------------------|-----------------|-------------------------------|
 | Cold prompt in 10GB monorepo      | < 30ms          | nixpkgs / chromium benchmark  |
 | Shell startup overhead            | < 5ms           | `hyperfine` against bare shell|
-| Warm-cache prompt render          | < 2ms p99       | shisa bench, public CI        |
+| Warm-cache prompt render          | < 2ms p99       | manual perf suite + hardware baseline |
 | Daemon RSS                        | < 25MB idle     | `ps`, public dashboard        |
 | Daemon CPU idle                   | < 0.1%          | per-second sampling           |
 | Async git in big repo (background)| < 200ms p99     | benchmark suite               |
@@ -164,7 +164,7 @@ A `shisa bench` subcommand runs the above locally and emits a shareable JSON rep
 
 Performance wins are surfaced through:
 - The `shisa bench` CLI
-- Public benchmarks in CI (vs. starship, oh-my-posh, p10k) on representative repos
+- Manual, reproducible benchmarks (vs. starship, oh-my-posh, p10k) on representative repos
 - A `shisa report` command that produces a human-readable performance dump the user can paste into a bug report
 
 ## 13. License

@@ -1,5 +1,17 @@
 # Prompt Comparison Harness
 
+## Structured Performance Suite
+
+Run the manual suite against a pinned, real large repository checkout:
+
+```sh
+scripts/perf-suite.sh --repo /path/to/nixpkgs --out-dir bench-results/nixpkgs-$(date -u +%Y%m%d)
+```
+
+It records four separate cases: client-process/socket round trip, daemon render time from the protocol response, fresh-daemon cold render in the selected repository, and cache invalidation/recovery after a daemon reload. The output directory contains raw Hyperfine samples, daemon timing samples, before/after metrics, and a prompt trace. It includes the repository commit and host baseline; attach the directory when reporting a regression.
+
+The suite reports only by default. Use `--enforce` after establishing a hardware-specific baseline; wall-clock prompt p99 is intentionally not a hosted CI check.
+
 Run:
 
 ```sh

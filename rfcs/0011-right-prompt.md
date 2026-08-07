@@ -160,7 +160,7 @@ Primary prompt p99 must remain unchanged. `--side left` should not allocate or r
 Verification:
 
 ```sh
-bash scripts/render-p99-gate.sh
+scripts/perf-suite.sh --repo /path/to/pinned-large-repo
 ```
 
 No implementation should land if left-only p99 regresses beyond the existing gate.

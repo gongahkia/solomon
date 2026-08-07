@@ -162,7 +162,7 @@ Disabled path cost is zero except config parsing. Enabled path cost is paid on i
 Render path p99 must remain unchanged:
 
 ```sh
-bash scripts/render-p99-gate.sh
+scripts/perf-suite.sh --repo /path/to/pinned-large-repo
 ```
 
 Invalidation storms must be tested with at least 50 filesystem events per second and must produce no more than five redraw attempts per second per session at the 200 ms debounce floor.

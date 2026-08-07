@@ -31,7 +31,7 @@ A pack cannot move to `graduated` unless its row lists a pack-level issue tracke
 
 ## Pack Performance Budgets
 
-`zig build bench` emits a `packs` JSON object and fails when any CI-gated pack budget is exceeded. `.github/workflows/bench.yml` runs it on pull requests and weekly on `main`.
+`zig build bench` emits a `packs` JSON object and fails when any deterministic pack budget is exceeded. The standard CI build runs it on supported operating systems.
 
 | Pack | PR gate | Budget |
 | --- | --- | --- |

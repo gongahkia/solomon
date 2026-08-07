@@ -20,8 +20,10 @@ Current release blockers:
 
 - Cross-shell prompt support for zsh, bash, fish, nushell, and PowerShell.
 - Async git and language-version segments with daemon-side caching.
-- Local context modules for cloud, IaC, SSH, containers, SSO, cost, VPN, and risk tier.
-- Capability-gated Lua plugins.
+- Quiet first-run profile: cwd, compact Git state, failures, jobs, duration, and SSH user/host.
+- Opt-in zsh command-aware context in the right prompt or ZLE message area.
+- Experimental, opt-in cloud, IaC, SSH, container, SSO, cost, VPN, and risk modules.
+- Capability-gated Lua plugins (experimental; marketplace work is frozen pending external use).
 - Starship, Powerlevel10k, Oh My Posh, Tide, and Pure migration helpers.
 - `shisa doctor` for local diagnostics, repair hints, and machine-readable lint.
 - Zero telemetry.
@@ -52,7 +54,7 @@ zig build bench
 Initialize config and install the hook:
 
 ```sh
-./zig-out/bin/shisa init --defaults --shell zsh --theme nord-dark --async on --write-hook
+./zig-out/bin/shisa init --defaults --profile quiet --shell zsh --theme nord-dark --async on --write-hook
 ```
 
 Start the daemon:
@@ -98,7 +100,7 @@ shisa font check
 shisa theme preview nord-dark
 ```
 
-Hide an active VPN segment by removing `"vpn_status"` from `[prompt].modules`.
+Use `--profile context-rich` at initialization, or add modules explicitly under `[prompt]`, when you want operational context beyond the quiet default.
 
 ## Troubleshooting
 
@@ -114,7 +116,6 @@ Expected first-run states:
 
 - `shisad: another daemon already owns the socket lock`: a daemon is already running.
 - `[pending:git_branch]`: async cache fill; render again.
-- `vpn:Tailscale`: active VPN detected by `vpn_status`.
 - skipped Pure or Nix tests: optional local prerequisites are missing.
 
 See [docs/troubleshooting.md](docs/troubleshooting.md) and [docs/doctor.md](docs/doctor.md).

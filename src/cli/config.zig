@@ -15,11 +15,12 @@ pub const help_text =
 ;
 
 pub const init_help_text =
-    \\usage: shisa init [--defaults|--interactive] [--shell NAME] [--theme THEME] [--async on|off] [--write-hook]
+    \\usage: shisa init [--defaults|--interactive] [--profile NAME] [--shell NAME] [--theme THEME] [--async on|off] [--write-hook]
     \\
     \\options:
     \\  --defaults      write default shisa.toml without prompting
     \\  --interactive   force first-run wizard
+    \\  --profile NAME  write quiet (default) or context-rich module defaults
     \\  --shell NAME    target zsh, bash, fish, nu, or pwsh for hook install
     \\  --theme THEME   write a built-in theme id
     \\  --async on|off  enable or disable async fill in generated shell prefs
@@ -39,6 +40,8 @@ pub const InitConfig = struct {
     interactive: bool = false,
     /// writes the accessibility-first default config when true.
     a11y: bool = false,
+    /// selects the emitted module profile.
+    profile: InitProfile = .quiet,
     /// appends an idempotent shell hook block to the current shell startup file.
     write_hook: bool = false,
     /// optional shell name override for hook installation.
@@ -57,6 +60,11 @@ pub const InitConfig = struct {
             if (self.shell_name) |shell_name| allocator.free(shell_name);
         }
     }
+};
+
+pub const InitProfile = enum {
+    quiet,
+    context_rich,
 };
 
 /// shell.env preferences emitted by shisa init shell flags.
@@ -164,6 +172,10 @@ fn parseInitArgs(args: []const []const u8) !InitConfig {
             config.interactive = true;
         } else if (std.mem.eql(u8, arg, "--a11y")) {
             config.a11y = true;
+        } else if (std.mem.eql(u8, arg, "--profile")) {
+            i += 1;
+            if (i >= args.len) return error.UnknownInitArgument;
+            config.profile = parseInitProfile(args[i]) orelse return error.InvalidProfile;
         } else if (std.mem.eql(u8, arg, "--write-hook")) {
             config.write_hook = true;
         } else if (std.mem.eql(u8, arg, "--shell")) {
@@ -211,13 +223,18 @@ fn parseInitArgs(args: []const []const u8) !InitConfig {
         }
     }
     if (config.defaults and config.interactive) return error.InvalidInitMode;
-    if (config.a11y and config.theme != null) return error.InvalidInitMode;
+    if (config.a11y and (config.theme != null or config.profile != .quiet)) return error.InvalidInitMode;
     if (seen_prefs) config.shell_preferences = prefs;
     return config;
 }
 
 fn renderInitConfigAlloc(allocator: std.mem.Allocator, config: InitConfig) ![]u8 {
-    const base = if (config.a11y) shisa_config.a11y_config_text else shisa_config.default_config_text;
+    const base = if (config.a11y)
+        shisa_config.a11y_config_text
+    else switch (config.profile) {
+        .quiet => shisa_config.default_config_text,
+        .context_rich => shisa_config.context_rich_config_text,
+    };
     if (config.theme) |theme_id| return upsertTopLevelStringKeyAlloc(allocator, base, "theme", theme_id);
     return allocator.dupe(u8, base);
 }
@@ -373,6 +390,12 @@ fn pathExistsAbsolute(path: []const u8) bool {
 fn parseAsyncMode(value: []const u8) ?bool {
     if (std.mem.eql(u8, value, "on") or std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1")) return true;
     if (std.mem.eql(u8, value, "off") or std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "0")) return false;
+    return null;
+}
+
+fn parseInitProfile(value: []const u8) ?InitProfile {
+    if (std.mem.eql(u8, value, "quiet")) return .quiet;
+    if (std.mem.eql(u8, value, "context-rich")) return .context_rich;
     return null;
 }
 
@@ -920,8 +943,9 @@ test "init args parse write hook" {
 }
 
 test "init args parse first-run flags" {
-    const config = try parseInitArgs(&.{ "--defaults", "--shell", "zsh", "--theme", "nord-dark", "--async", "off", "--write-hook" });
+    const config = try parseInitArgs(&.{ "--defaults", "--profile", "context-rich", "--shell", "zsh", "--theme", "nord-dark", "--async", "off", "--write-hook" });
     try std.testing.expect(config.defaults);
+    try std.testing.expectEqual(InitProfile.context_rich, config.profile);
     try std.testing.expect(config.write_hook);
     try std.testing.expectEqualStrings("zsh", config.shell_name.?);
     try std.testing.expectEqualStrings("nord-dark", config.theme.?);
@@ -930,7 +954,9 @@ test "init args parse first-run flags" {
     try std.testing.expectError(error.InvalidAsyncMode, parseInitArgs(&.{ "--async", "maybe" }));
     try std.testing.expectError(error.InvalidShell, parseInitArgs(&.{ "--shell", "csh" }));
     try std.testing.expectError(error.InvalidTheme, parseInitArgs(&.{ "--theme", "missing" }));
+    try std.testing.expectError(error.InvalidProfile, parseInitArgs(&.{ "--profile", "dense" }));
     try std.testing.expectError(error.InvalidInitMode, parseInitArgs(&.{ "--defaults", "--interactive" }));
+    try std.testing.expectError(error.InvalidInitMode, parseInitArgs(&.{ "--a11y", "--profile", "context-rich" }));
 }
 
 test "shell hook block includes marker and active env" {
@@ -946,6 +972,13 @@ test "init config renderer applies theme override" {
     const source = try renderInitConfigAlloc(std.testing.allocator, .{ .theme = "tokyo-night" });
     defer std.testing.allocator.free(source);
     try std.testing.expect(std.mem.indexOf(u8, source, "theme = \"tokyo-night\"") != null);
+}
+
+test "init config renderer selects context-rich profile" {
+    const source = try renderInitConfigAlloc(std.testing.allocator, .{ .profile = .context_rich });
+    defer std.testing.allocator.free(source);
+    try std.testing.expect(std.mem.indexOf(u8, source, "command_context = \"right\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "\"cloud_ctx\"") != null);
 }
 
 test "init shell preferences quote metacharacter messages" {

@@ -22,7 +22,7 @@ Starship is the de-facto cross-shell prompt today. It is excellent. It also has 
 - **No async rendering.** Slow modules (git, language version probes) block the prompt. Users routinely set `command_timeout` to hide slowness rather than eliminate it.
 - **No daemon / cache layer.** Every prompt re-spawns subprocesses and re-walks repo state. A [daemon concept gist](https://gist.github.com/nickwb/b12edea4152414bf5858c7b66f8171fe) was proposed years ago and never landed.
 - **No instant prompt.** Powerlevel10k has it; starship does not. P10k is the only prompt with instant + transient + async, and its author has declared it on life support.
-- **No transient prompt out of the box** for any shell.
+- **No daemon-backed async cache layer.** Starship documents transient-prompt integrations for several shells, but they remain shell-specific and do not change its per-render execution model.
 - **Subshell overhead** in init scripts and module dispatch.
 
 Tide solves these for fish-only. P10k solves these for zsh-only and is dying. Oh-my-posh is cross-shell but inherits the same per-render cost model as starship. **No project occupies the daemon-async + cross-shell + actively-maintained quadrant.** That is the opening Shisa takes.
@@ -43,7 +43,7 @@ Tide solves these for fish-only. P10k solves these for zsh-only and is dying. Oh
 | Background daemon                | no       | no            | no        | no         | **yes**         |
 | Async git / language probes      | no       | yes           | yes       | no         | **yes**         |
 | Instant prompt                   | no       | yes           | partial   | no         | **yes**         |
-| Transient prompt (built-in)      | no       | yes           | yes       | partial    | **yes**         |
+| Transient prompt                 | partial  | yes           | yes       | partial    | **yes**         |
 | fsnotify-based cache invalidation| no       | partial       | no        | no         | **yes**         |
 | Pre-rendered prompts per cwd     | no       | no            | no        | no         | **yes**         |
 | Sandboxed plugin scripting       | no       | no            | no        | partial    | **yes (Lua)**   |

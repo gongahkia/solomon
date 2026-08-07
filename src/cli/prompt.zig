@@ -175,6 +175,11 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.right = true;
         } else if (std.mem.eql(u8, arg, "--transient")) {
             config.transient = true;
+        } else if (std.mem.eql(u8, arg, "--command-context")) {
+            config.command_context = true;
+            config.right = true;
+        } else if (std.mem.eql(u8, arg, "--commandline")) {
+            config.commandline = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--shell")) {
             config.shell = try cli_util.nextValue(args, &i);
         } else if (std.mem.eql(u8, arg, "--cols")) {
@@ -805,6 +810,13 @@ test "prompt args parse right flag" {
 test "prompt args parse transient flag" {
     const config = try parsePrompt(&.{"--transient"});
     try std.testing.expect(config.transient);
+}
+
+test "prompt args parse command context" {
+    const config = try parsePrompt(&.{ "--command-context", "--commandline", "kubectl get pods" });
+    try std.testing.expect(config.command_context);
+    try std.testing.expect(config.right);
+    try std.testing.expectEqualStrings("kubectl get pods", config.commandline.?);
 }
 
 test "transient format renders cwd escapes" {

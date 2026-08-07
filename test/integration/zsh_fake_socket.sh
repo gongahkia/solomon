@@ -31,14 +31,19 @@ require "socket"
 sock = ARGV.fetch(0)
 File.unlink(sock) if File.exist?(sock)
 server = UNIXServer.new(sock)
-2.times do |index|
+3.times do |index|
   conn = server.accept
   header = conn.read(4)
   abort("missing frame header") unless header && header.bytesize == 4
   length = header.unpack1("N")
   payload = conn.read(length)
   abort("missing frame payload") unless payload && payload.bytesize == length
-  abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  if index == 2
+    abort("missing command-context modules") unless payload.include?('"right_modules":["cloud_ctx","risk_tier"]')
+    abort("missing command-context primary pipeline") unless payload.include?('"modules":["cwd"]')
+  else
+    abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  end
   abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
   if index == 0
     abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
@@ -72,6 +77,9 @@ transient_prompt = "%~ \u276f"
 [prompt]
 modules = ["cwd"]
 right_modules = ["time"]
+command_context = "right"
+command_context_commands = ["kubectl"]
+command_context_modules = ["cloud_ctx", "risk_tier"]
 EOF
 cat >"$xdg/shisa/shell.env" <<'EOF'
 SHISA_CMD_COMPLETE_BELL=1
@@ -81,11 +89,13 @@ SHISA_CMD_COMPLETE_BELL_MESSAGE=done
 EOF
 
 SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; print -P "$PROMPT"; shisa_right_prompt_render' >"$out"
+SHISA_A11Y=1 SHISA_SOCKET="$sock" SHISA_BIN="$root/zig-out/bin/shisa" TMUX_PANE="%42" XDG_CONFIG_HOME="$xdg" "$root/zig-out/bin/shisa" prompt --command-context --commandline 'kubectl get pods' --shell zsh --socket "$sock" >>"$out"
 grep -F 'fake> ' "$out" >/dev/null
 grep -F 'right-zsh' "$out" >/dev/null
+XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; [[ ${SHISA_COMMAND_CONTEXT_TARGET} == right ]]'
 zsh -fc 'source init/shisa.zsh; whence shisa_async_self_pipe_setup >/dev/null; whence shisa_async_self_pipe_readable >/dev/null; whence shisa_async_self_pipe_notify >/dev/null; whence shisa_reactive_self_pipe_notify >/dev/null'
-fifo_bytes="$(SHISA_ASYNC_SELF_PIPE=0 zsh -fc 'source init/shisa.zsh; fifo=${TMPDIR:-/tmp}/shisa-zsh-fifo-$$; rm -f -- "$fifo"; mkfifo -m 600 -- "$fifo"; exec {SHISA_ASYNC_FD}<>"$fifo"; shisa_async_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} async_byte; shisa_reactive_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} reactive_byte; exec {SHISA_ASYNC_FD}>&-; SHISA_ASYNC_FD=; rm -f -- "$fifo"; printf "%s%s" "$async_byte" "$reactive_byte"')"
-[[ "$fifo_bytes" == AR ]]
+fifo_bytes="$(SHISA_ASYNC_SELF_PIPE=0 zsh -fc 'source init/shisa.zsh; fifo=${TMPDIR:-/tmp}/shisa-zsh-fifo-$$; rm -f -- "$fifo"; mkfifo -m 600 -- "$fifo"; exec {SHISA_ASYNC_FD}<>"$fifo"; shisa_async_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} async_byte; shisa_reactive_self_pipe_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} reactive_byte; shisa_command_context_notify; read -r -k 1 -u ${SHISA_ASYNC_FD} context_byte; exec {SHISA_ASYNC_FD}>&-; SHISA_ASYNC_FD=; rm -f -- "$fifo"; printf "%s%s%s" "$async_byte" "$reactive_byte" "$context_byte"')"
+[[ "$fifo_bytes" == ARC ]]
 dispatch_byte="$(SHISA_ASYNC_SELF_PIPE=0 zsh -fc 'source init/shisa.zsh; fifo=${TMPDIR:-/tmp}/shisa-zsh-dispatch-$$; rm -f -- "$fifo"; mkfifo -m 600 -- "$fifo"; exec {SHISA_ASYNC_FD}<>"$fifo"; shisa_async_redraw() { print -rn -- A; }; shisa_reactive_redraw() { print -rn -- R; }; print -rn -- R >&${SHISA_ASYNC_FD}; shisa_async_self_pipe_readable ${SHISA_ASYNC_FD}; exec {SHISA_ASYNC_FD}>&-; SHISA_ASYNC_FD=; rm -f -- "$fifo"')"
 [[ "$dispatch_byte" == R ]]
 XDG_CONFIG_HOME="$xdg" zsh -fc 'source init/shisa.zsh; [[ ${SHISA_CMD_COMPLETE_BELL} == 1 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_MODE} == osc9 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_THRESHOLD_MS} == 2500 ]]; [[ ${SHISA_CMD_COMPLETE_BELL_MESSAGE} == done ]]'

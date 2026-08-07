@@ -115,18 +115,9 @@ SHISA_ASYNC_FILL=${SHISA_ASYNC_FILL:-1}
 SHISA_ASYNC_REDRAW=${SHISA_ASYNC_REDRAW:-1}
 SHISA_ASYNC_KEYSEQ=${SHISA_ASYNC_KEYSEQ:-'\C-x\C-s'}
 SHISA_BASH_RIGHT_PROMPT=${SHISA_BASH_RIGHT_PROMPT:-0}
-SHISA_NEXTCMD_KEYSEQ=${SHISA_NEXTCMD_KEYSEQ:-'\C-x\C-n'}
-SHISA_NEXTCMD_ACCEPT_KEYSEQ=${SHISA_NEXTCMD_ACCEPT_KEYSEQ:-'\C-i'}
-SHISA_NEXTCMD_REJECT_KEYSEQ=${SHISA_NEXTCMD_REJECT_KEYSEQ:-'\e'}
-SHISA_NEXTCMD_NEXT_KEYSEQ=${SHISA_NEXTCMD_NEXT_KEYSEQ:-'\e]'}
-SHISA_NEXTCMD_SUGGESTION=
-SHISA_EXPLAIN_KEYSEQ=${SHISA_EXPLAIN_KEYSEQ:-'\C-x\C-e'}
-SHISA_EXPLAIN_LAST_COMMAND=
-SHISA_EXPLAIN_LAST_OUTPUT=
 SHISA_TRANSIENT_PROMPT=${SHISA_TRANSIENT_PROMPT:-1}
 SHISA_PROD_GUARD=${SHISA_PROD_GUARD:-0}
 SHISA_PROD_GUARD_FORCE=${SHISA_PROD_GUARD_FORCE:-0}
-SHISA_AI_RISK_GUARD=${SHISA_AI_RISK_GUARD:-0}
 SHISA_A11Y=${SHISA_A11Y:-0}
 SHISA_CMD_COMPLETE_BELL=${SHISA_CMD_COMPLETE_BELL:-0}
 SHISA_CMD_COMPLETE_BELL_MODE=${SHISA_CMD_COMPLETE_BELL_MODE:-bell}
@@ -210,7 +201,6 @@ shisa_debug_trap() {
   [[ ${SHISA_COMMAND_STARTED:-0} == 0 ]] || return 0
   SHISA_LAST_COMMAND=${command}
   shisa_bash_transient_rewrite
-  shisa_ai_risk_preexec "${command}" || return $?
   shisa_preexec_guard bash "${command}" || return $?
   local now_us
   now_us=$(shisa_epoch_us) || return 0
@@ -230,13 +220,6 @@ shisa_preexec_guard() {
   args=(cloud preexec --socket "${socket_path}" --shell "${shell_name}")
   [[ ${SHISA_PROD_GUARD_FORCE:-0} == 1 ]] && args+=(--force)
   "${SHISA_BIN}" "${args[@]}" -- "${command}"
-}
-
-shisa_ai_risk_preexec() {
-  [[ ${SHISA_AI_RISK_GUARD:-0} == 1 ]] || return 0
-  local command=${1:-}
-  [[ -n ${command} ]] || return 0
-  "${SHISA_BIN}" ai risk --preexec -- "${command}"
 }
 
 shisa_cmd_complete_bell() {
@@ -338,54 +321,9 @@ shisa_async_redraw() {
   return 0
 }
 
-shisa_nextcmd_widget() {
-  local suggestion
-  suggestion=$("${SHISA_BIN}" ai nextcmd --shell bash --cwd "${PWD}" --last-command "${SHISA_LAST_COMMAND:-}" --last-exit "${SHISA_LAST_EXIT:-0}" --history-path "${HISTFILE:-}" 2>/dev/null) || return 0
-  SHISA_NEXTCMD_SUGGESTION=
-  [[ -n ${suggestion} ]] || return 0
-  SHISA_NEXTCMD_SUGGESTION=${suggestion}
-  printf '\n\033[2mshisa next: %s\033[0m\n' "${suggestion}"
-}
-
-shisa_nextcmd_accept_widget() {
-  [[ -n ${SHISA_NEXTCMD_SUGGESTION:-} ]] || return 0
-  local suggestion=${SHISA_NEXTCMD_SUGGESTION}
-  SHISA_NEXTCMD_SUGGESTION=
-  READLINE_LINE="${READLINE_LINE:0:READLINE_POINT}${suggestion}${READLINE_LINE:READLINE_POINT}"
-  READLINE_POINT=$((READLINE_POINT + ${#suggestion}))
-}
-
-shisa_nextcmd_reject_widget() {
-  SHISA_NEXTCMD_SUGGESTION=
-  printf '\r\033[2K'
-}
-
-shisa_nextcmd_next_widget() {
-  SHISA_NEXTCMD_SUGGESTION=
-  shisa_nextcmd_widget
-}
-
-shisa_explain_widget() {
-  local output
-  if [[ ${READLINE_LINE} == "${SHISA_EXPLAIN_LAST_COMMAND}" && -n ${SHISA_EXPLAIN_LAST_OUTPUT} ]]; then
-    output=${SHISA_EXPLAIN_LAST_OUTPUT}
-  else
-    output=$("${SHISA_BIN}" ai explain --command "${READLINE_LINE}" 2>/dev/null) || return 0
-    SHISA_EXPLAIN_LAST_COMMAND=${READLINE_LINE}
-    SHISA_EXPLAIN_LAST_OUTPUT=${output}
-  fi
-  [[ -n ${output} ]] || return 0
-  printf '\n%s\n' "${output}"
-}
-
 shisa_install_async_redraw() {
   [[ ${SHISA_ASYNC_REDRAW:-1} == 1 ]] || return 0
   bind -x "\"${SHISA_ASYNC_KEYSEQ}\": shisa_async_redraw" 2>/dev/null || true
-  bind -x "\"${SHISA_NEXTCMD_KEYSEQ}\": shisa_nextcmd_widget" 2>/dev/null || true
-  bind -x "\"${SHISA_NEXTCMD_ACCEPT_KEYSEQ}\": shisa_nextcmd_accept_widget" 2>/dev/null || true
-  bind -x "\"${SHISA_NEXTCMD_REJECT_KEYSEQ}\": shisa_nextcmd_reject_widget" 2>/dev/null || true
-  bind -x "\"${SHISA_NEXTCMD_NEXT_KEYSEQ}\": shisa_nextcmd_next_widget" 2>/dev/null || true
-  bind -x "\"${SHISA_EXPLAIN_KEYSEQ}\": shisa_explain_widget" 2>/dev/null || true
 }
 
 shisa_prompt_command() {

@@ -36,6 +36,8 @@ Set `SHISA_LONG_RUNNING=1` before sourcing zsh, bash, or fish init to print `shi
 
 Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from the hook.
 
+Command-aware context is opt-in through `[prompt]`. It is currently implemented in zsh only: Shisa debounces the ZLE command buffer, sends a context-only request to the daemon, and displays configured modules in `RPROMPT` (`command_context = "right"`) or the ZLE message area (`"message"`). Bash, fish, Nushell, and PowerShell retain their static prompt behavior.
+
 ## Graceful Degradation Matrix
 
 | Condition | zsh | bash | fish | nushell | PowerShell |
@@ -52,9 +54,10 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Redraw path is signal-driven: `TRAPUSR1` writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `shisa prompt --transient` output when `transient_prompt` is configured.
 - Shisa sets `PROMPT` and `RPROMPT`; `RPROMPT` calls `shisa prompt --right` and renders `[prompt].right_modules`.
+- `command_context = "right"` appends configured context to `RPROMPT` while a matching command is being typed. `"message"` uses the ZLE message area instead. The hook never evaluates command text; quoted, piped, redirected, and compound commands are ignored.
 - Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
 - If another plugin owns `RPROMPT`, source that plugin after Shisa if it should win.
-- When `SHISA_PROD_GUARD=1`, `preexec` sends `shisa cloud preexec --socket <socket> --shell zsh -- <command>` to the daemon.
+- `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 
 ## bash
 
@@ -67,7 +70,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Bash redraw limitation: an external notifier must inject the bound key sequence into the active tty. Redraw only works while Readline is active, not while a foreground command is running.
 - Bash has no native right prompt; set `SHISA_BASH_RIGHT_PROMPT=1` to draw `[prompt].right_modules` before `PS1` as a best-effort shim.
 - Bash transient prompt is best effort: the DEBUG trap rewrites the previous single-line prompt before command execution in interactive Readline sessions. Multi-line prompts, wrapped commands, and ble.sh-managed accept-line flows are not rewritten.
-- When `SHISA_PROD_GUARD=1`, the `DEBUG` trap sends `shisa cloud preexec --socket <socket> --shell bash -- <command>` to the daemon.
+- `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 
 ## fish
 
@@ -77,7 +80,7 @@ Set `SHISA_A11Y=1` before sourcing any init file to pass `prompt --a11y` from th
 - Defines `fish_right_prompt`, which calls `shisa prompt --right` and renders `[prompt].right_modules`.
 - Redraw path is fish-native: handlers can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
 - Shisa does not source or require `fish-async-prompt`. If that plugin is installed, keep its scheduling separate and emit `shisa_async_redraw` after Shisa async state changes.
-- When `SHISA_PROD_GUARD=1`, `fish_preexec` sends `shisa cloud preexec --socket <socket> --shell fish -- <command>` to the daemon.
+- `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 
 ## nushell
 

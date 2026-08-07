@@ -12,12 +12,12 @@ theme = "plain"
 locale = "auto"
 
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
 right_modules = []
 rtl_reverse = false
-
-[ai]
-provider = "ollama"
+command_context = "off"
+command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
 ```
 
 ## Top-Level Keys
@@ -38,25 +38,23 @@ Unknown top-level keys are invalid.
 | `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
 | `right_modules` | array of strings | no | `[]` | Ordered right-prompt module pipeline for shells with native right prompt support. Values must be unique. |
 | `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
+| `command_context` | string | no | `"off"` | Opt-in zsh command-aware target: `"off"`, `"right"`, or `"message"`. |
+| `command_context_commands` | array of strings | no | see below | Executable names that trigger command-aware context. |
+| `command_context_modules` | array of strings | no | see below | Modules rendered for a matching command. |
 
 Default module order:
 
 ```toml
 [prompt]
-modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
 right_modules = []
 rtl_reverse = false
+command_context = "off"
+command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
 ```
 
-## `[ai]`
-
-| Key | Type | Required | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `provider` | string | no | `"ollama"` | One of `"ollama"`, `"openai"`, `"anthropic"`, `"gemini"`, `"lmstudio"`, or `"llamacpp"`. |
-| `model` | string | no | provider default | Default model or local model path for AI commands. Explicit `--model` wins. |
-| `plugin` | string | only for configured cloud providers | none | Plugin id whose `net=<provider>` trust grant authorizes config-selected cloud providers. |
-
-`[ai]` defaults apply to `shisa ai risk`, `explain`, `nextcmd`, and `nl2cmd`. Explicit CLI flags override config. Config-selected cloud providers require `shisa plugin trust <plugin> --net=<provider>`.
+Command-aware context is disabled by default. zsh debounces command-buffer updates, asks the daemon to render only the configured modules, and displays the result on the selected target. It never evaluates the command line; quoted, piped, redirected, or compound commands do not trigger context. `"right"` and `"message"` are currently implemented in zsh only.
 
 Allowed core module ids for schema v1:
 
@@ -69,17 +67,17 @@ Allowed core module ids for schema v1:
 | `jobs` | sync | Background job count. |
 | `cmd_duration` | sync | Last command duration above threshold. |
 | `user_host` | sync | User and host, normally only over SSH. |
-| `cloud_ctx` | sync | Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available. |
-| `cdhint` | sync | Compact local project kind hint from marker files. |
-| `tmux_pane` | sync | Render the current tmux pane id from `TMUX_PANE`. |
-| `risk_tier` | sync | Risk classification and prompt background-bar color mapping. |
-| `sso_expiry` | sync | Warn when cached SSO/session expiry metadata is below the configured threshold. |
-| `iac_workspace` | sync | Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
-| `region_drift` | sync | Warn when region env vars differ from provider config defaults. |
-| `cost_glance` | sync | Render compact month-to-date cloud spend from the local cost cache. |
-| `vpn_status` | sync | Render active local VPN status from local client commands. |
-| `ssh_target` | sync | Render remote SSH target host and risk tier. |
-| `container_provenance` | sync | Render detected container/runtime provenance. |
+| `cloud_ctx` | sync | Experimental cloud account context; AWS, GCP, Azure, and Kubernetes support. |
+| `cdhint` | sync | Experimental compact local project-kind hint from marker files. |
+| `tmux_pane` | sync | Experimental current tmux pane id from `TMUX_PANE`. |
+| `risk_tier` | sync | Experimental risk classification and prompt background-bar mapping. |
+| `sso_expiry` | sync | Experimental cached SSO/session-expiry warning. |
+| `iac_workspace` | sync | Experimental Terraform/OpenTofu/Pulumi/CDK workspace metadata. |
+| `region_drift` | sync | Experimental provider-region drift warning. |
+| `cost_glance` | sync | Experimental compact local cloud-spend cache display. |
+| `vpn_status` | sync | Experimental active local VPN status. |
+| `ssh_target` | sync | Experimental remote SSH target and risk tier. |
+| `container_provenance` | sync | Experimental container/runtime provenance. |
 | `time` | sync | Optional UTC `HH:MM` clock segment. |
 
 Unknown module ids are invalid.
@@ -190,8 +188,8 @@ Reads cached token expiry metadata only. Sources are documented in `docs/sso-exp
 - `version` must be present and equal to `1`.
 - `[prompt].modules` must be an array of unique strings.
 - `[prompt].right_modules` must be an array of unique strings.
-- `[ai].provider` must be a known AI provider id.
-- Config-selected cloud AI providers require `[ai].plugin` and a matching plugin net trust grant.
+- `[prompt].command_context` must be `"off"`, `"right"`, or `"message"`; configured command names are unique and contain only letters, digits, `_`, `-`, or `.`.
+- `[prompt].command_context_modules` must be an array of unique core module ids.
 - Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
 - `[modules.<id>]` must reference a known module id.
 - Unknown keys in known tables are invalid.

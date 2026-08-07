@@ -108,46 +108,6 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
-    def shisa-nextcmd [] {
-        let last_exit = ($env.LAST_EXIT_CODE? | default 0 | into string)
-        let args = [ai nextcmd --shell nu --cwd (pwd) --last-exit $last_exit]
-        let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
-        let suggestion = ($rendered.stdout | str trim)
-        if $rendered.exit_code == 0 and $suggestion != "" {
-            $"shisa next: ($suggestion)"
-        } else {
-            ""
-        }
-    }
-
-    def shisa-nextcmd-accept [] {
-        let preview = (shisa-nextcmd | str trim)
-        if ($preview | str starts-with "shisa next: ") {
-            $preview | str replace "shisa next: " ""
-        } else {
-            ""
-        }
-    }
-
-    def shisa-nextcmd-reject [] { "" }
-
-    def shisa-nextcmd-next [] { shisa-nextcmd }
-
-    def shisa-explain [command: string] {
-        if (($env.SHISA_EXPLAIN_LAST_COMMAND? | default "") == $command) and (($env.SHISA_EXPLAIN_LAST_OUTPUT? | default "") != "") {
-            return $env.SHISA_EXPLAIN_LAST_OUTPUT
-        }
-        let args = [ai explain --command $command]
-        let rendered = (try { run-external $env.SHISA_BIN ...$args e> /dev/null | complete } catch { { stdout: "", exit_code: 1 } })
-        if $rendered.exit_code == 0 {
-            $env.SHISA_EXPLAIN_LAST_COMMAND = $command
-            $env.SHISA_EXPLAIN_LAST_OUTPUT = $rendered.stdout
-            $rendered.stdout
-        } else {
-            ""
-        }
-    }
-
     $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt | append {||
         if (($env.SHISA_REPROMPT_REQUESTED? | default "0") == "1") {
             $env.SHISA_REPROMPT_REQUESTED = "0"

@@ -46,9 +46,9 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\modules = [{s}]
         \\right_modules = []
         \\rtl_reverse = false
-        \\
-        \\[ai]
-        \\provider = "ollama"
+        \\command_context = "off"
+        \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+        \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
         \\```
         \\
         \\## Top-Level Keys
@@ -69,6 +69,9 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\| `modules` | array of strings | no | see below | Ordered left-prompt module pipeline. Values must be unique. |
         \\| `right_modules` | array of strings | no | `[]` | Ordered right-prompt module pipeline for shells with native right prompt support. Values must be unique. |
         \\| `rtl_reverse` | bool | no | `false` | Reverse rendered segment order only when the session is detected as RTL. |
+        \\| `command_context` | string | no | `"off"` | Opt-in zsh command-aware target: `"off"`, `"right"`, or `"message"`. |
+        \\| `command_context_commands` | array of strings | no | see below | Executable names that trigger command-aware context. |
+        \\| `command_context_modules` | array of strings | no | see below | Modules rendered for a matching command. |
         \\
         \\Default module order:
         \\
@@ -77,17 +80,12 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\modules = [{s}]
         \\right_modules = []
         \\rtl_reverse = false
+        \\command_context = "off"
+        \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+        \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
         \\```
         \\
-        \\## `[ai]`
-        \\
-        \\| Key | Type | Required | Default | Notes |
-        \\| --- | --- | --- | --- | --- |
-        \\| `provider` | string | no | `"ollama"` | One of `"ollama"`, `"openai"`, `"anthropic"`, `"gemini"`, `"lmstudio"`, or `"llamacpp"`. |
-        \\| `model` | string | no | provider default | Default model or local model path for AI commands. Explicit `--model` wins. |
-        \\| `plugin` | string | only for configured cloud providers | none | Plugin id whose `net=<provider>` trust grant authorizes config-selected cloud providers. |
-        \\
-        \\`[ai]` defaults apply to `shisa ai risk`, `explain`, `nextcmd`, and `nl2cmd`. Explicit CLI flags override config. Config-selected cloud providers require `shisa plugin trust <plugin> --net=<provider>`.
+        \\Command-aware context is disabled by default. zsh debounces command-buffer updates, asks the daemon to render only the configured modules, and displays the result on the selected target. It never evaluates the command line; quoted, piped, redirected, or compound commands do not trigger context. `"right"` and `"message"` are currently implemented in zsh only.
         \\
         \\Allowed core module ids for schema v1:
         \\
@@ -184,8 +182,8 @@ pub fn generateAlloc(allocator: std.mem.Allocator) ![]u8 {
         \\- `version` must be present and equal to `1`.
         \\- `[prompt].modules` must be an array of unique strings.
         \\- `[prompt].right_modules` must be an array of unique strings.
-        \\- `[ai].provider` must be a known AI provider id.
-        \\- Config-selected cloud AI providers require `[ai].plugin` and a matching plugin net trust grant.
+        \\- `[prompt].command_context` must be `"off"`, `"right"`, or `"message"`; configured command names are unique and contain only letters, digits, `_`, `-`, or `.`.
+        \\- `[prompt].command_context_modules` must be an array of unique core module ids.
         \\- Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
         \\- `[modules.<id>]` must reference a known module id.
         \\- Unknown keys in known tables are invalid.
@@ -209,17 +207,17 @@ const module_docs = [_]ModuleDoc{
     .{ .id = .jobs, .summary = "Background job count." },
     .{ .id = .cmd_duration, .summary = "Last command duration above threshold." },
     .{ .id = .user_host, .summary = "User and host, normally only over SSH." },
-    .{ .id = .cloud_ctx, .summary = "Optional cloud account context; AWS, GCP, Azure, and Kubernetes support are available." },
-    .{ .id = .cdhint, .summary = "Compact local project kind hint from marker files." },
-    .{ .id = .tmux_pane, .summary = "Render the current tmux pane id from `TMUX_PANE`." },
-    .{ .id = .risk_tier, .summary = "Risk classification and prompt background-bar color mapping." },
-    .{ .id = .sso_expiry, .summary = "Warn when cached SSO/session expiry metadata is below the configured threshold." },
-    .{ .id = .iac_workspace, .summary = "Render local Terraform/OpenTofu/Pulumi/CDK workspace metadata." },
-    .{ .id = .region_drift, .summary = "Warn when region env vars differ from provider config defaults." },
-    .{ .id = .cost_glance, .summary = "Render compact month-to-date cloud spend from the local cost cache." },
-    .{ .id = .vpn_status, .summary = "Render active local VPN status from local client commands." },
-    .{ .id = .ssh_target, .summary = "Render remote SSH target host and risk tier." },
-    .{ .id = .container_provenance, .summary = "Render detected container/runtime provenance." },
+    .{ .id = .cloud_ctx, .summary = "Experimental cloud account context; AWS, GCP, Azure, and Kubernetes support." },
+    .{ .id = .cdhint, .summary = "Experimental compact local project-kind hint from marker files." },
+    .{ .id = .tmux_pane, .summary = "Experimental current tmux pane id from `TMUX_PANE`." },
+    .{ .id = .risk_tier, .summary = "Experimental risk classification and prompt background-bar mapping." },
+    .{ .id = .sso_expiry, .summary = "Experimental cached SSO/session-expiry warning." },
+    .{ .id = .iac_workspace, .summary = "Experimental Terraform/OpenTofu/Pulumi/CDK workspace metadata." },
+    .{ .id = .region_drift, .summary = "Experimental provider-region drift warning." },
+    .{ .id = .cost_glance, .summary = "Experimental compact local cloud-spend cache display." },
+    .{ .id = .vpn_status, .summary = "Experimental active local VPN status." },
+    .{ .id = .ssh_target, .summary = "Experimental remote SSH target and risk tier." },
+    .{ .id = .container_provenance, .summary = "Experimental container/runtime provenance." },
     .{ .id = .time, .summary = "Optional UTC `HH:MM` clock segment." },
 };
 
@@ -279,8 +277,8 @@ test "generated config docs match checked-in file" {
     try std.testing.expectEqualStrings(checked_in, generated);
 }
 
-test "default module docs include container provenance" {
+test "default module docs stay quiet" {
     const modules = try defaultModuleListAlloc(std.testing.allocator);
     defer std.testing.allocator.free(modules);
-    try std.testing.expect(std.mem.indexOf(u8, modules, "\"container_provenance\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, modules, "\"cloud_ctx\"") == null);
 }

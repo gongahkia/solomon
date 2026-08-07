@@ -52,7 +52,7 @@ The user-facing `shisa.toml` schema is defined in [config-schema.md](config-sche
 
 Shisa's cache contract is described in [RFC-0004](../rfcs/0004-cache-invalidation-rules.md) and the current source-level layout is detailed in [Cache Architecture](cache-architecture.md).
 
-Current daemon code uses module-owned caches for async git/language probes and cached cloud context, plus reusable generic stores for module-output and rendered-prompt cache wrappers. Runtime L1 rendered-prompt lookup and shared external-command caching are design targets, not active server hot-path calls in the current source.
+Current daemon code uses module-owned caches for async git/language probes and cached cloud context, plus reusable generic stores for module output and active L1 rendered-prompt caching. Shared external-command caching remains a design target.
 
 ### Plugins
 

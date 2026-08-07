@@ -14,7 +14,6 @@ No raw-mode, full-screen, readline, or ncurses UI path is present in the current
 
 | Command | Keyboard-only status | Prompting behavior |
 | --- | --- | --- |
-| `ai` | args/stdout/stderr only | no interactive confirmation; generated commands are not executed |
 | `bench` | args/stdout/stderr only | no prompt |
 | `cache` | args/stdout/stderr only | no prompt |
 | `cloud` | args/stdout/stderr only | no prompt |

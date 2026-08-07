@@ -184,7 +184,7 @@ msgstr ""
 "\n"
 "# Migration warnings\n"
 
-#: src/cli/prompt.zig:860
+#: src/cli/prompt.zig:872
 msgid ""
 "usage: shisa trace [--cwd DIR] [--exit N] [--jobs N]\n"
 "\n"

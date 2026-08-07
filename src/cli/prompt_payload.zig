@@ -21,6 +21,8 @@ pub const Config = struct {
     rtl_reverse: bool = false,
     right: bool = false,
     transient: bool = false,
+    command_context: bool = false,
+    commandline: ?[]const u8 = null,
     trace: bool = false,
     shell: []const u8 = "zsh",
     cols: u16 = 80,
@@ -33,7 +35,9 @@ pub const ModuleOptions = struct {
     rtl_reverse: bool = false,
     modules: []const shisa_config.ModuleId,
     right_modules: []const shisa_config.ModuleId,
+    command_context: shisa_config.CommandContextOptions = .{ .commands = &.{}, .modules = &.{} },
     owns_modules: bool = false,
+    owns_command_context: bool = false,
     owns_theme: bool = false,
     owns_locale: bool = false,
     cwd: shisa_config.CwdOptions,
@@ -49,6 +53,11 @@ pub const ModuleOptions = struct {
             allocator.free(self.modules);
             allocator.free(self.right_modules);
         }
+        if (self.owns_command_context) {
+            for (self.command_context.commands) |command| allocator.free(command);
+            allocator.free(self.command_context.commands);
+            allocator.free(self.command_context.modules);
+        }
         if (self.owns_theme) allocator.free(self.theme);
         if (self.owns_locale) allocator.free(self.locale);
         self.* = undefined;
@@ -58,20 +67,12 @@ pub const ModuleOptions = struct {
 const default_prompt_modules = [_]shisa_config.ModuleId{
     .cwd,
     .git_branch,
-    .language_versions,
     .exit_status,
     .jobs,
     .cmd_duration,
     .user_host,
-    .risk_tier,
-    .sso_expiry,
-    .iac_workspace,
-    .region_drift,
-    .cost_glance,
-    .vpn_status,
-    .ssh_target,
-    .container_provenance,
 };
+const command_context_primary_modules = [_]shisa_config.ModuleId{.cwd};
 
 pub fn buildPromptPayload(allocator: std.mem.Allocator, config: Config, cwd: []const u8) ![]u8 {
     var module_options = try promptModuleOptions(allocator);
@@ -84,9 +85,12 @@ pub fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config:
     defer allocator.free(escaped_cwd);
     const escaped_shell = try daemon_json.escapeAlloc(allocator, config.shell);
     defer allocator.free(escaped_shell);
-    const modules_json = try promptModulesJsonAlloc(allocator, module_options.modules);
+    const selected_context_modules = commandContextModules(config, module_options);
+    const selected_modules = if (config.command_context) command_context_primary_modules[0..] else module_options.modules;
+    const selected_right_modules = if (config.command_context) selected_context_modules else module_options.right_modules;
+    const modules_json = try promptModulesJsonAlloc(allocator, selected_modules);
     defer allocator.free(modules_json);
-    const right_modules_json = try promptModulesJsonAlloc(allocator, module_options.right_modules);
+    const right_modules_json = try promptModulesJsonAlloc(allocator, selected_right_modules);
     defer allocator.free(right_modules_json);
     const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
     defer if (tmux_pane) |value| allocator.free(value);
@@ -184,6 +188,7 @@ pub fn defaultPromptModuleOptions() ModuleOptions {
         .rtl_reverse = false,
         .modules = default_prompt_modules[0..],
         .right_modules = &.{},
+        .command_context = .{ .commands = &.{}, .modules = &.{} },
         .cwd = .{},
         .cloud_ctx = .{},
         .cdhint = .{},
@@ -218,13 +223,23 @@ pub fn promptModuleOptions(allocator: std.mem.Allocator) !ModuleOptions {
     errdefer allocator.free(theme);
     const locale = try allocator.dupe(u8, parsed.locale);
     errdefer allocator.free(locale);
+    const command_context_commands = try dupStringSlice(allocator, parsed.command_context.commands);
+    errdefer freeStringSlice(allocator, command_context_commands);
+    const command_context_modules = try allocator.dupe(shisa_config.ModuleId, parsed.command_context.modules);
+    errdefer allocator.free(command_context_modules);
     return .{
         .theme = theme,
         .locale = locale,
         .rtl_reverse = parsed.prompt.rtl_reverse,
         .modules = modules,
         .right_modules = right_modules,
+        .command_context = .{
+            .target = parsed.command_context.target,
+            .commands = command_context_commands,
+            .modules = command_context_modules,
+        },
         .owns_modules = true,
+        .owns_command_context = true,
         .owns_theme = true,
         .owns_locale = true,
         .cwd = parsed.modules.cwd,
@@ -235,6 +250,82 @@ pub fn promptModuleOptions(allocator: std.mem.Allocator) !ModuleOptions {
         .risk_tier = parsed.modules.risk_tier,
         .sso_expiry = parsed.modules.sso_expiry,
     };
+}
+
+fn commandContextModules(config: Config, module_options: ModuleOptions) []const shisa_config.ModuleId {
+    if (!config.command_context) return &.{};
+    if (module_options.command_context.target == .off) return &.{};
+    if (module_options.command_context.modules.len == 0) return &.{};
+    const commandline = config.commandline orelse return &.{};
+    const executable = commandContextExecutable(commandline) orelse return &.{};
+    for (module_options.command_context.commands) |command| {
+        if (std.mem.eql(u8, command, executable)) return module_options.command_context.modules;
+    }
+    return &.{};
+}
+
+pub fn commandContextExecutable(commandline: []const u8) ?[]const u8 {
+    if (std.mem.indexOfAny(u8, commandline, "'\\\"`|;&()<>\n\r") != null) return null;
+    var tokens = std.mem.tokenizeAny(u8, commandline, " \t");
+    var skip_sudo_value = false;
+    while (tokens.next()) |token| {
+        if (token.len == 0) continue;
+        if (skip_sudo_value) {
+            skip_sudo_value = false;
+            continue;
+        }
+        if (isEnvironmentAssignment(token)) continue;
+        if (std.mem.eql(u8, token, "command") or std.mem.eql(u8, token, "builtin") or std.mem.eql(u8, token, "exec")) continue;
+        if (std.mem.eql(u8, token, "sudo")) {
+            continue;
+        }
+        if (std.mem.eql(u8, token, "env")) {
+            continue;
+        }
+        if (token[0] == '-') {
+            if (std.mem.eql(u8, token, "-u") or std.mem.eql(u8, token, "--user") or std.mem.eql(u8, token, "-g") or std.mem.eql(u8, token, "--group")) skip_sudo_value = true;
+            continue;
+        }
+        const executable = std.fs.path.basename(token);
+        if (executable.len == 0 or !isSafeCommandToken(executable)) return null;
+        return executable;
+    }
+    return null;
+}
+
+fn isEnvironmentAssignment(token: []const u8) bool {
+    const equals = std.mem.indexOfScalar(u8, token, '=') orelse return false;
+    if (equals == 0) return false;
+    for (token[0..equals], 0..) |byte, index| {
+        if (!(std.ascii.isAlphanumeric(byte) or byte == '_' or (index > 0 and byte == '-'))) return false;
+    }
+    return true;
+}
+
+fn isSafeCommandToken(token: []const u8) bool {
+    for (token) |byte| {
+        if (!(std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-' or byte == '.')) return false;
+    }
+    return true;
+}
+
+fn dupStringSlice(allocator: std.mem.Allocator, values: []const []const u8) ![]const []const u8 {
+    const out = try allocator.alloc([]const u8, values.len);
+    var copied: usize = 0;
+    errdefer {
+        for (out[0..copied]) |value| allocator.free(value);
+        allocator.free(out);
+    }
+    for (values, 0..) |value, index| {
+        out[index] = try allocator.dupe(u8, value);
+        copied += 1;
+    }
+    return out;
+}
+
+fn freeStringSlice(allocator: std.mem.Allocator, values: []const []const u8) void {
+    for (values) |value| allocator.free(value);
+    allocator.free(values);
 }
 
 test "prompt payload carries rtl flags" {
@@ -264,6 +355,42 @@ test "prompt payload carries right modules" {
     const payload = try buildPromptPayloadWithModuleOptions(std.testing.allocator, .{}, "/tmp", options);
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"right_modules\":[\"time\"]") != null);
+}
+
+test "command context selects configured modules only for matching commands" {
+    const commands = [_][]const u8{ "kubectl", "terraform" };
+    const context_modules = [_]shisa_config.ModuleId{ .cloud_ctx, .risk_tier };
+    var options = defaultPromptModuleOptions();
+    options.command_context = .{
+        .target = .right,
+        .commands = commands[0..],
+        .modules = context_modules[0..],
+    };
+    const matching = try buildPromptPayloadWithModuleOptions(
+        std.testing.allocator,
+        .{ .command_context = true, .commandline = "sudo -u root kubectl get pods" },
+        "/tmp",
+        options,
+    );
+    defer std.testing.allocator.free(matching);
+    try std.testing.expect(std.mem.indexOf(u8, matching, "\"modules\":[\"cwd\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, matching, "\"right_modules\":[\"cloud_ctx\",\"risk_tier\"]") != null);
+
+    const nonmatching = try buildPromptPayloadWithModuleOptions(
+        std.testing.allocator,
+        .{ .command_context = true, .commandline = "git status" },
+        "/tmp",
+        options,
+    );
+    defer std.testing.allocator.free(nonmatching);
+    try std.testing.expect(std.mem.indexOf(u8, nonmatching, "\"right_modules\":[]") != null);
+}
+
+test "command context executable rejects shell syntax" {
+    try std.testing.expectEqualStrings("kubectl", commandContextExecutable("AWS_PROFILE=prod kubectl get pods").?);
+    try std.testing.expectEqualStrings("terraform", commandContextExecutable("env TF_LOG=warn terraform plan").?);
+    try std.testing.expect(commandContextExecutable("kubectl get pods; rm -rf /") == null);
+    try std.testing.expect(commandContextExecutable("'kubectl' get pods") == null);
 }
 
 test "prompt payload carries env hash and path only when enabled" {

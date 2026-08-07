@@ -10,9 +10,42 @@ pub const default_config_text =
     \\locale = "auto"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
     \\right_modules = []
     \\rtl_reverse = false
+    \\command_context = "off"
+    \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+    \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
+    \\
+    \\[modules.cwd]
+    \\truncate_to = 3
+    \\home_tilde = true
+    \\max_width = 0
+    \\
+    \\[modules.git_branch]
+    \\show_dirty = true
+    \\cache_ttl_ms = 250
+    \\
+    \\[modules.cmd_duration]
+    \\threshold_ms = 1000
+    \\
+    \\[modules.user_host]
+    \\mode = "ssh"
+    \\
+;
+
+pub const context_rich_config_text =
+    \\version = 1
+    \\theme = "plain"
+    \\locale = "auto"
+    \\
+    \\[prompt]
+    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "cloud_ctx", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\right_modules = []
+    \\rtl_reverse = false
+    \\command_context = "right"
+    \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+    \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -34,12 +67,6 @@ pub const default_config_text =
     \\gcp = true
     \\azure = true
     \\kubernetes = true
-    \\
-    \\[modules.cdhint]
-    \\enabled = true
-    \\
-    \\[modules.tmux_pane]
-    \\enabled = true
     \\
     \\[modules.risk_tier]
     \\unknown_bg = "muted"
@@ -58,9 +85,12 @@ pub const a11y_config_text =
     \\locale = "auto"
     \\
     \\[prompt]
-    \\modules = ["cwd", "git_branch", "language_versions", "exit_status", "jobs", "cmd_duration", "user_host", "risk_tier", "sso_expiry", "iac_workspace", "region_drift", "cost_glance", "vpn_status", "ssh_target", "container_provenance"]
+    \\modules = ["cwd", "git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
     \\right_modules = []
     \\rtl_reverse = false
+    \\command_context = "off"
+    \\command_context_commands = ["aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu"]
+    \\command_context_modules = ["cloud_ctx", "risk_tier", "sso_expiry"]
     \\
     \\[modules.cwd]
     \\truncate_to = 3
@@ -76,27 +106,6 @@ pub const a11y_config_text =
     \\
     \\[modules.user_host]
     \\mode = "ssh"
-    \\
-    \\[modules.cloud_ctx]
-    \\aws = true
-    \\gcp = true
-    \\azure = true
-    \\kubernetes = true
-    \\
-    \\[modules.cdhint]
-    \\enabled = true
-    \\
-    \\[modules.tmux_pane]
-    \\enabled = true
-    \\
-    \\[modules.risk_tier]
-    \\unknown_bg = "muted"
-    \\dev_bg = "success"
-    \\staging_bg = "warning"
-    \\prod_bg = "danger"
-    \\
-    \\[modules.sso_expiry]
-    \\warning_minutes = 30
     \\
 ;
 
@@ -181,6 +190,18 @@ pub const ModuleOptions = struct {
     time: TimeOptions = .{},
 };
 
+pub const CommandContextTarget = enum {
+    off,
+    right,
+    message,
+};
+
+pub const CommandContextOptions = struct {
+    target: CommandContextTarget = .off,
+    commands: []const []const u8,
+    modules: []const ModuleId,
+};
+
 pub const PromptOptions = struct {
     rtl_reverse: bool = false,
 };
@@ -245,6 +266,7 @@ pub const Config = struct {
     transient_prompt: ?[]u8 = null,
     prompt_modules: []ModuleId,
     right_prompt_modules: []ModuleId,
+    command_context: CommandContextOptions,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
@@ -254,6 +276,9 @@ pub const Config = struct {
         if (self.transient_prompt) |value| allocator.free(value);
         allocator.free(self.prompt_modules);
         allocator.free(self.right_prompt_modules);
+        for (self.command_context.commands) |command| allocator.free(command);
+        allocator.free(self.command_context.commands);
+        allocator.free(self.command_context.modules);
         self.* = undefined;
     }
 };
@@ -284,6 +309,9 @@ const Seen = struct {
     prompt_modules: bool = false,
     prompt_right_modules: bool = false,
     prompt_rtl_reverse: bool = false,
+    prompt_command_context: bool = false,
+    prompt_command_context_commands: bool = false,
+    prompt_command_context_modules: bool = false,
     cwd_truncate_to: bool = false,
     cwd_home_tilde: bool = false,
     cwd_max_width: bool = false,
@@ -315,7 +343,9 @@ const Trimmed = struct {
     column: usize,
 };
 
-const default_modules = [_]ModuleId{ .cwd, .git_branch, .language_versions, .exit_status, .jobs, .cmd_duration, .user_host, .risk_tier, .sso_expiry, .iac_workspace, .region_drift, .cost_glance, .vpn_status, .ssh_target, .container_provenance };
+const default_modules = [_]ModuleId{ .cwd, .git_branch, .exit_status, .jobs, .cmd_duration, .user_host };
+const default_command_context_commands = [_][]const u8{ "aws", "az", "gcloud", "helm", "kubectl", "terraform", "tofu" };
+const default_command_context_modules = [_]ModuleId{ .cloud_ctx, .risk_tier, .sso_expiry };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8, diagnostic: *Diagnostic) !Config {
     diagnostic.* = .{};
@@ -339,6 +369,9 @@ const Parser = struct {
     transient_prompt: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
     right_prompt_modules: std.ArrayList(ModuleId) = .empty,
+    command_context_commands: std.ArrayList([]u8) = .empty,
+    command_context_modules: std.ArrayList(ModuleId) = .empty,
+    command_context_target: CommandContextTarget = .off,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
 
@@ -375,6 +408,17 @@ const Parser = struct {
             try self.right_prompt_modules.toOwnedSlice(self.allocator)
         else
             try self.allocator.dupe(ModuleId, &.{});
+        errdefer self.allocator.free(right_modules);
+        const command_context_commands = if (self.seen.prompt_command_context_commands)
+            try self.command_context_commands.toOwnedSlice(self.allocator)
+        else
+            try dupStringSlice(self.allocator, default_command_context_commands[0..]);
+        errdefer freeStringSlice(self.allocator, command_context_commands);
+        const command_context_modules = if (self.seen.prompt_command_context_modules)
+            try self.command_context_modules.toOwnedSlice(self.allocator)
+        else
+            try self.allocator.dupe(ModuleId, default_command_context_modules[0..]);
+        errdefer self.allocator.free(command_context_modules);
 
         return .{
             .version = 1,
@@ -383,6 +427,11 @@ const Parser = struct {
             .transient_prompt = transient_prompt,
             .prompt_modules = modules,
             .right_prompt_modules = right_modules,
+            .command_context = .{
+                .target = self.command_context_target,
+                .commands = command_context_commands,
+                .modules = command_context_modules,
+            },
             .prompt = self.prompt,
             .modules = self.modules,
         };
@@ -394,6 +443,9 @@ const Parser = struct {
         if (self.transient_prompt) |value| self.allocator.free(value);
         self.prompt_modules.deinit(self.allocator);
         self.right_prompt_modules.deinit(self.allocator);
+        for (self.command_context_commands.items) |command| self.allocator.free(command);
+        self.command_context_commands.deinit(self.allocator);
+        self.command_context_modules.deinit(self.allocator);
     }
 
     fn parseLine(self: *Parser, line_no: usize, line: []const u8) !void {
@@ -478,6 +530,15 @@ const Parser = struct {
         } else if (std.mem.eql(u8, key.text, "rtl_reverse")) {
             try self.markUnseen(&self.seen.prompt_rtl_reverse, line_no, key.column);
             self.prompt.rtl_reverse = try self.parseBool(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "command_context")) {
+            try self.markUnseen(&self.seen.prompt_command_context, line_no, key.column);
+            self.command_context_target = try self.parseCommandContextTarget(value, line_no);
+        } else if (std.mem.eql(u8, key.text, "command_context_commands")) {
+            try self.markUnseen(&self.seen.prompt_command_context_commands, line_no, key.column);
+            try self.parseCommandArray(&self.command_context_commands, value, line_no);
+        } else if (std.mem.eql(u8, key.text, "command_context_modules")) {
+            try self.markUnseen(&self.seen.prompt_command_context_modules, line_no, key.column);
+            try self.parseModuleArray(&self.command_context_modules, value, line_no);
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
@@ -665,6 +726,46 @@ const Parser = struct {
         }
     }
 
+    fn parseCommandArray(self: *Parser, commands: *std.ArrayList([]u8), value: Trimmed, line_no: usize) !void {
+        if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
+            return self.fail(line_no, value.column, "expected array");
+        }
+
+        var index: usize = 1;
+        while (index < value.text.len - 1) {
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != '"') return self.fail(line_no, value.column + index, "expected string");
+            const start = index + 1;
+            index = start;
+            while (index < value.text.len - 1 and value.text[index] != '"') : (index += 1) {
+                if (value.text[index] == '\\') return self.fail(line_no, value.column + index, "invalid command name");
+            }
+            if (index >= value.text.len - 1) return self.fail(line_no, value.column + start, "unterminated string");
+            const command = try self.allocator.dupe(u8, value.text[start..index]);
+            errdefer self.allocator.free(command);
+            if (!isValidCommandName(command)) return self.fail(line_no, value.column + start, "invalid command name");
+            for (commands.items) |existing| {
+                if (std.mem.eql(u8, existing, command)) return self.fail(line_no, value.column + start, "duplicate command name");
+            }
+            try commands.append(self.allocator, command);
+            index += 1;
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != ',') return self.fail(line_no, value.column + index, "expected comma");
+            index += 1;
+        }
+    }
+
+    fn parseCommandContextTarget(self: *Parser, value: Trimmed, line_no: usize) !CommandContextTarget {
+        const target = try self.parseStringAlloc(value, line_no);
+        defer self.allocator.free(target);
+        if (std.mem.eql(u8, target, "off")) return .off;
+        if (std.mem.eql(u8, target, "right")) return .right;
+        if (std.mem.eql(u8, target, "message")) return .message;
+        return self.fail(line_no, value.column, "invalid command_context target");
+    }
+
     fn parseLanguageDetectArray(self: *Parser, value: Trimmed, line_no: usize) !LanguageVersionsOptions {
         if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
             return self.fail(line_no, value.column, "expected array");
@@ -813,6 +914,33 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "container_provenance")) return .container_provenance;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
+}
+
+fn isValidCommandName(command: []const u8) bool {
+    if (command.len == 0 or command.len > 128) return false;
+    for (command) |byte| {
+        if (!(std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-' or byte == '.')) return false;
+    }
+    return true;
+}
+
+fn dupStringSlice(allocator: std.mem.Allocator, values: []const []const u8) ![]const []const u8 {
+    const out = try allocator.alloc([]const u8, values.len);
+    var copied: usize = 0;
+    errdefer {
+        for (out[0..copied]) |value| allocator.free(value);
+        allocator.free(out);
+    }
+    for (values, 0..) |value, index| {
+        out[index] = try allocator.dupe(u8, value);
+        copied += 1;
+    }
+    return out;
+}
+
+fn freeStringSlice(allocator: std.mem.Allocator, values: []const []const u8) void {
+    for (values) |value| allocator.free(value);
+    allocator.free(values);
 }
 
 fn stripComment(line: []const u8) []const u8 {
@@ -1010,6 +1138,9 @@ test "parses per-module options" {
         \\modules = ["cwd", "time"]
         \\right_modules = ["cmd_duration"]
         \\rtl_reverse = true
+        \\command_context = "message"
+        \\command_context_commands = ["kubectl", "terraform"]
+        \\command_context_modules = ["cloud_ctx", "risk_tier"]
         \\
         \\[modules.cwd]
         \\truncate_to = 2
@@ -1067,6 +1198,9 @@ test "parses per-module options" {
     try std.testing.expectEqualSlices(ModuleId, &.{ .cwd, .time }, config.prompt_modules);
     try std.testing.expectEqualSlices(ModuleId, &.{.cmd_duration}, config.right_prompt_modules);
     try std.testing.expect(config.prompt.rtl_reverse);
+    try std.testing.expectEqual(CommandContextTarget.message, config.command_context.target);
+    try std.testing.expectEqualStrings("kubectl", config.command_context.commands[0]);
+    try std.testing.expectEqualSlices(ModuleId, &.{ .cloud_ctx, .risk_tier }, config.command_context.modules);
     try std.testing.expectEqual(@as(u8, 2), config.modules.cwd.truncate_to);
     try std.testing.expect(!config.modules.cwd.home_tilde);
     try std.testing.expectEqual(@as(u16, 24), config.modules.cwd.max_width);
@@ -1091,6 +1225,25 @@ test "parses per-module options" {
     try std.testing.expectEqual(RiskTierColor.danger, config.modules.risk_tier.prod_bg);
     try std.testing.expectEqual(@as(u32, 15), config.modules.sso_expiry.warning_minutes);
     try std.testing.expect(config.modules.time.utc);
+}
+
+test "rejects invalid command context configuration" {
+    const invalid_target =
+        \\version = 1
+        \\[prompt]
+        \\command_context = "left"
+    ;
+    var diagnostic: Diagnostic = .{};
+    try std.testing.expectError(error.InvalidConfig, parse(std.testing.allocator, invalid_target, &diagnostic));
+    try std.testing.expectEqualStrings("invalid command_context target", diagnostic.message);
+
+    const invalid_command =
+        \\version = 1
+        \\[prompt]
+        \\command_context_commands = ["kubectl;rm"]
+    ;
+    try std.testing.expectError(error.InvalidConfig, parse(std.testing.allocator, invalid_command, &diagnostic));
+    try std.testing.expectEqualStrings("invalid command name", diagnostic.message);
 }
 
 test "parses and validates locale override" {

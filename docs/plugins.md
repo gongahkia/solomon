@@ -130,7 +130,6 @@ shisa plugin list
 shisa plugin disable demo-plugin
 shisa plugin enable demo-plugin
 shisa plugin trust demo-plugin
-shisa plugin trust shisa.ai --net=openai
 ```
 
 `shisa plugin pack <path>` writes `<name>-<version>.shisa-plugin`, a tar bundle with `SHISA_PLUGIN_BUNDLE.json` containing file SHA-256 values and an Ed25519 signature over the canonical bundle manifest.
@@ -143,7 +142,7 @@ shisa plugin trust shisa.ai --net=openai
 
 `shisa plugin install <name> [--index <path>]` resolves `<name>` through the catalog index, then copies the listed local plugin directory. Direct Git URLs and explicit paths still bypass the index.
 
-`shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. `[ai].provider` may select a cloud provider only when `[ai].plugin` names a trusted plugin with the matching `net=<provider>` grant.
+`shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. Core prompt configuration never enables network access; plugins require their own explicit capability and trust grants.
 
 `shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`. Catalog sync is expected to maintain that file once the index workflow lands.
 

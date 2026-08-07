@@ -86,11 +86,12 @@ commands:
 ### `shisa init`
 
 ```text
-usage: shisa init [--defaults|--interactive] [--shell NAME] [--theme THEME] [--async on|off] [--write-hook]
+usage: shisa init [--defaults|--interactive] [--profile NAME] [--shell NAME] [--theme THEME] [--async on|off] [--write-hook]
 
 options:
   --defaults      write default shisa.toml without prompting
   --interactive   force first-run wizard
+  --profile NAME  write quiet (default) or context-rich module defaults
   --shell NAME    target zsh, bash, fish, nu, or pwsh for hook install
   --theme THEME   write a built-in theme id
   --async on|off  enable or disable async fill in generated shell prefs

@@ -30,7 +30,9 @@ Primary path:
 ~/Library/Caches/shisa/shisa.sock
 ```
 
-The daemon creates `~/Library/Caches/shisa` with mode `0700` when missing.
+The daemon creates `~/Library/Caches/shisa` when missing using the process's
+normal directory-creation permissions. The socket itself is explicitly
+restricted to `0600`.
 
 ## Windows
 
@@ -41,6 +43,10 @@ Primary path:
 ```
 
 `<sid>` is the current user's Windows SID, for example `S-1-5-21-...-1001`.
+The name is not the access-control boundary: the daemon attaches a protected
+DACL granting the current logon SID only the read/write rights required by a
+client. This excludes Everyone, Anonymous, other local accounts, and other
+Terminal Services sessions (including another session for the same account).
 
 ## Lock File
 

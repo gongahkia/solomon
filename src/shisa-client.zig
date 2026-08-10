@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const frame = @import("proto/frame.zig");
 const types = @import("proto/types.zig");
+const win = std.os.windows;
 
 pub fn requestAlloc(allocator: std.mem.Allocator, socket_path: []const u8, payload: []const u8) ![]u8 {
     return requestAllocWithTimeout(allocator, socket_path, payload, 1000);
@@ -45,7 +46,7 @@ fn connectUnixSocketWithDeadline(socket_path: []const u8, deadline_ns: i128) !st
 }
 
 fn requestNamedPipeAlloc(allocator: std.mem.Allocator, pipe_path: []const u8, payload: []const u8) ![]u8 {
-    var pipe = try std.fs.openFileAbsolute(pipe_path, .{ .mode = .read_write });
+    var pipe = try openNamedPipeClient(pipe_path);
     defer pipe.close();
 
     const encoded = try frame.encodeAlloc(allocator, payload);
@@ -53,6 +54,16 @@ fn requestNamedPipeAlloc(allocator: std.mem.Allocator, pipe_path: []const u8, pa
     try writeAllFile(pipe, encoded);
 
     return readFrameFromFileAlloc(allocator, pipe);
+}
+
+fn openNamedPipeClient(pipe_path: []const u8) !std.fs.File {
+    const path_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, pipe_path);
+    defer std.heap.page_allocator.free(path_w);
+    const handle = try win.OpenFile(path_w[0..path_w.len], .{
+        .access_mask = @as(win.ACCESS_MASK, @import("daemon/windows_pipe_security.zig").client_access_mask),
+        .creation = win.FILE_OPEN,
+    });
+    return .{ .handle = handle };
 }
 
 pub fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {

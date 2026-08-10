@@ -7,7 +7,7 @@ shisa context --json
 shisa context --socket /tmp/shisa.sock --cwd "$PWD" --json
 ```
 
-The command writes one JSON object to standard output and uses the existing local Unix socket (or Windows named pipe). There is no TCP listener, authentication token, capability grant, filesystem probe, environment read, subprocess, or network request in the `context` operation. Access is constrained by the operating-system permissions of the local socket path.
+The command writes one JSON object to standard output and uses the existing local Unix socket (or Windows named pipe). There is no TCP listener, authentication token, capability grant, filesystem probe, environment read, subprocess, or network request in the `context` operation. On Unix, the socket is owner-only (`0600`); on Windows, the pipe DACL permits only the current logon session.
 
 ## Contract
 

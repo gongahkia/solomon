@@ -20,6 +20,7 @@ const framing = @import("framing.zig");
 const test_support = @import("test_support.zig");
 const runtime_paths = @import("runtime_paths.zig");
 const socket_security = @import("socket_security.zig");
+const windows_pipe_security = @import("windows_pipe_security.zig");
 const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
@@ -1357,12 +1358,16 @@ const WindowsServer = struct {
     connection_pool: ?*ConnectionPool = null,
     config_path_override: ?[]const u8 = null,
     plugins_dir_override: ?[]const u8 = null,
+    pipe_security: windows_pipe_security.Descriptor,
 
     pub fn init(socket_path: []const u8) !WindowsServer {
         return initWithLogger(socket_path, null);
     }
 
     pub fn initWithLogger(socket_path: []const u8, logger: ?*daemon_log.Logger) !WindowsServer {
+        var pipe_security = try windows_pipe_security.Descriptor.init(std.heap.page_allocator);
+        var pipe_security_owned = true;
+        errdefer if (pipe_security_owned) pipe_security.deinit();
         const reload_gpa = try std.heap.page_allocator.create(ReloadAllocator);
         reload_gpa.* = .{};
         var reload_gpa_owned = true;
@@ -1379,7 +1384,9 @@ const WindowsServer = struct {
             .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min, .pin_path = pins_path }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
             .reload_gpa = reload_gpa,
+            .pipe_security = pipe_security,
         };
+        pipe_security_owned = false;
         PosixServer.reloadConfigAndPlugins(&server) catch |err| {
             server.deinit();
             reload_gpa_owned = false;
@@ -1401,6 +1408,7 @@ const WindowsServer = struct {
         plugin_host.freeInstances(self.reloadAllocator(), self.plugin_instances);
         if (self.runtime_snapshot) |*snapshot| snapshot.deinit(self.reloadAllocator());
         self.reload_state.deinit(self.reloadAllocator());
+        self.pipe_security.deinit();
         const reload_gpa = self.reload_gpa;
         _ = reload_gpa.deinit();
         std.heap.page_allocator.destroy(reload_gpa);
@@ -1450,15 +1458,16 @@ const WindowsServer = struct {
 
         const pipe_name = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, self.socket_path);
         defer std.heap.page_allocator.free(pipe_name);
+        var attributes = self.pipe_security.attributes();
         const pipe = win.kernel32.CreateNamedPipeW(
             pipe_name.ptr,
             win.PIPE_ACCESS_DUPLEX,
             win.PIPE_TYPE_BYTE | win.PIPE_READMODE_BYTE | win.PIPE_NOWAIT,
-            255,
+            1,
             64 * 1024,
             64 * 1024,
             @intCast(shutdown_poll_ms),
-            null,
+            &attributes,
         );
         if (pipe == win.INVALID_HANDLE_VALUE) return error.CreateNamedPipeFailed;
         return pipe;

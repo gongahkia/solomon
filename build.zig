@@ -60,18 +60,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     plugin_lua_module.link_libc = true;
+    addPluginLuaBudgetHook(plugin_lua_module, b);
     const plugin_lua_debug_module = b.createModule(.{
         .root_source_file = b.path("src/plugin/lua.zig"),
         .target = target,
         .optimize = .Debug,
     });
     plugin_lua_debug_module.link_libc = true;
+    addPluginLuaBudgetHook(plugin_lua_debug_module, b);
     const plugin_lua_release_module = b.createModule(.{
         .root_source_file = b.path("src/plugin/lua.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
     plugin_lua_release_module.link_libc = true;
+    addPluginLuaBudgetHook(plugin_lua_release_module, b);
     const proto_types_module = b.createModule(.{
         .root_source_file = b.path("src/proto/types.zig"),
         .target = target,
@@ -101,6 +104,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("build_options", build_options_module);
     addThemeImports(exe.root_module, theme_loader_module);
     exe.root_module.link_libc = true;
+    addPluginLuaBudgetHook(exe.root_module, b);
     b.installArtifact(exe);
 
     const daemon = b.addExecutable(.{
@@ -113,7 +117,6 @@ pub fn build(b: *std.Build) void {
     });
     daemon.root_module.addImport("vcs_worktree", vcs_worktree_module);
     daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
-    daemon.root_module.addImport("config", shisa_config_module);
     daemon.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(daemon.root_module, theme_loader_module);
     daemon.root_module.link_libc = true;
@@ -143,6 +146,7 @@ pub fn build(b: *std.Build) void {
     debug_exe.root_module.addImport("build_options", build_options_module);
     addThemeImports(debug_exe.root_module, theme_loader_module);
     debug_exe.root_module.link_libc = true;
+    addPluginLuaBudgetHook(debug_exe.root_module, b);
     const debug_install = b.addInstallArtifact(debug_exe, .{});
     const debug_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -154,7 +158,6 @@ pub fn build(b: *std.Build) void {
     });
     debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     debug_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_debug_module);
-    debug_daemon.root_module.addImport("config", shisa_config_module);
     debug_daemon.root_module.addImport("plugin_lua", plugin_lua_debug_module);
     addThemeImports(debug_daemon.root_module, theme_loader_module);
     debug_daemon.root_module.link_libc = true;
@@ -187,6 +190,7 @@ pub fn build(b: *std.Build) void {
     release_exe.root_module.addImport("build_options", build_options_module);
     addThemeImports(release_exe.root_module, theme_loader_module);
     release_exe.root_module.link_libc = true;
+    addPluginLuaBudgetHook(release_exe.root_module, b);
     const release_install = b.addInstallArtifact(release_exe, .{});
     const release_daemon = b.addExecutable(.{
         .name = "shisad",
@@ -198,7 +202,6 @@ pub fn build(b: *std.Build) void {
     });
     release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     release_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_release_module);
-    release_daemon.root_module.addImport("config", shisa_config_module);
     release_daemon.root_module.addImport("plugin_lua", plugin_lua_release_module);
     addThemeImports(release_daemon.root_module, theme_loader_module);
     release_daemon.root_module.link_libc = true;
@@ -331,6 +334,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("build_options", build_options_module);
     addThemeImports(tests.root_module, theme_loader_module);
     tests.root_module.link_libc = true;
+    addPluginLuaBudgetHook(tests.root_module, b);
     const test_run = b.addRunArtifact(tests);
     const cli_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -380,6 +384,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     plugin_lua_tests.root_module.link_libc = true;
+    addPluginLuaBudgetHook(plugin_lua_tests.root_module, b);
     const plugin_lua_test_run = b.addRunArtifact(plugin_lua_tests);
     const plugin_reference_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -388,6 +393,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    plugin_reference_tests.root_module.link_libc = true;
+    addPluginLuaBudgetHook(plugin_reference_tests.root_module, b);
     const plugin_reference_test_run = b.addRunArtifact(plugin_reference_tests);
     const theme_builtin_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -743,7 +750,6 @@ pub fn build(b: *std.Build) void {
     });
     shisad_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     shisad_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
-    shisad_tests.root_module.addImport("config", shisa_config_module);
     shisad_tests.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(shisad_tests.root_module, theme_loader_module);
     shisad_tests.root_module.link_libc = true;
@@ -855,14 +861,13 @@ pub fn build(b: *std.Build) void {
     const client_test_run = b.addRunArtifact(client_tests);
     const server_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/daemon/server.zig"),
+            .root_source_file = b.path("src/shisad.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
     server_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     server_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
-    server_tests.root_module.addImport("config", shisa_config_module);
     server_tests.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(server_tests.root_module, theme_loader_module);
     server_tests.root_module.link_libc = true;
@@ -1018,4 +1023,8 @@ fn linkFseventsFrameworks(artifact: *std.Build.Step.Compile, target: std.Build.R
     artifact.linkFramework("CoreServices");
     artifact.linkFramework("CoreFoundation");
     artifact.linkSystemLibrary("dispatch");
+}
+
+fn addPluginLuaBudgetHook(module: *std.Build.Module, b: *std.Build) void {
+    module.addCSourceFile(.{ .file = b.path("src/plugin/lua_budget_hook.c") });
 }

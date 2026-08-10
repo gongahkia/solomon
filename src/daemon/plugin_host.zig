@@ -506,7 +506,7 @@ fn dotenvValueAlloc(allocator: std.mem.Allocator, path: []const u8, name: []cons
     return null;
 }
 
-fn freeStringList(allocator: std.mem.Allocator, values: [][]u8) void {
+fn freeStringList(allocator: std.mem.Allocator, values: []const []u8) void {
     for (values) |value| allocator.free(value);
     allocator.free(values);
 }

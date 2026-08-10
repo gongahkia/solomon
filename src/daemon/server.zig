@@ -20,7 +20,7 @@ const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
 const plugin_host = @import("plugin_host.zig");
-const shisa_config = @import("config");
+const shisa_config = @import("../config.zig");
 const win = std.os.windows;
 
 extern "kernel32" fn ConnectNamedPipe(hNamedPipe: win.HANDLE, lpOverlapped: ?*win.OVERLAPPED) callconv(.winapi) win.BOOL;
@@ -587,7 +587,11 @@ const PosixServer = struct {
             .host = host,
             .env_hash = parsed.value.env_hash,
             .path_env = parsed.value.path_env,
-            .cwd_options = runtime.config.modules.cwd,
+            .cwd_options = .{
+                .truncate_to = runtime.config.modules.cwd.truncate_to,
+                .home_tilde = runtime.config.modules.cwd.home_tilde,
+                .max_width = runtime.config.modules.cwd.max_width,
+            },
             .aws_profile = aws_profile,
             .aws_region = aws_region,
             .aws_default_region = aws_default_region,
@@ -596,7 +600,12 @@ const PosixServer = struct {
             .arm_location = arm_location,
             .azure_default_location = azure_default_location,
             .kubeconfig = kubeconfig,
-            .cloud_ctx = runtime.config.modules.cloud_ctx,
+            .cloud_ctx = .{
+                .aws = runtime.config.modules.cloud_ctx.aws,
+                .gcp = runtime.config.modules.cloud_ctx.gcp,
+                .azure = runtime.config.modules.cloud_ctx.azure,
+                .kubernetes = runtime.config.modules.cloud_ctx.kubernetes,
+            },
             .cdhint = runtime.config.modules.cdhint,
             .tmux_pane = parsed.value.tmux_pane,
             .tmux_pane_options = runtime.config.modules.tmux_pane,

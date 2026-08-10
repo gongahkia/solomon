@@ -67,11 +67,11 @@ const LuaPushBoolean = *const fn (?*LuaState, CInt) callconv(.c) void;
 const LuaPushLightUserData = *const fn (?*LuaState, ?*anyopaque) callconv(.c) void;
 const LuaPushCClosure = *const fn (?*LuaState, LuaCFunction, CInt) callconv(.c) void;
 const LuaToUserData = *const fn (?*LuaState, CInt) callconv(.c) ?*anyopaque;
-/// `lua_error` does not return: Lua performs a longjmp to the active protected
-/// call. Declaring that control flow accurately keeps Zig from generating a
-/// return path through the callback frame.
-const LuaError = *const fn (?*LuaState) callconv(.c) noreturn;
+const LuaError = *const fn (?*LuaState) callconv(.c) CInt;
 const LuaCFunction = *const fn (?*LuaState) callconv(.c) CInt;
+
+extern fn shisa_lua_install_budget_hook(LuaPushString, LuaError, *const fn () callconv(.c) CInt) void;
+extern fn shisa_lua_budget_hook(?*LuaState, ?*LuaDebug) callconv(.c) void;
 
 const Api = struct {
     lua_newstate: LuaNewState,
@@ -507,7 +507,8 @@ pub const Runtime = struct {
             active_lua_api = previous_api;
         }
 
-        _ = self.api.lua_sethook(self.state, luaBudgetHook, lua_maskline | lua_maskcount, lua_hook_count);
+        shisa_lua_install_budget_hook(self.api.lua_pushstring, self.api.lua_error, shisaLuaBudgetExceeded);
+        _ = self.api.lua_sethook(self.state, shisa_lua_budget_hook, lua_maskline | lua_maskcount, lua_hook_count);
         defer _ = self.api.lua_sethook(self.state, null, 0, 0);
 
         const status = self.api.lua_pcall(self.state, nargs, nresults, 0);
@@ -870,14 +871,14 @@ fn hostMethodName(method: HostMethod) []const u8 {
     };
 }
 
-fn luaBudgetHook(state: ?*LuaState, debug: ?*LuaDebug) callconv(.c) void {
-    _ = debug;
-    const budget = active_lua_budget orelse return;
-    if (elapsedNsSince(budget.start_ns) <= budget.hard_limit_ns) return;
+/// This function deliberately returns before the C shim calls `lua_error`.
+/// Lua uses longjmp for errors; jumping across a Zig callback frame is not
+/// supported, so the non-returning Lua API call must stay entirely in C.
+pub export fn shisaLuaBudgetExceeded() callconv(.c) CInt {
+    const budget = active_lua_budget orelse return 0;
+    if (elapsedNsSince(budget.start_ns) <= budget.hard_limit_ns) return 0;
     budget.hit_hard_limit = true;
-    const api = active_lua_api orelse return;
-    _ = api.lua_pushstring(state, "shisa plugin cpu budget exceeded");
-    api.lua_error(state);
+    return 1;
 }
 
 fn elapsedNsSince(start_ns: i128) u64 {

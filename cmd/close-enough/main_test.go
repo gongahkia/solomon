@@ -702,6 +702,14 @@ func TestDaemonRecordIncludesFailureEvidence(t *testing.T) {
 	}
 }
 
+func TestDaemonUndoRecordIncludesUndoToken(t *testing.T) {
+	record := daemonUndoRecord(daemon.Response{Version: daemon.ProtocolVersion, Action: "rewrite", UndoToken: "undo-token"})
+	fields := strings.Split(strings.TrimSuffix(record, "\n"), "\t")
+	if len(fields) != 8 || fields[7] != "dW5kby10b2tlbg" {
+		t.Fatalf("undo record = %q", record)
+	}
+}
+
 func TestDaemonCommandRejectsInvalidUsage(t *testing.T) {
 	err := run([]string{"daemon"}, io.Discard, io.Discard)
 	if clierr.Code(err) != clierr.ExitUsage {

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "restore-quoted-original-buffer",
+    "input": "git \"statsu\" --message 'keep quote'",
+    "suggestion": "git \"status\" --message 'keep quote'",
+    "undo_outcome": "restore",
+    "want_buffer": "git \"statsu\" --message 'keep quote'",
+    "submit_after_undo": false
+  },
+  {
+    "name": "expired-token-keeps-rewrite-submittable",
+    "input": "git statsu",
+    "suggestion": "git status",
+    "undo_outcome": "expired",
+    "want_buffer": "git status",
+    "submit_after_undo": true
+  },
+  {
+    "name": "malformed-undo-response-keeps-rewrite-submittable",
+    "input": "git statsu --message 'keep quote'",
+    "suggestion": "git status --message 'keep quote'",
+    "undo_outcome": "malformed",
+    "want_buffer": "git status --message 'keep quote'",
+    "submit_after_undo": true
+  },
+  {
+    "name": "unavailable-daemon-keeps-rewrite-submittable",
+    "input": "git statsu --porcelain",
+    "suggestion": "git status --porcelain",
+    "undo_outcome": "unavailable",
+    "want_buffer": "git status --porcelain",
+    "submit_after_undo": true
+  }
+]

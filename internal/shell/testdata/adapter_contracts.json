@@ -6,7 +6,7 @@
     "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
     "configuration": ["mode", "display"],
     "limitations": [],
-    "markers": ["--stage pre", "--stage post", "\"$action\" == rewrite", "\"$action\" == interrupt"]
+    "markers": ["--operation pre-send", "--operation post-failure", "\"$action\" == rewrite", "\"$action\" == interrupt"]
   },
   {
     "name": "bash",
@@ -15,7 +15,7 @@
     "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
     "configuration": ["mode", "display"],
     "limitations": [],
-    "markers": ["--stage pre", "--stage post", "\"$action\" = rewrite", "\"$action\" = interrupt"]
+    "markers": ["--operation pre-send", "--operation post-failure", "\"$action\" = rewrite", "\"$action\" = interrupt"]
   },
   {
     "name": "fish",
@@ -24,7 +24,7 @@
     "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
     "configuration": ["mode", "display"],
     "limitations": ["adapter replaces enter binding"],
-    "markers": ["--stage pre", "--stage post", "\"$fields[2]\" = rewrite", "\"$fields[2]\" = interrupt"]
+    "markers": ["--operation pre-send", "--operation post-failure", "\"$fields[2]\" = rewrite", "\"$fields[2]\" = interrupt"]
   },
   {
     "name": "PowerShell.EXE",
@@ -33,6 +33,6 @@
     "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
     "configuration": ["mode", "display"],
     "limitations": ["requires PSReadLine"],
-    "markers": ["--stage pre", "--stage post", "-eq 'rewrite'", "-eq 'hint'", "-eq 'interrupt'"]
+    "markers": ["--operation pre-send", "--operation post-failure", "-eq 'rewrite'", "-eq 'hint'", "-eq 'interrupt'"]
   }
 ]

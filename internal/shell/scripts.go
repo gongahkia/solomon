@@ -15,6 +15,8 @@ typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
 typeset -gi _CLOSE_ENOUGH_DAEMON_READY=0
 typeset -gi _CLOSE_ENOUGH_FAILURE_SEQUENCE=0
 typeset -g _CLOSE_ENOUGH_PENDING_REWRITE=''
+typeset -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
+typeset -g _CLOSE_ENOUGH_UNDO_WIDGET=''
 typeset -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
 typeset -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=''
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
@@ -40,23 +42,64 @@ function _close_enough_handshake {
   [[ "$version" == "1" && "$action" == ready ]] || return 1
   _CLOSE_ENOUGH_DAEMON_READY=1
 }
+function _close_enough_restore_undo {
+  local binding
+  [[ -n "$_CLOSE_ENOUGH_UNDO_WIDGET" ]] || return 0
+  binding="$(bindkey -M main '^G')" || return 0
+  [[ "$binding" == *" _close_enough_undo_rewrite" ]] || return 0
+  bindkey -M main '^G' "$_CLOSE_ENOUGH_UNDO_WIDGET"
+  _CLOSE_ENOUGH_UNDO_WIDGET=''
+}
+function _close_enough_clear_pending_undo {
+  _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
+  _close_enough_restore_undo
+}
+function _close_enough_clear_pending_rewrite {
+  _CLOSE_ENOUGH_PENDING_REWRITE=''
+  _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
+  _close_enough_clear_pending_undo
+}
+function _close_enough_bind_undo {
+  local binding widget
+  [[ -z "$_CLOSE_ENOUGH_UNDO_WIDGET" ]] || return 0
+  binding="$(bindkey -M main '^G')" || return 1
+  widget="${binding##* }"
+  [[ -n "$widget" && "$widget" != \"* ]] || return 1
+  _CLOSE_ENOUGH_UNDO_WIDGET="$widget"
+  bindkey -M main '^G' _close_enough_undo_rewrite || { _CLOSE_ENOUGH_UNDO_WIDGET=''; return 1; }
+}
+function _close_enough_undo_rewrite {
+  local record version action risk suggestion
+  local -a fields
+  [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" && -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" ]] || return 0
+  record="$(command close-enough daemon request --operation undo --shell zsh --session "$$" --token "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)" || { _close_enough_clear_pending_undo; return 0; }
+  fields=("${(@ps:\t:)record}")
+  (( ${#fields} == 7 )) || { _close_enough_clear_pending_undo; return 0; }
+  version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" suggestion="${fields[7]}"
+  [[ "$version" == "1" && "$action" == edit-in-buffer && "$risk" == safe ]] || { _close_enough_clear_pending_undo; return 0; }
+  suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_clear_pending_undo; return 0; }
+  [[ -n "$suggestion" ]] || { _close_enough_clear_pending_undo; return 0; }
+  BUFFER="$suggestion"
+  _close_enough_clear_pending_rewrite
+  zle -M "close-enough restored: $suggestion"
+  zle -R
+}
 function _close_enough_check {
-  local command record version action risk confidence cause consequence suggestion suggestion_key
+  local command record version action risk confidence cause consequence suggestion suggestion_key undo_token
   local -a fields
   command="$BUFFER"
   if [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
     if [[ "$command" == "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
-      _CLOSE_ENOUGH_PENDING_REWRITE=''
+      _close_enough_clear_pending_rewrite
       _CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"
       return 0
     fi
-    _CLOSE_ENOUGH_PENDING_REWRITE=''
-    _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
+    _close_enough_clear_pending_rewrite
   fi
   _close_enough_handshake || return 0
-  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
+  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
   fields=("${(@ps:\t:)record}")
-  (( ${#fields} == 7 )) || return 0
+  (( ${#fields} == 7 || ${#fields} == 8 )) || return 0
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
@@ -73,7 +116,17 @@ function _close_enough_check {
     fi
     BUFFER="$suggestion"
     _CLOSE_ENOUGH_PENDING_REWRITE="$suggestion"
-    zle -M "close-enough corrected: $suggestion ($cause; press Enter again)"
+    undo_token=''
+    if (( ${#fields} == 8 )) && [[ -n "${fields[8]}" ]]; then
+      undo_token="$(_close_enough_decode "${fields[8]}")" || undo_token=''
+      _CLOSE_ENOUGH_PENDING_UNDO_TOKEN="$undo_token"
+      _close_enough_bind_undo || _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
+    fi
+    if [[ -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" ]]; then
+      zle -M "close-enough corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)"
+    else
+      zle -M "close-enough corrected: $suggestion ($cause; press Enter again)"
+    fi
     zle -R
     return 1
   fi
@@ -96,6 +149,7 @@ function _close_enough_accept_line {
   zle "$_CLOSE_ENOUGH_ENTER_WIDGET"
 }
 zle -N _close_enough_accept_line
+zle -N _close_enough_undo_rewrite
 typeset -g _CLOSE_ENOUGH_ENTER_WIDGET=''
 function _close_enough_bind_enter {
   local binding widget
@@ -117,6 +171,7 @@ typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec {
   _CLOSE_ENOUGH_LAST_COMMAND="$1"
   _CLOSE_ENOUGH_PENDING_REWRITE=''
+  _close_enough_clear_pending_undo
   if [[ "$1" == "$_CLOSE_ENOUGH_AUTOMATIC_REWRITE" ]]; then
     _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
   else
@@ -172,6 +227,8 @@ _close_enough_diagnostic_limit=5
 _close_enough_daemon_ready=0
 _close_enough_failure_sequence=0
 _close_enough_pending_rewrite=''
+_close_enough_pending_undo_token=''
+_close_enough_undo_binding=''
 _close_enough_automatic_rewrite=''
 _close_enough_pending_failure_token=''
 _close_enough_last_command_token=none
@@ -201,28 +258,67 @@ _close_enough_handshake() {
   [ "$version" = 1 ] && [ "$action" = ready ] || return 1
   _close_enough_daemon_ready=1
 }
+_close_enough_restore_undo() {
+  [ -n "$_close_enough_undo_binding" ] || return 0
+  bind -X 2>/dev/null | command grep -F '"\C-g" "_close_enough_undo_rewrite"' >/dev/null || return 0
+  bind "$_close_enough_undo_binding"
+  _close_enough_undo_binding=''
+}
+_close_enough_clear_pending_undo() {
+  _close_enough_pending_undo_token=''
+  _close_enough_restore_undo
+}
+_close_enough_clear_pending_rewrite() {
+  _close_enough_pending_rewrite=''
+  _close_enough_automatic_rewrite=''
+  _close_enough_clear_pending_undo
+}
+_close_enough_bind_undo() {
+  local binding
+  [ -z "$_close_enough_undo_binding" ] || return 0
+  binding="$(bind -p 2>/dev/null | command grep '^"\\C-g": ')" || return 1
+  [ -n "$binding" ] || return 1
+  _close_enough_undo_binding="$binding"
+  bind -x '"\C-g":_close_enough_undo_rewrite' || { _close_enough_undo_binding=''; return 1; }
+}
+_close_enough_undo_rewrite() {
+  local record version action risk suggestion separator
+  local -a fields
+  [ -n "$_close_enough_pending_rewrite" ] && [ -n "$_close_enough_pending_undo_token" ] || return 0
+  record="$(command close-enough daemon request --operation undo --shell bash --session "$$" --token "$_close_enough_pending_undo_token" --ensure=false --format record 2>/dev/null)" || { _close_enough_clear_pending_undo; return 0; }
+  separator=$'\034'
+  record="${record//$'\t'/$separator}"
+  IFS="$separator" read -r -a fields <<< "$record"
+  [ "${#fields[@]}" -eq 7 ] || { _close_enough_clear_pending_undo; return 0; }
+  version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" suggestion="${fields[6]}"
+  [ "$version" = 1 ] && [ "$action" = edit-in-buffer ] && [ "$risk" = safe ] || { _close_enough_clear_pending_undo; return 0; }
+  suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_clear_pending_undo; return 0; }
+  [ -n "$suggestion" ] || { _close_enough_clear_pending_undo; return 0; }
+  READLINE_LINE="$suggestion"
+  _close_enough_clear_pending_rewrite
+  printf '\nclose-enough restored: %s\n' "$suggestion" >&2
+}
 _close_enough_accept_line() {
-  local command record version action risk confidence cause consequence suggestion suggestion_key separator
+  local command record version action risk confidence cause consequence suggestion suggestion_key undo_token separator
   local -a fields
   command="$READLINE_LINE"
   if [ -n "$_close_enough_pending_rewrite" ]; then
     if [ "$command" = "$_close_enough_pending_rewrite" ]; then
-      _close_enough_pending_rewrite=''
+      _close_enough_clear_pending_rewrite
       _close_enough_automatic_rewrite="$command"
       return
     fi
-    _close_enough_pending_rewrite=''
-    _close_enough_automatic_rewrite=''
+    _close_enough_clear_pending_rewrite
   fi
   if [ -n "$_close_enough_pending_confirmation" ] && [ "$command" != "$_close_enough_pending_confirmation" ]; then
     _close_enough_pending_confirmation=''
   fi
   _close_enough_handshake || return
-  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; _close_enough_pending_confirmation=''; return; }
+  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; _close_enough_pending_confirmation=''; return; }
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
-  [ "${#fields[@]}" -eq 7 ] || return
+  [ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || return
   version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" confidence="${fields[3]}" cause="${fields[4]}" consequence="${fields[5]}" suggestion="${fields[6]}"
   [ "$version" = 1 ] || return
   [ "$action" = none ] && return
@@ -241,7 +337,17 @@ _close_enough_accept_line() {
     fi
     READLINE_LINE="$suggestion"
     _close_enough_pending_rewrite="$suggestion"
-    printf '\nclose-enough corrected: %s (%s; press Enter again)\n' "$suggestion" "$cause" >&2
+    undo_token=''
+    if [ "${#fields[@]}" -eq 8 ] && [ -n "${fields[7]}" ]; then
+      undo_token="$(_close_enough_decode "${fields[7]}")" || undo_token=''
+      _close_enough_pending_undo_token="$undo_token"
+      _close_enough_bind_undo || _close_enough_pending_undo_token=''
+    fi
+    if [ -n "$_close_enough_pending_undo_token" ]; then
+      printf '\nclose-enough corrected: %s (%s; press Ctrl-G to undo or Enter again)\n' "$suggestion" "$cause" >&2
+    else
+      printf '\nclose-enough corrected: %s (%s; press Enter again)\n' "$suggestion" "$cause" >&2
+    fi
     return 1
   fi
   if [ "$action" = hint ]; then
@@ -323,6 +429,7 @@ set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
 set -g _CLOSE_ENOUGH_DAEMON_READY 0
 set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE 0
 set -g _CLOSE_ENOUGH_PENDING_REWRITE
+set -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
 set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
 set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN
 set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS
@@ -363,30 +470,85 @@ function _close_enough_handshake
   end
   set -g _CLOSE_ENOUGH_DAEMON_READY 1
 end
+function _close_enough_restore_undo
+  if not set -q _CLOSE_ENOUGH_FISH_UNDO_BOUND
+    return
+  end
+  if string match -q "* _close_enough_undo_rewrite" -- (bind \cg)
+    bind --erase \cg
+  end
+  set -e _CLOSE_ENOUGH_FISH_UNDO_BOUND
+end
+function _close_enough_clear_pending_undo
+  set -e _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
+  _close_enough_restore_undo
+end
+function _close_enough_clear_pending_rewrite
+  set -e _CLOSE_ENOUGH_PENDING_REWRITE
+  set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
+  _close_enough_clear_pending_undo
+end
+function _close_enough_bind_undo
+  if set -q _CLOSE_ENOUGH_FISH_UNDO_BOUND
+    return
+  end
+  bind \cg >/dev/null 2>&1
+  if test $status -eq 0
+    return 1
+  end
+  set -g _CLOSE_ENOUGH_FISH_UNDO_BOUND 1
+  bind \cg _close_enough_undo_rewrite; or begin
+    set -e _CLOSE_ENOUGH_FISH_UNDO_BOUND
+    return 1
+  end
+end
+function _close_enough_undo_rewrite
+  if not set -q _CLOSE_ENOUGH_PENDING_REWRITE; or not set -q _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
+    return
+  end
+  set -l record (command close-enough daemon request --operation undo --shell fish --session "$fish_pid" --token "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)
+  if test $status -ne 0
+    _close_enough_clear_pending_undo
+    return
+  end
+  set -l fields (string split \t -- $record)
+  if test (count $fields) -ne 7; or test "$fields[1]" != 1; or test "$fields[2]" != edit-in-buffer; or test "$fields[3]" != safe
+    _close_enough_clear_pending_undo
+    return
+  end
+  set -l suggestion (_close_enough_decode "$fields[7]")
+  if test $status -ne 0; or test -z "$suggestion"
+    _close_enough_clear_pending_undo
+    return
+  end
+  commandline -r "$suggestion"
+  _close_enough_clear_pending_rewrite
+  echo "close-enough restored: $suggestion" >&2
+  commandline -f repaint
+end
 function _close_enough_accept_line
   set -l command (commandline -b)
   if set -q _CLOSE_ENOUGH_PENDING_REWRITE; and test -n "$_CLOSE_ENOUGH_PENDING_REWRITE"
     if test "$command" = "$_CLOSE_ENOUGH_PENDING_REWRITE"
-      set -e _CLOSE_ENOUGH_PENDING_REWRITE
+      _close_enough_clear_pending_rewrite
       set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 1
       commandline -f execute
       return
     end
-    set -e _CLOSE_ENOUGH_PENDING_REWRITE
-    set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
+    _close_enough_clear_pending_rewrite
   end
   _close_enough_handshake; or begin
     commandline -f execute
     return
   end
-  set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record --command "$command" 2>/dev/null)
+  set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record --command "$command" 2>/dev/null)
   if test $status -ne 0
     set -g _CLOSE_ENOUGH_DAEMON_READY 0
     commandline -f execute
     return
   end
   set -l fields (string split \t -- $record)
-  if test (count $fields) -ne 7
+  if test (count $fields) -ne 7; and test (count $fields) -ne 8
     commandline -f execute
     return
   end
@@ -414,7 +576,18 @@ function _close_enough_accept_line
     end
     commandline -r "$suggestion"
     set -g _CLOSE_ENOUGH_PENDING_REWRITE "$suggestion"
-    echo "close-enough corrected: $suggestion ($cause; press Enter again)" >&2
+    if test (count $fields) -eq 8; and test -n "$fields[8]"
+      set -l undo_token (_close_enough_decode "$fields[8]")
+      if test $status -eq 0; and test -n "$undo_token"
+        set -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN "$undo_token"
+        _close_enough_bind_undo; or set -e _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
+      end
+    end
+    if set -q _CLOSE_ENOUGH_PENDING_UNDO_TOKEN; and test -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN"
+      echo "close-enough corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)" >&2
+    else
+      echo "close-enough corrected: $suggestion ($cause; press Enter again)" >&2
+    end
     return
   end
   if test "$fields[2]" = hint
@@ -520,6 +693,9 @@ $global:CloseEnoughDiagnosticLimit = 5
 $global:CloseEnoughDaemonReady = $false
 $global:CloseEnoughFailureSequence = 0
 $global:CloseEnoughPendingRewrite = $null
+$global:CloseEnoughPendingUndoToken = $null
+$global:CloseEnoughPreviousUndoHandler = $null
+$global:CloseEnoughUndoBound = $false
 $global:CloseEnoughAutomaticRewrite = $false
 $global:CloseEnoughPendingFailureToken = $null
 $global:CloseEnoughPendingConfirmation = $null
@@ -533,13 +709,12 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $command = $line
   if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite)) {
     if ($command -eq $global:CloseEnoughPendingRewrite) {
-      $global:CloseEnoughPendingRewrite = $null
+      Clear-CloseEnoughPendingRewrite
       $global:CloseEnoughAutomaticRewrite = $true
       [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
       return
     }
-    $global:CloseEnoughPendingRewrite = $null
-    $global:CloseEnoughAutomaticRewrite = $false
+    Clear-CloseEnoughPendingRewrite
   }
   if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingConfirmation) -and $command -ne $global:CloseEnoughPendingConfirmation) {
     $global:CloseEnoughPendingConfirmation = $null
@@ -556,7 +731,13 @@ Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
     }
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
     $global:CloseEnoughPendingRewrite = $decision.suggestion
-    Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
+    $global:CloseEnoughPendingUndoToken = $decision.undo_token
+    if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingUndoToken) -and (Enable-CloseEnoughUndoBinding)) {
+      Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Ctrl-G to undo or Enter again)"
+    } else {
+      $global:CloseEnoughPendingUndoToken = $null
+      Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
+    }
     return
   }
   if ($decision.action -eq 'hint') {
@@ -597,6 +778,44 @@ function global:Allow-CloseEnoughSuggestion {
   if (-not (Allow-CloseEnoughDiagnostic)) { return $false }
   [void]$global:CloseEnoughSeenSuggestions.Add($Suggestion)
   return $true
+}
+function global:Restore-CloseEnoughUndoBinding {
+  if (-not $global:CloseEnoughUndoBound) { return }
+  if ($null -ne $global:CloseEnoughPreviousUndoHandler -and -not [string]::IsNullOrEmpty($global:CloseEnoughPreviousUndoHandler.Function)) {
+    Set-PSReadLineKeyHandler -Key Ctrl+g -Function $global:CloseEnoughPreviousUndoHandler.Function
+  }
+  $global:CloseEnoughPreviousUndoHandler = $null
+  $global:CloseEnoughUndoBound = $false
+}
+function global:Clear-CloseEnoughPendingUndo {
+  $global:CloseEnoughPendingUndoToken = $null
+  Restore-CloseEnoughUndoBinding
+}
+function global:Clear-CloseEnoughPendingRewrite {
+  $global:CloseEnoughPendingRewrite = $null
+  $global:CloseEnoughAutomaticRewrite = $false
+  Clear-CloseEnoughPendingUndo
+}
+function global:Enable-CloseEnoughUndoBinding {
+  if ($global:CloseEnoughUndoBound) { return $true }
+  $handler = Get-PSReadLineKeyHandler -Chord Ctrl+g -ErrorAction SilentlyContinue
+  if ($null -eq $handler -or [string]::IsNullOrEmpty($handler.Function)) { return $false }
+  $global:CloseEnoughPreviousUndoHandler = $handler
+  try { Set-PSReadLineKeyHandler -Key Ctrl+g -ScriptBlock { Invoke-CloseEnoughPendingRewriteUndo } } catch { $global:CloseEnoughPreviousUndoHandler = $null; return $false }
+  $global:CloseEnoughUndoBound = $true
+  return $true
+}
+function global:Invoke-CloseEnoughPendingRewriteUndo {
+  if ([string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite) -or [string]::IsNullOrEmpty($global:CloseEnoughPendingUndoToken)) { return }
+  $record = & close-enough daemon request --operation undo --shell powershell --session $PID --token $global:CloseEnoughPendingUndoToken --ensure=false --format json 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { Clear-CloseEnoughPendingUndo; return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { Clear-CloseEnoughPendingUndo; return }
+  if ($decision.version -ne 1 -or $decision.action -ne 'edit-in-buffer' -or $decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) { Clear-CloseEnoughPendingUndo; return }
+  $line = $null; $cursor = $null
+  [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+  [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
+  Clear-CloseEnoughPendingRewrite
+  Write-Host "close-enough restored: $($decision.suggestion)"
 }
 function global:Restore-CloseEnoughEnterHandler {
   if ($null -ne $global:CloseEnoughPreviousEnterHandler -and $global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {

@@ -46,6 +46,15 @@ type highRiskConfirmationFixture struct {
 	Command string `json:"command"`
 }
 
+type rewriteUndoFixture struct {
+	Name            string `json:"name"`
+	Input           string `json:"input"`
+	Suggestion      string `json:"suggestion"`
+	UndoOutcome     string `json:"undo_outcome"`
+	WantBuffer      string `json:"want_buffer"`
+	SubmitAfterUndo bool   `json:"submit_after_undo"`
+}
+
 func TestResolveAction(t *testing.T) {
 	tests := []struct {
 		name, action, risk, suggestion string
@@ -242,7 +251,7 @@ func TestZshSuppressesRepeatedSuggestions(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	record := "1\thint\tsafe\t0.90\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
@@ -521,7 +530,7 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 		t.Fatal(err)
 	}
 	checker := filepath.Join(directory, "close-enough")
-	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CAPTURE\"\nif [ \"$7\" = \"$COMMAND_INPUT\" ]; then\n  printf '%s\\n' \"$COMMAND_RECORD\"\nelif [ \"$7\" = \"$SAFE_INPUT\" ]; then\n  printf '%s\\n' \"$SAFE_RECORD\"\nelse\n  printf '%s\\n' \"$HIGH_RECORD\"\nfi\n"
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CAPTURE\"\noperation= command=\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --operation|--command) key=$1; shift; test $# -gt 0 || exit 1; case \"$key\" in --operation) operation=$1 ;; --command) command=$1 ;; esac ;;\n  esac\n  shift\ndone\nif [ \"$operation\" = handshake ]; then\n  printf '1\\tready\\t\\t\\t\\t\\t\\n'\nelif [ \"$command\" = \"$COMMAND_INPUT\" ]; then\n  printf '%s\\n' \"$COMMAND_RECORD\"\nelif [ \"$command\" = \"$SAFE_INPUT\" ]; then\n  printf '%s\\n' \"$SAFE_RECORD\"\nelse\n  printf '%s\\n' \"$HIGH_RECORD\"\nfi\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -674,6 +683,249 @@ func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string,
 	}
 }
 
+func TestRewriteUndoCorpus(t *testing.T) {
+	data, err := os.ReadFile("testdata/rewrite_undo.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []rewriteUndoFixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("rewrite undo corpus is empty")
+	}
+	seenNames := make(map[string]struct{}, len(fixtures))
+	for _, fixture := range fixtures {
+		if _, exists := seenNames[fixture.Name]; exists {
+			t.Fatalf("duplicate rewrite undo fixture name %q", fixture.Name)
+		}
+		seenNames[fixture.Name] = struct{}{}
+	}
+	for _, shellName := range []string{"zsh", "bash", "fish"} {
+		shellPath, err := exec.LookPath(shellName)
+		if err != nil {
+			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
+			continue
+		}
+		for _, fixture := range fixtures {
+			t.Run(shellName+"/"+fixture.Name, func(t *testing.T) {
+				if fixture.Name == "" || fixture.Input == "" || fixture.Suggestion == "" || fixture.WantBuffer == "" {
+					t.Fatalf("invalid rewrite undo fixture: %#v", fixture)
+				}
+				switch fixture.UndoOutcome {
+				case "restore":
+					if fixture.SubmitAfterUndo || fixture.WantBuffer != fixture.Input {
+						t.Fatalf("restore fixture = %#v", fixture)
+					}
+				case "expired", "malformed", "unavailable":
+					if !fixture.SubmitAfterUndo || fixture.WantBuffer != fixture.Suggestion {
+						t.Fatalf("fail-open fixture = %#v", fixture)
+					}
+				default:
+					t.Fatalf("unsupported undo outcome %q", fixture.UndoOutcome)
+				}
+				runRewriteUndoFixture(t, shellName, shellPath, fixture)
+			})
+		}
+	}
+}
+
+func runRewriteUndoFixture(t *testing.T, shellName, shellPath string, fixture rewriteUndoFixture) {
+	t.Helper()
+	script, err := Script(shellName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter."+shellName)
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const token = "undo-token"
+	rewrite := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(fixture.Suggestion)) + "\t" + base64.StdEncoding.EncodeToString([]byte(token))
+	undoRestore := "1\tedit-in-buffer\tsafe\t\t\t\t" + base64.StdEncoding.EncodeToString([]byte(fixture.Input))
+	checker := filepath.Join(directory, "close-enough")
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) printf '%s\\n' \"$REWRITE\" ;; *\"--operation undo\"*) case \"$UNDO_OUTCOME\" in restore) printf '%s\\n' \"$UNDO_RESTORE\" ;; expired) printf '1\\tnone\\t\\t\\t\\t\\t\\n' ;; malformed) printf 'malformed\\n' ;; unavailable) exit 1 ;; esac ;; *) exit 1 ;; esac\n"
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture, result := filepath.Join(directory, "calls"), filepath.Join(directory, "result")
+	environment := append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CAPTURE="+capture, "REWRITE="+rewrite, "UNDO_RESTORE="+undoRestore, "UNDO_OUTCOME="+fixture.UndoOutcome, "SUBMIT_AFTER_UNDO="+strconv.FormatBool(fixture.SubmitAfterUndo), "RESULT="+result)
+	var command *exec.Cmd
+	switch shellName {
+	case "zsh":
+		harness := `typeset -g BIND_G=list-expand
+zle() { :; }
+bindkey() {
+  if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then
+    print '"^M" accept-line'
+  elif [[ "$1" == -M && "$2" == main && "$3" == '^G' && "$#" == 3 ]]; then
+    print "\"^G\" $BIND_G"
+  elif [[ "$1" == -M && "$2" == main && "$3" == '^G' && "$#" == 4 ]]; then
+    BIND_G="$4"
+  fi
+}
+autoload() { :; }
+add-zsh-hook() { :; }
+source "$1"
+BUFFER="$2"
+_close_enough_check; first=$?
+rewritten="$BUFFER"
+_close_enough_undo_rewrite
+after="$BUFFER"
+second=skip
+if [[ "$SUBMIT_AFTER_UNDO" == true ]]; then
+  _close_enough_check; second=$?
+fi
+print -rn -- "$first|$rewritten|$after|$second|$BIND_G|$_CLOSE_ENOUGH_UNDO_WIDGET" > "$RESULT"`
+		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Input)
+	case "bash":
+		harness := `BIND_G=abort
+bind() {
+  if [ "$1" = -p ]; then
+    printf '"\\C-m": accept-line\n"\\C-g": %s\n' "$BIND_G"
+    return
+  fi
+  if [ "$1" = -X ]; then
+    [ "$BIND_G" = _close_enough_undo_rewrite ] && printf '"\\C-g" "_close_enough_undo_rewrite"\n'
+    return
+  fi
+  if [ "$1" = -x ]; then
+    BIND_G=_close_enough_undo_rewrite
+    return
+  fi
+  BIND_G="${1##*: }"
+}
+source "$1"
+READLINE_LINE="$2"
+_close_enough_accept_line; first=$?
+rewritten="$READLINE_LINE"
+_close_enough_undo_rewrite
+after="$READLINE_LINE"
+second=skip
+if [ "$SUBMIT_AFTER_UNDO" = true ]; then
+  _close_enough_accept_line; second=$?
+fi
+printf '%s|%s|%s|%s|%s|%s' "$first" "$rewritten" "$after" "$second" "$BIND_G" "$_close_enough_undo_binding" > "$RESULT"`
+		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Input)
+	case "fish":
+		harness := `set -g EXECUTES 0
+set -g BIND_G unbound
+function bind
+  if test (count $argv) -eq 1
+    if test "$argv[1]" = \r
+      echo "bind --preset enter execute"
+      return 0
+    end
+    if test "$argv[1]" = \cg; and test "$BIND_G" != unbound
+      echo "bind \\cg $BIND_G"
+      return 0
+    end
+    return 1
+  end
+  if test "$argv[1]" = --erase
+    set -g BIND_G unbound
+    return 0
+  end
+  if test "$argv[1]" = \cg
+    set -g BIND_G "$argv[2]"
+  end
+end
+function commandline
+  if test "$argv[1]" = -b
+    printf '%s' "$BUFFER"
+  else if test "$argv[1]" = -r
+    set -g BUFFER "$argv[2]"
+  else if test "$argv[1]" = -f; and test "$argv[2]" = execute
+    set -g EXECUTES (math $EXECUTES + 1)
+  end
+end
+source "$argv[1]"
+set -g BUFFER "$argv[2]"
+_close_enough_accept_line
+set -g REWRITTEN "$BUFFER"
+_close_enough_undo_rewrite
+if test "$SUBMIT_AFTER_UNDO" = true
+  _close_enough_accept_line
+end
+printf '%s|%s|%s|%s' "$REWRITTEN" "$BUFFER" "$EXECUTES" "$BIND_G" > "$RESULT"`
+		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Input)
+	default:
+		t.Fatalf("unsupported shell %q", shellName)
+	}
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%s harness: %v\n%s", shellName, err, output)
+	}
+	data, err := os.ReadFile(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shellName == "fish" {
+		wantSubmits := "0"
+		if fixture.SubmitAfterUndo {
+			wantSubmits = "1"
+		}
+		if got, want := string(data), fixture.Suggestion+"|"+fixture.WantBuffer+"|"+wantSubmits+"|unbound"; got != want {
+			t.Fatalf("undo flow = %q, want %q", got, want)
+		}
+	} else if shellName == "zsh" {
+		wantSecondEnter := "skip"
+		if fixture.SubmitAfterUndo {
+			wantSecondEnter = "0"
+		}
+		if got, want := string(data), "1|"+fixture.Suggestion+"|"+fixture.WantBuffer+"|"+wantSecondEnter+"|list-expand|"; got != want {
+			t.Fatalf("undo flow = %q, want %q", got, want)
+		}
+	} else {
+		wantSecondEnter := "skip"
+		if fixture.SubmitAfterUndo {
+			wantSecondEnter = "0"
+		}
+		if got, want := string(data), "1|"+fixture.Suggestion+"|"+fixture.WantBuffer+"|"+wantSecondEnter+"|abort|"; got != want {
+			t.Fatalf("undo flow = %q, want %q", got, want)
+		}
+	}
+	calls, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"--format undo-record", "--operation undo", "--token " + token} {
+		if !strings.Contains(string(calls), value) {
+			t.Fatalf("daemon calls missing %q: %q", value, calls)
+		}
+	}
+	if got := strings.Count(string(calls), "--operation"); got != 3 || strings.Count(string(calls), "--operation pre-send") != 1 || strings.Count(string(calls), "--operation undo") != 1 {
+		t.Fatalf("daemon calls = %q", calls)
+	}
+}
+
+func TestAdaptersExposePendingRewriteUndoBindings(t *testing.T) {
+	tests := []struct {
+		shell   string
+		needles []string
+	}{
+		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell zsh", "press Ctrl-G to undo"}},
+		{"bash", []string{"_close_enough_pending_undo_token", "_close_enough_undo_rewrite", "--operation undo --shell bash", "press Ctrl-G to undo"}},
+		{"fish", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell fish", "press Ctrl-G to undo"}},
+		{"powershell", []string{"CloseEnoughPendingUndoToken", "Invoke-CloseEnoughPendingRewriteUndo", "--operation undo --shell powershell", "Ctrl+g", "press Ctrl-G to undo"}},
+	}
+	for _, test := range tests {
+		t.Run(test.shell, func(t *testing.T) {
+			script, err := Script(test.shell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, needle := range test.needles {
+				if !strings.Contains(script, needle) {
+					t.Fatalf("%s adapter missing undo behavior %q", test.shell, needle)
+				}
+			}
+		})
+	}
+}
+
 func TestHighRiskConfirmationCorpus(t *testing.T) {
 	data, err := os.ReadFile("testdata/high_risk_confirmation.json")
 	if err != nil {
@@ -800,11 +1052,11 @@ func TestZshPreExecutionUsesCapturedBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := `command="$BUFFER"`
-	check := `--stage pre --format record --command "$command"`
+	check := `--operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record --command "$command"`
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$BUFFER"`) {
 		t.Fatalf("zsh pre-execution check does not use a captured buffer: %q", script)
 	}
-	if !strings.Contains(script, `2>/dev/null)" || return 0`) {
+	if !strings.Contains(script, `2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }`) {
 		t.Fatalf("zsh check failure does not preserve normal submission: %q", script)
 	}
 }
@@ -1182,7 +1434,7 @@ func TestBashPreExecutionUsesCapturedBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := `command="$READLINE_LINE"`
-	check := `--stage pre --format record --command "$command"`
+	check := `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record --command "$command"`
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$READLINE_LINE"`) {
 		t.Fatalf("bash pre-execution check does not use a captured buffer: %q", script)
 	}
@@ -1201,14 +1453,18 @@ func TestBashHintRenderingDoesNotAlterBuffer(t *testing.T) {
 	}
 }
 
-func TestBashInterruptReplacesBufferWithNoopBeforeReturning(t *testing.T) {
+func TestBashInterruptPreservesBufferBeforeReturning(t *testing.T) {
 	script, err := Script("bash")
 	if err != nil {
 		t.Fatal(err)
 	}
 	interrupt := `if [ "$action" = interrupt ]; then`
 	start := strings.Index(script, interrupt)
-	if start < 0 || !strings.Contains(script[start:], "READLINE_LINE=':'\n    return 1") {
+	if start < 0 {
+		t.Fatalf("bash interrupt branch is missing: %q", script)
+	}
+	branch := script[start:]
+	if strings.Contains(branch, "READLINE_LINE=") || !strings.Contains(branch, "_close_enough_pending_confirmation=\"$command\"\n    return 1") {
 		t.Fatalf("bash interrupt path does not suppress command execution: %q", script)
 	}
 }
@@ -1281,7 +1537,7 @@ func TestBashHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("bash accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, "_close_enough_pending_confirmation=''; return") {
+	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, "_close_enough_pending_confirmation=''; return") {
 		t.Fatalf("bash handshake fallback = %q", checkBody)
 	}
 }
@@ -1595,7 +1851,7 @@ func TestFishPreExecutionUsesCapturedBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := "set -l command (commandline -b)"
-	check := `daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record --command "$command"`
+	check := `daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record --command "$command"`
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
 		t.Fatalf("fish pre-execution check does not use a captured buffer: %q", script)
 	}
@@ -1676,7 +1932,7 @@ func TestFishHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("fish accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake; or begin\n    commandline -f execute") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
+	if !strings.Contains(checkBody, "_close_enough_handshake; or begin\n    commandline -f execute") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
 		t.Fatalf("fish handshake fallback = %q", checkBody)
 	}
 }
@@ -2072,7 +2328,7 @@ func TestPowerShellPreExecutionUsesCapturedBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := "$command = $line"
-	check := "--stage pre --format json --command $command"
+	check := "--operation pre-send --shell powershell --session $PID --ensure=false --command $command"
 	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command $line") {
 		t.Fatalf("PowerShell pre-execution check does not use a captured buffer: %q", script)
 	}
@@ -2177,7 +2433,7 @@ func TestPowerShellProtocolDecodingFailsOpenOnMalformedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `$record = & close-enough check --stage pre --format json --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { return }`) {
+	if !strings.Contains(script, `$record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { $global:CloseEnoughDaemonReady = $false;`) {
 		t.Fatalf("PowerShell protocol decoder is not binary-safe and failure-aware: %q", script)
 	}
 }
@@ -2774,7 +3030,7 @@ func TestZshHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("zsh check function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake || return 0") || !strings.Contains(checkBody, `--operation pre-send --shell zsh --session "$$" --ensure=false --format record`) || !strings.Contains(checkBody, "_CLOSE_ENOUGH_DAEMON_READY=0; return 0") {
+	if !strings.Contains(checkBody, "_close_enough_handshake || return 0") || !strings.Contains(checkBody, `--operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_CLOSE_ENOUGH_DAEMON_READY=0; return 0") {
 		t.Fatalf("zsh handshake fallback = %q", checkBody)
 	}
 }
@@ -2784,7 +3040,7 @@ func TestZshProtocolDecodingFailsOpenOnMalformedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `print -rn -- "$1" | base64 --decode`) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `print -rn -- "$1" | base64 --decode`) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 || ${#fields} == 8 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
 		t.Fatalf("zsh protocol decoder is not binary-safe and fail-open: %q", script)
 	}
 }

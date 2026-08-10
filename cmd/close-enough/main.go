@@ -347,13 +347,13 @@ func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Wri
 	failureOutput := fs.String("failure-output", "", "failure output")
 	session := fs.String("session", "", "shell session")
 	token := fs.String("token", "", "confirmation, undo, or failure token")
-	format := fs.String("format", "json", "json or record")
+	format := fs.String("format", "json", "json, record, or undo-record")
 	ensure := fs.Bool("ensure", true, "start the local daemon when unavailable")
 	if err := fs.Parse(args); err != nil || *operation == "" || fs.NArg() != 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough daemon request --operation <handshake|status|pre-send|post-failure|post-success|undo|confirm|stop> [--shell <shell>] [--command <command>] [--failure-output <output>] [--session <id>] [--token <token>] [--format <json|record>] [--ensure=<true|false>]")
+		return clierr.New(clierr.Usage, "usage: close-enough daemon request --operation <handshake|status|pre-send|post-failure|post-success|undo|confirm|stop> [--shell <shell>] [--command <command>] [--failure-output <output>] [--session <id>] [--token <token>] [--format <json|record|undo-record>] [--ensure=<true|false>]")
 	}
-	if *format != "json" && *format != "record" {
-		return clierr.New(clierr.Usage, "daemon request --format must be json or record")
+	if *format != "json" && *format != "record" && *format != "undo-record" {
+		return clierr.New(clierr.Usage, "daemon request --format must be json, record, or undo-record")
 	}
 	request := daemon.Request{
 		Version:       daemon.ProtocolVersion,
@@ -372,10 +372,22 @@ func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Wri
 		_, err := io.WriteString(stdout, daemonRecord(response))
 		return clierr.Wrap(clierr.Operation, err)
 	}
+	if *format == "undo-record" {
+		_, err := io.WriteString(stdout, daemonUndoRecord(response))
+		return clierr.Wrap(clierr.Operation, err)
+	}
 	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(response))
 }
 
 func daemonRecord(response daemon.Response) string {
+	return daemonRecordWithUndo(response, false)
+}
+
+func daemonUndoRecord(response daemon.Response) string {
+	return daemonRecordWithUndo(response, true)
+}
+
+func daemonRecordWithUndo(response daemon.Response, includeUndoToken bool) string {
 	var evidence []byte
 	if len(response.Evidence) > 0 {
 		evidence, _ = json.Marshal(response.Evidence)
@@ -388,6 +400,9 @@ func daemonRecord(response daemon.Response) string {
 		base64.RawStdEncoding.EncodeToString([]byte(response.Explanation)),
 		base64.RawStdEncoding.EncodeToString(evidence),
 		base64.RawStdEncoding.EncodeToString([]byte(response.Suggestion)),
+	}
+	if includeUndoToken {
+		fields = append(fields, base64.RawStdEncoding.EncodeToString([]byte(response.UndoToken)))
 	}
 	return strings.Join(fields, "\t") + "\n"
 }

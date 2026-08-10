@@ -32,6 +32,8 @@ Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_S
 
 Undo is enabled for 30 seconds by default; set `undo_enabled` or `undo_ttl_seconds` with `close-enough config set`.
 
+When an adapter displays `press Ctrl-G to undo` after a safe rewrite, Ctrl-G restores the original command buffer without submitting either command.
+
 Session overrides affect only the invoking process and never modify configuration files.
 
 Use `close-enough rule list|add|update|remove` to manage global exact-command exceptions; matching exceptions suppress diagnostics and never alter command execution.

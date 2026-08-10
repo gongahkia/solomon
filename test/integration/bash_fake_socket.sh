@@ -40,7 +40,7 @@ abort("missing frame payload") unless payload && payload.bytesize == length
 abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
 abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
 abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
-response = '{"v":1,"prompt":"fake-bash> ","redraw_token":null}'
+response = '{"v":2,"prompt":"fake-bash> ","redraw_token":null}'
 conn.write([response.bytesize].pack("N"))
 conn.write(response)
 conn.close

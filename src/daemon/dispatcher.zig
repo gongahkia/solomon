@@ -202,6 +202,10 @@ pub fn renderSegmentsStyled(allocator: std.mem.Allocator, caches: CacheSet, inpu
     return renderPipelineWithOptions(allocator, caches, input, pipeline, "", .{ .style = style });
 }
 
+pub fn renderSegmentsTraced(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec) !RenderedPrompt {
+    return renderPipelineWithOptions(allocator, caches, input, pipeline, "", .{ .trace_enabled = true });
+}
+
 fn renderPipelineWithTerminator(allocator: std.mem.Allocator, caches: CacheSet, input: RenderInput, pipeline: []const ModuleSpec, terminator: []const u8) !RenderedPrompt {
     return renderPipelineWithOptions(allocator, caches, input, pipeline, terminator, .{});
 }

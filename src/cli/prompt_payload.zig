@@ -75,9 +75,33 @@ const default_prompt_modules = [_]shisa_config.ModuleId{
 const command_context_primary_modules = [_]shisa_config.ModuleId{.cwd};
 
 pub fn buildPromptPayload(allocator: std.mem.Allocator, config: Config, cwd: []const u8) ![]u8 {
-    var module_options = try promptModuleOptions(allocator);
-    defer module_options.deinit(allocator);
-    return buildPromptPayloadWithModuleOptions(allocator, config, cwd, module_options);
+    return buildPromptPayloadV2(allocator, config, cwd);
+}
+
+/// Render requests deliberately contain only shell-owned, per-invocation
+/// state. The daemon owns configuration, theme parsing, and module selection;
+/// keeping them out of this function prevents prompt-time config I/O.
+fn buildPromptPayloadV2(allocator: std.mem.Allocator, config: Config, cwd: []const u8) ![]u8 {
+    const escaped_cwd = try daemon_json.escapeAlloc(allocator, cwd);
+    defer allocator.free(escaped_cwd);
+    const escaped_shell = try daemon_json.escapeAlloc(allocator, config.shell);
+    defer allocator.free(escaped_shell);
+    const escaped_commandline = try daemon_json.escapeAlloc(allocator, config.commandline orelse "");
+    defer allocator.free(escaped_commandline);
+    const tmux_pane = std.process.getEnvVarOwned(allocator, "TMUX_PANE") catch null;
+    defer if (tmux_pane) |value| allocator.free(value);
+    const escaped_tmux_pane = try daemon_json.escapeAlloc(allocator, tmux_pane orelse "");
+    defer allocator.free(escaped_tmux_pane);
+    const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(request_id);
+    const env_json = try pathEnvJsonAlloc(allocator);
+    defer allocator.free(env_json);
+
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},\"tmux_pane\":\"{s}\",\"trace\":{},\"rtl\":{},\"command_context\":{},\"commandline\":\"{s}\"}}",
+        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), promptUserId(), request_id, env_json, escaped_tmux_pane, config.trace, config.rtl, config.command_context, escaped_commandline },
+    );
 }
 
 pub fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config: Config, cwd: []const u8, module_options: ModuleOptions) ![]u8 {
@@ -110,7 +134,7 @@ pub fn buildPromptPayloadWithModuleOptions(allocator: std.mem.Allocator, config:
 
     const head = try std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"theme\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
+        "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"theme\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},",
         .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), escaped_theme, promptUserId(), request_id, env_json },
     );
     defer allocator.free(head);
@@ -332,7 +356,7 @@ test "prompt payload carries rtl flags" {
     const payload = try buildPromptPayload(std.testing.allocator, .{ .rtl = true, .rtl_reverse = true }, "/tmp");
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl\":true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\"") == null);
 }
 
 test "prompt payload locale override controls rtl" {

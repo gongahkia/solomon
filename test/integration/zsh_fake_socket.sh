@@ -49,7 +49,7 @@ server = UNIXServer.new(sock)
     abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
     abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
   end
-  response = '{"v":1,"prompt":"fake> ","right_prompt":"right-zsh","redraw_token":null}'
+  response = '{"v":2,"prompt":"fake> ","right_prompt":"right-zsh","redraw_token":null}'
   conn.write([response.bytesize].pack("N"))
   conn.write(response)
   conn.close

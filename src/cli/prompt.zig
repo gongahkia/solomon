@@ -32,7 +32,7 @@ pub fn reportPromptPayloadBenchIterationAlloc(allocator: std.mem.Allocator) ![]u
     return buildPromptPayloadWithModuleOptions(allocator, config, resolved_cwd, module_options);
 }
 
-const prompt_auto_spawn_grace_ms: i64 = 100;
+pub const interactive_request_timeout_ms: i32 = 5;
 
 pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var config = try parsePrompt(args);
@@ -67,11 +67,10 @@ pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
 
-    const response_payload = client.requestAlloc(allocator, socket_path, payload) catch |err| response: {
-        if (!config.auto_spawn) return err;
-        if (try autoSpawnPromptRequestAlloc(allocator, socket_path, payload)) |retried| break :response retried;
+    const response_payload = client.requestAllocWithTimeout(allocator, socket_path, payload, interactive_request_timeout_ms) catch {
+        if (config.auto_spawn) spawnPromptDaemon(allocator, socket_path) catch {};
         if (config.right) return;
-        const prompt_text = try renderSyncPromptAlloc(allocator, config, cwd);
+        const prompt_text = try minimalPromptAlloc(allocator, cwd);
         defer allocator.free(prompt_text);
         if (config.instant) {
             try writeInstantPrompt(allocator, prompt_text);
@@ -344,9 +343,14 @@ fn spawnPromptDaemon(allocator: std.mem.Allocator, socket_path: []const u8) !voi
 }
 
 fn autoSpawnPromptRequestAlloc(allocator: std.mem.Allocator, socket_path: []const u8, payload: []const u8) !?[]u8 {
-    spawnPromptDaemon(allocator, socket_path) catch return null;
-    cli_util.waitForPath(socket_path, prompt_auto_spawn_grace_ms) catch return null;
-    return client.requestAlloc(allocator, socket_path, payload) catch null;
+    _ = allocator;
+    _ = socket_path;
+    _ = payload;
+    return null;
+}
+
+fn minimalPromptAlloc(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}> ", .{cwd});
 }
 
 const LocalPromptRender = struct {
@@ -830,8 +834,8 @@ test "prompt args parse auto spawn" {
     try std.testing.expect(config.auto_spawn);
 }
 
-test "auto spawn uses 100ms grace" {
-    try std.testing.expectEqual(@as(i64, 100), prompt_auto_spawn_grace_ms);
+test "interactive prompt deadline is five milliseconds" {
+    try std.testing.expectEqual(@as(i32, 5), interactive_request_timeout_ms);
 }
 
 test "sync prompt fallback renders cwd prompt" {

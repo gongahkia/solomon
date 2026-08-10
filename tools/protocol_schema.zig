@@ -8,7 +8,7 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
-    const output_path = if (args.len > 1) args[1] else "docs/protocol/v1.schema.json";
+    const output_path = if (args.len > 1) args[1] else "docs/protocol/v2.schema.json";
 
     var file = try std.fs.cwd().createFile(output_path, .{ .truncate = true });
     defer file.close();
@@ -18,8 +18,8 @@ pub fn main() !void {
 const schema_json =
     \\{
     \\  "$schema": "https://json-schema.org/draft/2020-12/schema",
-    \\  "$id": "https://shisa.dev/schemas/protocol/v1.schema.json",
-    \\  "title": "Shisa protocol v1",
+    \\  "$id": "https://shisa.dev/schemas/protocol/v2.schema.json",
+    \\  "title": "Shisa protocol v2",
     \\  "type": "object",
     \\  "oneOf": [
     \\    { "$ref": "#/$defs/renderRequest" },
@@ -56,66 +56,12 @@ const schema_json =
     \\      "type": "string",
     \\      "enum": ["nerdfont", "unicode", "ascii"]
     \\    },
-    \\    "cwdOptions": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "truncate_to": { "type": "integer", "minimum": 0, "maximum": 16 },
-    \\        "home_tilde": { "type": "boolean" },
-    \\        "max_width": { "type": "integer", "minimum": 0, "maximum": 512 }
-    \\      }
-    \\    },
-    \\    "cloudCtx": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "aws": { "type": "boolean" },
-    \\        "gcp": { "type": "boolean" },
-    \\        "azure": { "type": "boolean" },
-    \\        "kubernetes": { "type": "boolean" }
-    \\      }
-    \\    },
-    \\    "cdhint": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "enabled": { "type": "boolean" }
-    \\      }
-    \\    },
-    \\    "tmuxPaneOptions": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "enabled": { "type": "boolean" }
-    \\      }
-    \\    },
-    \\    "riskTierColor": {
-    \\      "type": "string",
-    \\      "enum": ["fg", "muted", "accent", "success", "warning", "danger"]
-    \\    },
-    \\    "riskTier": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "unknown_bg": { "$ref": "#/$defs/riskTierColor" },
-    \\        "dev_bg": { "$ref": "#/$defs/riskTierColor" },
-    \\        "staging_bg": { "$ref": "#/$defs/riskTierColor" },
-    \\        "prod_bg": { "$ref": "#/$defs/riskTierColor" }
-    \\      }
-    \\    },
-    \\    "ssoExpiry": {
-    \\      "type": "object",
-    \\      "additionalProperties": true,
-    \\      "properties": {
-    \\        "warning_minutes": { "type": "integer", "minimum": 1 }
-    \\      }
-    \\    },
     \\    "commonRequest": {
     \\      "type": "object",
     \\      "required": ["v", "op", "request_id"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "op": { "$ref": "#/$defs/op" },
     \\        "request_id": { "type": "string" }
     \\      }
@@ -125,7 +71,7 @@ const schema_json =
     \\      "required": ["v", "op", "request_id", "cwd", "exit", "jobs", "duration_ms", "shell", "cols", "rows", "tty", "color_caps", "glyph_caps", "user_id", "session"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "op": { "const": "render" },
     \\        "request_id": { "type": "string" },
     \\        "cwd": { "type": "string" },
@@ -145,19 +91,10 @@ const schema_json =
     \\        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
     \\        "path_env": { "type": ["string", "null"] },
     \\        "trace": { "type": "boolean" },
-    \\        "modules": {
-    \\          "type": "array",
-    \\          "items": { "type": "string" }
-    \\        },
     \\        "tmux_pane": { "type": ["string", "null"] },
     \\        "rtl": { "type": "boolean" },
-    \\        "rtl_reverse": { "type": "boolean" },
-    \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
-    \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
-    \\        "cdhint": { "$ref": "#/$defs/cdhint" },
-    \\        "tmux_pane_options": { "$ref": "#/$defs/tmuxPaneOptions" },
-    \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
-    \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
+    \\        "command_context": { "type": "boolean" },
+    \\        "commandline": { "type": ["string", "null"] }
     \\      }
     \\    },
     \\    "renderContinueRequest": {
@@ -165,7 +102,7 @@ const schema_json =
     \\      "required": ["v", "op", "request_id", "cwd", "exit", "jobs", "duration_ms", "shell", "cols", "rows", "tty", "color_caps", "glyph_caps", "user_id", "session"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "op": { "const": "render_continue" },
     \\        "request_id": { "type": "string" },
     \\        "cwd": { "type": "string" },
@@ -185,19 +122,10 @@ const schema_json =
     \\        "env_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
     \\        "path_env": { "type": ["string", "null"] },
     \\        "trace": { "type": "boolean" },
-    \\        "modules": {
-    \\          "type": "array",
-    \\          "items": { "type": "string" }
-    \\        },
     \\        "tmux_pane": { "type": ["string", "null"] },
     \\        "rtl": { "type": "boolean" },
-    \\        "rtl_reverse": { "type": "boolean" },
-    \\        "cwd_options": { "$ref": "#/$defs/cwdOptions" },
-    \\        "cloud_ctx": { "$ref": "#/$defs/cloudCtx" },
-    \\        "cdhint": { "$ref": "#/$defs/cdhint" },
-    \\        "tmux_pane_options": { "$ref": "#/$defs/tmuxPaneOptions" },
-    \\        "risk_tier": { "$ref": "#/$defs/riskTier" },
-    \\        "sso_expiry": { "$ref": "#/$defs/ssoExpiry" }
+    \\        "command_context": { "type": "boolean" },
+    \\        "commandline": { "type": ["string", "null"] }
     \\      }
     \\    },
     \\    "healthRequest": {
@@ -234,7 +162,7 @@ const schema_json =
     \\      "required": ["v", "op", "request_id", "cwd"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "op": { "const": "context" },
     \\        "request_id": { "type": "string" },
     \\        "cwd": { "type": "string", "minLength": 1 }
@@ -245,7 +173,7 @@ const schema_json =
     \\      "required": ["v", "op", "request_id", "topics"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "op": { "const": "subscribe" },
     \\        "request_id": { "type": "string" },
     \\        "backpressure_limit": { "type": "integer", "minimum": 1, "maximum": 1024 },
@@ -281,9 +209,10 @@ const schema_json =
     \\      "required": ["v", "request_id", "prompt", "diagnostics", "elapsed_us"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "prompt": { "type": "string" },
+    \\        "right_prompt": { "type": ["string", "null"] },
     \\        "redraw_token": { "type": ["string", "null"] },
     \\        "trailer": { "type": ["string", "null"] },
     \\        "diagnostics": {
@@ -302,7 +231,7 @@ const schema_json =
     \\      "required": ["v", "request_id", "ok"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "ok": { "type": "boolean" }
     \\      }
@@ -322,7 +251,7 @@ const schema_json =
     \\      "required": ["v", "schema", "request_id", "context"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "schema": { "const": "shisa.context/v1" },
     \\        "request_id": { "type": "string" },
     \\        "context": {
@@ -354,7 +283,7 @@ const schema_json =
     \\      "required": ["v", "request_id", "connections", "cache", "fsnotify"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "connections": { "type": "integer", "minimum": 0 },
     \\        "cache": { "type": "object", "additionalProperties": true },
@@ -366,7 +295,7 @@ const schema_json =
     \\      "required": ["v", "request_id", "reloaded"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "reloaded": { "type": "boolean" },
     \\        "config_generation": { "type": "integer", "minimum": 0 },
@@ -379,10 +308,10 @@ const schema_json =
     \\      "required": ["v", "request_id", "daemon", "protocol"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "daemon": { "type": "string" },
-    \\        "protocol": { "const": 1 }
+    \\        "protocol": { "const": 2 }
     \\      }
     \\    },
     \\    "subscribeEvent": {
@@ -390,7 +319,7 @@ const schema_json =
     \\      "required": ["v", "request_id", "topic", "kind", "data"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "topic": { "type": "string" },
     \\        "kind": { "type": "string", "enum": ["snapshot", "delta", "heartbeat", "error"] },
@@ -422,7 +351,7 @@ const schema_json =
     \\      "required": ["v", "request_id", "error"],
     \\      "additionalProperties": true,
     \\      "properties": {
-    \\        "v": { "const": 1 },
+    \\        "v": { "const": 2 },
     \\        "request_id": { "type": "string" },
     \\        "error": {
     \\          "type": "object",

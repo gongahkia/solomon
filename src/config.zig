@@ -294,6 +294,24 @@ pub const CommandContextOptions = struct {
     target: CommandContextTarget = .off,
     commands: []const []const u8,
     modules: []const ModuleId,
+    plugin_modules: []const []const u8 = &.{},
+    module_order: []ModuleEntry = &.{},
+};
+
+/// The prompt module array can interleave built-in modules and plugin exports.
+/// Keep this representation alongside the compatibility core/plugin slices so
+/// consumers that need exact composition order do not have to reconstruct it.
+pub const ModuleEntry = union(enum) {
+    core: ModuleId,
+    plugin: []u8,
+
+    pub fn deinit(self: *ModuleEntry, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .core => {},
+            .plugin => |value| allocator.free(value),
+        }
+        self.* = undefined;
+    }
 };
 
 pub const PromptOptions = struct {
@@ -360,9 +378,14 @@ pub const Config = struct {
     transient_prompt: ?[]u8 = null,
     prompt_modules: []ModuleId,
     right_prompt_modules: []ModuleId,
+    prompt_plugin_modules: [][]u8 = &.{},
+    right_prompt_plugin_modules: [][]u8 = &.{},
+    prompt_module_order: []ModuleEntry = &.{},
+    right_prompt_module_order: []ModuleEntry = &.{},
     command_context: CommandContextOptions,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
+    plugin_configs: []PluginConfig = &.{},
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
         allocator.free(self.theme);
@@ -370,12 +393,54 @@ pub const Config = struct {
         if (self.transient_prompt) |value| allocator.free(value);
         allocator.free(self.prompt_modules);
         allocator.free(self.right_prompt_modules);
+        freeStringSlice(allocator, self.prompt_plugin_modules);
+        freeStringSlice(allocator, self.right_prompt_plugin_modules);
+        freeModuleEntries(allocator, self.prompt_module_order);
+        freeModuleEntries(allocator, self.right_prompt_module_order);
         for (self.command_context.commands) |command| allocator.free(command);
         allocator.free(self.command_context.commands);
         allocator.free(self.command_context.modules);
+        freeStringSlice(allocator, self.command_context.plugin_modules);
+        freeModuleEntries(allocator, self.command_context.module_order);
+        for (self.plugin_configs) |*plugin_config| plugin_config.deinit(allocator);
+        allocator.free(self.plugin_configs);
         self.* = undefined;
     }
 };
+
+/// Raw plugin settings are parsed as safe Lua literals. The daemon injects a
+/// table only for the plugin named by `[plugins."<plugin-name>"]`; no plugin
+/// can inspect another plugin's settings.
+pub const PluginConfig = struct {
+    name: []u8,
+    lua_table: []u8,
+
+    pub fn deinit(self: *PluginConfig, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        allocator.free(self.lua_table);
+        self.* = undefined;
+    }
+};
+
+const PluginConfigEntry = struct {
+    plugin_name: []u8,
+    key: []u8,
+    lua_value: []u8,
+
+    fn deinit(self: *PluginConfigEntry, allocator: std.mem.Allocator) void {
+        allocator.free(self.plugin_name);
+        allocator.free(self.key);
+        allocator.free(self.lua_value);
+        self.* = undefined;
+    }
+};
+
+pub fn pluginConfigLua(config: *const Config, plugin_name: []const u8) ?[]const u8 {
+    for (config.plugin_configs) |plugin_config| {
+        if (std.mem.eql(u8, plugin_config.name, plugin_name)) return plugin_config.lua_table;
+    }
+    return null;
+}
 
 const Table = enum {
     root,
@@ -393,6 +458,7 @@ const Table = enum {
     risk_tier,
     sso_expiry,
     time,
+    plugin,
 };
 
 const Seen = struct {
@@ -463,11 +529,19 @@ const Parser = struct {
     transient_prompt: ?[]u8 = null,
     prompt_modules: std.ArrayList(ModuleId) = .empty,
     right_prompt_modules: std.ArrayList(ModuleId) = .empty,
+    prompt_plugin_modules: std.ArrayList([]u8) = .empty,
+    right_prompt_plugin_modules: std.ArrayList([]u8) = .empty,
+    prompt_module_order: std.ArrayList(ModuleEntry) = .empty,
+    right_prompt_module_order: std.ArrayList(ModuleEntry) = .empty,
     command_context_commands: std.ArrayList([]u8) = .empty,
     command_context_modules: std.ArrayList(ModuleId) = .empty,
+    command_context_plugin_modules: std.ArrayList([]u8) = .empty,
+    command_context_module_order: std.ArrayList(ModuleEntry) = .empty,
     command_context_target: CommandContextTarget = .off,
     prompt: PromptOptions = .{},
     modules: ModuleOptions = .{},
+    active_plugin_name: ?[]u8 = null,
+    plugin_entries: std.ArrayList(PluginConfigEntry) = .empty,
 
     fn parse(self: *Parser) !Config {
         var offset: usize = 0;
@@ -503,6 +577,20 @@ const Parser = struct {
         else
             try self.allocator.dupe(ModuleId, &.{});
         errdefer self.allocator.free(right_modules);
+        const plugin_modules = try self.prompt_plugin_modules.toOwnedSlice(self.allocator);
+        errdefer freeStringSlice(self.allocator, plugin_modules);
+        const right_plugin_modules = try self.right_prompt_plugin_modules.toOwnedSlice(self.allocator);
+        errdefer freeStringSlice(self.allocator, right_plugin_modules);
+        const prompt_module_order = if (self.seen.prompt_modules)
+            try self.prompt_module_order.toOwnedSlice(self.allocator)
+        else
+            try defaultModuleEntriesAlloc(self.allocator, default_modules[0..]);
+        errdefer freeModuleEntries(self.allocator, prompt_module_order);
+        const right_prompt_module_order = if (self.seen.prompt_right_modules)
+            try self.right_prompt_module_order.toOwnedSlice(self.allocator)
+        else
+            try self.allocator.alloc(ModuleEntry, 0);
+        errdefer freeModuleEntries(self.allocator, right_prompt_module_order);
         const command_context_commands = if (self.seen.prompt_command_context_commands)
             try self.command_context_commands.toOwnedSlice(self.allocator)
         else
@@ -513,6 +601,18 @@ const Parser = struct {
         else
             try self.allocator.dupe(ModuleId, default_command_context_modules[0..]);
         errdefer self.allocator.free(command_context_modules);
+        const command_context_plugin_modules = try self.command_context_plugin_modules.toOwnedSlice(self.allocator);
+        errdefer freeStringSlice(self.allocator, command_context_plugin_modules);
+        const command_context_module_order = if (self.seen.prompt_command_context_modules)
+            try self.command_context_module_order.toOwnedSlice(self.allocator)
+        else
+            try defaultModuleEntriesAlloc(self.allocator, default_command_context_modules[0..]);
+        errdefer freeModuleEntries(self.allocator, command_context_module_order);
+        const plugin_configs = try self.buildPluginConfigs();
+        errdefer {
+            for (plugin_configs) |*plugin_config| plugin_config.deinit(self.allocator);
+            self.allocator.free(plugin_configs);
+        }
 
         return .{
             .version = 1,
@@ -521,13 +621,20 @@ const Parser = struct {
             .transient_prompt = transient_prompt,
             .prompt_modules = modules,
             .right_prompt_modules = right_modules,
+            .prompt_plugin_modules = plugin_modules,
+            .right_prompt_plugin_modules = right_plugin_modules,
+            .prompt_module_order = prompt_module_order,
+            .right_prompt_module_order = right_prompt_module_order,
             .command_context = .{
                 .target = self.command_context_target,
                 .commands = command_context_commands,
                 .modules = command_context_modules,
+                .plugin_modules = command_context_plugin_modules,
+                .module_order = command_context_module_order,
             },
             .prompt = self.prompt,
             .modules = self.modules,
+            .plugin_configs = plugin_configs,
         };
     }
 
@@ -537,9 +644,18 @@ const Parser = struct {
         if (self.transient_prompt) |value| self.allocator.free(value);
         self.prompt_modules.deinit(self.allocator);
         self.right_prompt_modules.deinit(self.allocator);
+        freePluginModuleList(self.allocator, &self.prompt_plugin_modules);
+        freePluginModuleList(self.allocator, &self.right_prompt_plugin_modules);
+        freeModuleEntryList(self.allocator, &self.prompt_module_order);
+        freeModuleEntryList(self.allocator, &self.right_prompt_module_order);
         for (self.command_context_commands.items) |command| self.allocator.free(command);
         self.command_context_commands.deinit(self.allocator);
         self.command_context_modules.deinit(self.allocator);
+        freePluginModuleList(self.allocator, &self.command_context_plugin_modules);
+        freeModuleEntryList(self.allocator, &self.command_context_module_order);
+        if (self.active_plugin_name) |name| self.allocator.free(name);
+        for (self.plugin_entries.items) |*entry| entry.deinit(self.allocator);
+        self.plugin_entries.deinit(self.allocator);
     }
 
     fn parseLine(self: *Parser, line_no: usize, line: []const u8) !void {
@@ -563,6 +679,16 @@ const Parser = struct {
         const inner = trimWithColumn(trimmed.text[1 .. trimmed.text.len - 1], trimmed.column + 1);
         if (inner.text.len == 0) return self.fail(line_no, inner.column, "empty table name");
 
+        if (parsePluginTableName(inner.text)) |plugin_name| {
+            if (self.active_plugin_name) |name| self.allocator.free(name);
+            self.active_plugin_name = try self.allocator.dupe(u8, plugin_name);
+            self.table = .plugin;
+            return;
+        }
+        if (self.active_plugin_name) |name| {
+            self.allocator.free(name);
+            self.active_plugin_name = null;
+        }
         self.table = parseTableName(inner.text) orelse return self.fail(line_no, inner.column, "unknown table");
     }
 
@@ -589,6 +715,7 @@ const Parser = struct {
             .risk_tier => try self.parseRiskTierKey(line_no, key, value),
             .sso_expiry => try self.parseSsoExpiryKey(line_no, key, value),
             .time => try self.parseTimeKey(line_no, key, value),
+            .plugin => try self.parsePluginKey(line_no, key, value),
         }
     }
 
@@ -617,10 +744,10 @@ const Parser = struct {
     fn parsePromptKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
         if (std.mem.eql(u8, key.text, "modules")) {
             try self.markUnseen(&self.seen.prompt_modules, line_no, key.column);
-            try self.parseModuleArray(&self.prompt_modules, value, line_no);
+            try self.parseModuleArray(&self.prompt_modules, &self.prompt_plugin_modules, &self.prompt_module_order, value, line_no);
         } else if (std.mem.eql(u8, key.text, "right_modules")) {
             try self.markUnseen(&self.seen.prompt_right_modules, line_no, key.column);
-            try self.parseModuleArray(&self.right_prompt_modules, value, line_no);
+            try self.parseModuleArray(&self.right_prompt_modules, &self.right_prompt_plugin_modules, &self.right_prompt_module_order, value, line_no);
         } else if (std.mem.eql(u8, key.text, "rtl_reverse")) {
             try self.markUnseen(&self.seen.prompt_rtl_reverse, line_no, key.column);
             self.prompt.rtl_reverse = try self.parseBool(value, line_no);
@@ -632,10 +759,125 @@ const Parser = struct {
             try self.parseCommandArray(&self.command_context_commands, value, line_no);
         } else if (std.mem.eql(u8, key.text, "command_context_modules")) {
             try self.markUnseen(&self.seen.prompt_command_context_modules, line_no, key.column);
-            try self.parseModuleArray(&self.command_context_modules, value, line_no);
+            try self.parseModuleArray(&self.command_context_modules, &self.command_context_plugin_modules, &self.command_context_module_order, value, line_no);
         } else {
             return self.fail(line_no, key.column, "unknown key");
         }
+    }
+
+    fn parsePluginKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
+        const plugin_name = self.active_plugin_name orelse return self.fail(line_no, key.column, "plugin table missing name");
+        if (!isValidPluginConfigKey(key.text)) return self.fail(line_no, key.column, "invalid plugin config key");
+        for (self.plugin_entries.items) |entry| {
+            if (std.mem.eql(u8, entry.plugin_name, plugin_name) and std.mem.eql(u8, entry.key, key.text)) {
+                return self.fail(line_no, key.column, "duplicate plugin config key");
+            }
+        }
+        const lua_value = try self.parsePluginLuaValueAlloc(value, line_no);
+        errdefer self.allocator.free(lua_value);
+        try self.plugin_entries.append(self.allocator, .{
+            .plugin_name = try self.allocator.dupe(u8, plugin_name),
+            .key = try self.allocator.dupe(u8, key.text),
+            .lua_value = lua_value,
+        });
+    }
+
+    fn parsePluginLuaValueAlloc(self: *Parser, value: Trimmed, line_no: usize) ![]u8 {
+        if (value.text.len != 0 and value.text[0] == '"') {
+            const parsed = try self.parseStringAlloc(value, line_no);
+            defer self.allocator.free(parsed);
+            return quoteLuaStringAlloc(self.allocator, parsed);
+        }
+        if (std.mem.eql(u8, value.text, "true") or std.mem.eql(u8, value.text, "false")) {
+            return self.allocator.dupe(u8, value.text);
+        }
+        if (value.text.len != 0 and value.text[0] == '[') return self.parsePluginStringArrayLuaAlloc(value, line_no);
+        _ = std.fmt.parseInt(i64, value.text, 10) catch return self.fail(line_no, value.column, "plugin values must be string, bool, integer, or string array");
+        return self.allocator.dupe(u8, value.text);
+    }
+
+    fn parsePluginStringArrayLuaAlloc(self: *Parser, value: Trimmed, line_no: usize) ![]u8 {
+        if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
+            return self.fail(line_no, value.column, "expected plugin string array");
+        }
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+        try out.append(self.allocator, '{');
+        var index: usize = 1;
+        var count: usize = 0;
+        while (index < value.text.len - 1) {
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != '"') return self.fail(line_no, value.column + index, "expected plugin string");
+            const start = index;
+            index += 1;
+            var escaped = false;
+            while (index < value.text.len - 1) : (index += 1) {
+                if (!escaped and value.text[index] == '"') break;
+                if (!escaped and value.text[index] == '\\') {
+                    escaped = true;
+                } else {
+                    escaped = false;
+                }
+            }
+            if (index >= value.text.len - 1) return self.fail(line_no, value.column + start, "unterminated plugin string");
+            const string_value = try self.parseStringAlloc(.{ .text = value.text[start .. index + 1], .column = value.column + start }, line_no);
+            defer self.allocator.free(string_value);
+            const quoted = try quoteLuaStringAlloc(self.allocator, string_value);
+            defer self.allocator.free(quoted);
+            if (count != 0) try out.appendSlice(self.allocator, ", ");
+            try out.appendSlice(self.allocator, quoted);
+            count += 1;
+            index += 1;
+            skipSpaces(value.text, &index);
+            if (index >= value.text.len - 1) break;
+            if (value.text[index] != ',') return self.fail(line_no, value.column + index, "expected comma");
+            index += 1;
+        }
+        try out.append(self.allocator, '}');
+        return out.toOwnedSlice(self.allocator);
+    }
+
+    fn buildPluginConfigs(self: *Parser) ![]PluginConfig {
+        var configs: std.ArrayList(PluginConfig) = .empty;
+        errdefer {
+            for (configs.items) |*config| config.deinit(self.allocator);
+            configs.deinit(self.allocator);
+        }
+        for (self.plugin_entries.items) |entry| {
+            var existing: ?*PluginConfig = null;
+            for (configs.items) |*config| {
+                if (std.mem.eql(u8, config.name, entry.plugin_name)) {
+                    existing = config;
+                    break;
+                }
+            }
+            if (existing == null) {
+                try configs.append(self.allocator, .{
+                    .name = try self.allocator.dupe(u8, entry.plugin_name),
+                    .lua_table = try self.allocator.dupe(u8, "{}"),
+                });
+                existing = &configs.items[configs.items.len - 1];
+            }
+            const config = existing.?;
+            const key = try quoteLuaStringAlloc(self.allocator, entry.key);
+            defer self.allocator.free(key);
+            const inner = config.lua_table[1 .. config.lua_table.len - 1];
+            const replacement = try std.fmt.allocPrint(
+                self.allocator,
+                "{{{s}{s}[{s}] = {s}}}",
+                .{ inner, if (inner.len == 0) "" else ", ", key, entry.lua_value },
+            );
+            self.allocator.free(config.lua_table);
+            config.lua_table = replacement;
+        }
+        const owned = try configs.toOwnedSlice(self.allocator);
+        for (self.plugin_entries.items) |*entry| entry.deinit(self.allocator);
+        self.plugin_entries.deinit(self.allocator);
+        self.plugin_entries = .empty;
+        if (self.active_plugin_name) |name| self.allocator.free(name);
+        self.active_plugin_name = null;
+        return owned;
     }
 
     fn parseCwdKey(self: *Parser, line_no: usize, key: Trimmed, value: Trimmed) !void {
@@ -789,7 +1031,7 @@ const Parser = struct {
         }
     }
 
-    fn parseModuleArray(self: *Parser, modules: *std.ArrayList(ModuleId), value: Trimmed, line_no: usize) !void {
+    fn parseModuleArray(self: *Parser, modules: *std.ArrayList(ModuleId), plugin_modules: *std.ArrayList([]u8), module_order: *std.ArrayList(ModuleEntry), value: Trimmed, line_no: usize) !void {
         if (value.text.len < 2 or value.text[0] != '[' or value.text[value.text.len - 1] != ']') {
             return self.fail(line_no, value.column, "expected array");
         }
@@ -806,11 +1048,26 @@ const Parser = struct {
 
             const raw_id = value.text[start..index];
             if (std.mem.indexOfScalar(u8, raw_id, '\\') != null) return self.fail(line_no, value.column + start, "invalid module id");
-            const module_id = parseModuleId(raw_id) orelse return self.fail(line_no, value.column + start, "unknown module id");
-            for (modules.items) |existing| {
-                if (existing == module_id) return self.fail(line_no, value.column + start, "duplicate module id");
+            if (parseModuleId(raw_id)) |module_id| {
+                for (modules.items) |existing| {
+                    if (existing == module_id) return self.fail(line_no, value.column + start, "duplicate module id");
+                }
+                try modules.append(self.allocator, module_id);
+                try module_order.append(self.allocator, .{ .core = module_id });
+            } else if (isPluginModuleId(raw_id)) {
+                for (plugin_modules.items) |existing| {
+                    if (std.mem.eql(u8, existing, raw_id)) return self.fail(line_no, value.column + start, "duplicate module id");
+                }
+                const plugin_copy = try self.allocator.dupe(u8, raw_id);
+                errdefer self.allocator.free(plugin_copy);
+                const order_copy = try self.allocator.dupe(u8, raw_id);
+                errdefer self.allocator.free(order_copy);
+                try plugin_modules.append(self.allocator, plugin_copy);
+                errdefer _ = plugin_modules.pop();
+                try module_order.append(self.allocator, .{ .plugin = order_copy });
+            } else {
+                return self.fail(line_no, value.column + start, "unknown module id");
             }
-            try modules.append(self.allocator, module_id);
 
             index += 1;
             skipSpaces(value.text, &index);
@@ -987,6 +1244,45 @@ fn parseTableName(name: []const u8) ?Table {
     return null;
 }
 
+fn parsePluginTableName(name: []const u8) ?[]const u8 {
+    const prefix = "plugins.\"";
+    if (!std.mem.startsWith(u8, name, prefix) or name.len <= prefix.len + 1 or name[name.len - 1] != '"') return null;
+    const plugin_name = name[prefix.len .. name.len - 1];
+    if (!isValidPluginConfigName(plugin_name)) return null;
+    return plugin_name;
+}
+
+fn isValidPluginConfigName(value: []const u8) bool {
+    if (value.len == 0 or !std.ascii.isLower(value[0]) and !std.ascii.isDigit(value[0])) return false;
+    for (value[1..]) |byte| {
+        if (!(std.ascii.isLower(byte) or std.ascii.isDigit(byte) or byte == '.' or byte == '_' or byte == '-')) return false;
+    }
+    return true;
+}
+
+fn isValidPluginConfigKey(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |byte| {
+        if (!(std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-')) return false;
+    }
+    return true;
+}
+
+fn quoteLuaStringAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.append(allocator, '"');
+    for (value) |byte| switch (byte) {
+        '\\' => try out.appendSlice(allocator, "\\\\"),
+        '"' => try out.appendSlice(allocator, "\\\""),
+        '\n' => try out.appendSlice(allocator, "\\n"),
+        '\r' => try out.appendSlice(allocator, "\\r"),
+        else => try out.append(allocator, byte),
+    };
+    try out.append(allocator, '"');
+    return out.toOwnedSlice(allocator);
+}
+
 fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "cwd")) return .cwd;
     if (std.mem.eql(u8, id, "git_branch")) return .git_branch;
@@ -1008,6 +1304,20 @@ fn parseModuleId(id: []const u8) ?ModuleId {
     if (std.mem.eql(u8, id, "container_provenance")) return .container_provenance;
     if (std.mem.eql(u8, id, "time")) return .time;
     return null;
+}
+
+/// Plugin module ids remain explicit and namespaced so they cannot shadow a
+/// core module. Registry ownership is validated by the daemon when it builds
+/// the runtime snapshot.
+fn isPluginModuleId(id: []const u8) bool {
+    if (!std.mem.startsWith(u8, id, "plugin.")) return false;
+    const rest = id["plugin.".len..];
+    const separator = std.mem.indexOfScalar(u8, rest, '.') orelse return false;
+    if (separator == 0 or separator + 1 >= rest.len) return false;
+    for (rest) |byte| {
+        if (!(std.ascii.isAlphanumeric(byte) or byte == '.' or byte == '_' or byte == '-')) return false;
+    }
+    return true;
 }
 
 fn isValidCommandName(command: []const u8) bool {
@@ -1035,6 +1345,27 @@ fn dupStringSlice(allocator: std.mem.Allocator, values: []const []const u8) ![]c
 fn freeStringSlice(allocator: std.mem.Allocator, values: []const []const u8) void {
     for (values) |value| allocator.free(value);
     allocator.free(values);
+}
+
+fn defaultModuleEntriesAlloc(allocator: std.mem.Allocator, modules: []const ModuleId) ![]ModuleEntry {
+    const entries = try allocator.alloc(ModuleEntry, modules.len);
+    for (modules, 0..) |module_id, index| entries[index] = .{ .core = module_id };
+    return entries;
+}
+
+fn freeModuleEntries(allocator: std.mem.Allocator, entries: []ModuleEntry) void {
+    for (entries) |*entry| entry.deinit(allocator);
+    allocator.free(entries);
+}
+
+fn freeModuleEntryList(allocator: std.mem.Allocator, entries: *std.ArrayList(ModuleEntry)) void {
+    for (entries.items) |*entry| entry.deinit(allocator);
+    entries.deinit(allocator);
+}
+
+fn freePluginModuleList(allocator: std.mem.Allocator, values: *std.ArrayList([]u8)) void {
+    for (values.items) |value| allocator.free(value);
+    values.deinit(allocator);
 }
 
 fn stripComment(line: []const u8) []const u8 {
@@ -1402,4 +1733,47 @@ test "rejects option range violation" {
     try std.testing.expectEqual(@as(usize, 4), diagnostic.line);
     try std.testing.expectEqual(@as(usize, 15), diagnostic.column);
     try std.testing.expectEqualStrings("integer out of range", diagnostic.message);
+}
+
+test "parses namespaced plugin module ids without weakening core validation" {
+    const source =
+        \\version = 1
+        \\theme = "plain"
+        \\[prompt]
+        \\modules = ["cwd", "plugin.shisa.git.git_branch"]
+        \\right_modules = ["plugin.demo.status"]
+    ;
+    var diagnostic: Diagnostic = .{};
+    var config = try parse(std.testing.allocator, source, &diagnostic);
+    defer config.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(ModuleId, &.{.cwd}, config.prompt_modules);
+    try std.testing.expectEqualStrings("plugin.shisa.git.git_branch", config.prompt_plugin_modules[0]);
+    try std.testing.expectEqualStrings("plugin.demo.status", config.right_prompt_plugin_modules[0]);
+    switch (config.prompt_module_order[0]) {
+        .core => |module_id| try std.testing.expectEqual(ModuleId.cwd, module_id),
+        .plugin => return error.TestUnexpectedResult,
+    }
+    switch (config.prompt_module_order[1]) {
+        .plugin => |module_id| try std.testing.expectEqualStrings("plugin.shisa.git.git_branch", module_id),
+        .core => return error.TestUnexpectedResult,
+    }
+}
+
+test "parses namespaced plugin configuration into an isolated Lua table" {
+    const source =
+        \\version = 1
+        \\[plugins."demo-plugin"]
+        \\label = "ops"
+        \\enabled = true
+        \\retries = 2
+        \\regions = ["us-east-1", "eu-west-1"]
+    ;
+    var diagnostic: Diagnostic = .{};
+    var config = try parse(std.testing.allocator, source, &diagnostic);
+    defer config.deinit(std.testing.allocator);
+    try std.testing.expect(pluginConfigLua(&config, "demo-plugin") != null);
+    const lua_table = pluginConfigLua(&config, "demo-plugin").?;
+    try std.testing.expect(std.mem.indexOf(u8, lua_table, "[\"label\"] = \"ops\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lua_table, "[\"enabled\"] = true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lua_table, "[\"regions\"] = {\"us-east-1\", \"eu-west-1\"}") != null);
 }

@@ -141,11 +141,22 @@ shisa plugin trust demo-plugin
 
 `shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`; this is a local maintainer-review marker, not a registry listing or a statement that a plugin is safe in every environment.
 
-## Current Limits
+## Runtime and Host APIs
 
-- Plugin lifecycle hook names are validated and stored, but hook invocation is not yet wired into the daemon pipeline.
-- Host API bindings for filesystem, exec, network, env, secrets, and pre-exec are not exposed to Lua yet.
-- `shisa plugin install` audits `plugin.lua` by sandbox-loading and validating the returned manifest table before installing.
+The daemon keeps one sandboxed Lua VM for each loaded plugin. It calls `on_load` after validation, `render` while composing configured plugin segments at their declared position in `[prompt].modules` or `right_modules`, `update` on a bounded two-worker refresh queue, `pre_exec` before command execution, and `on_unload` during reload or shutdown.
+
+`render(ctx)` is cache-only: filesystem, environment, secret, exec, and network APIs return an error there. `update` may use declared capabilities; `net.get` accepts HTTPS only and runs outside the prompt path. `fs.watch` records a native watcher registration, which is applied by the daemon and schedules a later update after debounce. `ctx.cache.get(key)` and `ctx.cache.set(key, value)` are available in every hook.
+
+Available APIs are `ctx.fs.read(path)`, `ctx.fs.watch(path)`, `ctx.env.get(name)`, `ctx.secrets.get(name)`, `ctx.exec.run(command, args)`, `ctx.net.get(https_url)`, and the cache methods. Every call passes the manifest capability gate. Secrets are read only from `.env`, checking the plugin's `.env` before `<cwd>/.env`; they are never read from ambient environment variables through `ctx.secrets`.
+
+Plugin settings use an isolated TOML namespace:
+
+```toml
+[plugins."demo-plugin"]
+label = "ops"
+```
+
+The resulting values appear as `ctx.config.label`. A plugin pre-exec denial can block a command unless the shell request is forced. Plugin hook errors and CPU-budget timeouts fail open for commands and are appended to the local plugin pre-exec audit log.
 
 ## Reference Plugins
 

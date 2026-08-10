@@ -113,9 +113,11 @@ pub fn build(b: *std.Build) void {
     });
     daemon.root_module.addImport("vcs_worktree", vcs_worktree_module);
     daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
+    daemon.root_module.addImport("config", shisa_config_module);
     daemon.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(daemon.root_module, theme_loader_module);
     daemon.root_module.link_libc = true;
+    linkFseventsFrameworks(daemon, target);
     b.installArtifact(daemon);
 
     const supervisor_exe = b.addExecutable(.{
@@ -152,9 +154,11 @@ pub fn build(b: *std.Build) void {
     });
     debug_daemon.root_module.addImport("vcs_worktree", vcs_worktree_debug_module);
     debug_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_debug_module);
+    debug_daemon.root_module.addImport("config", shisa_config_module);
     debug_daemon.root_module.addImport("plugin_lua", plugin_lua_debug_module);
     addThemeImports(debug_daemon.root_module, theme_loader_module);
     debug_daemon.root_module.link_libc = true;
+    linkFseventsFrameworks(debug_daemon, target);
     const debug_daemon_install = b.addInstallArtifact(debug_daemon, .{});
     const debug_supervisor = b.addExecutable(.{
         .name = "shisa-supervisor",
@@ -194,9 +198,11 @@ pub fn build(b: *std.Build) void {
     });
     release_daemon.root_module.addImport("vcs_worktree", vcs_worktree_release_module);
     release_daemon.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_release_module);
+    release_daemon.root_module.addImport("config", shisa_config_module);
     release_daemon.root_module.addImport("plugin_lua", plugin_lua_release_module);
     addThemeImports(release_daemon.root_module, theme_loader_module);
     release_daemon.root_module.link_libc = true;
+    linkFseventsFrameworks(release_daemon, target);
     const release_daemon_install = b.addInstallArtifact(release_daemon, .{});
     const release_supervisor = b.addExecutable(.{
         .name = "shisa-supervisor",
@@ -235,7 +241,7 @@ pub fn build(b: *std.Build) void {
     });
     schema_exe.root_module.addImport("proto_types", proto_types_module);
     const schema_run = b.addRunArtifact(schema_exe);
-    schema_run.addFileArg(b.path("docs/protocol/v1.schema.json"));
+    schema_run.addFileArg(b.path("docs/protocol/v2.schema.json"));
     const schema_step = b.step("schema", "Generate protocol JSON Schema");
     schema_step.dependOn(&schema_run.step);
 
@@ -502,6 +508,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    command_cache_tests.root_module.link_libc = true;
+    linkFseventsFrameworks(command_cache_tests, target);
     const command_cache_test_run = b.addRunArtifact(command_cache_tests);
     const warmup_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -518,6 +526,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    fsnotify_tests.root_module.link_libc = true;
+    linkFseventsFrameworks(fsnotify_tests, target);
     const fsnotify_test_run = b.addRunArtifact(fsnotify_tests);
     const windows_fsnotify_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -733,9 +743,11 @@ pub fn build(b: *std.Build) void {
     });
     shisad_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     shisad_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
+    shisad_tests.root_module.addImport("config", shisa_config_module);
     shisad_tests.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(shisad_tests.root_module, theme_loader_module);
     shisad_tests.root_module.link_libc = true;
+    linkFseventsFrameworks(shisad_tests, target);
     const shisad_test_run = b.addRunArtifact(shisad_tests);
     const proto_types_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -850,9 +862,11 @@ pub fn build(b: *std.Build) void {
     });
     server_tests.root_module.addImport("vcs_worktree", vcs_worktree_module);
     server_tests.root_module.addImport("vcs_git_libgit2", vcs_git_libgit2_module);
+    server_tests.root_module.addImport("config", shisa_config_module);
     server_tests.root_module.addImport("plugin_lua", plugin_lua_module);
     addThemeImports(server_tests.root_module, theme_loader_module);
     server_tests.root_module.link_libc = true;
+    linkFseventsFrameworks(server_tests, target);
     const server_test_run = b.addRunArtifact(server_tests);
     const zsh_integration = b.addSystemCommand(&.{ "bash", "test/integration/zsh_fake_socket.sh" });
     zsh_integration.step.dependOn(&debug_install.step);
@@ -997,4 +1011,11 @@ pub fn build(b: *std.Build) void {
 
 fn addThemeImports(module: *std.Build.Module, theme_loader: *std.Build.Module) void {
     module.addImport("theme_loader", theme_loader);
+}
+
+fn linkFseventsFrameworks(artifact: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
+    if (target.result.os.tag != .macos) return;
+    artifact.linkFramework("CoreServices");
+    artifact.linkFramework("CoreFoundation");
+    artifact.linkSystemLibrary("dispatch");
 }

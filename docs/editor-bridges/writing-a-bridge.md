@@ -1,6 +1,6 @@
 # Writing A Shisa Bridge In 50 Lines
 
-Editor bridges use the daemon socket and protocol v1 `subscribe` op.
+Editor bridges use the daemon socket and protocol v2 `subscribe` op.
 
 The startup handshake is one length-prefixed JSON frame:
 
@@ -41,7 +41,7 @@ def render(event):
 def main():
     path = os.environ.get("SHISA_SOCKET", default_socket())
     request = {
-        "v": 1,
+        "v": 2,
         "op": "subscribe",
         "request_id": "bridge-50",
         "topics": TOPICS,

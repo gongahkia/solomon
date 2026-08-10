@@ -82,6 +82,19 @@ Allowed core module ids for schema v1:
 
 Unknown module ids are invalid.
 
+## Plugin Configuration
+
+Plugin settings are namespaced by loaded plugin name and are exposed only as `ctx.config` to that plugin's Lua hooks:
+
+```toml
+[plugins."demo-plugin"]
+enabled = true
+label = "ops"
+regions = ["us-east-1", "eu-west-1"]
+```
+
+Table names must use `[plugins."<plugin-name>"]` for a loaded plugin. Keys are bare alphanumeric, `_`, or `-` names. Values may be strings, booleans, integers, or arrays of strings. Unknown settings inside a plugin table are preserved for that plugin; they are not core Shisa options.
+
 ## Per-Module Options
 
 Per-module config lives under `[modules.<id>]`. Option tables may exist only for known module ids.
@@ -141,7 +154,7 @@ Per-module config lives under `[modules.<id>]`. Option tables may exist only for
 | `azure` | bool | `true` | Show Azure subscription context. |
 | `kubernetes` | bool | `true` | Show Kubernetes context and namespace. |
 
-AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/`; Azure subscription is cached from `~/.azure/azureProfile.json`; Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`. The daemon registers invalidation scopes for these paths, but native filesystem-event delivery is not wired into the running daemon yet; current invalidation coverage is exercised through daemon-received test events. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
+AWS profile is resolved from `AWS_PROFILE`; when unset, Shisa reads `~/.aws/config` and uses `[default]` or the first `[profile <name>]` section. GCP project is cached from the active Cloud SDK config file under `~/.config/gcloud/configurations/`; Azure subscription is cached from `~/.azure/azureProfile.json`; Kubernetes context is cached from the first `KUBECONFIG` path, or `~/.kube/config`. The daemon registers native Linux inotify and macOS FSEvents invalidation scopes for these paths. Multiple providers render in one `cloud[...]` segment with ASCII provider markers: `aws`, `gcp`, `az`, and `k8s`.
 
 ### `[modules.cdhint]`
 
@@ -189,8 +202,9 @@ Reads cached token expiry metadata only. Sources are documented in `docs/sso-exp
 - `[prompt].modules` must be an array of unique strings.
 - `[prompt].right_modules` must be an array of unique strings.
 - `[prompt].command_context` must be `"off"`, `"right"`, or `"message"`; configured command names are unique and contain only letters, digits, `_`, `-`, or `.`.
-- `[prompt].command_context_modules` must be an array of unique core module ids.
+- `[prompt].command_context_modules` must be an array of unique core module ids or loaded plugin module ids.
 - Each module in `[prompt].modules` and `[prompt].right_modules` must be a known core module id or a loaded plugin module id.
+- `[plugins."<plugin-name>"]` names an installed-plugin namespace and accepts string, bool, integer, or string-array values.
 - `[modules.<id>]` must reference a known module id.
 - Unknown keys in known tables are invalid.
 - Type mismatch, range violation, duplicate module id, and unknown module id errors must include file, line, and column.

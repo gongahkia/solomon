@@ -260,13 +260,8 @@ shisa_long_running_stop() {
 shisa_prompt_render() {
   local socket_path
   socket_path=$(shisa_socket_path)
-  if [[ ! -S ${socket_path} ]]; then
-    shisa_prompt_fallback
-    return 0
-  fi
-
   local -a args
-  args=(prompt --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  args=(prompt --auto-spawn --shell bash --cwd "${PWD}" --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)

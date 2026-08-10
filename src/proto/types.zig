@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const version: u32 = 1;
+pub const version: u32 = 2;
 pub const max_frame_bytes: u32 = 1024 * 1024;
 
 pub const Op = enum {
@@ -35,43 +35,6 @@ pub const GlyphCaps = enum {
     ascii,
 };
 
-pub const CwdOptions = struct {
-    truncate_to: u8 = 3,
-    home_tilde: bool = true,
-    max_width: u16 = 0,
-};
-
-pub const CloudCtxOptions = struct {
-    aws: bool = true,
-    gcp: bool = true,
-    azure: bool = true,
-    kubernetes: bool = true,
-};
-
-pub const CdhintOptions = struct {
-    enabled: bool = true,
-};
-
-pub const TmuxPaneOptions = struct {
-    enabled: bool = true,
-};
-
-pub const RiskTierColor = enum {
-    fg,
-    muted,
-    accent,
-    success,
-    warning,
-    danger,
-};
-
-pub const RiskTierOptions = struct {
-    unknown_bg: RiskTierColor = .muted,
-    dev_bg: RiskTierColor = .success,
-    staging_bg: RiskTierColor = .warning,
-    prod_bg: RiskTierColor = .danger,
-};
-
 pub const Request = struct {
     v: u32 = version,
     op: Op = .render,
@@ -93,16 +56,10 @@ pub const Request = struct {
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
     trace: bool = false,
-    modules: []const []const u8 = &.{},
-    right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
     rtl: bool = false,
-    rtl_reverse: bool = false,
-    cwd_options: CwdOptions = .{},
-    cloud_ctx: CloudCtxOptions = .{},
-    cdhint: CdhintOptions = .{},
-    tmux_pane_options: TmuxPaneOptions = .{},
-    risk_tier: RiskTierOptions = .{},
+    command_context: bool = false,
+    commandline: ?[]const u8 = null,
 };
 
 pub const Diagnostic = struct {
@@ -238,7 +195,7 @@ fn malformedRequest(field: []const u8, expected: []const u8) ErrorEnvelope {
     };
 }
 
-test "request type carries v1 render inputs" {
+test "request type carries v2 prompt state without configuration" {
     const request = Request{
         .op = .render,
         .cwd = "/tmp",
@@ -259,16 +216,12 @@ test "request type carries v1 render inputs" {
         .env_hash = "abc123",
         .path_env = "/nix/store/bin:/usr/bin",
         .trace = true,
-        .modules = &.{ "cwd", "cdhint" },
-        .right_modules = &.{"time"},
         .tmux_pane = "%1",
-        .cloud_ctx = .{ .azure = false },
-        .cdhint = .{ .enabled = false },
-        .tmux_pane_options = .{ .enabled = false },
-        .risk_tier = .{ .prod_bg = .accent },
+        .command_context = true,
+        .commandline = "kubectl get pods",
     };
 
-    try std.testing.expectEqual(@as(u32, 1), request.v);
+    try std.testing.expectEqual(@as(u32, 2), request.v);
     try std.testing.expectEqual(Op.render, request.op);
     try std.testing.expectEqualStrings("/tmp", request.cwd);
     try std.testing.expectEqual(@as(i32, 1), request.exit);
@@ -286,14 +239,9 @@ test "request type carries v1 render inputs" {
     try std.testing.expectEqualStrings("abc123", request.env_hash.?);
     try std.testing.expectEqualStrings("/nix/store/bin:/usr/bin", request.path_env.?);
     try std.testing.expect(request.trace);
-    try std.testing.expectEqualStrings("cwd", request.modules[0]);
-    try std.testing.expectEqualStrings("cdhint", request.modules[1]);
-    try std.testing.expectEqualStrings("time", request.right_modules[0]);
     try std.testing.expectEqualStrings("%1", request.tmux_pane.?);
-    try std.testing.expect(!request.cloud_ctx.azure);
-    try std.testing.expect(!request.cdhint.enabled);
-    try std.testing.expect(!request.tmux_pane_options.enabled);
-    try std.testing.expectEqual(RiskTierColor.accent, request.risk_tier.prod_bg);
+    try std.testing.expect(request.command_context);
+    try std.testing.expectEqualStrings("kubectl get pods", request.commandline.?);
 }
 
 test "response type carries prompt metadata and optional redraw token" {
@@ -315,7 +263,7 @@ test "response type carries prompt metadata and optional redraw token" {
         .trace = &trace,
     };
 
-    try std.testing.expectEqual(@as(u32, 1), response.v);
+    try std.testing.expectEqual(@as(u32, 2), response.v);
     try std.testing.expectEqualStrings("request-1", response.request_id);
     try std.testing.expectEqualStrings("shisa> ", response.prompt);
     try std.testing.expectEqualStrings("time:01:01", response.right_prompt.?);
@@ -329,12 +277,12 @@ test "response type carries prompt metadata and optional redraw token" {
 
 test "error envelope carries explicit code and structured context" {
     const source =
-        \\{"v":1,"request_id":"request-1","error":{"code":"E_OVERSIZE","message":"frame too large","context":{"max_frame_bytes":1048576}}}
+        \\{"v":2,"request_id":"request-1","error":{"code":"E_OVERSIZE","message":"frame too large","context":{"max_frame_bytes":1048576}}}
     ;
     var parsed = try std.json.parseFromSlice(ErrorEnvelope, std.testing.allocator, source, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
-    try std.testing.expectEqual(@as(u32, 1), parsed.value.v);
+    try std.testing.expectEqual(@as(u32, 2), parsed.value.v);
     try std.testing.expectEqualStrings("request-1", parsed.value.request_id);
     try std.testing.expectEqual(ErrorCode.E_OVERSIZE, parsed.value.@"error".code);
     try std.testing.expectEqualStrings("frame too large", parsed.value.@"error".message);
@@ -370,7 +318,7 @@ test "error code enum exposes canonical protocol codes" {
 test "error context carries machine fields for each code" {
     const allocator = std.testing.allocator;
     const envelopes = [_]ErrorEnvelope{
-        .{ .@"error" = .{ .code = .E_VERSION, .message = "bad version", .context = .{ .field = "v", .highest_supported_version = 1 } } },
+        .{ .@"error" = .{ .code = .E_VERSION, .message = "bad version", .context = .{ .field = "v", .highest_supported_version = 2 } } },
         .{ .@"error" = .{ .code = .E_OVERSIZE, .message = "too large", .context = .{ .max_frame_bytes = max_frame_bytes } } },
         .{ .@"error" = .{ .code = .E_MALFORMED, .message = "bad request", .context = .{ .field = "op", .expected = "render" } } },
         .{ .@"error" = .{ .code = .E_NOT_READY, .message = "pending", .context = .{ .op = "render_continue", .retry_after_ms = 25 } } },
@@ -387,7 +335,7 @@ test "error context carries machine fields for each code" {
         defer parsed.deinit();
         try std.testing.expectEqual(envelope.@"error".code, parsed.value.@"error".code);
         switch (envelope.@"error".code) {
-            .E_VERSION => try std.testing.expectEqual(@as(u32, 1), parsed.value.@"error".context.highest_supported_version.?),
+            .E_VERSION => try std.testing.expectEqual(@as(u32, 2), parsed.value.@"error".context.highest_supported_version.?),
             .E_OVERSIZE => try std.testing.expectEqual(max_frame_bytes, parsed.value.@"error".context.max_frame_bytes.?),
             .E_MALFORMED => try std.testing.expectEqualStrings("render", parsed.value.@"error".context.expected.?),
             .E_NOT_READY => try std.testing.expectEqual(@as(u32, 25), parsed.value.@"error".context.retry_after_ms.?),
@@ -451,21 +399,21 @@ test "json helpers roundtrip request and response" {
 test "decode ignores unknown fields for forward compatibility" {
     const allocator = std.testing.allocator;
     var request = try decodeAlloc(Request, allocator,
-        \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"future_request_field":true}
+        \\{"v":2,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"future_request_field":true}
     );
     defer request.deinit();
     try std.testing.expectEqual(Shell.zsh, request.value.shell);
     try std.testing.expectEqualStrings("/tmp", request.value.cwd);
 
     var response = try decodeAlloc(Response, allocator,
-        \\{"v":1,"request_id":"r1","prompt":"shisa> ","future_response_field":{"nested":1}}
+        \\{"v":2,"request_id":"r1","prompt":"shisa> ","future_response_field":{"nested":1}}
     );
     defer response.deinit();
     try std.testing.expectEqualStrings("r1", response.value.request_id);
     try std.testing.expectEqualStrings("shisa> ", response.value.prompt);
 
     var envelope = try decodeAlloc(ErrorEnvelope, allocator,
-        \\{"v":1,"request_id":"r1","error":{"code":"E_VERSION","message":"bad version","context":{},"future_error_field":"ignored"},"future_envelope_field":1}
+        \\{"v":2,"request_id":"r1","error":{"code":"E_VERSION","message":"bad version","context":{},"future_error_field":"ignored"},"future_envelope_field":1}
     );
     defer envelope.deinit();
     try std.testing.expectEqual(ErrorCode.E_VERSION, envelope.value.@"error".code);
@@ -475,20 +423,20 @@ test "decode ignores unknown fields for forward compatibility" {
 test "validates required request fields with structured errors" {
     const allocator = std.testing.allocator;
     const missing = (try validateRequestPayload(allocator,
-        \\{"v":1,"op":"render","shell":"zsh","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+        \\{"v":2,"op":"render","shell":"zsh","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
     )).?;
     try std.testing.expectEqual(ErrorCode.E_MALFORMED, missing.@"error".code);
     try std.testing.expectEqualStrings("cwd", missing.@"error".context.field.?);
     try std.testing.expectEqualStrings("required field", missing.@"error".context.expected.?);
 
     const bad_version = (try validateRequestPayload(allocator,
-        \\{"v":2,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+        \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
     )).?;
     try std.testing.expectEqual(ErrorCode.E_VERSION, bad_version.@"error".code);
     try std.testing.expectEqual(@as(u32, version), bad_version.@"error".context.highest_supported_version.?);
 
     const valid = try validateRequestPayload(allocator,
-        \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+        \\{"v":2,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/ttys001","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
     );
     try std.testing.expect(valid == null);
 }
@@ -500,7 +448,7 @@ test "fuzz request decoder invariants" {
             "{}",
             "{\"v\":\"1\"}",
             "{\"v\":2}",
-            \\{"v":1,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/tty","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
+            \\{"v":2,"op":"render","shell":"zsh","cwd":"/tmp","exit":0,"jobs":0,"duration_ms":1,"cols":80,"rows":24,"tty":"/dev/tty","color_caps":"truecolor","glyph_caps":"unicode","user_id":501,"session":"s1","request_id":"r1"}
         },
     });
 }
@@ -544,7 +492,7 @@ test "snapshots every op and protocol shape" {
         };
         const request_json = try encodeAlloc(allocator, request);
         defer allocator.free(request_json);
-        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"trace\":false,\"modules\":[],\"right_modules\":[],\"rtl\":false,\"rtl_reverse\":false,\"cwd_options\":{{\"truncate_to\":3,\"home_tilde\":true,\"max_width\":0}},\"cloud_ctx\":{{\"aws\":true,\"gcp\":true,\"azure\":true,\"kubernetes\":true}},\"cdhint\":{{\"enabled\":true}},\"tmux_pane_options\":{{\"enabled\":true}},\"risk_tier\":{{\"unknown_bg\":\"muted\",\"dev_bg\":\"success\",\"staging_bg\":\"warning\",\"prod_bg\":\"danger\"}}}}", .{ op_name, request_id });
+        const expected_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"{s}\",\"cwd\":\"/tmp\",\"exit\":0,\"jobs\":0,\"duration_ms\":1,\"time\":false,\"no_async\":false,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"tty\":\"/dev/ttys001\",\"color_caps\":\"truecolor\",\"glyph_caps\":\"unicode\",\"user_id\":501,\"session\":\"session-1\",\"request_id\":\"{s}\",\"trace\":false,\"rtl\":false,\"command_context\":false}}", .{ op_name, request_id });
         defer allocator.free(expected_request);
         try std.testing.expectEqualStrings(expected_request, request_json);
 
@@ -559,7 +507,7 @@ test "snapshots every op and protocol shape" {
         };
         const response_json = try encodeAlloc(allocator, response);
         defer allocator.free(response_json);
-        const expected_response = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"shisa> \",\"redraw_token\":\"token\",\"trailer\":\"right\",\"diagnostics\":[{{\"code\":\"snapshot\",\"message\":\"ok\"}}],\"elapsed_us\":7}}", .{request_id});
+        const expected_response = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"prompt\":\"shisa> \",\"redraw_token\":\"token\",\"trailer\":\"right\",\"diagnostics\":[{{\"code\":\"snapshot\",\"message\":\"ok\"}}],\"elapsed_us\":7}}", .{request_id});
         defer allocator.free(expected_response);
         try std.testing.expectEqualStrings(expected_response, response_json);
 
@@ -573,7 +521,7 @@ test "snapshots every op and protocol shape" {
         };
         const error_json = try encodeAlloc(allocator, envelope);
         defer allocator.free(error_json);
-        const expected_error = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"snapshot error\",\"context\":{{\"field\":\"op\"}}}}}}", .{request_id});
+        const expected_error = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"snapshot error\",\"context\":{{\"field\":\"op\"}}}}}}", .{request_id});
         defer allocator.free(expected_error);
         try std.testing.expectEqualStrings(expected_error, error_json);
     }

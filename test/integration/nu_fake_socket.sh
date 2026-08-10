@@ -42,7 +42,7 @@ server = UNIXServer.new(sock)
   abort("missing right modules") unless payload.include?('"right_modules":["time"]')
   abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
   abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
-  response = '{"v":1,"prompt":"fake-nu> ","right_prompt":"right-nu","redraw_token":null}'
+  response = '{"v":2,"prompt":"fake-nu> ","right_prompt":"right-nu","redraw_token":null}'
   conn.write([response.bytesize].pack("N"))
   conn.write(response)
   conn.close

@@ -132,12 +132,9 @@ function shisa_prompt_render
     shisa_long_running_stop
     shisa_cmd_complete_bell $duration_ms
 
-    set -l args prompt --shell fish --cwd "$PWD" --exit "$last_status" --jobs "$jobs_count" --duration-ms "$duration_ms" --socket "$socket_path"
+    set -l args prompt --auto-spawn --shell fish --cwd "$PWD" --exit "$last_status" --jobs "$jobs_count" --duration-ms "$duration_ms" --socket "$socket_path"
     if test "$SHISA_INSTANT" = 1
         set args $args --instant
-    else if not test -S "$socket_path"
-        shisa_prompt_fallback
-        return 0
     end
     if test "$SHISA_A11Y" = 1
         set args $args --a11y

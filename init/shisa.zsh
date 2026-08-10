@@ -132,7 +132,10 @@ shisa_detect_rtl_locale() {
 }
 
 typeset -g SHISA_RTL=${SHISA_RTL:-$(shisa_detect_rtl_locale)}
-typeset -g SHISA_COMMAND_CONTEXT_TARGET=${SHISA_COMMAND_CONTEXT_TARGET:-$(shisa_command_context_target_from_config)}
+# Command-context policy belongs to the daemon. Start in the scheduling mode so
+# the first asynchronous request can discover an enabled context without
+# parsing shisa.toml in the shell process.
+typeset -g SHISA_COMMAND_CONTEXT_TARGET=${SHISA_COMMAND_CONTEXT_TARGET:-right}
 typeset -g SHISA_COMMAND_CONTEXT_DEBOUNCE_SECONDS=${SHISA_COMMAND_CONTEXT_DEBOUNCE_SECONDS:-0.08}
 typeset -g SHISA_COMMAND_CONTEXT_BUFFER=
 typeset -g SHISA_COMMAND_CONTEXT_VALUE=
@@ -450,13 +453,8 @@ shisa_prompt_render() {
   emulate -L zsh
   local socket_path
   socket_path=$(shisa_socket_path)
-  if [[ ! -S ${socket_path} ]]; then
-    shisa_prompt_fallback
-    return 0
-  fi
-
   local -a args
-  args=(prompt --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  args=(prompt --auto-spawn --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)

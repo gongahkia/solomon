@@ -26,7 +26,9 @@ The store owns keys and outputs. Returned output is valid only until the store i
 
 ### Rendered prompt store
 
-`src/daemon/prompt_cache.zig` wraps the generic store for rendered prompt strings.
+`Server.prompt_cache` uses the generic store for rendered prompt strings. The
+older `src/daemon/prompt_cache.zig` wrapper documents the same key shape but
+is not the server's storage owner.
 
 The key is:
 
@@ -38,7 +40,9 @@ The key is:
 - `--no-async` flag
 - `cache_rev`
 
-This is the intended L1 rendered-prompt cache from RFC-0004. Current server render code does not call this store; `Server.renderResponse` reads request state and calls `dispatcher.renderDefault` directly.
+This is the implemented L1 rendered-prompt cache from RFC-0004. `Server.renderResponse`
+looks up `self.prompt_cache` before dispatching modules and writes completed,
+non-pending left prompts back after rendering.
 
 ### Daemon-owned module caches
 
@@ -87,7 +91,10 @@ These are data-source caches, not entries in `src/daemon/cache.zig`.
 
 ### Filesystem scopes
 
-`src/daemon/fsnotify.zig` stores debounced watch registrations. It selects a backend label from the OS (`fsevents`, `inotify`, or `unsupported`), owns registered paths, deduplicates by module/cwd, and emits invalidations after the scope debounce window when an event is delivered to it.
+`src/daemon/fsnotify.zig` stores debounced watch registrations and feeds them
+from native Linux inotify and macOS FSEvents sources. It owns registered paths,
+merges paths for the same module/cwd scope, and emits invalidations after the
+scope debounce window.
 
 `src/daemon/windows_fsnotify.zig` covers request planning, `FILE_NOTIFY_INFORMATION` parsing, and a Windows-only synchronous `ReadDirectoryChangesW` call wrapper. The daemon reports the Windows fsnotify backend on Windows; broader runtime event-loop integration remains tracked by the Windows native RFC.
 
@@ -98,7 +105,18 @@ Current registered scopes:
 - Azure: `~/.azure/azureProfile.json`.
 - Kubernetes: resolved kubeconfig path.
 
-`Server.renderResponse` drains pending invalidations before rendering, then registers git and cloud scopes for the current request. A delivered filesystem invalidation clears matching daemon-owned caches. Native FSEvents/inotify event ingestion is not yet connected to this registration layer, so a running daemon does not currently observe host file changes on its own; tests exercise the invalidation contract through `Server.recordFsEvent`.
+`Server` drains pending invalidations before rendering and while idle, then
+registers git and cloud scopes for the current request. Linux inotify watches
+recursive directories, follows newly created descendants, and treats queue
+overflow as a conservative invalidation of every registered scope. macOS
+FSEvents uses file-event streams and applies the same conservative fallback
+when the stream reports dropped or root-change events. The test seam
+`Server.recordFsEvent` remains for deterministic injection.
+
+Native watch registration is capped at 8192 paths. When that budget or the
+kernel watcher is unavailable, the watcher reports a degraded state and
+conservatively invalidates registered scopes once per second rather than
+consuming an unbounded share of the user's inotify quota.
 
 ### TTL and LRU
 
@@ -124,7 +142,9 @@ Async caches use `generation` as a stale-result guard. Invalidation or cwd chang
 
 ## Observability
 
-- `metrics` response includes live validity, in-flight state, generation, fsnotify backend, and registration count.
+- `metrics` response includes live validity, in-flight state, generation,
+  fsnotify backend, registration count, native watch count, degradation state,
+  and overflow count.
 - `shisa cache stats` prints cache-shape defaults and zero entry counts; it does not query live daemon cache contents in the current CLI path.
 - Slow module warnings log the first module in a render that exceeds the dispatcher threshold.
 
@@ -135,13 +155,12 @@ Async caches use `generation` as a stale-result guard. Invalidation or cwd chang
 | Repeated cwd changes | Async caches cancel old work and reject stale worker results by generation. |
 | Dirty repo churn | Git fs events debounce before cache invalidation. |
 | Worker command hangs after invalidation | Active child PID is killed when known. |
-| Watcher pressure | Linux inotify limits are counted and warned through daemon logs. |
+| Watcher pressure | Native watcher paths are capped; Linux inotify limits are also counted and warned through daemon logs. |
 | Unsupported fsnotify backend | Backend is reported as `unsupported`; render still works, but event-driven freshness depends on recorded events. |
 | Cache growth | Generic store uses max entry count and TTL; daemon-owned async caches hold one segment per cache. |
 
 ## Current Gaps
 
-- The rendered prompt cache is implemented and tested but not wired into `Server.renderResponse`.
 - The reusable module-output `Store` is implemented and tested but the server currently relies on module-owned caches for git, language versions, and cloud context.
 - RFC-0004's shared external-command L3 cache is a design target; current command results are folded into module-owned segments after async probes complete.
 - `shisa pin` writes a pins file, but `src/daemon/cache.zig` eviction does not read pin state in current source.

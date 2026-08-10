@@ -11,11 +11,11 @@ The command writes one JSON object to standard output and uses the existing loca
 
 ## Contract
 
-The response has protocol version `v: 1` and schema identifier `shisa.context/v1`:
+The response has protocol version `v: 2` and schema identifier `shisa.context/v1`:
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "schema": "shisa.context/v1",
   "request_id": "context-cli",
   "context": {
@@ -49,7 +49,7 @@ Cloud cache values are process-wide and currently use `unknown` or `ready`. The 
 Clients that need to avoid spawning `shisa` can connect to the same local socket and send one length-prefixed UTF-8 JSON request. The frame is a four-byte big-endian unsigned payload length followed by JSON:
 
 ```json
-{"v":1,"op":"context","cwd":"/work/service","request_id":"statusline-42"}
+{"v":2,"op":"context","cwd":"/work/service","request_id":"statusline-42"}
 ```
 
 The daemon returns one frame containing the response object, then closes the connection. Invalid requests receive a regular error envelope with `E_MALFORMED`. The request is read-only by design; use the existing `reload` operation only when a caller is authorized to refresh daemon configuration.

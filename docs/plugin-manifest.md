@@ -78,4 +78,4 @@ Lifecycle contracts and wall-time limits:
 | `pre_exec(ctx)` | 1 ms | Inspect a pending command and return `nil` or a decision table such as `{ allow = false, message = "..." }`. Requires `capabilities.pre_exec = true`. |
 | `on_unload(ctx)` | 1 ms | Release transient resources before reload, disable, or daemon shutdown. Return value is ignored. |
 
-All lifecycle hooks share the current Lua runtime budget: 1 ms per call. Debug builds use a 5 ms hard-stop window for diagnostics; non-debug builds fail at the 1 ms budget. Current runtime validation stores these hook names in the manifest. Daemon hook invocation is tracked separately from manifest validation.
+All lifecycle hooks share the current Lua runtime budget: 1 ms per call. Debug builds use a 5 ms hard-stop window for diagnostics; non-debug builds fail at the 1 ms budget. The daemon invokes declared hooks from a retained per-plugin VM; render remains cache-only, while update runs on the bounded background queue. Pre-exec hook failures and CPU-budget timeouts are audited and fail open.

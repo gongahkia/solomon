@@ -62,7 +62,16 @@ const LuaNext = *const fn (?*LuaState, CInt) callconv(.c) CInt;
 const LuaSetTop = *const fn (?*LuaState, CInt) callconv(.c) void;
 const LuaSetHook = *const fn (?*LuaState, ?LuaHook, CInt, CInt) callconv(.c) CInt;
 const LuaPushString = *const fn (?*LuaState, [*:0]const u8) callconv(.c) ?[*:0]const u8;
-const LuaError = *const fn (?*LuaState) callconv(.c) CInt;
+const LuaPushLString = *const fn (?*LuaState, [*]const u8, usize) callconv(.c) ?[*:0]const u8;
+const LuaPushBoolean = *const fn (?*LuaState, CInt) callconv(.c) void;
+const LuaPushLightUserData = *const fn (?*LuaState, ?*anyopaque) callconv(.c) void;
+const LuaPushCClosure = *const fn (?*LuaState, LuaCFunction, CInt) callconv(.c) void;
+const LuaToUserData = *const fn (?*LuaState, CInt) callconv(.c) ?*anyopaque;
+/// `lua_error` does not return: Lua performs a longjmp to the active protected
+/// call. Declaring that control flow accurately keeps Zig from generating a
+/// return path through the callback frame.
+const LuaError = *const fn (?*LuaState) callconv(.c) noreturn;
+const LuaCFunction = *const fn (?*LuaState) callconv(.c) CInt;
 
 const Api = struct {
     lua_newstate: LuaNewState,
@@ -84,7 +93,40 @@ const Api = struct {
     lua_settop: LuaSetTop,
     lua_sethook: LuaSetHook,
     lua_pushstring: LuaPushString,
+    lua_pushlstring: LuaPushLString,
+    lua_pushboolean: LuaPushBoolean,
+    lua_pushlightuserdata: LuaPushLightUserData,
+    lua_pushcclosure: LuaPushCClosure,
+    lua_touserdata: LuaToUserData,
     lua_error: LuaError,
+};
+
+/// The host API is installed only after the manifest has been validated. Lua
+/// code can access it solely through a lifecycle context constructed by Shisa;
+/// the manifest itself therefore cannot perform host calls while loading.
+pub const HostMethod = enum(c_int) {
+    fs_read,
+    fs_watch,
+    env_get,
+    secret_get,
+    exec_run,
+    net_get,
+    cache_get,
+    cache_set,
+};
+
+pub const HostCallback = *const fn (*Runtime, ?*anyopaque, HostMethod) callconv(.c) CInt;
+
+const HostClosure = struct {
+    host: *HostApi,
+    method: HostMethod,
+};
+
+pub const HostApi = struct {
+    callback: HostCallback,
+    user_data: ?*anyopaque,
+    runtime: ?*Runtime = null,
+    closures: [@typeInfo(HostMethod).@"enum".fields.len]HostClosure = undefined,
 };
 
 pub const OwnedManifest = struct {
@@ -243,6 +285,151 @@ pub const Runtime = struct {
         return is_nil;
     }
 
+    /// Bind the stable host state for this VM. Every callback receives a
+    /// pointer to this runtime and an opaque host-owned context; neither is
+    /// visible as a mutable Lua value.
+    pub fn installHostApi(self: *Runtime, host: *HostApi) !void {
+        host.runtime = self;
+        inline for (std.meta.fields(HostMethod), 0..) |field, index| {
+            host.closures[index] = .{
+                .host = host,
+                .method = @enumFromInt(field.value),
+            };
+            self.api.lua_pushlightuserdata(self.state, @ptrCast(&host.closures[index]));
+            self.api.lua_pushcclosure(self.state, luaHostCallback, 1);
+            try self.setGlobal(hostMethodName(@enumFromInt(field.value)));
+        }
+    }
+
+    /// Borrow the string argument currently on the stack of a host callback.
+    /// It must not outlive the callback invocation.
+    pub fn hostArgumentString(self: *Runtime, index: CInt) ?[]const u8 {
+        if (self.api.lua_type(self.state, index) != lua_tstring) return null;
+        var len: usize = 0;
+        const ptr = self.api.lua_tolstring(self.state, index, &len) orelse return null;
+        return ptr[0..len];
+    }
+
+    pub fn hostArgumentStringArrayAlloc(self: *Runtime, allocator: std.mem.Allocator, index: CInt) !?[][]u8 {
+        if (self.api.lua_type(self.state, index) != lua_ttable) return null;
+        const len = self.api.lua_objlen(self.state, index);
+        const out = try allocator.alloc([]u8, len);
+        var initialized: usize = 0;
+        errdefer {
+            for (out[0..initialized]) |value| allocator.free(value);
+            allocator.free(out);
+        }
+        for (out, 0..) |*slot, zero_index| {
+            self.api.lua_rawgeti(self.state, index, @intCast(zero_index + 1));
+            defer self.pop(1);
+            const value = self.hostArgumentString(-1) orelse return error.InvalidHostArgument;
+            slot.* = try allocator.dupe(u8, value);
+            initialized += 1;
+        }
+        return out;
+    }
+
+    pub fn hostPushString(self: *Runtime, value: []const u8) void {
+        _ = self.api.lua_pushlstring(self.state, value.ptr, value.len);
+    }
+
+    pub fn hostPushBoolean(self: *Runtime, value: bool) void {
+        self.api.lua_pushboolean(self.state, if (value) 1 else 0);
+    }
+
+    pub fn hostPushNil(self: *Runtime) void {
+        self.api.lua_pushnil(self.state);
+    }
+
+    /// Invoke a manifest-declared global with a host-created Lua expression.
+    /// The expression is deliberately supplied by Zig, never by plugin input;
+    /// it is used to construct the read-only lifecycle context without
+    /// exposing the Lua loader or string-evaluation APIs to plugins.
+    pub fn callGlobalStringAlloc(self: *Runtime, name: []const u8, context_expression: []const u8) !?[]u8 {
+        const quoted_name = try luaQuoteAlloc(self.allocator, name);
+        defer self.allocator.free(quoted_name);
+        const source = try std.fmt.allocPrint(
+            self.allocator,
+            "local f = _G[{s}]; if type(f) ~= 'function' then return nil end; return f({s})",
+            .{ quoted_name, context_expression },
+        );
+        defer self.allocator.free(source);
+        try self.loadBuffer(source, "shisa-plugin-hook");
+        try self.protectedCall(0, 1);
+        defer self.clearStack();
+        return switch (self.api.lua_type(self.state, -1)) {
+            lua_tnil => null,
+            lua_tstring => try self.stringAt(-1),
+            else => error.InvalidPluginHookResult,
+        };
+    }
+
+    pub fn callGlobalNoResult(self: *Runtime, name: []const u8, context_expression: []const u8) !void {
+        const quoted_name = try luaQuoteAlloc(self.allocator, name);
+        defer self.allocator.free(quoted_name);
+        const source = try std.fmt.allocPrint(
+            self.allocator,
+            "local f = _G[{s}]; if type(f) == 'function' then f({s}) end",
+            .{ quoted_name, context_expression },
+        );
+        defer self.allocator.free(source);
+        try self.loadBuffer(source, "shisa-plugin-hook");
+        try self.protectedCall(0, 0);
+        self.clearStack();
+    }
+
+    pub const PreexecDecision = struct {
+        allow: ?bool = null,
+        message: ?[]u8 = null,
+
+        pub fn deinit(self: *PreexecDecision, allocator: std.mem.Allocator) void {
+            if (self.message) |value| allocator.free(value);
+            self.* = undefined;
+        }
+    };
+
+    /// A pre-exec hook may return nil (no opinion) or a table containing an
+    /// optional boolean `allow` and optional string `message`.
+    pub fn callGlobalPreexecDecisionAlloc(self: *Runtime, name: []const u8, context_expression: []const u8) !?PreexecDecision {
+        const quoted_name = try luaQuoteAlloc(self.allocator, name);
+        defer self.allocator.free(quoted_name);
+        const source = try std.fmt.allocPrint(
+            self.allocator,
+            "local f = _G[{s}]; if type(f) ~= 'function' then return nil end; return f({s})",
+            .{ quoted_name, context_expression },
+        );
+        defer self.allocator.free(source);
+        try self.loadBuffer(source, "shisa-plugin-preexec");
+        try self.protectedCall(0, 1);
+        defer self.clearStack();
+        if (self.api.lua_type(self.state, -1) == lua_tnil) return null;
+        if (self.api.lua_type(self.state, -1) != lua_ttable) return error.InvalidPluginHookResult;
+        const table_index = self.api.lua_gettop(self.state);
+        var decision = PreexecDecision{};
+        errdefer decision.deinit(self.allocator);
+        {
+            try self.pushField(table_index, "allow");
+            defer self.pop(1);
+            const allow_type = self.api.lua_type(self.state, -1);
+            if (allow_type == lua_tboolean) {
+                decision.allow = self.api.lua_toboolean(self.state, -1) != 0;
+            } else if (allow_type != lua_tnil) {
+                return error.InvalidPluginHookResult;
+            }
+        }
+        {
+            try self.pushField(table_index, "message");
+            defer self.pop(1);
+            const message_type = self.api.lua_type(self.state, -1);
+            if (message_type == lua_tstring) {
+                decision.message = try self.stringAt(-1);
+            } else if (message_type != lua_tnil) {
+                return error.InvalidPluginHookResult;
+            }
+        }
+        return decision;
+    }
+
     /// plugin-api: sandbox | removed_globals | `os`, `io`, `package`, `debug`, `dofile`, `loadfile` | always | sandbox startup removes direct shell, filesystem, loader, debug, and package APIs from Lua globals.
     /// plugin-api: sandbox | require | project-local module name | opt-in | `initSandboxedWithOptions(.require_root)` allows `require` only through `<root>/?.lua` and `<root>/?/init.lua`.
     fn stripDangerousGlobals(self: *Runtime, keep_require: bool) !void {
@@ -279,6 +466,12 @@ pub const Runtime = struct {
         const global = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(global);
         self.api.lua_pushnil(self.state);
+        self.api.lua_setfield(self.state, lua_globalsindex, global.ptr);
+    }
+
+    fn setGlobal(self: *Runtime, name: []const u8) !void {
+        const global = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(global);
         self.api.lua_setfield(self.state, lua_globalsindex, global.ptr);
     }
 
@@ -654,6 +847,29 @@ const LuaExecutionBudget = struct {
 threadlocal var active_lua_budget: ?*LuaExecutionBudget = null;
 threadlocal var active_lua_api: ?*const Api = null;
 
+const lua_first_upvalue_index = lua_globalsindex - 1;
+
+fn luaHostCallback(state: ?*LuaState) callconv(.c) CInt {
+    const api = active_lua_api orelse return 0;
+    const raw_closure = api.lua_touserdata(state, lua_first_upvalue_index) orelse return 0;
+    const closure: *HostClosure = @ptrCast(@alignCast(raw_closure));
+    const runtime = closure.host.runtime orelse return 0;
+    return closure.host.callback(runtime, closure.host.user_data, closure.method);
+}
+
+fn hostMethodName(method: HostMethod) []const u8 {
+    return switch (method) {
+        .fs_read => "_shisa_fs_read",
+        .fs_watch => "_shisa_fs_watch",
+        .env_get => "_shisa_env_get",
+        .secret_get => "_shisa_secret_get",
+        .exec_run => "_shisa_exec_run",
+        .net_get => "_shisa_net_get",
+        .cache_get => "_shisa_cache_get",
+        .cache_set => "_shisa_cache_set",
+    };
+}
+
 fn luaBudgetHook(state: ?*LuaState, debug: ?*LuaDebug) callconv(.c) void {
     _ = debug;
     const budget = active_lua_budget orelse return;
@@ -661,7 +877,7 @@ fn luaBudgetHook(state: ?*LuaState, debug: ?*LuaDebug) callconv(.c) void {
     budget.hit_hard_limit = true;
     const api = active_lua_api orelse return;
     _ = api.lua_pushstring(state, "shisa plugin cpu budget exceeded");
-    _ = api.lua_error(state);
+    api.lua_error(state);
 }
 
 fn elapsedNsSince(start_ns: i128) u64 {
@@ -759,6 +975,11 @@ fn loadApi(lib: *std.DynLib) !Api {
         .lua_settop = lib.lookup(LuaSetTop, "lua_settop") orelse return error.LuaSymbolMissing,
         .lua_sethook = lib.lookup(LuaSetHook, "lua_sethook") orelse return error.LuaSymbolMissing,
         .lua_pushstring = lib.lookup(LuaPushString, "lua_pushstring") orelse return error.LuaSymbolMissing,
+        .lua_pushlstring = lib.lookup(LuaPushLString, "lua_pushlstring") orelse return error.LuaSymbolMissing,
+        .lua_pushboolean = lib.lookup(LuaPushBoolean, "lua_pushboolean") orelse return error.LuaSymbolMissing,
+        .lua_pushlightuserdata = lib.lookup(LuaPushLightUserData, "lua_pushlightuserdata") orelse return error.LuaSymbolMissing,
+        .lua_pushcclosure = lib.lookup(LuaPushCClosure, "lua_pushcclosure") orelse return error.LuaSymbolMissing,
+        .lua_touserdata = lib.lookup(LuaToUserData, "lua_touserdata") orelse return error.LuaSymbolMissing,
         .lua_error = lib.lookup(LuaError, "lua_error") orelse return error.LuaSymbolMissing,
     };
 }
@@ -772,6 +993,37 @@ test "loads luajit and runs code" {
 
     try runtime.doString("shisa_test_value = 40 + 2");
     try std.testing.expect(!(try runtime.globalIsNil("shisa_test_value")));
+}
+
+const HostBridgeTestState = struct {
+    called: bool = false,
+};
+
+fn hostBridgeTestCallback(runtime: *Runtime, user_data: ?*anyopaque, method: HostMethod) callconv(.c) CInt {
+    const raw_state = user_data orelse return 0;
+    const state: *HostBridgeTestState = @ptrCast(@alignCast(raw_state));
+    if (method != .cache_get) return 0;
+    const key = runtime.hostArgumentString(1) orelse return 0;
+    if (!std.mem.eql(u8, key, "key")) return 0;
+    state.called = true;
+    runtime.hostPushString("value");
+    return 1;
+}
+
+test "sandboxed hooks can call installed host APIs" {
+    var runtime = Runtime.initSandboxed(std.testing.allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    defer runtime.deinit();
+    var state = HostBridgeTestState{};
+    var host = HostApi{ .callback = hostBridgeTestCallback, .user_data = @ptrCast(&state) };
+    try runtime.installHostApi(&host);
+    try runtime.doString("function render(ctx) return ctx.cache.get('key') end");
+    const rendered = try runtime.callGlobalStringAlloc("render", "{ cache = { get = _shisa_cache_get } }");
+    defer if (rendered) |value| std.testing.allocator.free(value);
+    try std.testing.expect(state.called);
+    try std.testing.expectEqualStrings("value", rendered.?);
 }
 
 test "selected plugin Lua VM is LuaJIT" {

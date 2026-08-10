@@ -901,13 +901,16 @@ fn explainAlloc(allocator: std.mem.Allocator, parsed: shisa_config.Config) ![]u8
 
     try cli_util.appendFmt(allocator, &out, "theme: {s}\n", .{parsed.theme});
     try out.appendSlice(allocator, "pipeline:\n");
-    for (parsed.prompt_modules, 0..) |module_id, index| {
-        try cli_util.appendFmt(
-            allocator,
-            &out,
-            "  {d}. {s} ({s})\n",
-            .{ index + 1, shisa_config.moduleIdName(module_id), shisa_config.moduleExecutionClass(module_id) },
-        );
+    for (parsed.prompt_module_order, 0..) |entry, index| {
+        switch (entry) {
+            .core => |module_id| try cli_util.appendFmt(
+                allocator,
+                &out,
+                "  {d}. {s} ({s})\n",
+                .{ index + 1, shisa_config.moduleIdName(module_id), shisa_config.moduleExecutionClass(module_id) },
+            ),
+            .plugin => |module_id| try cli_util.appendFmt(allocator, &out, "  {d}. {s} (plugin)\n", .{ index + 1, module_id }),
+        }
     }
 
     return try out.toOwnedSlice(allocator);
@@ -931,8 +934,11 @@ fn explainCommandContextAlloc(allocator: std.mem.Allocator, parsed: shisa_config
     for (parsed.command_context.commands) |command| {
         if (!std.mem.eql(u8, command, executable)) continue;
         try cli_util.appendFmt(allocator, &out, "  state: shown\n  target: {s}\n  reason: executable matches command_context_commands\n  modules:", .{@tagName(parsed.command_context.target)});
-        for (parsed.command_context.modules) |module_id| {
-            try cli_util.appendFmt(allocator, &out, " {s}", .{shisa_config.moduleIdName(module_id)});
+        for (parsed.command_context.module_order) |entry| {
+            switch (entry) {
+                .core => |module_id| try cli_util.appendFmt(allocator, &out, " {s}", .{shisa_config.moduleIdName(module_id)}),
+                .plugin => |module_id| try cli_util.appendFmt(allocator, &out, " {s}", .{module_id}),
+            }
         }
         try out.append(allocator, '\n');
         return out.toOwnedSlice(allocator);

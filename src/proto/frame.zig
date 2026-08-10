@@ -118,12 +118,6 @@ test "property wire protocol request frame roundtrip" {
             .user_id = random.intRangeAtMost(u32, 1, 65535),
             .session = sessions[random.intRangeAtMost(usize, 0, sessions.len - 1)],
             .request_id = request_id,
-            .cloud_ctx = .{
-                .aws = random.boolean(),
-                .gcp = random.boolean(),
-                .azure = random.boolean(),
-                .kubernetes = random.boolean(),
-            },
         };
 
         const payload = try types.encodeAlloc(allocator, request);
@@ -151,10 +145,6 @@ test "property wire protocol request frame roundtrip" {
         try std.testing.expectEqual(request.user_id.?, parsed.value.user_id.?);
         try std.testing.expectEqualStrings(request.session.?, parsed.value.session.?);
         try std.testing.expectEqualStrings(request.request_id, parsed.value.request_id);
-        try std.testing.expectEqual(request.cloud_ctx.aws, parsed.value.cloud_ctx.aws);
-        try std.testing.expectEqual(request.cloud_ctx.gcp, parsed.value.cloud_ctx.gcp);
-        try std.testing.expectEqual(request.cloud_ctx.azure, parsed.value.cloud_ctx.azure);
-        try std.testing.expectEqual(request.cloud_ctx.kubernetes, parsed.value.cloud_ctx.kubernetes);
     }
 }
 

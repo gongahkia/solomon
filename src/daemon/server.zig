@@ -20,6 +20,7 @@ const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
 const plugin_host = @import("plugin_host.zig");
+const shisa_config = @import("config");
 const win = std.os.windows;
 
 extern "kernel32" fn ConnectNamedPipe(hNamedPipe: win.HANDLE, lpOverlapped: ?*win.OVERLAPPED) callconv(.winapi) win.BOOL;
@@ -31,10 +32,11 @@ const max_frame_bytes = 1024 * 1024;
 const max_config_bytes = 1024 * 1024;
 pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
+const interactive_frame_timeout_ms: i32 = 5;
 const render_histogram_buckets = 5;
 const prompt_cache_module = "render_prompt";
 pub const daemon_version = "0.1.0-dev";
-pub const protocol_version: u32 = 1;
+pub const protocol_version: u32 = 2;
 const default_config_text =
     \\version = 1
     \\theme = "plain"
@@ -45,7 +47,7 @@ const default_config_text =
 ;
 
 const RenderRequest = struct {
-    v: u32 = 1,
+    v: u32 = protocol_version,
     op: []const u8 = "render",
     cwd: []const u8,
     exit: i32 = 0,
@@ -58,11 +60,16 @@ const RenderRequest = struct {
     rows: u16 = 24,
     color_caps: RequestColorCaps = .truecolor,
     glyph_caps: RequestGlyphCaps = .unicode,
-    theme: []const u8 = "plain",
     request_id: []const u8 = "",
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
     trace: bool = false,
+    command_context: bool = false,
+    commandline: ?[]const u8 = null,
+    // Kept as ignored parser fields so internal cache-key regression tests can
+    // continue to construct historical request shapes while protocol v2 no
+    // longer accepts configuration from clients.
+    theme: []const u8 = "plain",
     modules: []const []const u8 = &.{},
     right_modules: []const []const u8 = &.{},
     tmux_pane: ?[]const u8 = null,
@@ -90,7 +97,7 @@ const RequestGlyphCaps = enum {
 };
 
 const PreexecRequest = struct {
-    v: u32 = 1,
+    v: u32 = protocol_version,
     kind: []const u8 = "",
     cwd: []const u8 = "",
     shell: []const u8 = "",
@@ -99,7 +106,7 @@ const PreexecRequest = struct {
 };
 
 const MetricsRequest = struct {
-    v: u32 = 1,
+    v: u32 = protocol_version,
     op: []const u8 = "metrics",
     request_id: []const u8 = "",
     format: []const u8 = "json",
@@ -200,6 +207,21 @@ const RenderCacheContext = struct {
     snapshot: RenderCacheSnapshot = .{},
 };
 
+const RuntimeSnapshot = struct {
+    config: shisa_config.Config,
+    style: RenderStyleState,
+
+    fn deinit(self: *RuntimeSnapshot, allocator: std.mem.Allocator) void {
+        self.config.deinit(allocator);
+        self.style.deinit(allocator);
+        self.* = undefined;
+    }
+
+    fn styleFor(self: *const RuntimeSnapshot, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) dispatcher.StyleConfig {
+        return self.style.styleFor(color_caps, glyph_caps);
+    }
+};
+
 const PosixServer = struct {
     socket_path: []const u8,
     listener: std.net.Server,
@@ -221,6 +243,11 @@ const PosixServer = struct {
     cost_refresh_state: cost_refresh.State = .{},
     reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
     reload_state: plugin_host.ReloadState = .{},
+    runtime_snapshot: ?RuntimeSnapshot = null,
+    plugin_instances: []plugin_host.Instance = &.{},
+    plugin_scheduler: ?*plugin_host.UpdateScheduler = null,
+    request_mutex: std.Thread.Mutex = .{},
+    connection_pool: ?*ConnectionPool = null,
     config_path_override: ?[]const u8 = null,
     plugins_dir_override: ?[]const u8 = null,
 
@@ -245,22 +272,31 @@ const PosixServer = struct {
             .kernel_backlog = 128,
         });
 
-        return .{
+        var server: Server = .{
             .socket_path = socket_path,
             .listener = listener,
             .logger = logger,
             .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
         };
+        server.reloadConfigAndPlugins() catch |err| {
+            server.deinit();
+            return err;
+        };
+        return server;
     }
 
     pub fn deinit(self: *Server) void {
         self.cost_refresh_state.stop();
+        if (self.connection_pool) |pool| pool.deinit();
         self.prompt_cache.deinit();
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
         self.fs_watcher.deinit();
+        if (self.plugin_scheduler) |scheduler| scheduler.deinit();
+        plugin_host.freeInstances(self.reloadAllocator(), self.plugin_instances);
+        if (self.runtime_snapshot) |*snapshot| snapshot.deinit(self.reloadAllocator());
         self.reload_state.deinit(self.reloadAllocator());
         _ = self.reload_gpa.deinit();
         self.listener.deinit();
@@ -273,24 +309,58 @@ const PosixServer = struct {
     }
 
     pub fn serve(self: *Server, shutdown_requested: *const std.atomic.Value(bool), reload_requested: *std.atomic.Value(bool), stack_dump_requested: *std.atomic.Value(bool)) !void {
+        try self.ensureConnectionPool(shutdown_requested);
         try self.warmupCaches(std.heap.page_allocator);
         try self.cost_refresh_state.start(std.heap.page_allocator);
         while (!shutdown_requested.load(.seq_cst)) {
-            try self.consumeReloadSignal(reload_requested);
-            try self.consumeStackDumpSignal(stack_dump_requested);
-            var poll_fds = [_]std.posix.pollfd{.{
-                .fd = self.listener.stream.handle,
-                .events = std.posix.POLL.IN,
-                .revents = 0,
-            }};
+            self.request_mutex.lock();
+            self.consumeReloadSignal(reload_requested) catch |err| {
+                self.request_mutex.unlock();
+                return err;
+            };
+            self.consumeStackDumpSignal(stack_dump_requested) catch |err| {
+                self.request_mutex.unlock();
+                return err;
+            };
+            self.fs_watcher.pump(nowNs());
+            self.drainFsInvalidations(nowNs());
+            self.request_mutex.unlock();
+            var poll_fds = [_]std.posix.pollfd{
+                .{
+                    .fd = self.listener.stream.handle,
+                    .events = std.posix.POLL.IN,
+                    .revents = 0,
+                },
+                .{
+                    .fd = self.fs_watcher.nativeFd() orelse -1,
+                    .events = std.posix.POLL.IN,
+                    .revents = 0,
+                },
+            };
 
             const ready = try std.posix.poll(&poll_fds, shutdown_poll_ms);
             if (ready == 0) continue;
 
+            if ((poll_fds[1].revents & std.posix.POLL.IN) != 0) {
+                self.request_mutex.lock();
+                self.fs_watcher.pump(nowNs());
+                self.drainFsInvalidations(nowNs());
+                self.request_mutex.unlock();
+            }
             if ((poll_fds[0].revents & std.posix.POLL.IN) != 0) {
-                try self.acceptOneWithShutdown(shutdown_requested);
+                const connection = try self.listener.accept();
+                self.request_mutex.lock();
+                self.connections += 1;
+                self.request_mutex.unlock();
+                const accepted = self.connection_pool.?.submit(connection) catch false;
+                if (!accepted) connection.stream.close();
             }
         }
+    }
+
+    fn ensureConnectionPool(self: *Server, shutdown_requested: *const std.atomic.Value(bool)) !void {
+        if (self.connection_pool != null) return;
+        self.connection_pool = try ConnectionPool.init(self.reloadAllocator(), self, shutdown_requested);
     }
 
     fn consumeStackDumpSignal(self: *Server, stack_dump_requested: *std.atomic.Value(bool)) !void {
@@ -349,45 +419,61 @@ const PosixServer = struct {
     fn handleConnection(self: *Server, connection: std.net.Server.Connection, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
         defer connection.stream.close();
 
-        const request = try readFrameAlloc(std.heap.page_allocator, connection.stream.handle);
+        const request = try readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, interactive_frame_timeout_ms);
         defer std.heap.page_allocator.free(request);
 
+        try self.handleRequest(connection.stream.handle, request, shutdown_requested);
+    }
+
+    fn handlePooledConnection(self: *Server, connection: std.net.Server.Connection, shutdown_requested: *const std.atomic.Value(bool)) !void {
+        defer connection.stream.close();
+        const request = try readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, interactive_frame_timeout_ms);
+        defer std.heap.page_allocator.free(request);
+        if (isOpRequest(request, "subscribe")) {
+            return subscribe.handleConnection(std.heap.page_allocator, connection.stream.handle, request, shutdown_requested);
+        }
+        self.request_mutex.lock();
+        defer self.request_mutex.unlock();
+        try self.handleRequest(connection.stream.handle, request, shutdown_requested);
+    }
+
+    fn handleRequest(self: *Server, fd: std.posix.fd_t, request: []const u8, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
         if (std.mem.startsWith(u8, request, "metrics")) {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
-            try writeFrame(connection.stream.handle, line);
+            try writeFrame(fd, line);
         } else if (isOpRequest(request, "context")) {
             const response = try self.contextResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else if (isOpRequest(request, "metrics")) {
             const response = try self.metricsResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else if (std.mem.startsWith(u8, request, "health")) {
-            try writeFrame(connection.stream.handle, "ok\n");
+            try writeFrame(fd, "ok\n");
         } else if (isOpRequest(request, "health")) {
             const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else if (isOpRequest(request, "version")) {
             const response = try versionResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else if (isOpRequest(request, "reload")) {
             const response = try self.reloadResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else if (isOpRequest(request, "subscribe")) {
-            try subscribe.handleConnection(std.heap.page_allocator, connection.stream.handle, request, shutdown_requested);
+            try subscribe.handleConnection(std.heap.page_allocator, fd, request, shutdown_requested);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         } else {
             const response = try self.renderResponse(request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(connection.stream.handle, response);
+            try writeFrame(fd, response);
         }
     }
 
@@ -395,18 +481,24 @@ const PosixServer = struct {
         const start_ns = nowNs();
         var parsed = try std.json.parseFromSlice(RenderRequest, std.heap.page_allocator, request_payload, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
+        if (parsed.value.v != protocol_version) return error.UnsupportedProtocolVersion;
         if (!std.mem.eql(u8, parsed.value.op, "render") and !std.mem.eql(u8, parsed.value.op, "render_continue")) {
             const escaped_request_id = try json.escapeAlloc(std.heap.page_allocator, parsed.value.request_id);
             defer std.heap.page_allocator.free(escaped_request_id);
             return std.fmt.allocPrint(
                 std.heap.page_allocator,
-                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"unsupported render path op\",\"context\":{{\"field\":\"op\",\"expected\":\"render|render_continue\"}}}}}}",
+                "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"unsupported render path op\",\"context\":{{\"field\":\"op\",\"expected\":\"render|render_continue\"}}}}}}",
                 .{escaped_request_id},
             );
         }
 
         PosixServer.drainFsInvalidations(self, nowNs());
         try PosixServer.registerGitInvalidation(self, parsed.value.cwd);
+        if (self.runtime_snapshot == null) return error.RuntimeNotReady;
+        const runtime = &self.runtime_snapshot.?;
+        const command_context_active = parsed.value.command_context and commandContextMatches(runtime.config.command_context, parsed.value.commandline);
+        const configured_modules = if (command_context_active) command_context_primary_module_order[0..] else runtime.config.prompt_module_order;
+        const configured_right_modules = if (command_context_active) runtime.config.command_context.module_order else runtime.config.right_prompt_module_order;
 
         const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch null;
         defer if (home) |home_path| std.heap.page_allocator.free(home_path);
@@ -458,10 +550,8 @@ const PosixServer = struct {
         };
         const cache_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, cache_context);
         defer std.heap.page_allocator.free(cache_key);
-        var style_state = PosixServer.loadRenderStyleAlloc(std.heap.page_allocator, parsed.value.theme, parsed.value.color_caps, parsed.value.glyph_caps) catch null;
-        defer if (style_state) |*state| state.deinit(std.heap.page_allocator);
 
-        const use_prompt_cache = parsed.value.right_modules.len == 0 and !parsed.value.trace;
+        const use_prompt_cache = configured_right_modules.len == 0 and !hasPluginModules(configured_modules) and !parsed.value.trace;
         if (use_prompt_cache) {
             if (try self.prompt_cache.get(prompt_cache_module, cache_key)) |cached| {
                 self.prompt_cache_hits += 1;
@@ -471,7 +561,7 @@ const PosixServer = struct {
                 defer std.heap.page_allocator.free(escaped_prompt);
                 const elapsed_us = (nowNs() - start_ns) / std.time.ns_per_us;
                 PosixServer.recordRender(self, elapsed_us);
-                return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":null,\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
+                return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":null,\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}}}", .{ escaped_request_id, escaped_prompt, elapsed_us });
             }
         }
         if (use_prompt_cache) {
@@ -497,7 +587,7 @@ const PosixServer = struct {
             .host = host,
             .env_hash = parsed.value.env_hash,
             .path_env = parsed.value.path_env,
-            .cwd_options = parsed.value.cwd_options,
+            .cwd_options = runtime.config.modules.cwd,
             .aws_profile = aws_profile,
             .aws_region = aws_region,
             .aws_default_region = aws_default_region,
@@ -506,41 +596,37 @@ const PosixServer = struct {
             .arm_location = arm_location,
             .azure_default_location = azure_default_location,
             .kubeconfig = kubeconfig,
-            .cloud_ctx = parsed.value.cloud_ctx,
-            .cdhint = parsed.value.cdhint,
+            .cloud_ctx = runtime.config.modules.cloud_ctx,
+            .cdhint = runtime.config.modules.cdhint,
             .tmux_pane = parsed.value.tmux_pane,
-            .tmux_pane_options = parsed.value.tmux_pane_options,
-            .risk_tier = parsed.value.risk_tier,
-            .sso_expiry = parsed.value.sso_expiry,
-            .rtl = parsed.value.rtl,
-            .rtl_reverse = parsed.value.rtl_reverse,
+            .tmux_pane_options = runtime.config.modules.tmux_pane,
+            .risk_tier = runtime.config.modules.risk_tier,
+            .sso_expiry = runtime.config.modules.sso_expiry,
+            .rtl = if (std.mem.eql(u8, runtime.config.locale, "auto")) parsed.value.rtl else shisa_config.localeIsRtl(runtime.config.locale),
+            .rtl_reverse = runtime.config.prompt.rtl_reverse,
         };
-        const request_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.modules);
-        defer if (request_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
-        var rendered = if (request_pipeline) |pipeline|
-            if (parsed.value.trace)
-                try dispatcher.renderPipelineTraced(std.heap.page_allocator, cache_set, render_input, pipeline)
-            else if (style_state) |*state|
-                try dispatcher.renderPipelineStyled(std.heap.page_allocator, cache_set, render_input, pipeline, state.style())
-            else
-                try dispatcher.renderPipeline(std.heap.page_allocator, cache_set, render_input, pipeline)
-        else if (parsed.value.trace)
-            try dispatcher.renderDefaultTraced(std.heap.page_allocator, cache_set, render_input)
-        else if (style_state) |*state|
-            try dispatcher.renderDefaultStyled(std.heap.page_allocator, cache_set, render_input, state.style())
-        else
-            try dispatcher.renderDefault(std.heap.page_allocator, cache_set, render_input);
+        var rendered = try PosixServer.renderConfiguredModules(
+            self,
+            configured_modules,
+            parsed.value.cwd,
+            cache_set,
+            render_input,
+            runtime.styleFor(parsed.value.color_caps, parsed.value.glyph_caps),
+            parsed.value.trace,
+            "> ",
+        );
         defer rendered.deinit(std.heap.page_allocator);
         try PosixServer.logSlowWarning(self, rendered.slow_warning);
-        const right_pipeline = try renderPipelineFromModuleNamesAlloc(std.heap.page_allocator, parsed.value.right_modules);
-        defer if (right_pipeline) |pipeline| std.heap.page_allocator.free(pipeline);
-        var rendered_right = if (right_pipeline) |pipeline|
-            if (style_state) |*state|
-                try dispatcher.renderSegmentsStyled(std.heap.page_allocator, cache_set, render_input, pipeline, state.style())
-            else
-                try dispatcher.renderSegments(std.heap.page_allocator, cache_set, render_input, pipeline)
-        else
-            dispatcher.RenderedPrompt{ .prompt = try std.heap.page_allocator.dupe(u8, "") };
+        var rendered_right = try PosixServer.renderConfiguredModules(
+            self,
+            configured_right_modules,
+            parsed.value.cwd,
+            cache_set,
+            render_input,
+            runtime.styleFor(parsed.value.color_caps, parsed.value.glyph_caps),
+            parsed.value.trace,
+            "",
+        );
         defer rendered_right.deinit(std.heap.page_allocator);
         try PosixServer.logSlowWarning(self, rendered_right.slow_warning);
 
@@ -566,9 +652,9 @@ const PosixServer = struct {
         if (redraw_token) |token| {
             const escaped_token = try json.escapeAlloc(std.heap.page_allocator, token);
             defer std.heap.page_allocator.free(escaped_token);
-            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, escaped_token, elapsed_us, trace_fragment });
+            return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":\"{s}\",\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, escaped_token, elapsed_us, trace_fragment });
         }
-        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, elapsed_us, trace_fragment });
+        return std.fmt.allocPrint(std.heap.page_allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"prompt\":\"{s}\",\"right_prompt\":\"{s}\",\"redraw_token\":null,\"trailer\":null,\"diagnostics\":[],\"elapsed_us\":{d}{s}}}", .{ escaped_request_id, escaped_prompt, escaped_right_prompt, elapsed_us, trace_fragment });
     }
 
     fn renderCacheSnapshot(self: *Server) RenderCacheSnapshot {
@@ -611,16 +697,85 @@ const PosixServer = struct {
         defer if (iac_warning) |value| std.heap.page_allocator.free(value);
         const escaped_iac_warning = try json.escapeAlloc(std.heap.page_allocator, iac_warning orelse "");
         defer std.heap.page_allocator.free(escaped_iac_warning);
-        const allow = parsed.value.force or destructive == null or reason.tier != .prod;
+        var plugin_preexec = try PosixServer.runPluginPreexecHooks(self, parsed.value);
+        defer plugin_preexec.deinit(std.heap.page_allocator);
+        const escaped_plugin_warning = try json.escapeAlloc(std.heap.page_allocator, plugin_preexec.warning orelse "");
+        defer std.heap.page_allocator.free(escaped_plugin_warning);
+        const core_allow = destructive == null or reason.tier != .prod;
+        const allow = parsed.value.force or (core_allow and plugin_preexec.allow);
         if (destructive) |pattern| {
             try PosixServer.appendProdGuardAudit(self, reason.tier, allow, parsed.value.force, pattern, parsed.value.command);
             if (parsed.value.force) try PosixServer.logProdGuardForce(self, reason.tier, pattern);
         }
         return std.fmt.allocPrint(
             std.heap.page_allocator,
-            "{{\"v\":1,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\",\"warning\":\"{s}\"}}",
-            .{ allow, parsed.value.force, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive, escaped_iac_warning },
+            "{{\"v\":2,\"allow\":{},\"forced\":{},\"confirm\":\"{s}\",\"tier\":\"{s}\",\"source\":\"{s}\",\"pattern\":\"{s}\",\"destructive\":{},\"destructive_pattern\":\"{s}\",\"warning\":\"{s}\",\"plugin_warning\":\"{s}\"}}",
+            .{ allow, parsed.value.force, if (allow) "" else risk_tier_module.tierName(reason.tier), risk_tier_module.tierName(reason.tier), risk_tier_module.sourceName(reason.source), escaped_pattern, destructive != null, escaped_destructive, escaped_iac_warning, escaped_plugin_warning },
         );
+    }
+
+    const PluginPreexecOutcome = struct {
+        allow: bool = true,
+        warning: ?[]u8 = null,
+
+        fn deinit(self: *PluginPreexecOutcome, allocator: std.mem.Allocator) void {
+            if (self.warning) |warning| allocator.free(warning);
+            self.* = undefined;
+        }
+    };
+
+    fn runPluginPreexecHooks(self: *Server, request: PreexecRequest) !PluginPreexecOutcome {
+        var outcome = PluginPreexecOutcome{};
+        errdefer outcome.deinit(std.heap.page_allocator);
+        for (self.plugin_instances) |*instance| {
+            var decision = instance.preexecDecisionAlloc(request.cwd, request.command) catch |err| {
+                // Plugin timeouts and failures are observable but fail-open;
+                // a broken optional prompt plugin cannot block a shell command.
+                try PosixServer.appendPluginPreexecAudit(self, instance.loaded.manifest.name, "error", true, request.command, @errorName(err));
+                continue;
+            };
+            defer if (decision) |*value| value.deinit(std.heap.page_allocator);
+            if (decision) |value| {
+                const plugin_allows = value.allow orelse true;
+                try PosixServer.appendPluginPreexecAudit(self, instance.loaded.manifest.name, if (plugin_allows) "allow" else "deny", plugin_allows, request.command, value.message orelse "");
+                if (!plugin_allows) {
+                    outcome.allow = false;
+                    if (outcome.warning == null and value.message != null) {
+                        outcome.warning = try std.heap.page_allocator.dupe(u8, value.message.?);
+                    }
+                }
+            }
+        }
+        return outcome;
+    }
+
+    fn appendPluginPreexecAudit(self: *Server, plugin_name: []const u8, event: []const u8, allow: bool, command: []const u8, detail: []const u8) !void {
+        const home_owned = if (self.prod_guard_audit_home == null)
+            std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch return
+        else
+            null;
+        defer if (home_owned) |value| std.heap.page_allocator.free(value);
+        const home = self.prod_guard_audit_home orelse home_owned.?;
+        const path = try pluginPreexecAuditPathAlloc(std.heap.page_allocator, home);
+        defer std.heap.page_allocator.free(path);
+        if (std.fs.path.dirname(path)) |parent| try std.fs.cwd().makePath(parent);
+        var file = try std.fs.createFileAbsolute(path, .{ .read = true, .truncate = false, .mode = 0o600 });
+        defer file.close();
+        try file.seekFromEnd(0);
+        const escaped_plugin = try json.escapeAlloc(std.heap.page_allocator, plugin_name);
+        defer std.heap.page_allocator.free(escaped_plugin);
+        const escaped_event = try json.escapeAlloc(std.heap.page_allocator, event);
+        defer std.heap.page_allocator.free(escaped_event);
+        const escaped_detail = try json.escapeAlloc(std.heap.page_allocator, detail);
+        defer std.heap.page_allocator.free(escaped_detail);
+        const command_hash = sha256Hex(command);
+        const line = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{{\"ts\":{d},\"plugin\":\"{s}\",\"event\":\"{s}\",\"allow\":{},\"command_sha256\":\"{s}\",\"detail\":\"{s}\"}}\n",
+            .{ std.time.timestamp(), escaped_plugin, escaped_event, allow, command_hash[0..], escaped_detail },
+        );
+        defer std.heap.page_allocator.free(line);
+        try file.writeAll(line);
     }
 
     fn logProdGuardForce(self: *Server, tier: risk_tier_module.Tier, pattern: []const u8) !void {
@@ -708,6 +863,111 @@ const PosixServer = struct {
         }
     }
 
+    /// Render one configured sequence in its TOML order. Built-in modules use
+    /// the normal dispatcher one at a time so a plugin can sit between them;
+    /// plugin segments are intentionally unstyled because their output belongs
+    /// to the plugin and may already contain terminal escapes.
+    fn renderConfiguredModules(
+        self: *Server,
+        module_order: []const shisa_config.ModuleEntry,
+        cwd: []const u8,
+        cache_set: dispatcher.CacheSet,
+        render_input: dispatcher.RenderInput,
+        style: dispatcher.StyleConfig,
+        trace_enabled: bool,
+        terminator: []const u8,
+    ) !dispatcher.RenderedPrompt {
+        const allocator = std.heap.page_allocator;
+        const start_ns = nowNs();
+        var output: std.ArrayList(u8) = .empty;
+        errdefer output.deinit(allocator);
+        var trace_entries: std.ArrayList(dispatcher.TraceEntry) = .empty;
+        errdefer trace_entries.deinit(allocator);
+        var wrote_segment = false;
+        var has_async = false;
+        var slow_warning: ?dispatcher.SlowWarning = null;
+
+        var index = if (render_input.rtl and render_input.rtl_reverse) module_order.len else 0;
+        while (if (render_input.rtl and render_input.rtl_reverse) index > 0 else index < module_order.len) {
+            const entry = if (render_input.rtl and render_input.rtl_reverse) entry: {
+                index -= 1;
+                break :entry module_order[index];
+            } else entry: {
+                defer index += 1;
+                break :entry module_order[index];
+            };
+            switch (entry) {
+                .core => |module_id| {
+                    const dispatcher_id = dispatcher.moduleIdFromName(shisa_config.moduleIdName(module_id)) orelse return error.UnknownModule;
+                    const pipeline = [_]dispatcher.ModuleSpec{.{
+                        .id = dispatcher_id,
+                        .execution_class = dispatcher.executionClass(dispatcher_id),
+                    }};
+                    var rendered = if (trace_enabled)
+                        try dispatcher.renderSegmentsTraced(allocator, cache_set, render_input, pipeline[0..])
+                    else
+                        try dispatcher.renderSegmentsStyled(allocator, cache_set, render_input, pipeline[0..], style);
+                    defer rendered.deinit(allocator);
+                    try appendConfiguredSegment(allocator, &output, &wrote_segment, rendered.prompt, style.theme.separators.segment);
+                    if (rendered.redraw_token != null) has_async = true;
+                    if (slow_warning == null) slow_warning = rendered.slow_warning;
+                    if (trace_enabled) {
+                        if (rendered.trace) |entries| try trace_entries.appendSlice(allocator, entries);
+                    }
+                },
+                .plugin => |configured_id| {
+                    const segment = try PosixServer.renderPluginSegmentAlloc(self, configured_id, cwd);
+                    defer if (segment) |value| allocator.free(value);
+                    if (segment) |value| {
+                        try appendConfiguredSegment(allocator, &output, &wrote_segment, value, style.theme.separators.segment);
+                    }
+                },
+            }
+        }
+        try output.appendSlice(allocator, terminator);
+        return .{
+            .prompt = try output.toOwnedSlice(allocator),
+            .redraw_token = if (has_async) try allocator.dupe(u8, "pending") else null,
+            .slow_warning = slow_warning,
+            .trace = if (trace_enabled) try trace_entries.toOwnedSlice(allocator) else null,
+            .total_ns = nowNs() - start_ns,
+        };
+    }
+
+    fn renderPluginSegmentAlloc(self: *Server, configured_id: []const u8, cwd: []const u8) !?[]u8 {
+        const resolved = pluginInstanceForModule(self.plugin_instances, configured_id) orelse return null;
+        const segment = resolved.instance.renderAlloc(cwd, resolved.module_id) catch |err| {
+            if (self.logger) |logger| try logger.warn("plugin_render_failed", @errorName(err));
+            return null;
+        };
+        try PosixServer.registerPluginWatchRequests(self, resolved.instance);
+        if (self.plugin_scheduler) |scheduler| {
+            _ = scheduler.schedule(resolved.instance, cwd, resolved.module_id) catch |err| {
+                if (self.logger) |logger| try logger.warn("plugin_update_schedule_failed", @errorName(err));
+            };
+        }
+        return segment;
+    }
+
+    fn registerPluginWatchRequests(self: *Server, instance: *plugin_host.Instance) !void {
+        const requests = try instance.takeWatchRequestsAlloc(std.heap.page_allocator);
+        defer plugin_host.Instance.freeWatchRequests(std.heap.page_allocator, requests);
+        for (requests) |request| {
+            const qualified_module = try std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "plugin.{s}.{s}",
+                .{ instance.loaded.manifest.name, request.module_id },
+            );
+            defer std.heap.page_allocator.free(qualified_module);
+            const paths = [_]fsnotify.WatchPath{.{ .path = request.path, .recursive = true }};
+            try self.fs_watcher.watch(.{
+                .module_id = qualified_module,
+                .cwd = request.cwd,
+                .paths = &paths,
+            });
+        }
+    }
+
     fn recordRender(self: *Server, elapsed_us: u64) void {
         self.render_count += 1;
         self.render_total_us += elapsed_us;
@@ -752,8 +1012,8 @@ const PosixServer = struct {
 
         return std.fmt.allocPrint(
             allocator,
-            "{{\"v\":1,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}},\"prompt_l1\":{{\"entries\":{d},\"hits\":{d},\"misses\":{d},\"hit_rate_ppm\":{d}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d}}}}}",
-            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, prompt_cache_entries, self.prompt_cache_hits, self.prompt_cache_misses, prompt_cache_hit_rate_ppm, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], reload_snapshot.plugin_count, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len },
+            "{{\"v\":2,\"request_id\":\"{s}\",\"connections\":{d},\"cache\":{{\"git_branch\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"language_versions\":{{\"valid\":{},\"in_flight\":{},\"generation\":{d}}},\"cloud_ctx\":{{\"gcp_valid\":{},\"azure_valid\":{},\"kube_valid\":{}}},\"prompt_l1\":{{\"entries\":{d},\"hits\":{d},\"misses\":{d},\"hit_rate_ppm\":{d}}}}},\"render\":{{\"count\":{d},\"total_us\":{d},\"max_us\":{d},\"histogram\":{{\"le_100us\":{d},\"le_500us\":{d},\"le_1000us\":{d},\"le_5000us\":{d},\"gt_5000us\":{d}}}}},\"plugins\":{d},\"fsnotify\":{{\"backend\":\"{s}\",\"registrations\":{d},\"native_watches\":{d},\"degraded\":{},\"overflows\":{d}}}}}",
+            .{ escaped_request_id, self.connections, git_valid, git_in_flight, git_generation, language_valid, language_in_flight, language_generation, gcp_valid, azure_valid, kube_valid, prompt_cache_entries, self.prompt_cache_hits, self.prompt_cache_misses, prompt_cache_hit_rate_ppm, self.render_count, self.render_total_us, self.render_max_us, self.render_histogram[0], self.render_histogram[1], self.render_histogram[2], self.render_histogram[3], self.render_histogram[4], reload_snapshot.plugin_count, @tagName(self.fs_watcher.backend), self.fs_watcher.registrations.items.len, self.fs_watcher.nativeWatchCount(), self.fs_watcher.isDegraded(), self.fs_watcher.overflowCount() },
         );
     }
 
@@ -762,7 +1022,7 @@ const PosixServer = struct {
             return contextMalformedResponseAlloc(allocator, request, "request", "valid context request");
         };
         defer parsed.deinit();
-        if (parsed.value.v != protocol_version) return contextMalformedResponseAlloc(allocator, request, "v", "1");
+        if (parsed.value.v != protocol_version) return contextMalformedResponseAlloc(allocator, request, "v", "2");
         if (!std.mem.eql(u8, parsed.value.op, "context")) return contextMalformedResponseAlloc(allocator, request, "op", "context");
         if (parsed.value.cwd.len == 0) return contextMalformedResponseAlloc(allocator, request, "cwd", "non-empty absolute path");
 
@@ -847,7 +1107,7 @@ const PosixServer = struct {
             defer allocator.free(escaped_detail);
             return std.fmt.allocPrint(
                 allocator,
-                "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"reload failed\",\"context\":{{\"op\":\"reload\",\"detail\":\"{s}\"}}}}}}",
+                "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_INTERNAL\",\"message\":\"reload failed\",\"context\":{{\"op\":\"reload\",\"detail\":\"{s}\"}}}}}}",
                 .{ escaped_request_id, escaped_detail },
             );
         };
@@ -855,7 +1115,7 @@ const PosixServer = struct {
 
         return std.fmt.allocPrint(
             allocator,
-            "{{\"v\":1,\"request_id\":\"{s}\",\"reloaded\":true,\"config_generation\":{d},\"plugin_generation\":{d},\"plugins\":{d}}}",
+            "{{\"v\":2,\"request_id\":\"{s}\",\"reloaded\":true,\"config_generation\":{d},\"plugin_generation\":{d},\"plugins\":{d}}}",
             .{ escaped_request_id, reload_snapshot.config_generation, reload_snapshot.plugin_generation, reload_snapshot.plugin_count },
         );
     }
@@ -864,10 +1124,36 @@ const PosixServer = struct {
         const allocator = self.reloadAllocator();
         const config_source = try PosixServer.loadConfigSourceAlloc(self, allocator);
         errdefer allocator.free(config_source);
+        var runtime_snapshot = try PosixServer.runtimeSnapshotFromSource(allocator, config_source);
+        errdefer runtime_snapshot.deinit(allocator);
         const plugin_names = try PosixServer.loadPluginNamesAlloc(self, allocator);
         errdefer plugin_host.freeNames(allocator, plugin_names);
+        const plugin_instances = try PosixServer.loadPluginInstancesAlloc(self, allocator);
+        errdefer plugin_host.freeInstances(allocator, plugin_instances);
+        try validatePluginConfigs(plugin_instances, &runtime_snapshot.config);
+        try configurePluginInstanceConfigs(plugin_instances, &runtime_snapshot.config);
+        try validateConfiguredPluginModules(plugin_instances, runtime_snapshot.config.prompt_plugin_modules);
+        try validateConfiguredPluginModules(plugin_instances, runtime_snapshot.config.right_prompt_plugin_modules);
+        try validateConfiguredPluginModules(plugin_instances, runtime_snapshot.config.command_context.plugin_modules);
+        const next_scheduler = try plugin_host.UpdateScheduler.init(allocator);
+        errdefer next_scheduler.deinit();
 
+        if (self.plugin_scheduler) |scheduler| scheduler.deinit();
+        if (self.runtime_snapshot) |*previous| previous.deinit(allocator);
+        plugin_host.freeInstances(allocator, self.plugin_instances);
+        self.runtime_snapshot = runtime_snapshot;
+        self.plugin_instances = plugin_instances;
+        self.plugin_scheduler = next_scheduler;
         self.reload_state.replace(allocator, config_source, plugin_names);
+    }
+
+    fn runtimeSnapshotFromSource(allocator: std.mem.Allocator, source: []const u8) !RuntimeSnapshot {
+        var diagnostic: shisa_config.Diagnostic = .{};
+        var config = try shisa_config.parse(allocator, source, &diagnostic);
+        errdefer config.deinit(allocator);
+        var style = try PosixServer.loadRenderStyleAlloc(allocator, config.theme, .truecolor, .nerdfont);
+        errdefer style.deinit(allocator);
+        return .{ .config = config, .style = style };
     }
 
     fn setReloadPluginNamesForTest(self: *Server, names: []const []const u8) !void {
@@ -889,6 +1175,12 @@ const PosixServer = struct {
         return plugin_host.loadNamesAlloc(allocator, plugins_dir);
     }
 
+    fn loadPluginInstancesAlloc(self: *Server, allocator: std.mem.Allocator) ![]plugin_host.Instance {
+        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
+        defer allocator.free(plugins_dir);
+        return plugin_host.loadInstancesAlloc(allocator, plugins_dir);
+    }
+
     fn loadRenderStyleAlloc(allocator: std.mem.Allocator, theme_arg: []const u8, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) !RenderStyleState {
         const theme_path = try themePathAlloc(allocator, theme_arg);
         defer allocator.free(theme_path);
@@ -897,11 +1189,9 @@ const PosixServer = struct {
         var diagnostic: theme_loader.Diagnostic = .{};
         var theme = try theme_loader.parse(allocator, theme_source, &diagnostic);
         errdefer theme.deinit(allocator);
-        return .{
-            .theme = theme,
-            .color_caps = effectiveThemeColorCaps(theme, color_caps),
-            .glyph_tier = effectiveThemeGlyphTier(theme, glyph_caps),
-        };
+        _ = color_caps;
+        _ = glyph_caps;
+        return .{ .theme = theme };
     }
 
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
@@ -917,6 +1207,11 @@ const PosixServer = struct {
                 self.cloud_ctx_cache.invalidateGcp(std.heap.page_allocator);
                 self.cloud_ctx_cache.invalidateAzure(std.heap.page_allocator);
                 self.cloud_ctx_cache.invalidateKube(std.heap.page_allocator);
+            } else if (pluginInstanceForModule(self.plugin_instances, invalidation.module_id)) |resolved| {
+                resolved.instance.invalidateCache();
+                if (self.plugin_scheduler) |scheduler| {
+                    _ = scheduler.schedule(resolved.instance, invalidation.cwd, resolved.module_id) catch {};
+                }
             }
         }
     }
@@ -998,19 +1293,17 @@ const PosixServer = struct {
 
 const RenderStyleState = struct {
     theme: theme_loader.Theme,
-    color_caps: theme_loader.contrast.ColorCaps,
-    glyph_tier: theme_loader.GlyphTier,
 
     fn deinit(self: *RenderStyleState, allocator: std.mem.Allocator) void {
         self.theme.deinit(allocator);
         self.* = undefined;
     }
 
-    fn style(self: *const RenderStyleState) dispatcher.StyleConfig {
+    fn styleFor(self: *const RenderStyleState, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) dispatcher.StyleConfig {
         return .{
             .theme = &self.theme,
-            .color_caps = self.color_caps,
-            .glyph_tier = self.glyph_tier,
+            .color_caps = effectiveThemeColorCaps(self.theme, color_caps),
+            .glyph_tier = effectiveThemeGlyphTier(self.theme, glyph_caps),
         };
     }
 };
@@ -1097,6 +1390,11 @@ const WindowsServer = struct {
     cost_refresh_state: cost_refresh.State = .{},
     reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
     reload_state: plugin_host.ReloadState = .{},
+    runtime_snapshot: ?RuntimeSnapshot = null,
+    plugin_instances: []plugin_host.Instance = &.{},
+    plugin_scheduler: ?*plugin_host.UpdateScheduler = null,
+    request_mutex: std.Thread.Mutex = .{},
+    connection_pool: ?*ConnectionPool = null,
     config_path_override: ?[]const u8 = null,
     plugins_dir_override: ?[]const u8 = null,
 
@@ -1105,21 +1403,27 @@ const WindowsServer = struct {
     }
 
     pub fn initWithLogger(socket_path: []const u8, logger: ?*daemon_log.Logger) !WindowsServer {
-        return .{
+        var server: WindowsServer = .{
             .socket_path = socket_path,
             .logger = logger,
             .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
         };
+        try PosixServer.reloadConfigAndPlugins(&server);
+        return server;
     }
 
     pub fn deinit(self: *WindowsServer) void {
         self.cost_refresh_state.stop();
+        if (self.connection_pool) |pool| pool.deinit();
         self.prompt_cache.deinit();
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
         self.fs_watcher.deinit();
+        if (self.plugin_scheduler) |scheduler| scheduler.deinit();
+        plugin_host.freeInstances(self.reloadAllocator(), self.plugin_instances);
+        if (self.runtime_snapshot) |*snapshot| snapshot.deinit(self.reloadAllocator());
         self.reload_state.deinit(self.reloadAllocator());
         _ = self.reload_gpa.deinit();
         self.* = undefined;
@@ -1231,6 +1535,95 @@ const WindowsServer = struct {
 
 pub const Server = if (builtin.os.tag == .windows) WindowsServer else PosixServer;
 
+/// Framing happens on a fixed pool rather than the accept loop. A peer that
+/// sends a partial frame can consume at most one worker for the interactive
+/// frame deadline; excess peers are closed instead of creating unbounded work.
+const ConnectionPool = struct {
+    allocator: std.mem.Allocator,
+    server: *Server,
+    shutdown_requested: *const std.atomic.Value(bool),
+    mutex: std.Thread.Mutex = .{},
+    tasks: std.ArrayList(std.net.Server.Connection) = .empty,
+    threads: []std.Thread = &.{},
+    stopping: bool = false,
+
+    const workers: usize = 4;
+    const max_pending: usize = 64;
+
+    fn init(allocator: std.mem.Allocator, server: *Server, shutdown_requested: *const std.atomic.Value(bool)) !*ConnectionPool {
+        const pool = try allocator.create(ConnectionPool);
+        errdefer allocator.destroy(pool);
+        pool.* = .{
+            .allocator = allocator,
+            .server = server,
+            .shutdown_requested = shutdown_requested,
+        };
+        pool.threads = try allocator.alloc(std.Thread, workers);
+        var started: usize = 0;
+        errdefer {
+            pool.mutex.lock();
+            pool.stopping = true;
+            pool.mutex.unlock();
+            for (pool.threads[0..started]) |thread| thread.join();
+            allocator.free(pool.threads);
+        }
+        while (started < pool.threads.len) : (started += 1) {
+            pool.threads[started] = try std.Thread.spawn(.{}, connectionWorkerMain, .{pool});
+        }
+        return pool;
+    }
+
+    fn deinit(self: *ConnectionPool) void {
+        self.mutex.lock();
+        self.stopping = true;
+        self.mutex.unlock();
+        for (self.threads) |thread| thread.join();
+        for (self.tasks.items) |connection| connection.stream.close();
+        self.tasks.deinit(self.allocator);
+        self.allocator.free(self.threads);
+        const allocator = self.allocator;
+        self.* = undefined;
+        allocator.destroy(self);
+    }
+
+    fn submit(self: *ConnectionPool, connection: std.net.Server.Connection) !bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.stopping or self.tasks.items.len >= max_pending) return false;
+        try self.tasks.append(self.allocator, connection);
+        return true;
+    }
+
+    fn take(self: *ConnectionPool) ?std.net.Server.Connection {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.tasks.items.len == 0) return null;
+        return self.tasks.orderedRemove(0);
+    }
+
+    fn shouldStop(self: *ConnectionPool) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.stopping;
+    }
+
+    fn workerLoop(self: *ConnectionPool) void {
+        if (comptime builtin.os.tag == .windows) return;
+        while (true) {
+            if (self.take()) |connection| {
+                _ = self.server.handlePooledConnection(connection, self.shutdown_requested) catch {};
+                continue;
+            }
+            if (self.shouldStop()) return;
+            std.Thread.sleep(std.time.ns_per_ms);
+        }
+    }
+};
+
+fn connectionWorkerMain(pool: *ConnectionPool) void {
+    pool.workerLoop();
+}
+
 fn contextValueFromCloudCacheAlloc(allocator: std.mem.Allocator, valid: bool, generation: u64, value: ?[]const u8) !ContextCacheValue {
     return .{
         .state = if (valid) .ready else .unknown,
@@ -1242,7 +1635,8 @@ fn contextValueFromCloudCacheAlloc(allocator: std.mem.Allocator, valid: bool, ge
 fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
     const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
     defer std.heap.page_allocator.free(encoded);
-    try subscribe.writeAll(fd, encoded);
+    const deadline_ns = std.time.nanoTimestamp() + @as(i128, interactive_frame_timeout_ms) * @as(i128, std.time.ns_per_ms);
+    try writeAllWithDeadline(fd, encoded, deadline_ns);
 }
 
 fn writeFrameFile(file: std.fs.File, payload: []const u8) !void {
@@ -1368,6 +1762,19 @@ fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
     return payload;
 }
 
+fn readFrameAllocWithTimeout(allocator: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) ![]u8 {
+    if (timeout_ms <= 0) return error.Timeout;
+    const deadline_ns = std.time.nanoTimestamp() + @as(i128, timeout_ms) * @as(i128, std.time.ns_per_ms);
+    var header: [header_bytes]u8 = undefined;
+    try readExactWithDeadline(fd, &header, deadline_ns);
+    const payload_len = std.mem.readInt(u32, &header, .big);
+    if (payload_len > max_frame_bytes) return error.Oversize;
+    const payload = try allocator.alloc(u8, payload_len);
+    errdefer allocator.free(payload);
+    try readExactWithDeadline(fd, payload, deadline_ns);
+    return payload;
+}
+
 fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
@@ -1375,6 +1782,40 @@ fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
         if (n == 0) return error.ConnectionClosed;
         offset += n;
     }
+}
+
+fn readExactWithDeadline(fd: std.posix.fd_t, buffer: []u8, deadline_ns: i128) !void {
+    var offset: usize = 0;
+    while (offset < buffer.len) {
+        try waitForFdDeadline(fd, std.posix.POLL.IN, deadline_ns);
+        const n = try std.posix.read(fd, buffer[offset..]);
+        if (n == 0) return error.ConnectionClosed;
+        offset += n;
+    }
+}
+
+/// Poll before each bounded write. Small chunks avoid a single large blocking
+/// write after readiness has been observed.
+fn writeAllWithDeadline(fd: std.posix.fd_t, bytes: []const u8, deadline_ns: i128) !void {
+    var remaining = bytes;
+    while (remaining.len > 0) {
+        try waitForFdDeadline(fd, std.posix.POLL.OUT, deadline_ns);
+        const chunk_len = @min(remaining.len, 4096);
+        const written = try std.posix.write(fd, remaining[0..chunk_len]);
+        if (written == 0) return error.ConnectionClosed;
+        remaining = remaining[written..];
+    }
+}
+
+fn waitForFdDeadline(fd: std.posix.fd_t, events: i16, deadline_ns: i128) !void {
+    const remaining_ns = deadline_ns - std.time.nanoTimestamp();
+    if (remaining_ns <= 0) return error.Timeout;
+    const rounded_ms = @divTrunc(remaining_ns + @as(i128, std.time.ns_per_ms) - 1, @as(i128, std.time.ns_per_ms));
+    const timeout_ms: i32 = @intCast(@min(rounded_ms, std.math.maxInt(i32)));
+    var poll_fds = [_]std.posix.pollfd{.{ .fd = fd, .events = events, .revents = 0 }};
+    if (try std.posix.poll(&poll_fds, timeout_ms) == 0) return error.Timeout;
+    if ((poll_fds[0].revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL)) != 0) return error.ConnectionClosed;
+    if ((poll_fds[0].revents & events) == 0 and (poll_fds[0].revents & std.posix.POLL.HUP) != 0) return error.ConnectionClosed;
 }
 
 fn nowNs() u64 {
@@ -1409,6 +1850,81 @@ fn renderPipelineFromModuleNamesAlloc(allocator: std.mem.Allocator, modules: []c
     return pipeline;
 }
 
+const command_context_primary_module_order = [_]shisa_config.ModuleEntry{.{ .core = .cwd }};
+
+fn hasPluginModules(module_order: []const shisa_config.ModuleEntry) bool {
+    for (module_order) |entry| switch (entry) {
+        .core => {},
+        .plugin => return true,
+    };
+    return false;
+}
+
+fn appendConfiguredSegment(allocator: std.mem.Allocator, output: *std.ArrayList(u8), wrote_segment: *bool, segment: []const u8, separator: []const u8) !void {
+    if (segment.len == 0) return;
+    if (wrote_segment.*) try output.appendSlice(allocator, separator);
+    try output.appendSlice(allocator, segment);
+    wrote_segment.* = true;
+}
+
+fn commandContextMatches(config: shisa_config.CommandContextOptions, commandline: ?[]const u8) bool {
+    if (config.target == .off) return false;
+    const raw = commandline orelse return false;
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    if (trimmed.len == 0) return false;
+    var words = std.mem.tokenizeAny(u8, trimmed, " \t");
+    const executable = words.next() orelse return false;
+    for (config.commands) |candidate| if (std.mem.eql(u8, executable, candidate)) return true;
+    return false;
+}
+
+const PluginModuleResolution = struct {
+    instance: *plugin_host.Instance,
+    module_id: []const u8,
+};
+
+fn pluginInstanceForModule(instances: []plugin_host.Instance, configured_id: []const u8) ?PluginModuleResolution {
+    if (!std.mem.startsWith(u8, configured_id, "plugin.")) return null;
+    const rest = configured_id["plugin.".len..];
+    var best: ?PluginModuleResolution = null;
+    for (instances) |*instance| {
+        const name = instance.loaded.manifest.name;
+        if (!std.mem.startsWith(u8, rest, name) or rest.len <= name.len or rest[name.len] != '.') continue;
+        const exported = rest[name.len + 1 ..];
+        if (exported.len == 0) continue;
+        var exports_module = false;
+        for (instance.loaded.manifest.modules) |candidate| {
+            if (std.mem.eql(u8, candidate, exported)) {
+                exports_module = true;
+                break;
+            }
+        }
+        if (!exports_module) continue;
+        if (best == null or name.len > best.?.instance.loaded.manifest.name.len) {
+            best = .{ .instance = instance, .module_id = exported };
+        }
+    }
+    return best;
+}
+
+fn validateConfiguredPluginModules(instances: []plugin_host.Instance, configured: []const []const u8) !void {
+    for (configured) |module_id| {
+        if (pluginInstanceForModule(instances, module_id) == null) return error.UnknownPluginModule;
+    }
+}
+
+fn configurePluginInstanceConfigs(instances: []plugin_host.Instance, config: *const shisa_config.Config) !void {
+    for (instances) |*instance| {
+        try instance.setConfigLua(shisa_config.pluginConfigLua(config, instance.loaded.manifest.name) orelse "{}");
+    }
+}
+
+fn validatePluginConfigs(instances: []plugin_host.Instance, config: *const shisa_config.Config) !void {
+    for (config.plugin_configs) |plugin_config| {
+        if (plugin_host.findInstance(instances, plugin_config.name) == null) return error.UnknownPluginConfig;
+    }
+}
+
 fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderRequest, context: RenderCacheContext) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -1426,30 +1942,10 @@ fn renderPromptCacheKeyAlloc(allocator: std.mem.Allocator, request: RenderReques
     try appendKeyInt(allocator, &out, "rows", request.rows);
     try appendKeyString(allocator, &out, "color_caps", @tagName(request.color_caps));
     try appendKeyString(allocator, &out, "glyph_caps", @tagName(request.glyph_caps));
-    try appendKeyString(allocator, &out, "theme", request.theme);
     try appendKeyOptional(allocator, &out, "tmux_pane", request.tmux_pane);
-    try appendKeyInt(allocator, &out, "modules_len", request.modules.len);
-    for (request.modules, 0..) |module_name, index| {
-        const key = try std.fmt.allocPrint(allocator, "module_{d}", .{index});
-        defer allocator.free(key);
-        try appendKeyString(allocator, &out, key, module_name);
-    }
-    try appendKeyBool(allocator, &out, "cloud_aws", request.cloud_ctx.aws);
-    try appendKeyBool(allocator, &out, "cloud_gcp", request.cloud_ctx.gcp);
-    try appendKeyBool(allocator, &out, "cloud_azure", request.cloud_ctx.azure);
-    try appendKeyBool(allocator, &out, "cloud_kube", request.cloud_ctx.kubernetes);
-    try appendKeyInt(allocator, &out, "cwd_truncate_to", request.cwd_options.truncate_to);
-    try appendKeyBool(allocator, &out, "cwd_home_tilde", request.cwd_options.home_tilde);
-    try appendKeyInt(allocator, &out, "cwd_max_width", request.cwd_options.max_width);
-    try appendKeyBool(allocator, &out, "cdhint_enabled", request.cdhint.enabled);
-    try appendKeyBool(allocator, &out, "tmux_pane_enabled", request.tmux_pane_options.enabled);
-    try appendKeyString(allocator, &out, "risk_unknown_bg", risk_tier_module.colorSlotName(request.risk_tier.unknown_bg));
-    try appendKeyString(allocator, &out, "risk_dev_bg", risk_tier_module.colorSlotName(request.risk_tier.dev_bg));
-    try appendKeyString(allocator, &out, "risk_staging_bg", risk_tier_module.colorSlotName(request.risk_tier.staging_bg));
-    try appendKeyString(allocator, &out, "risk_prod_bg", risk_tier_module.colorSlotName(request.risk_tier.prod_bg));
-    try appendKeyInt(allocator, &out, "sso_warning", request.sso_expiry.warning_minutes);
+    try appendKeyBool(allocator, &out, "command_context", request.command_context);
+    try appendKeyOptional(allocator, &out, "commandline", request.commandline);
     try appendKeyBool(allocator, &out, "rtl", request.rtl);
-    try appendKeyBool(allocator, &out, "rtl_reverse", request.rtl_reverse);
     try appendKeyOptional(allocator, &out, "home", context.home);
     try appendKeyOptional(allocator, &out, "kubeconfig", context.kubeconfig);
     try appendKeyOptional(allocator, &out, "ssh", context.ssh);
@@ -1554,7 +2050,7 @@ pub fn healthResponseAlloc(allocator: std.mem.Allocator, request: []const u8, ok
     defer allocator.free(request_id);
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
-    return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"ok\":{}}}", .{ escaped_request_id, ok });
+    return std.fmt.allocPrint(allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"ok\":{}}}", .{ escaped_request_id, ok });
 }
 
 pub fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) ![]u8 {
@@ -1562,7 +2058,7 @@ pub fn versionResponseAlloc(allocator: std.mem.Allocator, request: []const u8) !
     defer allocator.free(request_id);
     const escaped_request_id = try json.escapeAlloc(allocator, request_id);
     defer allocator.free(escaped_request_id);
-    return std.fmt.allocPrint(allocator, "{{\"v\":1,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
+    return std.fmt.allocPrint(allocator, "{{\"v\":2,\"request_id\":\"{s}\",\"daemon\":\"{s}\",\"protocol\":{d}}}", .{ escaped_request_id, daemon_version, protocol_version });
 }
 
 fn contextMalformedResponseAlloc(allocator: std.mem.Allocator, request: []const u8, field: []const u8, expected: []const u8) ![]u8 {
@@ -1576,7 +2072,7 @@ fn contextMalformedResponseAlloc(allocator: std.mem.Allocator, request: []const 
     defer allocator.free(escaped_expected);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"malformed context request\",\"context\":{{\"field\":\"{s}\",\"expected\":\"{s}\"}}}}}}",
+        "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_MALFORMED\",\"message\":\"malformed context request\",\"context\":{{\"field\":\"{s}\",\"expected\":\"{s}\"}}}}}}",
         .{ escaped_request_id, escaped_field, escaped_expected },
     );
 }
@@ -1588,7 +2084,7 @@ fn unsupportedSubscribeResponseAlloc(allocator: std.mem.Allocator, request: []co
     defer allocator.free(escaped_request_id);
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":1,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_UNSUPPORTED\",\"message\":\"subscribe is not supported on Windows named pipes yet\",\"context\":{{\"op\":\"subscribe\"}}}}}}",
+        "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_UNSUPPORTED\",\"message\":\"subscribe is not supported on Windows named pipes yet\",\"context\":{{\"op\":\"subscribe\"}}}}}}",
         .{escaped_request_id},
     );
 }
@@ -1641,6 +2137,10 @@ fn cloudRequestAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![
     return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/cloud_requests.jsonl", .{home});
 }
 
+fn pluginPreexecAuditPathAlloc(allocator: std.mem.Allocator, home: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/.local/state/shisa/plugin_preexec.jsonl", .{home});
+}
+
 fn sha256Hex(value: []const u8) [std.crypto.hash.sha2.Sha256.digest_length * 2]u8 {
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
@@ -1659,7 +2159,7 @@ test "preexec response classifies command tier" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl get pods --context api-prd-use1\"}");
+    const response = try server.preexecResponse("{\"v\":2,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl get pods --context api-prd-use1\"}");
     defer std.heap.page_allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
@@ -1686,7 +2186,7 @@ test "preexec response warns on locked iac workspace" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"kind\":\"preexec\",\"cwd\":\"{s}\",\"shell\":\"zsh\",\"command\":\"terraform apply\"}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"kind\":\"preexec\",\"cwd\":\"{s}\",\"shell\":\"zsh\",\"command\":\"terraform apply\"}}", .{dir_path});
     defer allocator.free(request);
     const response = try server.preexecResponse(request);
     defer std.heap.page_allocator.free(response);
@@ -1706,7 +2206,7 @@ test "preexec response denies destructive prod command" {
     defer server.deinit();
     server.prod_guard_audit_home = dir_path;
 
-    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
+    const response = try server.preexecResponse("{\"v\":2,\"kind\":\"preexec\",\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
     defer std.heap.page_allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"tier\":\"prod\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":false") != null);
@@ -1748,7 +2248,7 @@ test "preexec force allows and logs destructive command" {
     defer server.deinit();
     server.prod_guard_audit_home = dir_path;
 
-    const response = try server.preexecResponse("{\"v\":1,\"kind\":\"preexec\",\"force\":true,\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
+    const response = try server.preexecResponse("{\"v\":2,\"kind\":\"preexec\",\"force\":true,\"shell\":\"zsh\",\"command\":\"kubectl delete pod x --context api-prd-use1\"}");
     defer std.heap.page_allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"allow\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"forced\":true") != null);
@@ -1778,7 +2278,7 @@ test "fs event invalidates git branch cache" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"modules\":[\"cwd\",\"git_branch\"]}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"modules\":[\"cwd\",\"git_branch\"]}}", .{dir_path});
     defer allocator.free(request);
     const clean = try server.renderResponse(request);
     defer std.heap.page_allocator.free(clean);
@@ -1799,7 +2299,7 @@ test "fs event invalidates git branch cache" {
     try std.testing.expectEqual(@as(u64, 1), server.cache_rev);
 }
 
-test "render response carries request id and v1 shape" {
+test "render response carries request id and v2 shape" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-render-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(dir_path);
@@ -1811,7 +2311,7 @@ test "render response carries request id and v1 shape" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-test\"}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-test\"}}", .{dir_path});
     defer allocator.free(request);
     const response = try server.renderResponse(request);
     defer std.heap.page_allocator.free(response);
@@ -1847,7 +2347,7 @@ test "render request modules select cdhint" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"cdhint-test\",\"modules\":[\"cdhint\"]}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"cdhint-test\",\"modules\":[\"cdhint\"]}}", .{dir_path});
     defer allocator.free(request);
     const response = try server.renderResponse(request);
     defer std.heap.page_allocator.free(response);
@@ -1866,7 +2366,7 @@ test "render request modules select tmux pane" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"tmux-test\",\"modules\":[\"tmux_pane\"],\"tmux_pane\":\"%4\"}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"tmux-test\",\"modules\":[\"tmux_pane\"],\"tmux_pane\":\"%4\"}}", .{dir_path});
     defer allocator.free(request);
     const response = try server.renderResponse(request);
     defer std.heap.page_allocator.free(response);
@@ -1885,7 +2385,7 @@ test "render request right modules return right prompt" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":1500,\"time\":true,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"right-test\",\"modules\":[\"cwd\"],\"right_modules\":[\"time\",\"cmd_duration\"]}}", .{dir_path});
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":1500,\"time\":true,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"right-test\",\"modules\":[\"cwd\"],\"right_modules\":[\"time\",\"cmd_duration\"]}}", .{dir_path});
     defer allocator.free(request);
     const response = try server.renderResponse(request);
     defer std.heap.page_allocator.free(response);
@@ -2026,8 +2526,8 @@ test "render prompt cache key ignores request id and includes tuple fields" {
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(!std.mem.eql(u8, first, different_exit));
     try std.testing.expect(!std.mem.eql(u8, first, different_rev));
-    try std.testing.expect(!std.mem.eql(u8, first, different_modules));
-    try std.testing.expect(!std.mem.eql(u8, first, different_cdhint));
+    try std.testing.expectEqualStrings(first, different_modules);
+    try std.testing.expectEqualStrings(first, different_cdhint);
     try std.testing.expect(!std.mem.eql(u8, first, different_tmux));
     try std.testing.expect(!std.mem.eql(u8, first, different_env));
 }
@@ -2051,7 +2551,7 @@ test "render response stores completed prompts in bounded l1 cache" {
     defer server.deinit();
     server.prompt_cache.options.max_entries = 1;
 
-    const first_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"first\"}}", .{dir_path});
+    const first_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"first\"}}", .{dir_path});
     defer allocator.free(first_request);
     const first = try server.renderResponse(first_request);
     defer std.heap.page_allocator.free(first);
@@ -2060,7 +2560,7 @@ test "render response stores completed prompts in bounded l1 cache" {
     try std.testing.expectEqual(@as(u64, 0), server.prompt_cache_hits);
     try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_misses);
 
-    const second_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"second\"}}", .{dir_path});
+    const second_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"second\"}}", .{dir_path});
     defer allocator.free(second_request);
     const second = try server.renderResponse(second_request);
     defer std.heap.page_allocator.free(second);
@@ -2069,7 +2569,7 @@ test "render response stores completed prompts in bounded l1 cache" {
     try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_hits);
     try std.testing.expectEqual(@as(u64, 1), server.prompt_cache_misses);
 
-    const different_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":2,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"different\"}}", .{dir_path});
+    const different_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":2,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"different\"}}", .{dir_path});
     defer allocator.free(different_request);
     const different = try server.renderResponse(different_request);
     defer std.heap.page_allocator.free(different);
@@ -2130,14 +2630,14 @@ test "render_continue fills async git segment from cache" {
     var server = try Server.init(socket_path);
     defer server.deinit();
 
-    const initial_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-start\"}}", .{dir_path});
+    const initial_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-start\"}}", .{dir_path});
     defer allocator.free(initial_request);
     const initial_response = try server.renderResponse(initial_request);
     defer std.heap.page_allocator.free(initial_response);
     try std.testing.expect(std.mem.indexOf(u8, initial_response, "[pending:git_branch]") != null);
     try std.testing.expect(std.mem.indexOf(u8, initial_response, "\"redraw_token\":\"pending\"") != null);
 
-    const continue_request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-continue\"}}", .{dir_path});
+    const continue_request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render_continue\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"render-continue\"}}", .{dir_path});
     defer allocator.free(continue_request);
     // This verifies eventual async completion. Latency budgets are exercised by
     // the dedicated manual performance suite, where the host baseline is known.
@@ -2190,7 +2690,7 @@ test "reload op rereads config and bumps generations" {
     server.config_path_override = config_path;
     server.plugins_dir_override = plugins_dir;
 
-    const first = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-1\"}");
+    const first = try server.reloadResponseAlloc(allocator, "{\"v\":2,\"op\":\"reload\",\"request_id\":\"reload-1\"}");
     defer allocator.free(first);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"reloaded\":true") != null);
     const first_snapshot = server.reload_state.snapshot();
@@ -2213,7 +2713,7 @@ test "reload op rereads config and bumps generations" {
         ,
     });
 
-    const second = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-2\"}");
+    const second = try server.reloadResponseAlloc(allocator, "{\"v\":2,\"op\":\"reload\",\"request_id\":\"reload-2\"}");
     defer allocator.free(second);
     try std.testing.expect(std.mem.indexOf(u8, second, "\"config_generation\":2") != null);
     const second_source = try server.reload_state.copyConfigSourceAlloc(allocator);
@@ -2343,7 +2843,7 @@ test "reload op rereads plugin manifests" {
     server.config_path_override = config_path;
     server.plugins_dir_override = plugins_dir;
 
-    const response = try server.reloadResponseAlloc(allocator, "{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-plugin\"}");
+    const response = try server.reloadResponseAlloc(allocator, "{\"v\":2,\"op\":\"reload\",\"request_id\":\"reload-plugin\"}");
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     const plugin_names = try server.reload_state.copyPluginNamesAlloc(allocator);
@@ -2400,7 +2900,7 @@ test "reload disables slow plugin after three cpu strikes" {
     server.plugins_dir_override = plugins_dir;
 
     for (0..3) |index| {
-        const request = try std.fmt.allocPrint(allocator, "{{\"v\":1,\"op\":\"reload\",\"request_id\":\"reload-slow-{d}\"}}", .{index});
+        const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"reload\",\"request_id\":\"reload-slow-{d}\"}}", .{index});
         defer allocator.free(request);
         const response = try server.reloadResponseAlloc(allocator, request);
         defer allocator.free(response);
@@ -2428,7 +2928,7 @@ test "metrics op returns JSON metrics dump" {
     try server.prompt_cache.put(prompt_cache_module, "metrics-key", "cached> ", 0);
     try server.setReloadPluginNamesForTest(&.{"demo-plugin"});
 
-    const response = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-1\"}");
+    const response = try server.metricsResponseAlloc(allocator, "{\"v\":2,\"op\":\"metrics\",\"request_id\":\"metrics-1\"}");
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"metrics-1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"connections\":3") != null);
@@ -2440,7 +2940,7 @@ test "metrics op returns JSON metrics dump" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"plugins\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"fsnotify\"") != null);
 
-    const prometheus = try server.metricsResponseAlloc(allocator, "{\"v\":1,\"op\":\"metrics\",\"request_id\":\"metrics-prom\",\"format\":\"prometheus\"}");
+    const prometheus = try server.metricsResponseAlloc(allocator, "{\"v\":2,\"op\":\"metrics\",\"request_id\":\"metrics-prom\",\"format\":\"prometheus\"}");
     defer allocator.free(prometheus);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "# TYPE shisa_connections gauge") != null);
     try std.testing.expect(std.mem.indexOf(u8, prometheus, "shisa_render_count 2") != null);
@@ -2484,7 +2984,7 @@ test "context op returns a read-only cache snapshot with freshness" {
     server.cloud_ctx_cache.kube_context = try std.heap.page_allocator.dupe(u8, "dev/default");
     server.cloud_ctx_cache.mutex.unlock();
 
-    const response = try server.contextResponseAlloc(allocator, "{\"v\":1,\"op\":\"context\",\"cwd\":\"/repo\",\"request_id\":\"context-1\"}");
+    const response = try server.contextResponseAlloc(allocator, "{\"v\":2,\"op\":\"context\",\"cwd\":\"/repo\",\"request_id\":\"context-1\"}");
     defer allocator.free(response);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"request_id\":\"context-1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"schema\":\"shisa.context/v1\"") != null);
@@ -2494,7 +2994,7 @@ test "context op returns a read-only cache snapshot with freshness" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"azure\":{\"state\":\"unknown\",\"generation\":0,\"value\":null}") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"kubernetes\":{\"state\":\"ready\",\"generation\":9,\"value\":\"dev/default\"}") != null);
 
-    const malformed = try server.contextResponseAlloc(allocator, "{\"v\":1,\"op\":\"context\",\"request_id\":\"missing-cwd\"}");
+    const malformed = try server.contextResponseAlloc(allocator, "{\"v\":2,\"op\":\"context\",\"request_id\":\"missing-cwd\"}");
     defer allocator.free(malformed);
     try std.testing.expect(std.mem.indexOf(u8, malformed, "\"code\":\"E_MALFORMED\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, malformed, "\"field\":\"cwd\"") != null);

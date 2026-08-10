@@ -17,6 +17,7 @@ const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
 const framing = @import("framing.zig");
+const test_support = @import("test_support.zig");
 const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
@@ -2118,7 +2119,7 @@ test "fs event invalidates git branch cache" {
     defer allocator.free(dir_path);
     defer std.fs.cwd().deleteTree(dir_path) catch {};
     try std.fs.cwd().makePath(dir_path);
-    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+    try test_support.runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
 
     const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
     defer allocator.free(socket_path);
@@ -2152,7 +2153,7 @@ test "daemon render applies configured module options" {
     defer allocator.free(dir_path);
     defer std.fs.cwd().deleteTree(dir_path) catch {};
     try std.fs.cwd().makePath(dir_path);
-    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+    try test_support.runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
 
     const dirty_file = try std.fmt.allocPrint(allocator, "{s}/dirty.txt", .{dir_path});
     defer allocator.free(dirty_file);
@@ -2582,7 +2583,7 @@ test "render_continue fills async git segment from cache" {
     defer allocator.free(dir_path);
     defer std.fs.cwd().deleteTree(dir_path) catch {};
     try std.fs.cwd().makePath(dir_path);
-    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+    try test_support.runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
 
     const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
     defer allocator.free(socket_path);
@@ -2796,6 +2797,9 @@ test "reload op rereads plugin manifests" {
         \\}
         ,
     });
+    const trusted_path = try plugin_host.statePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.trusted");
+    defer allocator.free(trusted_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = trusted_path, .data = "demo-plugin\n" });
 
     var server = try Server.init(socket_path);
     defer server.deinit();
@@ -2981,20 +2985,4 @@ test "logs slow module warning" {
     defer allocator.free(contents);
     try std.testing.expect(std.mem.indexOf(u8, contents, "\"event\":\"slow_module\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, contents, "module=language_versions") != null);
-}
-
-fn runGit(allocator: std.mem.Allocator, cwd_path: []const u8, argv: []const []const u8) !void {
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = argv,
-        .cwd = cwd_path,
-        .max_output_bytes = 4096,
-        .expand_arg0 = .expand,
-    });
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    try std.testing.expect(switch (result.term) {
-        .Exited => |code| code == 0,
-        else => false,
-    });
 }

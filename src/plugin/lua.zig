@@ -7,6 +7,7 @@ const context_schema = @import("context.zig");
 pub const manifest = manifest_schema;
 pub const capability = capability_schema;
 pub const context = context_schema;
+pub const trust = @import("trust.zig");
 
 const LuaState = opaque {};
 const CInt = c_int;

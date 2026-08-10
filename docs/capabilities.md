@@ -36,7 +36,7 @@ net = { "*" }
 
 ## Trust prompts
 
-`shisa plugin install` shows the manifest before installing. `shisa plugin trust <name>` records user intent for capability escalation. `shisa plugin trust <name> --net=<provider>` records a provider-scoped network grant; it does not trust other providers or non-network capabilities. A plugin upgrade that changes requested capabilities must be treated as a new trust decision.
+The daemon loads only plugins recorded in `plugins.trusted`. A capability-free manifest needs an explicit name record; a manifest that requests host access must also match its recorded capability fingerprint. `shisa plugin install` records that approval after an interactive confirmation. `shisa plugin install --yes` installs without granting runtime trust; follow it with `shisa plugin trust <name>` to approve the exact installed manifest. `shisa plugin trust <name> --net=<provider>` records a provider-scoped network grant for a net-only manifest; it does not trust other providers or non-network capabilities. A plugin upgrade that changes requested capabilities must be treated as a new trust decision.
 
 ## Review checklist
 

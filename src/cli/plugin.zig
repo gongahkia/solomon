@@ -3,6 +3,7 @@ const cli_util = @import("util.zig");
 const daemon_json = @import("../daemon/json.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
+const plugin_trust = plugin_lua.trust;
 
 const plugin_slow_strike_limit: u8 = 3;
 
@@ -86,8 +87,12 @@ pub fn command(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try std.fs.File.stdout().writeAll(message);
     } else if (std.mem.eql(u8, args[0], "trust")) {
         const config = try parsePluginTrustArgs(args[1..]);
-        try setPluginTrusted(allocator, trusted_path, config.name);
-        if (config.net) |provider| try setPluginTrustedNet(allocator, trusted_path, config.name, provider);
+        if (config.net) |provider| {
+            try plugin_trust.grantName(allocator, trusted_path, config.name);
+            try plugin_trust.grantNet(allocator, trusted_path, config.name, provider);
+        } else {
+            try trustInstalledPlugin(allocator, plugins_dir, trusted_path, config.name);
+        }
         const message = if (config.net) |provider|
             try std.fmt.allocPrint(allocator, "trusted {s} net={s}\n", .{ config.name, provider })
         else
@@ -604,14 +609,31 @@ fn pluginInstall(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_
         else => return err,
     }
 
-    const prompted = !config.yes and !(try pluginTrustedForManifest(allocator, trusted_path, loaded.manifest));
+    const prompted = !config.yes and !(try plugin_trust.isTrustedForManifest(allocator, trusted_path, loaded.manifest));
     if (prompted and !(try confirmPluginInstall(allocator, loaded.manifest))) return error.PluginInstallDeclined;
 
     try std.fs.renameAbsolute(temp_path, target_path);
-    if (prompted) try setPluginTrustedManifest(allocator, trusted_path, loaded.manifest);
+    if (prompted) try plugin_trust.grantManifest(allocator, trusted_path, loaded.manifest);
     const message = try std.fmt.allocPrint(allocator, "installed {s} {s}\n", .{ loaded.manifest.name, loaded.manifest.version });
     defer allocator.free(message);
     try std.fs.File.stdout().writeAll(message);
+}
+
+fn trustInstalledPlugin(allocator: std.mem.Allocator, plugins_dir: []const u8, trusted_path: []const u8, name: []const u8) !void {
+    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
+    const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, name });
+    defer allocator.free(plugin_dir);
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
+    defer allocator.free(manifest_path);
+    const source = try std.fs.cwd().readFileAlloc(allocator, manifest_path, 1024 * 1024);
+    defer allocator.free(source);
+
+    var runtime = try plugin_lua.Runtime.initSandboxedWithOptions(allocator, .{ .require_root = plugin_dir });
+    defer runtime.deinit();
+    var loaded = try runtime.loadManifestStrict(source);
+    defer loaded.deinit(allocator);
+    if (!std.mem.eql(u8, loaded.manifest.name, name)) return error.PluginManifestNameMismatch;
+    try plugin_trust.grantManifest(allocator, trusted_path, loaded.manifest);
 }
 
 fn pluginInstallSourceAlloc(allocator: std.mem.Allocator, config: PluginInstallConfig) !PluginInstallSource {
@@ -938,319 +960,6 @@ fn pluginSlowStrikeCount(allocator: std.mem.Allocator, slow_strikes_path: []cons
     return 0;
 }
 
-fn setPluginTrusted(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8) !void {
-    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
-
-    var names = try readPluginNames(allocator, trusted_path);
-    defer {
-        for (names.items) |item| allocator.free(item);
-        names.deinit(allocator);
-    }
-
-    if (indexOfString(names.items, name) == null) {
-        try names.append(allocator, try allocator.dupe(u8, name));
-    }
-    std.mem.sort([]u8, names.items, {}, lessThanString);
-    try writePluginNames(trusted_path, names.items);
-}
-
-fn pluginTrusted(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8) !bool {
-    var names = try readPluginNames(allocator, trusted_path);
-    defer {
-        for (names.items) |item| allocator.free(item);
-        names.deinit(allocator);
-    }
-    return indexOfString(names.items, name) != null;
-}
-
-fn pluginTrustedForManifest(allocator: std.mem.Allocator, trusted_path: []const u8, manifest: plugin_manifest.Manifest) !bool {
-    if (!(try pluginTrusted(allocator, trusted_path, manifest.name))) return false;
-
-    const capabilities_path = try trustedCapabilitiesPathAlloc(allocator, trusted_path);
-    defer allocator.free(capabilities_path);
-    const fingerprint = try manifestCapabilityFingerprintAlloc(allocator, manifest);
-    defer allocator.free(fingerprint);
-    if (try trustedCapabilityFingerprintMatches(allocator, capabilities_path, manifest.name, fingerprint)) return true;
-    return pluginManifestTrustedByNetGrants(allocator, trusted_path, manifest);
-}
-
-fn setPluginTrustedManifest(allocator: std.mem.Allocator, trusted_path: []const u8, manifest: plugin_manifest.Manifest) !void {
-    try setPluginTrusted(allocator, trusted_path, manifest.name);
-
-    const capabilities_path = try trustedCapabilitiesPathAlloc(allocator, trusted_path);
-    defer allocator.free(capabilities_path);
-    const fingerprint = try manifestCapabilityFingerprintAlloc(allocator, manifest);
-    defer allocator.free(fingerprint);
-    try setTrustedCapabilityFingerprint(allocator, capabilities_path, manifest.name, fingerprint);
-}
-
-fn trustedCapabilitiesPathAlloc(allocator: std.mem.Allocator, trusted_path: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{s}.capabilities", .{trusted_path});
-}
-
-fn trustedNetProvidersPathAlloc(allocator: std.mem.Allocator, trusted_path: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{s}.net", .{trusted_path});
-}
-
-fn setPluginTrustedNet(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8, provider: []const u8) !void {
-    if (!plugin_manifest.isValidPluginName(name)) return error.InvalidPluginName;
-    if (!validNetProviderId(provider)) return error.InvalidNetCapability;
-
-    const path = try trustedNetProvidersPathAlloc(allocator, trusted_path);
-    defer allocator.free(path);
-    var grants = try readTrustedNetGrants(allocator, path);
-    defer deinitTrustedNetGrants(allocator, &grants);
-
-    if (indexOfTrustedNetGrant(grants.items, name, provider) == null) {
-        const name_copy = try allocator.dupe(u8, name);
-        errdefer allocator.free(name_copy);
-        const provider_copy = try allocator.dupe(u8, provider);
-        errdefer allocator.free(provider_copy);
-        try grants.append(allocator, .{
-            .name = name_copy,
-            .provider = provider_copy,
-        });
-    }
-    std.mem.sort(TrustedNetGrant, grants.items, {}, lessThanTrustedNetGrant);
-    try writeTrustedNetGrants(path, grants.items);
-}
-
-fn pluginTrustedNet(allocator: std.mem.Allocator, trusted_path: []const u8, name: []const u8, provider: []const u8) !bool {
-    const path = try trustedNetProvidersPathAlloc(allocator, trusted_path);
-    defer allocator.free(path);
-    var grants = try readTrustedNetGrants(allocator, path);
-    defer deinitTrustedNetGrants(allocator, &grants);
-    return indexOfTrustedNetGrant(grants.items, name, provider) != null;
-}
-
-fn pluginManifestTrustedByNetGrants(allocator: std.mem.Allocator, trusted_path: []const u8, manifest: plugin_manifest.Manifest) !bool {
-    if (manifest.capabilities.fs_read.len != 0 or
-        manifest.capabilities.fs_watch.len != 0 or
-        !listCapabilityIsDeny(manifest.capabilities.exec) or
-        manifest.capabilities.secrets or
-        manifest.capabilities.env_read.len != 0 or
-        manifest.capabilities.pre_exec)
-    {
-        return false;
-    }
-    return switch (manifest.capabilities.net) {
-        .deny => false,
-        .allow => |providers| {
-            if (providers.len == 0) return false;
-            for (providers) |provider| {
-                if (!(try pluginTrustedNet(allocator, trusted_path, manifest.name, provider))) return false;
-            }
-            return true;
-        },
-    };
-}
-
-fn listCapabilityIsDeny(capability: plugin_manifest.ListCapability) bool {
-    return switch (capability) {
-        .deny => true,
-        .allow => false,
-    };
-}
-
-const TrustedNetGrant = struct {
-    name: []u8,
-    provider: []u8,
-};
-
-fn readTrustedNetGrants(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(TrustedNetGrant) {
-    var grants: std.ArrayList(TrustedNetGrant) = .empty;
-    errdefer deinitTrustedNetGrants(allocator, &grants);
-    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => return grants,
-        else => return err,
-    };
-    defer allocator.free(contents);
-
-    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
-    while (lines.next()) |line| {
-        const record = parseTrustedNetGrantLine(line) orelse continue;
-        if (indexOfTrustedNetGrant(grants.items, record.name, record.provider) != null) continue;
-        const name_copy = try allocator.dupe(u8, record.name);
-        errdefer allocator.free(name_copy);
-        const provider_copy = try allocator.dupe(u8, record.provider);
-        errdefer allocator.free(provider_copy);
-        try grants.append(allocator, .{
-            .name = name_copy,
-            .provider = provider_copy,
-        });
-    }
-    return grants;
-}
-
-fn deinitTrustedNetGrants(allocator: std.mem.Allocator, grants: *std.ArrayList(TrustedNetGrant)) void {
-    for (grants.items) |grant| {
-        allocator.free(grant.name);
-        allocator.free(grant.provider);
-    }
-    grants.deinit(allocator);
-}
-
-fn writeTrustedNetGrants(path: []const u8, grants: []const TrustedNetGrant) !void {
-    if (std.fs.path.dirname(path)) |parent| {
-        try std.fs.cwd().makePath(parent);
-    }
-    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
-    defer file.close();
-    for (grants) |grant| {
-        try file.writeAll(grant.name);
-        try file.writeAll(" ");
-        try file.writeAll(grant.provider);
-        try file.writeAll("\n");
-    }
-}
-
-const TrustedNetGrantLine = struct {
-    name: []const u8,
-    provider: []const u8,
-};
-
-fn parseTrustedNetGrantLine(line: []const u8) ?TrustedNetGrantLine {
-    var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t\r");
-    const name = fields.next() orelse return null;
-    const provider = fields.next() orelse return null;
-    if (fields.next() != null) return null;
-    if (!plugin_manifest.isValidPluginName(name)) return null;
-    if (!validNetProviderId(provider)) return null;
-    return .{ .name = name, .provider = provider };
-}
-
-fn validNetProviderId(provider: []const u8) bool {
-    if (provider.len == 0) return false;
-    for (provider) |byte| {
-        if (!(std.ascii.isAlphanumeric(byte) or byte == '.' or byte == '_' or byte == '-')) return false;
-    }
-    return true;
-}
-
-fn indexOfTrustedNetGrant(grants: []const TrustedNetGrant, name: []const u8, provider: []const u8) ?usize {
-    for (grants, 0..) |grant, index| {
-        if (std.mem.eql(u8, grant.name, name) and std.mem.eql(u8, grant.provider, provider)) return index;
-    }
-    return null;
-}
-
-fn lessThanTrustedNetGrant(_: void, lhs: TrustedNetGrant, rhs: TrustedNetGrant) bool {
-    if (!std.mem.eql(u8, lhs.name, rhs.name)) return std.mem.lessThan(u8, lhs.name, rhs.name);
-    return std.mem.lessThan(u8, lhs.provider, rhs.provider);
-}
-
-fn manifestCapabilityFingerprintAlloc(allocator: std.mem.Allocator, manifest: plugin_manifest.Manifest) ![]u8 {
-    var canonical: std.ArrayList(u8) = .empty;
-    defer canonical.deinit(allocator);
-
-    try appendCapabilityStringList(allocator, &canonical, "fs_read", manifest.capabilities.fs_read);
-    try appendCapabilityStringList(allocator, &canonical, "fs_watch", manifest.capabilities.fs_watch);
-    try appendListCapability(allocator, &canonical, "exec", manifest.capabilities.exec);
-    try appendListCapability(allocator, &canonical, "net", manifest.capabilities.net);
-    try appendCapabilityBool(allocator, &canonical, "secrets", manifest.capabilities.secrets);
-    try appendCapabilityStringList(allocator, &canonical, "env_read", manifest.capabilities.env_read);
-    try appendCapabilityBool(allocator, &canonical, "pre_exec", manifest.capabilities.pre_exec);
-
-    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(canonical.items, &digest, .{});
-    const hex = std.fmt.bytesToHex(digest, .lower);
-    return std.fmt.allocPrint(allocator, "sha256:{s}", .{hex[0..]});
-}
-
-fn appendCapabilityStringList(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, items: []const []const u8) !void {
-    try cli_util.appendFmt(allocator, out, "{s}:list\n", .{label});
-    const sorted = try allocator.dupe([]const u8, items);
-    defer allocator.free(sorted);
-    std.mem.sort([]const u8, sorted, {}, lessThanString);
-    for (sorted) |item| try cli_util.appendFmt(allocator, out, "{s}\n", .{item});
-}
-
-fn appendListCapability(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, capability: plugin_manifest.ListCapability) !void {
-    switch (capability) {
-        .deny => try cli_util.appendFmt(allocator, out, "{s}:deny\n", .{label}),
-        .allow => |items| try appendCapabilityStringList(allocator, out, label, items),
-    }
-}
-
-fn appendCapabilityBool(allocator: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, value: bool) !void {
-    try cli_util.appendFmt(allocator, out, "{s}:bool:{s}\n", .{ label, if (value) "true" else "false" });
-}
-
-fn trustedCapabilityFingerprintMatches(allocator: std.mem.Allocator, path: []const u8, name: []const u8, fingerprint: []const u8) !bool {
-    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => return err,
-    };
-    defer allocator.free(contents);
-
-    var lines = std.mem.tokenizeScalar(u8, contents, '\n');
-    while (lines.next()) |line| {
-        const record = parseTrustedCapabilityLine(line) orelse continue;
-        if (std.mem.eql(u8, record.name, name)) return std.mem.eql(u8, record.fingerprint, fingerprint);
-    }
-    return false;
-}
-
-fn setTrustedCapabilityFingerprint(allocator: std.mem.Allocator, path: []const u8, name: []const u8, fingerprint: []const u8) !void {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    var replaced = false;
-
-    const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
-        error.FileNotFound => null,
-        else => return err,
-    };
-    defer if (contents) |text| allocator.free(text);
-
-    if (contents) |text| {
-        var lines = std.mem.tokenizeScalar(u8, text, '\n');
-        while (lines.next()) |line| {
-            const record = parseTrustedCapabilityLine(line) orelse continue;
-            if (std.mem.eql(u8, record.name, name)) {
-                if (replaced) continue;
-                try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
-                replaced = true;
-            } else {
-                try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ record.name, record.fingerprint });
-            }
-        }
-    }
-
-    if (!replaced) try cli_util.appendFmt(allocator, &out, "{s} {s}\n", .{ name, fingerprint });
-    if (std.fs.path.dirname(path)) |parent| {
-        try std.fs.cwd().makePath(parent);
-    }
-    var file = try std.fs.createFileAbsolute(path, .{ .truncate = true, .mode = 0o600 });
-    defer file.close();
-    try file.writeAll(out.items);
-}
-
-const TrustedCapabilityLine = struct {
-    name: []const u8,
-    fingerprint: []const u8,
-};
-
-fn parseTrustedCapabilityLine(line: []const u8) ?TrustedCapabilityLine {
-    var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t\r");
-    const name = fields.next() orelse return null;
-    const fingerprint = fields.next() orelse return null;
-    if (fields.next() != null) return null;
-    if (!plugin_manifest.isValidPluginName(name)) return null;
-    if (!isValidCapabilityFingerprint(fingerprint)) return null;
-    return .{ .name = name, .fingerprint = fingerprint };
-}
-
-fn isValidCapabilityFingerprint(fingerprint: []const u8) bool {
-    const prefix = "sha256:";
-    if (!std.mem.startsWith(u8, fingerprint, prefix)) return false;
-    const hex = fingerprint[prefix.len..];
-    if (hex.len != std.crypto.hash.sha2.Sha256.digest_length * 2) return false;
-    for (hex) |byte| {
-        if (!std.ascii.isHex(byte) or std.ascii.isUpper(byte)) return false;
-    }
-    return true;
-}
-
 fn readPluginNames(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]u8) {
     var names: std.ArrayList([]u8) = .empty;
     const contents = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| switch (err) {
@@ -1566,9 +1275,9 @@ test "plugin trust is duplicate safe" {
 
     const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
     defer allocator.free(trusted_path);
-    try setPluginTrusted(allocator, trusted_path, "alpha");
-    try setPluginTrusted(allocator, trusted_path, "alpha");
-    try std.testing.expect(try pluginTrusted(allocator, trusted_path, "alpha"));
+    try plugin_trust.grantName(allocator, trusted_path, "alpha");
+    try plugin_trust.grantName(allocator, trusted_path, "alpha");
+    try std.testing.expect(try plugin_trust.nameIsTrusted(allocator, trusted_path, "alpha"));
 
     const contents = try std.fs.cwd().readFileAlloc(allocator, trusted_path, 4096);
     defer allocator.free(contents);
@@ -1584,6 +1293,52 @@ test "plugin trust args parse net provider" {
     try std.testing.expectEqualStrings("api.example.com", spaced_config.net.?);
 }
 
+test "plugin trust approves the installed manifest" {
+    const allocator = std.testing.allocator;
+    var runtime = plugin_lua.Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    runtime.deinit();
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-trust-installed-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/alpha", .{plugins_dir});
+    defer allocator.free(plugin_dir);
+    try std.fs.cwd().makePath(plugin_dir);
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
+    defer allocator.free(manifest_path);
+    const trusted_path = try plugin_trust.pathForPluginsDirAlloc(allocator, plugins_dir);
+    defer allocator.free(trusted_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "alpha",
+        \\  version = "1.0.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = { exec = { "git" } },
+        \\  modules = { "alpha" },
+        \\}
+        ,
+    });
+
+    try trustInstalledPlugin(allocator, plugins_dir, trusted_path, "alpha");
+    const expected = plugin_manifest.Manifest{
+        .name = "alpha",
+        .version = "1.0.0",
+        .api_version = plugin_manifest.supported_api_version,
+        .license = "MIT",
+        .capabilities = .{ .exec = .{ .allow = &.{"git"} } },
+        .modules = &.{"alpha"},
+    };
+    try std.testing.expect(try plugin_trust.isTrustedForManifest(allocator, trusted_path, expected));
+}
+
 test "plugin net trust is provider scoped" {
     const allocator = std.testing.allocator;
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-net-{x}", .{std.crypto.random.int(u64)});
@@ -1593,13 +1348,13 @@ test "plugin net trust is provider scoped" {
 
     const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
     defer allocator.free(trusted_path);
-    try setPluginTrusted(allocator, trusted_path, "shisa.example");
-    try setPluginTrustedNet(allocator, trusted_path, "shisa.example", "remote");
-    try setPluginTrustedNet(allocator, trusted_path, "shisa.example", "remote");
-    try std.testing.expect(try pluginTrustedNet(allocator, trusted_path, "shisa.example", "remote"));
-    try std.testing.expect(!(try pluginTrustedNet(allocator, trusted_path, "shisa.example", "other")));
+    try plugin_trust.grantName(allocator, trusted_path, "shisa.example");
+    try plugin_trust.grantNet(allocator, trusted_path, "shisa.example", "remote");
+    try plugin_trust.grantNet(allocator, trusted_path, "shisa.example", "remote");
+    try std.testing.expect(try plugin_trust.netIsTrusted(allocator, trusted_path, "shisa.example", "remote"));
+    try std.testing.expect(!(try plugin_trust.netIsTrusted(allocator, trusted_path, "shisa.example", "other")));
 
-    const contents_path = try trustedNetProvidersPathAlloc(allocator, trusted_path);
+    const contents_path = try plugin_trust.netProvidersPathAlloc(allocator, trusted_path);
     defer allocator.free(contents_path);
     const contents = try std.fs.cwd().readFileAlloc(allocator, contents_path, 4096);
     defer allocator.free(contents);
@@ -1631,13 +1386,11 @@ test "plugin trust re-prompts on capability upgrade" {
         .modules = &.{"alpha"},
     };
 
-    try setPluginTrusted(allocator, trusted_path, "alpha");
-    try std.testing.expect(!(try pluginTrustedForManifest(allocator, trusted_path, base)));
-    try setPluginTrustedManifest(allocator, trusted_path, base);
-    try std.testing.expect(try pluginTrustedForManifest(allocator, trusted_path, base));
-    try std.testing.expect(!(try pluginTrustedForManifest(allocator, trusted_path, upgraded)));
-    try setPluginTrustedManifest(allocator, trusted_path, upgraded);
-    try std.testing.expect(try pluginTrustedForManifest(allocator, trusted_path, upgraded));
+    try plugin_trust.grantName(allocator, trusted_path, "alpha");
+    try std.testing.expect(try plugin_trust.isTrustedForManifest(allocator, trusted_path, base));
+    try std.testing.expect(!(try plugin_trust.isTrustedForManifest(allocator, trusted_path, upgraded)));
+    try plugin_trust.grantManifest(allocator, trusted_path, upgraded);
+    try std.testing.expect(try plugin_trust.isTrustedForManifest(allocator, trusted_path, upgraded));
 }
 
 test "plugin net trust covers only matching net-only manifests" {
@@ -1649,8 +1402,8 @@ test "plugin net trust covers only matching net-only manifests" {
 
     const trusted_path = try std.fmt.allocPrint(allocator, "{s}/plugins.trusted", .{dir_path});
     defer allocator.free(trusted_path);
-    try setPluginTrusted(allocator, trusted_path, "shisa.example");
-    try setPluginTrustedNet(allocator, trusted_path, "shisa.example", "remote");
+    try plugin_trust.grantName(allocator, trusted_path, "shisa.example");
+    try plugin_trust.grantNet(allocator, trusted_path, "shisa.example", "remote");
 
     const net_only = plugin_manifest.Manifest{
         .name = "shisa.example",
@@ -1677,9 +1430,9 @@ test "plugin net trust covers only matching net-only manifests" {
         .modules = &.{"example"},
     };
 
-    try std.testing.expect(try pluginTrustedForManifest(allocator, trusted_path, net_only));
-    try std.testing.expect(!(try pluginTrustedForManifest(allocator, trusted_path, other_net)));
-    try std.testing.expect(!(try pluginTrustedForManifest(allocator, trusted_path, net_plus_exec)));
+    try std.testing.expect(try plugin_trust.isTrustedForManifest(allocator, trusted_path, net_only));
+    try std.testing.expect(!(try plugin_trust.isTrustedForManifest(allocator, trusted_path, other_net)));
+    try std.testing.expect(!(try plugin_trust.isTrustedForManifest(allocator, trusted_path, net_plus_exec)));
 }
 
 test "capability fingerprint is order independent" {
@@ -1709,14 +1462,14 @@ test "capability fingerprint is order independent" {
         .modules = &.{"alpha"},
     };
 
-    const first_fingerprint = try manifestCapabilityFingerprintAlloc(allocator, first);
+    const first_fingerprint = try plugin_trust.capabilityFingerprintAlloc(allocator, first);
     defer allocator.free(first_fingerprint);
-    const second_fingerprint = try manifestCapabilityFingerprintAlloc(allocator, second);
+    const second_fingerprint = try plugin_trust.capabilityFingerprintAlloc(allocator, second);
     defer allocator.free(second_fingerprint);
     try std.testing.expectEqualStrings(first_fingerprint, second_fingerprint);
 }
 
 test "plugin state rejects invalid names" {
     try std.testing.expectError(error.InvalidPluginName, setPluginDisabled(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad", true));
-    try std.testing.expectError(error.InvalidPluginName, setPluginTrusted(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad"));
+    try std.testing.expectError(error.InvalidPluginName, plugin_trust.grantName(std.testing.allocator, "/tmp/shisa-plugin-invalid", "Bad"));
 }

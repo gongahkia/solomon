@@ -1,5 +1,6 @@
 const std = @import("std");
 const plugin_lua = @import("plugin_lua");
+const plugin_trust = plugin_lua.trust;
 
 pub const capability = plugin_lua.capability;
 pub const manifest = plugin_lua.manifest;
@@ -26,6 +27,7 @@ pub const Instance = struct {
     runtime: *Runtime,
     loaded: plugin_lua.OwnedManifest,
     host: *HostState,
+    activated: bool = false,
     mutex: std.Thread.Mutex = .{},
     update_queued: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
@@ -56,7 +58,7 @@ pub const Instance = struct {
     }
 
     pub fn deinit(self: *Instance) void {
-        self.callLifecycle(self.loaded.manifest.entry_points.on_unload, "{}") catch {};
+        if (self.activated) self.callLifecycle(self.loaded.manifest.entry_points.on_unload, "{}") catch {};
         self.loaded.deinit(self.allocator);
         self.runtime.deinit();
         self.allocator.destroy(self.runtime);
@@ -67,6 +69,7 @@ pub const Instance = struct {
 
     pub fn activate(self: *Instance) !void {
         try self.callLifecycle(self.loaded.manifest.entry_points.on_load, "{}");
+        self.activated = true;
     }
 
     pub fn renderAlloc(self: *Instance, cwd: []const u8, module_id: []const u8) !?[]u8 {
@@ -681,6 +684,8 @@ pub fn loadNamesAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8) ![]
     defer allocator.free(disabled_path);
     const strikes_path = try statePathForPluginsDirAlloc(allocator, plugins_dir, "plugins.slow-strikes");
     defer allocator.free(strikes_path);
+    const trusted_path = try plugin_trust.pathForPluginsDirAlloc(allocator, plugins_dir);
+    defer allocator.free(trusted_path);
 
     var dir = std.fs.openDirAbsolute(plugins_dir, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return allocator.alloc([]u8, 0),
@@ -715,6 +720,7 @@ pub fn loadNamesAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8) ![]
             else => return err,
         };
         defer loaded.deinit(allocator);
+        if (!(try plugin_trust.isTrustedForManifest(allocator, trusted_path, loaded.manifest))) continue;
         try clearSlowStrike(allocator, strikes_path, loaded.manifest.name);
         if (try nameListed(allocator, disabled_path, loaded.manifest.name)) continue;
         try names.append(allocator, try allocator.dupe(u8, loaded.manifest.name));
@@ -726,6 +732,8 @@ pub fn loadNamesAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8) ![]
 pub fn loadInstancesAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8) ![]Instance {
     const names = try loadNamesAlloc(allocator, plugins_dir);
     defer freeNames(allocator, names);
+    const trusted_path = try plugin_trust.pathForPluginsDirAlloc(allocator, plugins_dir);
+    defer allocator.free(trusted_path);
     var instances: std.ArrayList(Instance) = .empty;
     errdefer deinitInstances(allocator, &instances);
     for (names) |name| {
@@ -736,6 +744,10 @@ pub fn loadInstancesAlloc(allocator: std.mem.Allocator, plugins_dir: []const u8)
             else => return err,
         };
         errdefer instance.deinit();
+        if (!(try plugin_trust.isTrustedForManifest(allocator, trusted_path, instance.loaded.manifest))) {
+            instance.deinit();
+            continue;
+        }
         try instance.activate();
         try instances.append(allocator, instance);
     }
@@ -969,6 +981,86 @@ test "slow plugin strikes disable after third strike" {
     const strikes = try std.fs.cwd().readFileAlloc(allocator, strikes_path, 4096);
     defer allocator.free(strikes);
     try std.testing.expectEqualStrings("slow-plugin 3\n", strikes);
+}
+
+test "daemon plugin loader requires current manifest trust" {
+    const allocator = std.testing.allocator;
+    var runtime = Runtime.initSandboxed(allocator) catch |err| switch (err) {
+        error.LuaUnavailable => return error.SkipZigTest,
+        else => return err,
+    };
+    runtime.deinit();
+
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-plugin-trust-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    const plugins_dir = try std.fmt.allocPrint(allocator, "{s}/plugins", .{dir_path});
+    defer allocator.free(plugins_dir);
+    const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/demo-plugin", .{plugins_dir});
+    defer allocator.free(plugin_dir);
+    try std.fs.cwd().makePath(plugin_dir);
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/plugin.lua", .{plugin_dir});
+    defer allocator.free(manifest_path);
+    const trusted_path = try plugin_trust.pathForPluginsDirAlloc(allocator, plugins_dir);
+    defer allocator.free(trusted_path);
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "demo-plugin",
+        \\  version = "1.0.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = { exec = { "git" } },
+        \\  modules = { "demo" },
+        \\}
+        ,
+    });
+
+    const untrusted = try loadNamesAlloc(allocator, plugins_dir);
+    defer freeNames(allocator, untrusted);
+    try std.testing.expectEqual(@as(usize, 0), untrusted.len);
+
+    const trusted_manifest = manifest.Manifest{
+        .name = "demo-plugin",
+        .version = "1.0.0",
+        .api_version = manifest.supported_api_version,
+        .license = "MIT",
+        .capabilities = .{ .exec = .{ .allow = &.{"git"} } },
+        .modules = &.{"demo"},
+    };
+    try plugin_trust.grantManifest(allocator, trusted_path, trusted_manifest);
+
+    const trusted = try loadNamesAlloc(allocator, plugins_dir);
+    defer freeNames(allocator, trusted);
+    try std.testing.expectEqual(@as(usize, 1), trusted.len);
+    {
+        const instances = try loadInstancesAlloc(allocator, plugins_dir);
+        defer freeInstances(allocator, instances);
+        try std.testing.expectEqual(@as(usize, 1), instances.len);
+    }
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = manifest_path,
+        .data =
+        \\return {
+        \\  name = "demo-plugin",
+        \\  version = "1.1.0",
+        \\  api_version = 1,
+        \\  license = "MIT",
+        \\  capabilities = { exec = { "git", "curl" } },
+        \\  modules = { "demo" },
+        \\}
+        ,
+    });
+
+    const upgraded = try loadNamesAlloc(allocator, plugins_dir);
+    defer freeNames(allocator, upgraded);
+    try std.testing.expectEqual(@as(usize, 0), upgraded.len);
+    const upgraded_instances = try loadInstancesAlloc(allocator, plugins_dir);
+    defer freeInstances(allocator, upgraded_instances);
+    try std.testing.expectEqual(@as(usize, 0), upgraded_instances.len);
 }
 
 test "daemon checks plugin host api calls through capability gate" {

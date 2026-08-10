@@ -58,6 +58,7 @@ From the Shisa repo:
 ```sh
 zig build debug
 ./zig-out/bin/shisa plugin install /path/to/shisa-demo-plugin --yes --plugin-sandbox-strict
+./zig-out/bin/shisa plugin trust shisa-demo-plugin
 ./zig-out/bin/shisa plugin list
 ```
 

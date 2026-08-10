@@ -103,16 +103,18 @@ Install it:
 shisa plugin install ./demo-plugin
 ```
 
-For scripts or tests:
+For non-interactive installation (this does not grant runtime trust):
 
 ```sh
 shisa plugin install ./demo-plugin --yes
+shisa plugin trust demo-plugin
 ```
 
 For strict manifest audits:
 
 ```sh
 shisa plugin install ./demo-plugin --yes --plugin-sandbox-strict
+shisa plugin trust demo-plugin
 ```
 
 Strict mode rejects unknown top-level manifest fields and unknown capability fields.
@@ -137,7 +139,7 @@ shisa plugin trust demo-plugin
 
 `shisa plugin verify <path>` strict-loads the manifest and rejects direct `os.execute` or `io.popen` use in `plugin.lua`.
 
-`shisa plugin trust <name> --net=<provider>` records provider-scoped network trust. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. Core prompt configuration never enables network access; plugins require their own explicit capability and trust grants.
+`shisa plugin trust <name>` approves the exact manifest currently installed at that plugin path. `shisa plugin trust <name> --net=<provider>` records provider-scoped network trust for a net-only manifest. A grant for `openai` does not cover another provider such as `anthropic`, and it does not cover non-network capability changes. Core prompt configuration never enables network access; plugins require their own explicit capability and trust grants.
 
 `shisa plugin list` prints `verified` for plugins recorded in `plugins.verified`; this is a local maintainer-review marker, not a registry listing or a statement that a plugin is safe in every environment.
 

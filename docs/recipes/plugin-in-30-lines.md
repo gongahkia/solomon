@@ -47,6 +47,7 @@ git commit -m "init plugin"
 
 ```sh
 shisa plugin install . --yes --plugin-sandbox-strict
+shisa plugin trust hello
 shisa plugin list
 ```
 

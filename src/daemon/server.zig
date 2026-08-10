@@ -35,6 +35,7 @@ const shutdown_poll_ms: i32 = 100;
 const interactive_frame_timeout_ms: i32 = 5;
 const render_histogram_buckets = 5;
 const prompt_cache_module = "render_prompt";
+const ReloadAllocator = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true });
 pub const daemon_version = "0.1.0-dev";
 pub const protocol_version: u32 = 2;
 const default_config_text =
@@ -241,7 +242,9 @@ const PosixServer = struct {
     fs_watcher: fsnotify.Watcher,
     prod_guard_audit_home: ?[]const u8 = null,
     cost_refresh_state: cost_refresh.State = .{},
-    reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
+    // Reload-owned values outlive initWithLogger's stack frame. Keep the
+    // allocator itself stable too: Allocator stores a context pointer.
+    reload_gpa: *ReloadAllocator,
     reload_state: plugin_host.ReloadState = .{},
     runtime_snapshot: ?RuntimeSnapshot = null,
     plugin_instances: []plugin_host.Instance = &.{},
@@ -272,15 +275,25 @@ const PosixServer = struct {
             .kernel_backlog = 128,
         });
 
+        const reload_gpa = try std.heap.page_allocator.create(ReloadAllocator);
+        reload_gpa.* = .{};
+        var reload_gpa_owned = true;
+        errdefer if (reload_gpa_owned) {
+            _ = reload_gpa.deinit();
+            std.heap.page_allocator.destroy(reload_gpa);
+        };
+
         var server: Server = .{
             .socket_path = socket_path,
             .listener = listener,
             .logger = logger,
             .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
+            .reload_gpa = reload_gpa,
         };
         server.reloadConfigAndPlugins() catch |err| {
             server.deinit();
+            reload_gpa_owned = false;
             return err;
         };
         return server;
@@ -298,7 +311,9 @@ const PosixServer = struct {
         plugin_host.freeInstances(self.reloadAllocator(), self.plugin_instances);
         if (self.runtime_snapshot) |*snapshot| snapshot.deinit(self.reloadAllocator());
         self.reload_state.deinit(self.reloadAllocator());
-        _ = self.reload_gpa.deinit();
+        const reload_gpa = self.reload_gpa;
+        _ = reload_gpa.deinit();
+        std.heap.page_allocator.destroy(reload_gpa);
         self.listener.deinit();
         std.fs.deleteFileAbsolute(self.socket_path) catch {};
         self.* = undefined;
@@ -1397,7 +1412,7 @@ const WindowsServer = struct {
     fs_watcher: fsnotify.Watcher,
     prod_guard_audit_home: ?[]const u8 = null,
     cost_refresh_state: cost_refresh.State = .{},
-    reload_gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .{},
+    reload_gpa: *ReloadAllocator,
     reload_state: plugin_host.ReloadState = .{},
     runtime_snapshot: ?RuntimeSnapshot = null,
     plugin_instances: []plugin_host.Instance = &.{},
@@ -1412,13 +1427,26 @@ const WindowsServer = struct {
     }
 
     pub fn initWithLogger(socket_path: []const u8, logger: ?*daemon_log.Logger) !WindowsServer {
+        const reload_gpa = try std.heap.page_allocator.create(ReloadAllocator);
+        reload_gpa.* = .{};
+        var reload_gpa_owned = true;
+        errdefer if (reload_gpa_owned) {
+            _ = reload_gpa.deinit();
+            std.heap.page_allocator.destroy(reload_gpa);
+        };
+
         var server: WindowsServer = .{
             .socket_path = socket_path,
             .logger = logger,
             .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
+            .reload_gpa = reload_gpa,
         };
-        try PosixServer.reloadConfigAndPlugins(&server);
+        PosixServer.reloadConfigAndPlugins(&server) catch |err| {
+            server.deinit();
+            reload_gpa_owned = false;
+            return err;
+        };
         return server;
     }
 
@@ -1434,7 +1462,9 @@ const WindowsServer = struct {
         plugin_host.freeInstances(self.reloadAllocator(), self.plugin_instances);
         if (self.runtime_snapshot) |*snapshot| snapshot.deinit(self.reloadAllocator());
         self.reload_state.deinit(self.reloadAllocator());
-        _ = self.reload_gpa.deinit();
+        const reload_gpa = self.reload_gpa;
+        _ = reload_gpa.deinit();
+        std.heap.page_allocator.destroy(reload_gpa);
         self.* = undefined;
     }
 

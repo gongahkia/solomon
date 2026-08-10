@@ -39,10 +39,10 @@ server = UNIXServer.new(sock)
   payload = conn.read(length)
   abort("missing frame payload") unless payload && payload.bytesize == length
   if index == 2
-    abort("missing command-context modules") unless payload.include?('"right_modules":["cloud_ctx","risk_tier"]')
-    abort("missing command-context primary pipeline") unless payload.include?('"modules":["cwd"]')
+    abort("missing command-context request state") unless payload.include?('"command_context":true')
+    abort("missing command line") unless payload.include?('"commandline":"kubectl get pods"')
   else
-    abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+    abort("client leaked daemon module configuration") if payload.include?('"right_modules"') || payload.include?('"modules"')
   end
   abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
   if index == 0

@@ -67,8 +67,10 @@ pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
 
-    const response_payload = client.requestAllocWithTimeout(allocator, socket_path, payload, interactive_request_timeout_ms) catch {
-        if (config.auto_spawn) spawnPromptDaemon(allocator, socket_path) catch {};
+    const response_payload = client.requestAllocWithTimeout(allocator, socket_path, payload, interactive_request_timeout_ms) catch |err| {
+        // A timeout can mean a healthy daemon is busy. Starting a second
+        // daemon here would race its socket and can orphan the first process.
+        if (config.auto_spawn and shouldAutoSpawnDaemon(err)) spawnPromptDaemon(allocator, socket_path) catch {};
         if (config.right) return;
         const prompt_text = try minimalPromptAlloc(allocator, cwd);
         defer allocator.free(prompt_text);
@@ -340,6 +342,13 @@ fn spawnPromptDaemon(allocator: std.mem.Allocator, socket_path: []const u8) !voi
     daemon.stdout_behavior = .Ignore;
     daemon.stderr_behavior = .Ignore;
     try daemon.spawn();
+}
+
+fn shouldAutoSpawnDaemon(err: anyerror) bool {
+    return switch (err) {
+        error.FileNotFound, error.ConnectionRefused => true,
+        else => false,
+    };
 }
 
 fn autoSpawnPromptRequestAlloc(allocator: std.mem.Allocator, socket_path: []const u8, payload: []const u8) !?[]u8 {
@@ -832,6 +841,13 @@ test "transient format renders cwd escapes" {
 test "prompt args parse auto spawn" {
     const config = try parsePrompt(&.{"--auto-spawn"});
     try std.testing.expect(config.auto_spawn);
+}
+
+test "auto spawn only repairs an absent or stale daemon socket" {
+    try std.testing.expect(shouldAutoSpawnDaemon(error.FileNotFound));
+    try std.testing.expect(shouldAutoSpawnDaemon(error.ConnectionRefused));
+    try std.testing.expect(!shouldAutoSpawnDaemon(error.Timeout));
+    try std.testing.expect(!shouldAutoSpawnDaemon(error.ConnectionResetByPeer));
 }
 
 test "interactive prompt deadline is five milliseconds" {

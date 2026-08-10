@@ -39,7 +39,7 @@ server = UNIXServer.new(sock)
   payload = conn.read(length)
   abort("missing frame payload") unless payload && payload.bytesize == length
   abort("missing fish shell") unless payload.include?('"shell":"fish"')
-  abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  abort("client leaked daemon module configuration") if payload.include?('"right_modules"') || payload.include?('"modules"')
   abort("missing tmux pane") unless payload.include?('"tmux_pane":"%42"')
   if index == 0
     abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')

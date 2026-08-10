@@ -7,16 +7,16 @@ pub fn requestAlloc(allocator: std.mem.Allocator, socket_path: []const u8, paylo
     return requestAllocWithTimeout(allocator, socket_path, payload, 1000);
 }
 
-/// A prompt process must never wait indefinitely for a wedged daemon. The
-/// caller chooses the deadline; render calls use the much smaller interactive
-/// budget while administrative clients retain a bounded one-second request.
+/// A prompt process uses one deadline for Unix-socket connection, framing, and
+/// response. Render calls use the much smaller interactive budget while
+/// administrative clients retain a bounded one-second request.
 pub fn requestAllocWithTimeout(allocator: std.mem.Allocator, socket_path: []const u8, payload: []const u8, timeout_ms: i32) ![]u8 {
     if (builtin.os.tag == .windows) return requestNamedPipeAlloc(allocator, socket_path, payload);
     if (timeout_ms <= 0) return error.Timeout;
 
-    var stream = try std.net.connectUnixSocket(socket_path);
-    defer stream.close();
     const deadline_ns = std.time.nanoTimestamp() + @as(i128, timeout_ms) * @as(i128, std.time.ns_per_ms);
+    var stream = try connectUnixSocketWithDeadline(socket_path, deadline_ns);
+    defer stream.close();
 
     const encoded = try frame.encodeAlloc(allocator, payload);
     defer allocator.free(encoded);
@@ -24,6 +24,24 @@ pub fn requestAllocWithTimeout(allocator: std.mem.Allocator, socket_path: []cons
     try writeAllFileWithDeadline(file, encoded, deadline_ns);
 
     return readFrameFromFileAllocWithDeadline(allocator, file, deadline_ns);
+}
+
+fn connectUnixSocketWithDeadline(socket_path: []const u8, deadline_ns: i128) !std.net.Stream {
+    const fd = try std.posix.socket(
+        std.posix.AF.UNIX,
+        std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC | std.posix.SOCK.NONBLOCK,
+        0,
+    );
+    errdefer std.posix.close(fd);
+    var address = try std.net.Address.initUnix(socket_path);
+    std.posix.connect(fd, &address.any, address.getOsSockLen()) catch |err| switch (err) {
+        error.WouldBlock, error.ConnectionPending => {
+            try waitForDeadline(fd, std.posix.POLL.OUT, deadline_ns);
+            try std.posix.getsockoptError(fd);
+        },
+        else => return err,
+    };
+    return .{ .handle = fd };
 }
 
 fn requestNamedPipeAlloc(allocator: std.mem.Allocator, pipe_path: []const u8, payload: []const u8) ![]u8 {
@@ -82,7 +100,10 @@ fn writeAllFileWithDeadline(file: std.fs.File, bytes: []const u8, deadline_ns: i
     var remaining = bytes;
     while (remaining.len > 0) {
         try waitForDeadline(file.handle, std.posix.POLL.OUT, deadline_ns);
-        const written = try file.write(remaining[0..@min(remaining.len, 4096)]);
+        const written = file.write(remaining[0..@min(remaining.len, 4096)]) catch |err| switch (err) {
+            error.WouldBlock => continue,
+            else => return err,
+        };
         if (written == 0) return error.ConnectionClosed;
         remaining = remaining[written..];
     }
@@ -91,7 +112,10 @@ fn writeAllFileWithDeadline(file: std.fs.File, bytes: []const u8, deadline_ns: i
 fn readExactFile(file: std.fs.File, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
-        const n = try file.read(buffer[offset..]);
+        const n = file.read(buffer[offset..]) catch |err| switch (err) {
+            error.WouldBlock => continue,
+            else => return err,
+        };
         if (n == 0) return error.ConnectionClosed;
         offset += n;
     }

@@ -86,5 +86,5 @@ test "context arguments reject unknown flags" {
 test "context request is compact JSON" {
     const payload = try proto.encodeAlloc(std.testing.allocator, ContextRequest{ .cwd = "/repo" });
     defer std.testing.allocator.free(payload);
-    try std.testing.expectEqualStrings("{\"v\":1,\"op\":\"context\",\"cwd\":\"/repo\",\"request_id\":\"context-cli\"}", payload);
+    try std.testing.expectEqualStrings("{\"v\":2,\"op\":\"context\",\"cwd\":\"/repo\",\"request_id\":\"context-cli\"}", payload);
 }

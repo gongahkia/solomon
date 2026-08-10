@@ -39,7 +39,7 @@ server = UNIXServer.new(sock)
   payload = conn.read(length)
   abort("missing frame payload") unless payload && payload.bytesize == length
   abort("missing nu shell") unless payload.include?('"shell":"nu"')
-  abort("missing right modules") unless payload.include?('"right_modules":["time"]')
+  abort("client leaked daemon module configuration") if payload.include?('"right_modules"') || payload.include?('"modules"')
   abort("missing a11y color caps") unless payload.include?('"color_caps":"none"')
   abort("missing a11y glyph caps") unless payload.include?('"glyph_caps":"ascii"')
   response = '{"v":2,"prompt":"fake-nu> ","right_prompt":"right-nu","redraw_token":null}'

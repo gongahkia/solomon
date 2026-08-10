@@ -45,7 +45,7 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
 
         let exit_code = ($env.LAST_EXIT_CODE? | default 0 | into int)
-        let jobs_count = (job list | length)
+        let jobs_count = 0
         let args = [
             prompt
             --shell
@@ -80,7 +80,7 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
 
         let exit_code = ($env.LAST_EXIT_CODE? | default 0 | into int)
-        let jobs_count = (job list | length)
+        let jobs_count = 0
         let args = [
             prompt
             --right
@@ -108,11 +108,14 @@ if not ("__SHISA_NU_INIT" in $env) {
         }
     }
 
-    $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt | append {||
+    let shisa_config = ($env.config? | default {})
+    let shisa_hooks = ($shisa_config.hooks? | default {})
+    let shisa_pre_prompt = ($shisa_hooks.pre_prompt? | default [])
+    $env.config = ($shisa_config | upsert hooks ($shisa_hooks | upsert pre_prompt ($shisa_pre_prompt | append {||
         if (($env.SHISA_REPROMPT_REQUESTED? | default "0") == "1") {
             $env.SHISA_REPROMPT_REQUESTED = "0"
         }
-    })
+    })))
 
     $env.PROMPT_COMMAND = {|| shisa-prompt-render }
     $env.PROMPT_COMMAND_RIGHT = {|| shisa-right-prompt-render }

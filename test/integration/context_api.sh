@@ -35,8 +35,20 @@ done
   exit 1
 }
 
-output="$("$shisa" context --json --socket "$socket_path" --cwd "$tmp/repo")"
-grep -Fq "\"v\":1" <<<"$output"
+output=""
+for _ in {1..200}; do
+  if output="$("$shisa" context --json --socket "$socket_path" --cwd "$tmp/repo" 2>/dev/null)" && grep -Fq '"schema":"shisa.context/v1"' <<<"$output"; then
+    break
+  fi
+  sleep 0.01
+done
+if ! grep -Fq '"schema":"shisa.context/v1"' <<<"$output"; then
+  printf 'context API: daemon did not return a context snapshot\n' >&2
+  printf '%s\n' "$output" >&2
+  cat "$tmp/shisad.log" >&2 || true
+  exit 1
+fi
+grep -Fq "\"v\":2" <<<"$output"
 grep -Fq '"schema":"shisa.context/v1"' <<<"$output"
 grep -Fq "\"cwd\":\"$tmp/repo\"" <<<"$output"
 grep -Fq '"git":{"state":"unknown"' <<<"$output"

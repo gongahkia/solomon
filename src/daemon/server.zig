@@ -18,6 +18,7 @@ const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
 const framing = @import("framing.zig");
 const test_support = @import("test_support.zig");
+const runtime_paths = @import("runtime_paths.zig");
 const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
@@ -218,6 +219,7 @@ const PosixServer = struct {
     render_total_us: u64 = 0,
     render_max_us: u64 = 0,
     render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
+    pins_path: []u8,
     prompt_cache: daemon_cache.Store,
     prompt_cache_hits: u64 = 0,
     prompt_cache_misses: u64 = 0,
@@ -255,11 +257,13 @@ const PosixServer = struct {
         };
 
         const address = try std.net.Address.initUnix(socket_path);
-        const listener = try address.listen(.{
+        var listener = try address.listen(.{
             .reuse_address = false,
             .force_nonblocking = false,
             .kernel_backlog = 128,
         });
+        var listener_owned = true;
+        errdefer if (listener_owned) listener.deinit();
 
         const reload_gpa = try std.heap.page_allocator.create(ReloadAllocator);
         reload_gpa.* = .{};
@@ -269,14 +273,17 @@ const PosixServer = struct {
             std.heap.page_allocator.destroy(reload_gpa);
         };
 
+        const pins_path = try runtime_paths.defaultPinsPathAlloc(std.heap.page_allocator);
         var server: Server = .{
             .socket_path = socket_path,
             .listener = listener,
             .logger = logger,
-            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
+            .pins_path = pins_path,
+            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min, .pin_path = pins_path }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
             .reload_gpa = reload_gpa,
         };
+        listener_owned = false;
         server.reloadConfigAndPlugins() catch |err| {
             server.deinit();
             reload_gpa_owned = false;
@@ -289,6 +296,7 @@ const PosixServer = struct {
         self.cost_refresh_state.stop();
         if (self.connection_pool) |pool| pool.deinit();
         self.prompt_cache.deinit();
+        std.heap.page_allocator.free(self.pins_path);
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
@@ -684,7 +692,7 @@ const PosixServer = struct {
             store_context.snapshot = PosixServer.renderCacheSnapshot(self);
             const store_key = try renderPromptCacheKeyAlloc(std.heap.page_allocator, parsed.value, store_context);
             defer std.heap.page_allocator.free(store_key);
-            try self.prompt_cache.put(prompt_cache_module, store_key, rendered.prompt, 0);
+            try self.prompt_cache.putScoped(prompt_cache_module, store_key, parsed.value.cwd, rendered.prompt, 0);
         }
 
         const redraw_token = rendered.redraw_token orelse rendered_right.redraw_token;
@@ -1205,19 +1213,19 @@ const PosixServer = struct {
     }
 
     fn loadConfigSourceAlloc(self: *Server, allocator: std.mem.Allocator) ![]u8 {
-        const path = if (self.config_path_override) |override| try allocator.dupe(u8, override) else try defaultConfigPathAlloc(allocator);
+        const path = if (self.config_path_override) |override| try allocator.dupe(u8, override) else try runtime_paths.defaultConfigPathAlloc(allocator);
         defer allocator.free(path);
         return readConfigOrDefaultAlloc(allocator, path);
     }
 
     fn loadPluginNamesAlloc(self: *Server, allocator: std.mem.Allocator) ![][]u8 {
-        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
+        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try runtime_paths.defaultPluginsDirPathAlloc(allocator);
         defer allocator.free(plugins_dir);
         return plugin_host.loadNamesAlloc(allocator, plugins_dir);
     }
 
     fn loadPluginInstancesAlloc(self: *Server, allocator: std.mem.Allocator) ![]plugin_host.Instance {
-        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
+        const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try runtime_paths.defaultPluginsDirPathAlloc(allocator);
         defer allocator.free(plugins_dir);
         return plugin_host.loadInstancesAlloc(allocator, plugins_dir);
     }
@@ -1327,6 +1335,7 @@ const WindowsServer = struct {
     render_total_us: u64 = 0,
     render_max_us: u64 = 0,
     render_histogram: [render_histogram_buckets]u64 = [_]u64{0} ** render_histogram_buckets,
+    pins_path: []u8,
     prompt_cache: daemon_cache.Store,
     prompt_cache_hits: u64 = 0,
     prompt_cache_misses: u64 = 0,
@@ -1360,10 +1369,12 @@ const WindowsServer = struct {
             std.heap.page_allocator.destroy(reload_gpa);
         };
 
+        const pins_path = try runtime_paths.defaultPinsPathAlloc(std.heap.page_allocator);
         var server: WindowsServer = .{
             .socket_path = socket_path,
             .logger = logger,
-            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min }),
+            .pins_path = pins_path,
+            .prompt_cache = daemon_cache.Store.initWithOptions(std.heap.page_allocator, .{ .max_entries = 1024, .max_age_ns = 5 * std.time.ns_per_min, .pin_path = pins_path }),
             .fs_watcher = fsnotify.Watcher.init(std.heap.page_allocator),
             .reload_gpa = reload_gpa,
         };
@@ -1379,6 +1390,7 @@ const WindowsServer = struct {
         self.cost_refresh_state.stop();
         if (self.connection_pool) |pool| pool.deinit();
         self.prompt_cache.deinit();
+        std.heap.page_allocator.free(self.pins_path);
         self.git_branch_cache.deinit(std.heap.page_allocator);
         self.language_versions_cache.deinit(std.heap.page_allocator);
         self.cloud_ctx_cache.deinit(std.heap.page_allocator);
@@ -1935,31 +1947,6 @@ fn unsupportedSubscribeResponseAlloc(allocator: std.mem.Allocator, request: []co
         "{{\"v\":2,\"request_id\":\"{s}\",\"error\":{{\"code\":\"E_UNSUPPORTED\",\"message\":\"subscribe is not supported on Windows named pipes yet\",\"context\":{{\"op\":\"subscribe\"}}}}}}",
         .{escaped_request_id},
     );
-}
-
-fn defaultConfigPathAlloc(allocator: std.mem.Allocator) ![]u8 {
-    const xdg = std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => null,
-        else => return err,
-    };
-    if (xdg) |xdg_config_home| {
-        defer allocator.free(xdg_config_home);
-        return std.fmt.allocPrint(allocator, "{s}/shisa/shisa.toml", .{xdg_config_home});
-    }
-
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return error.MissingHome,
-        else => return err,
-    };
-    defer allocator.free(home);
-    return std.fmt.allocPrint(allocator, "{s}/.config/shisa/shisa.toml", .{home});
-}
-
-fn defaultPluginsDirPathAlloc(allocator: std.mem.Allocator) ![]u8 {
-    const config_path = try defaultConfigPathAlloc(allocator);
-    defer allocator.free(config_path);
-    const dir = std.fs.path.dirname(config_path) orelse return error.MissingConfigDir;
-    return std.fmt.allocPrint(allocator, "{s}/plugins", .{dir});
 }
 
 fn readConfigOrDefaultAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {

@@ -16,10 +16,14 @@ pub const Entry = struct {
 pub const Options = struct {
     max_entries: usize = 1024,
     max_age_ns: u64 = 5 * std.time.ns_per_min,
+    /// optional path written by `shisa pin`. Entries whose pin scope matches a
+    /// listed path are retained across normal TTL and LRU eviction.
+    pin_path: ?[]const u8 = null,
 };
 
 const StoredEntry = struct {
     key: []u8,
+    pin_scope: ?[]u8,
     output: []u8,
     cache_rev: u64,
     created_ns: u64,
@@ -47,6 +51,7 @@ pub const Store = struct {
         var it = self.entries.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.key);
+            if (entry.value_ptr.pin_scope) |scope| self.allocator.free(scope);
             self.allocator.free(entry.value_ptr.output);
         }
         self.entries.deinit();
@@ -54,19 +59,31 @@ pub const Store = struct {
     }
 
     pub fn put(self: *Store, module_id: []const u8, cwd: []const u8, output: []const u8, cache_rev: u64) !void {
-        try self.putAt(module_id, cwd, output, cache_rev, nowNs());
+        try self.putAtScoped(module_id, cwd, cwd, output, cache_rev, nowNs());
     }
 
     pub fn putAt(self: *Store, module_id: []const u8, cwd: []const u8, output: []const u8, cache_rev: u64, timestamp_ns: u64) !void {
-        const key = try keyAlloc(self.allocator, module_id, cwd);
+        try self.putAtScoped(module_id, cwd, cwd, output, cache_rev, timestamp_ns);
+    }
+
+    pub fn putScoped(self: *Store, module_id: []const u8, key_scope: []const u8, pin_scope: []const u8, output: []const u8, cache_rev: u64) !void {
+        try self.putAtScoped(module_id, key_scope, pin_scope, output, cache_rev, nowNs());
+    }
+
+    pub fn putAtScoped(self: *Store, module_id: []const u8, key_scope: []const u8, pin_scope: []const u8, output: []const u8, cache_rev: u64, timestamp_ns: u64) !void {
+        const key = try keyAlloc(self.allocator, module_id, key_scope);
         errdefer self.allocator.free(key);
+        const owned_pin_scope = try self.allocator.dupe(u8, pin_scope);
+        errdefer self.allocator.free(owned_pin_scope);
         const value = try self.allocator.dupe(u8, output);
         errdefer self.allocator.free(value);
 
         const entry = try self.entries.getOrPut(key);
         if (entry.found_existing) {
             self.allocator.free(key);
+            if (entry.value_ptr.pin_scope) |previous_scope| self.allocator.free(previous_scope);
             self.allocator.free(entry.value_ptr.output);
+            entry.value_ptr.pin_scope = owned_pin_scope;
             entry.value_ptr.output = value;
             entry.value_ptr.cache_rev = cache_rev;
             entry.value_ptr.created_ns = timestamp_ns;
@@ -74,6 +91,7 @@ pub const Store = struct {
         } else {
             entry.value_ptr.* = .{
                 .key = key,
+                .pin_scope = owned_pin_scope,
                 .output = value,
                 .cache_rev = cache_rev,
                 .created_ns = timestamp_ns,
@@ -94,6 +112,13 @@ pub const Store = struct {
         defer self.allocator.free(key);
         const entry = self.entries.getPtr(key) orelse return null;
         if (self.isExpired(entry.*, timestamp_ns)) {
+            if (self.isPinned(entry.*)) {
+                entry.last_access_ns = timestamp_ns;
+                return .{
+                    .output = entry.output,
+                    .cache_rev = entry.cache_rev,
+                };
+            }
             try self.invalidate(module_id, cwd);
             return null;
         }
@@ -109,6 +134,7 @@ pub const Store = struct {
         defer self.allocator.free(key);
         const removed = self.entries.fetchRemove(key) orelse return;
         self.allocator.free(removed.value.key);
+        if (removed.value.pin_scope) |scope| self.allocator.free(scope);
         self.allocator.free(removed.value.output);
     }
 
@@ -243,7 +269,7 @@ pub const Store = struct {
 
         var it = self.entries.iterator();
         while (it.next()) |entry| {
-            if (self.isExpired(entry.value_ptr.*, timestamp_ns)) {
+            if (self.isExpired(entry.value_ptr.*, timestamp_ns) and !self.isPinned(entry.value_ptr.*)) {
                 try expired.append(self.allocator, try self.allocator.dupe(u8, entry.key_ptr.*));
             }
         }
@@ -254,17 +280,13 @@ pub const Store = struct {
     }
 
     fn evictLru(self: *Store) void {
-        if (self.options.max_entries == 0) {
-            self.clear();
-            return;
-        }
-
         while (self.entries.count() > self.options.max_entries) {
             var oldest_key: ?[]const u8 = null;
             var oldest_access: u64 = std.math.maxInt(u64);
 
             var it = self.entries.iterator();
             while (it.next()) |entry| {
+                if (self.isPinned(entry.value_ptr.*)) continue;
                 if (entry.value_ptr.last_access_ns < oldest_access) {
                     oldest_access = entry.value_ptr.last_access_ns;
                     oldest_key = entry.key_ptr.*;
@@ -283,6 +305,7 @@ pub const Store = struct {
         var it = self.entries.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.key);
+            if (entry.value_ptr.pin_scope) |scope| self.allocator.free(scope);
             self.allocator.free(entry.value_ptr.output);
         }
         self.entries.clearRetainingCapacity();
@@ -298,6 +321,8 @@ pub const Store = struct {
         if (entry.found_existing) {
             self.allocator.free(key);
             self.allocator.free(entry.value_ptr.output);
+            if (entry.value_ptr.pin_scope) |scope| self.allocator.free(scope);
+            entry.value_ptr.pin_scope = null;
             entry.value_ptr.output = output;
             entry.value_ptr.cache_rev = cache_rev;
             entry.value_ptr.created_ns = created_ns;
@@ -305,6 +330,7 @@ pub const Store = struct {
         } else {
             entry.value_ptr.* = .{
                 .key = key,
+                .pin_scope = null,
                 .output = output,
                 .cache_rev = cache_rev,
                 .created_ns = created_ns,
@@ -320,13 +346,42 @@ pub const Store = struct {
     fn removeBorrowedKey(self: *Store, key: []const u8) void {
         const removed = self.entries.fetchRemove(key) orelse return;
         self.allocator.free(removed.value.key);
+        if (removed.value.pin_scope) |scope| self.allocator.free(scope);
         self.allocator.free(removed.value.output);
+    }
+
+    fn isPinned(self: *Store, entry: StoredEntry) bool {
+        const scope = entry.pin_scope orelse return false;
+        const pin_path = self.options.pin_path orelse return false;
+        const contents = std.fs.cwd().readFileAlloc(self.allocator, pin_path, 1024 * 1024) catch |err| switch (err) {
+            error.FileNotFound => return false,
+            // retain entries if pin state cannot be read. dropping a pin due to
+            // a transient permission or I/O failure would violate its contract.
+            else => return true,
+        };
+        defer self.allocator.free(contents);
+
+        var lines = std.mem.tokenizeScalar(u8, contents, '\n');
+        while (lines.next()) |line| {
+            const pinned_path = std.mem.trim(u8, line, " \t\r");
+            if (scopeMatchesPin(scope, pinned_path)) return true;
+        }
+        return false;
     }
 
     fn isExpired(self: Store, entry: StoredEntry, timestamp_ns: u64) bool {
         return self.options.max_age_ns != 0 and timestamp_ns >= entry.created_ns and timestamp_ns - entry.created_ns > self.options.max_age_ns;
     }
 };
+
+fn scopeMatchesPin(scope: []const u8, pinned_path: []const u8) bool {
+    if (pinned_path.len == 0 or !std.mem.startsWith(u8, scope, pinned_path)) return false;
+    if (scope.len == pinned_path.len) return true;
+    const last = pinned_path[pinned_path.len - 1];
+    if (last == '/' or last == '\\') return true;
+    const next = scope[pinned_path.len];
+    return next == '/' or next == '\\';
+}
 
 fn nowNs() u64 {
     return @intCast(std.time.nanoTimestamp());
@@ -472,6 +527,36 @@ test "evicts entries older than max age" {
 
     try std.testing.expect((try store.getAt("m", "/fresh", 109)) != null);
     try std.testing.expect(try store.getAt("m", "/old", 112) == null);
+}
+
+test "retains pinned scopes across lru and ttl eviction" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-cache-pins-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    const pins_path = try std.fmt.allocPrint(allocator, "{s}/pins", .{dir_path});
+    defer allocator.free(pins_path);
+    try std.fs.cwd().writeFile(.{ .sub_path = pins_path, .data = "/repo\n" });
+
+    var store = Store.initWithOptions(allocator, .{
+        .max_entries = 2,
+        .max_age_ns = 10,
+        .pin_path = pins_path,
+    });
+    defer store.deinit();
+    try store.putAt("m", "/repo/subdir", "pinned", 1, 100);
+    try store.putAt("m", "/old", "old", 2, 105);
+    try store.putAt("m", "/fresh", "fresh", 3, 109);
+
+    try std.testing.expect((try store.getAt("m", "/repo/subdir", 109)) != null);
+    try std.testing.expect(try store.getAt("m", "/old", 109) == null);
+    try std.testing.expect((try store.getAt("m", "/fresh", 109)) != null);
+
+    try store.putAt("m", "/later", "later", 4, 120);
+    try std.testing.expect((try store.getAt("m", "/repo/subdir", 120)) != null);
+    try std.testing.expect(try store.getAt("m", "/fresh", 120) == null);
+    try std.testing.expect((try store.getAt("m", "/later", 120)) != null);
 }
 
 test "property cache eviction invariants" {

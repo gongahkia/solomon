@@ -18,7 +18,7 @@ Shisa's cache design is split between implemented daemon caches and the broader 
 - Key shape: `module_id + NUL + cwd`.
 - Value: duplicated output plus `cache_rev`, creation time, and last-access time.
 - Defaults: `max_entries = 1024`, `max_age_ns = 5 minutes`.
-- `put` replaces existing entries, then evicts expired entries and least-recently-used overflow.
+- `put` replaces existing entries, then evicts expired entries and least-recently-used overflow. A cwd listed by `shisa pin` is retained through normal TTL and LRU eviction; a pin also covers descendant cwd scopes, so explicitly pinned entries can make the store exceed its normal entry cap.
 - `get` returns a borrowed output slice and updates `last_access_ns`.
 - `invalidate` removes one module/scope entry.
 
@@ -42,7 +42,8 @@ The key is:
 
 This is the implemented L1 rendered-prompt cache from RFC-0004. `Server.renderResponse`
 looks up `self.prompt_cache` before dispatching modules and writes completed,
-non-pending left prompts back after rendering.
+non-pending left prompts back after rendering. It keeps the request cwd as the
+pin scope even though the cache key also contains terminal and shell state.
 
 ### Daemon-owned module caches
 
@@ -157,12 +158,11 @@ Async caches use `generation` as a stale-result guard. Invalidation or cwd chang
 | Worker command hangs after invalidation | Active child PID is killed when known. |
 | Watcher pressure | Native watcher paths are capped; Linux inotify limits are also counted and warned through daemon logs. |
 | Unsupported fsnotify backend | Backend is reported as `unsupported`; render still works, but event-driven freshness depends on recorded events. |
-| Cache growth | Generic store uses max entry count and TTL; daemon-owned async caches hold one segment per cache. |
+| Cache growth | Generic store uses max entry count and TTL, except explicitly pinned cwd scopes; daemon-owned async caches hold one segment per cache. |
 
 ## Current Gaps
 
 - The reusable module-output `Store` is implemented and tested but the server currently relies on module-owned caches for git, language versions, and cloud context.
 - RFC-0004's shared external-command L3 cache is a design target; current command results are folded into module-owned segments after async probes complete.
-- `shisa pin` writes a pins file, but `src/daemon/cache.zig` eviction does not read pin state in current source.
 
 Use [Profiling Notes](profiling.md) before changing these paths, and update RFC-0004 if a freshness rule changes.

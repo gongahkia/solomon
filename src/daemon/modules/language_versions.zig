@@ -1,6 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const Options = struct {
+    python: bool = true,
+    node: bool = true,
+    rust: bool = true,
+    go: bool = true,
+};
+
 pub const Cache = struct {
     mutex: std.Thread.Mutex = .{},
     valid: bool = false,
@@ -10,6 +17,7 @@ pub const Cache = struct {
     cwd: ?[]u8 = null,
     env_hash: ?[]u8 = null,
     segment: ?[]u8 = null,
+    options: Options = .{},
     worker: ?std.Thread = null,
 
     pub const AsyncRender = struct {
@@ -31,14 +39,14 @@ pub const Cache = struct {
         self.clear(allocator);
     }
 
-    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8, path_env: ?[]const u8) !AsyncRender {
+    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8, path_env: ?[]const u8, options: Options) !AsyncRender {
         self.joinFinishedWorker();
 
-        const cancelled_worker = self.cancelForCwdOrEnvChange(allocator, cwd_path, env_hash);
+        const cancelled_worker = self.cancelForRenderChange(allocator, cwd_path, env_hash, options);
         if (cancelled_worker) |thread| thread.join();
 
         self.mutex.lock();
-        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash)) {
+        if (self.isReusable(cwd_path, env_hash, options)) {
             const segment = if (self.segment) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return .{ .segment = segment };
@@ -49,13 +57,14 @@ pub const Cache = struct {
         }
         self.mutex.unlock();
 
-        if (!(try detect(allocator, cwd_path)).any()) {
+        if (!(try detect(allocator, cwd_path, options)).any()) {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.clear(allocator);
             self.valid = true;
             self.cwd = try allocator.dupe(u8, cwd_path);
             self.env_hash = if (env_hash) |value| try allocator.dupe(u8, value) else null;
+            self.options = options;
             return .{};
         }
 
@@ -68,12 +77,13 @@ pub const Cache = struct {
         self.clear(allocator);
         self.cwd = try allocator.dupe(u8, cwd_path);
         self.env_hash = if (env_hash) |value| try allocator.dupe(u8, value) else null;
+        self.options = options;
         self.in_flight = true;
         self.generation += 1;
         const generation = self.generation;
         self.mutex.unlock();
 
-        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, worker_path_env, generation }) catch |err| {
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, worker_path_env, options, generation }) catch |err| {
             self.mutex.lock();
             self.clear(allocator);
             self.mutex.unlock();
@@ -85,6 +95,10 @@ pub const Cache = struct {
         self.mutex.unlock();
 
         return .{ .pending = true };
+    }
+
+    fn isReusable(self: *const Cache, cwd_path: []const u8, env_hash: ?[]const u8, options: Options) bool {
+        return self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash) and sameOptions(self.options, options);
     }
 
     fn takeWorker(self: *Cache) ?std.Thread {
@@ -114,14 +128,15 @@ pub const Cache = struct {
         self.cwd = null;
         self.env_hash = null;
         self.segment = null;
+        self.options = .{};
     }
 
-    fn cancelForCwdOrEnvChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8) ?std.Thread {
+    fn cancelForRenderChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, env_hash: ?[]const u8, options: Options) ?std.Thread {
         self.mutex.lock();
         defer self.mutex.unlock();
 
         if (!self.in_flight) return null;
-        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash)) return null;
+        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and optionalEql(self.env_hash, env_hash) and sameOptions(self.options, options)) return null;
 
         self.generation += 1;
         if (self.active_pid) |pid| killProcessId(pid);
@@ -132,6 +147,7 @@ pub const Cache = struct {
         self.cwd = null;
         self.env_hash = null;
         self.segment = null;
+        self.options = .{};
         self.valid = false;
         self.in_flight = false;
         const worker = self.worker;
@@ -169,6 +185,10 @@ pub const Cache = struct {
     }
 };
 
+fn sameOptions(left: Options, right: Options) bool {
+    return left.python == right.python and left.node == right.node and left.rust == right.rust and left.go == right.go;
+}
+
 fn optionalEql(left: ?[]const u8, right: ?[]const u8) bool {
     if (left) |left_value| {
         return if (right) |right_value| std.mem.eql(u8, left_value, right_value) else false;
@@ -198,10 +218,10 @@ const Versions = struct {
     }
 };
 
-fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, path_env: ?[]u8, generation: u64) void {
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, path_env: ?[]u8, options: Options, generation: u64) void {
     defer allocator.free(cwd_path);
     defer if (path_env) |value| allocator.free(value);
-    const segment = probeCancellable(allocator, cache, generation, cwd_path, path_env) catch null;
+    const segment = probeCancellable(allocator, cache, generation, cwd_path, path_env, options) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
@@ -215,12 +235,12 @@ fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, path_
     cache.in_flight = false;
 }
 
-pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8, path_env: ?[]const u8) !?[]u8 {
-    return probeCancellable(allocator, null, 0, cwd_path, path_env);
+pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8, path_env: ?[]const u8, options: Options) !?[]u8 {
+    return probeCancellable(allocator, null, 0, cwd_path, path_env, options);
 }
 
-fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, path_env: ?[]const u8) !?[]u8 {
-    const detected = try detect(allocator, cwd_path);
+fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, path_env: ?[]const u8, options: Options) !?[]u8 {
+    const detected = try detect(allocator, cwd_path, options);
     if (!detected.any()) return null;
 
     var versions = Versions{};
@@ -240,12 +260,12 @@ fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u6
     return try formatVersions(allocator, versions);
 }
 
-fn detect(allocator: std.mem.Allocator, cwd_path: []const u8) !Detection {
+fn detect(allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) !Detection {
     return .{
-        .python = try hasAncestorMarker(allocator, cwd_path, &.{ "pyproject.toml", "requirements.txt", "setup.py" }),
-        .node = try hasAncestorMarker(allocator, cwd_path, &.{"package.json"}),
-        .rust = try hasAncestorMarker(allocator, cwd_path, &.{"Cargo.toml"}),
-        .go = try hasAncestorMarker(allocator, cwd_path, &.{"go.mod"}),
+        .python = options.python and try hasAncestorMarker(allocator, cwd_path, &.{ "pyproject.toml", "requirements.txt", "setup.py" }),
+        .node = options.node and try hasAncestorMarker(allocator, cwd_path, &.{"package.json"}),
+        .rust = options.rust and try hasAncestorMarker(allocator, cwd_path, &.{"Cargo.toml"}),
+        .go = options.go and try hasAncestorMarker(allocator, cwd_path, &.{"go.mod"}),
     };
 }
 

@@ -4,6 +4,12 @@ const git_libgit2 = @import("vcs_git_libgit2");
 const vcs_worktree = @import("vcs_worktree");
 
 pub const module_id = "git_branch";
+
+pub const Options = struct {
+    show_dirty: bool = true,
+    cache_ttl_ms: u32 = 250,
+};
+
 pub const WatchPath = struct {
     path: []const u8,
     recursive: bool = false,
@@ -24,6 +30,8 @@ pub const Cache = struct {
     active_pid: ?std.process.Child.Id = null,
     cwd: ?[]u8 = null,
     segment: ?[]u8 = null,
+    options: Options = .{},
+    cached_at_ns: ?i128 = null,
     worker: ?std.Thread = null,
 
     pub fn deinit(self: *Cache, allocator: std.mem.Allocator) void {
@@ -53,13 +61,13 @@ pub const Cache = struct {
         self.clear(allocator);
     }
 
-    pub fn render(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+    pub fn render(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) !?[]u8 {
         const worker = self.takeWorker();
         if (worker) |thread| thread.join();
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
+        if (self.isReusable(cwd_path, options)) {
             if (self.segment) |segment| return try allocator.dupe(u8, segment);
             return null;
         }
@@ -67,7 +75,9 @@ pub const Cache = struct {
         self.clear(allocator);
         self.valid = true;
         self.cwd = try allocator.dupe(u8, cwd_path);
-        self.segment = try probe(allocator, cwd_path);
+        self.options = options;
+        self.segment = try probe(allocator, cwd_path, options);
+        self.cached_at_ns = std.time.nanoTimestamp();
 
         if (self.segment) |segment| return try allocator.dupe(u8, segment);
         return null;
@@ -83,14 +93,14 @@ pub const Cache = struct {
         }
     };
 
-    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) !AsyncRender {
+    pub fn renderAsync(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) !AsyncRender {
         self.joinFinishedWorker();
 
-        const cancelled_worker = self.cancelForCwdChange(allocator, cwd_path);
+        const cancelled_worker = self.cancelForRenderChange(allocator, cwd_path, options);
         if (cancelled_worker) |thread| thread.join();
 
         self.mutex.lock();
-        if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) {
+        if (self.isReusable(cwd_path, options)) {
             const segment = if (self.segment) |value| try allocator.dupe(u8, value) else null;
             self.mutex.unlock();
             return .{ .segment = segment };
@@ -107,6 +117,8 @@ pub const Cache = struct {
             self.clear(allocator);
             self.valid = true;
             self.cwd = try allocator.dupe(u8, cwd_path);
+            self.options = options;
+            self.cached_at_ns = std.time.nanoTimestamp();
             return .{};
         }
 
@@ -116,12 +128,13 @@ pub const Cache = struct {
         self.mutex.lock();
         self.clear(allocator);
         self.cwd = try allocator.dupe(u8, cwd_path);
+        self.options = options;
         self.in_flight = true;
         self.generation += 1;
         const generation = self.generation;
         self.mutex.unlock();
 
-        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, generation }) catch |err| {
+        const worker = std.Thread.spawn(.{}, asyncProbe, .{ self, allocator, worker_cwd, options, generation }) catch |err| {
             self.mutex.lock();
             self.clear(allocator);
             self.mutex.unlock();
@@ -132,6 +145,17 @@ pub const Cache = struct {
         self.mutex.unlock();
 
         return .{ .pending = true };
+    }
+
+    /// Prevent an L1 rendered-prompt cache hit from extending a Git result
+    /// beyond its configured lifetime. A zero TTL invalidates every result.
+    pub fn invalidateExpired(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (!self.valid or self.cwd == null or !std.mem.eql(u8, self.cwd.?, cwd_path)) return;
+        if (self.isReusable(cwd_path, options)) return;
+        self.generation +%= 1;
+        self.clear(allocator);
     }
 
     fn takeWorker(self: *Cache) ?std.Thread {
@@ -159,14 +183,24 @@ pub const Cache = struct {
         self.active_pid = null;
         self.cwd = null;
         self.segment = null;
+        self.options = .{};
+        self.cached_at_ns = null;
     }
 
-    fn cancelForCwdChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8) ?std.Thread {
+    fn isReusable(self: *const Cache, cwd_path: []const u8, options: Options) bool {
+        if (!self.valid or self.cwd == null or !std.mem.eql(u8, self.cwd.?, cwd_path)) return false;
+        if (!sameOptions(self.options, options) or options.cache_ttl_ms == 0) return false;
+        const cached_at_ns = self.cached_at_ns orelse return false;
+        const elapsed_ns = std.time.nanoTimestamp() - cached_at_ns;
+        return elapsed_ns >= 0 and elapsed_ns < @as(i128, options.cache_ttl_ms) * std.time.ns_per_ms;
+    }
+
+    fn cancelForRenderChange(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) ?std.Thread {
         self.mutex.lock();
         defer self.mutex.unlock();
 
         if (!self.in_flight) return null;
-        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path)) return null;
+        if (self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and sameOptions(self.options, options)) return null;
 
         self.generation += 1;
         if (self.active_pid) |pid| killProcessId(pid);
@@ -175,6 +209,8 @@ pub const Cache = struct {
         if (self.segment) |value| allocator.free(value);
         self.cwd = null;
         self.segment = null;
+        self.options = .{};
+        self.cached_at_ns = null;
         self.valid = false;
         self.in_flight = false;
         const worker = self.worker;
@@ -211,6 +247,10 @@ pub const Cache = struct {
         return self.generation != generation;
     }
 };
+
+fn sameOptions(left: Options, right: Options) bool {
+    return left.show_dirty == right.show_dirty and left.cache_ttl_ms == right.cache_ttl_ms;
+}
 
 pub const WatchScope = struct {
     cwd: []u8,
@@ -260,9 +300,9 @@ pub fn watchScope(allocator: std.mem.Allocator, cwd_path: []const u8) !?WatchSco
     };
 }
 
-fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, generation: u64) void {
+fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, options: Options, generation: u64) void {
     defer allocator.free(cwd_path);
-    const segment = probeCancellable(allocator, cache, generation, cwd_path) catch null;
+    const segment = probeCancellable(allocator, cache, generation, cwd_path, options) catch null;
 
     cache.mutex.lock();
     defer cache.mutex.unlock();
@@ -274,14 +314,15 @@ fn asyncProbe(cache: *Cache, allocator: std.mem.Allocator, cwd_path: []u8, gener
     cache.segment = segment;
     cache.valid = true;
     cache.in_flight = false;
+    cache.cached_at_ns = std.time.nanoTimestamp();
 }
 
-pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
-    return probeCancellable(allocator, null, 0, cwd_path);
+pub fn probe(allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) !?[]u8 {
+    return probeCancellable(allocator, null, 0, cwd_path, options);
 }
 
-fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8) !?[]u8 {
-    if (try probeLibgit2(allocator, cwd_path)) |segment| return segment;
+fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u64, cwd_path: []const u8, options: Options) !?[]u8 {
+    if (try probeLibgit2(allocator, cwd_path, options)) |segment| return segment;
 
     const branch_result = runCommand(allocator, cache, generation, cwd_path, &.{ "git", "branch", "--show-current" }, 4096) catch return null;
     defer allocator.free(branch_result.stdout);
@@ -293,7 +334,7 @@ fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u6
     const branch = std.mem.trim(u8, branch_result.stdout, " \t\r\n");
     if (branch.len == 0) return null;
 
-    const dirty = try isDirty(allocator, cache, generation, cwd_path);
+    const dirty = if (options.show_dirty) try isDirty(allocator, cache, generation, cwd_path) else false;
     const worktree_segment = worktreeSegmentAlloc(allocator, cwd_path) catch null;
     defer if (worktree_segment) |segment| allocator.free(segment);
     if (worktree_segment) |segment| {
@@ -302,14 +343,14 @@ fn probeCancellable(allocator: std.mem.Allocator, cache: ?*Cache, generation: u6
     return try std.fmt.allocPrint(allocator, "git:{s}{s}", .{ branch, if (dirty) "*" else "" });
 }
 
-fn probeLibgit2(allocator: std.mem.Allocator, cwd_path: []const u8) !?[]u8 {
+fn probeLibgit2(allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) !?[]u8 {
     var snapshot = (try git_libgit2.readSnapshot(allocator, cwd_path)) orelse return null;
     defer snapshot.deinit(allocator);
     const branch = snapshot.branch orelse return null;
-    const dirty = snapshot.counts.staged > 0 or
+    const dirty = options.show_dirty and (snapshot.counts.staged > 0 or
         snapshot.counts.unstaged > 0 or
         snapshot.counts.untracked > 0 or
-        snapshot.counts.conflicts > 0;
+        snapshot.counts.conflicts > 0);
     const worktree_segment = worktreeSegmentAlloc(allocator, cwd_path) catch null;
     defer if (worktree_segment) |segment| allocator.free(segment);
     if (worktree_segment) |segment| {
@@ -443,7 +484,7 @@ test "hides outside git repo" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    try std.testing.expect(try cache.render(allocator, dir_path) == null);
+    try std.testing.expect(try cache.render(allocator, dir_path, .{}) == null);
 }
 
 test "renders branch and dirty indicator" {
@@ -463,9 +504,13 @@ test "renders branch and dirty indicator" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    const rendered = (try cache.render(allocator, dir_path)).?;
+    const rendered = (try cache.render(allocator, dir_path, .{})).?;
     defer allocator.free(rendered);
     try std.testing.expectEqualStrings("git:main*", rendered);
+
+    const clean = (try cache.render(allocator, dir_path, .{ .show_dirty = false })).?;
+    defer allocator.free(clean);
+    try std.testing.expectEqualStrings("git:main", clean);
 }
 
 test "renders linked worktree name" {
@@ -491,7 +536,7 @@ test "renders linked worktree name" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    const rendered = (try cache.render(allocator, linked_path)).?;
+    const rendered = (try cache.render(allocator, linked_path, .{})).?;
     defer allocator.free(rendered);
     const expected = try std.fmt.allocPrint(allocator, "git:feature wt:{s}", .{std.fs.path.basename(linked_path)});
     defer allocator.free(expected);
@@ -533,7 +578,7 @@ test "invalidate refreshes cached git segment" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    const clean = (try cache.render(allocator, dir_path)).?;
+    const clean = (try cache.render(allocator, dir_path, .{})).?;
     defer allocator.free(clean);
     try std.testing.expectEqualStrings("git:main", clean);
 
@@ -543,14 +588,37 @@ test "invalidate refreshes cached git segment" {
     try file.writeAll("dirty");
     file.close();
 
-    const cached = (try cache.render(allocator, dir_path)).?;
+    const cached = (try cache.render(allocator, dir_path, .{})).?;
     defer allocator.free(cached);
     try std.testing.expectEqualStrings("git:main", cached);
 
     cache.invalidate(allocator, dir_path);
-    const refreshed = (try cache.render(allocator, dir_path)).?;
+    const refreshed = (try cache.render(allocator, dir_path, .{})).?;
     defer allocator.free(refreshed);
     try std.testing.expectEqualStrings("git:main*", refreshed);
+}
+
+test "zero TTL does not reuse a cached git segment" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    var cache = Cache{
+        .valid = true,
+        .cwd = try allocator.dupe(u8, dir_path),
+        .segment = try allocator.dupe(u8, "git:stale"),
+        .options = .{ .cache_ttl_ms = 250 },
+        .cached_at_ns = std.time.nanoTimestamp(),
+    };
+    defer cache.deinit(allocator);
+
+    var rendered = try cache.renderAsync(allocator, dir_path, .{ .cache_ttl_ms = 0 });
+    defer rendered.deinit(allocator);
+    try std.testing.expect(rendered.segment == null);
+    try std.testing.expect(cache.valid);
+    try std.testing.expect(cache.segment == null);
 }
 
 fn runSleepForCancelTest(cache: *Cache, allocator: std.mem.Allocator, term_out: *?std.process.Child.Term) void {
@@ -584,7 +652,7 @@ test "cancels active git child when cwd changes" {
     var term: ?std.process.Child.Term = null;
     const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
     try waitForActivePid(&cache);
-    _ = cache.cancelForCwdChange(allocator, "/new");
+    _ = cache.cancelForRenderChange(allocator, "/new", .{});
     thread.join();
 
     try std.testing.expect(term != null);
@@ -631,13 +699,13 @@ test "async render fills worker cache" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var first = try cache.renderAsync(allocator, dir_path);
+    var first = try cache.renderAsync(allocator, dir_path, .{});
     defer first.deinit(allocator);
     try std.testing.expect(first.pending);
     try std.testing.expect(first.segment == null);
 
     for (0..100) |_| {
-        var rendered = try cache.renderAsync(allocator, dir_path);
+        var rendered = try cache.renderAsync(allocator, dir_path, .{});
         defer rendered.deinit(allocator);
         if (rendered.segment) |segment| {
             try std.testing.expectEqualStrings("git:main", segment);
@@ -657,7 +725,7 @@ test "async render hides non git cwd without pending" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var rendered = try cache.renderAsync(allocator, dir_path);
+    var rendered = try cache.renderAsync(allocator, dir_path, .{});
     defer rendered.deinit(allocator);
     try std.testing.expect(!rendered.pending);
     try std.testing.expect(rendered.segment == null);

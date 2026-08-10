@@ -66,7 +66,7 @@ Core modules are Zig. Third-party plugins are Lua and must declare capabilities 
 4. Daemon drains pending cache invalidations and registers current watch scopes.
 5. Renderer reads configured modules, returning ready async cache values and scheduling cache misses.
 6. Daemon returns prompt and optional `redraw_token`.
-7. Async completions update module caches; a later render, including a protocol-level `render_continue` request, can use the completed value. The checked-in shell hooks do not subscribe to daemon completion events.
+7. Async completions update module caches. The zsh hook starts a bounded background `render_continue` poll only when the daemon returns a redraw token, then uses its self-pipe to safely redraw the idle prompt once the cache is ready. Other hooks retain their documented next-render behavior.
 
 ## Failure Model
 

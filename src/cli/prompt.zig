@@ -33,6 +33,7 @@ pub fn reportPromptPayloadBenchIterationAlloc(allocator: std.mem.Allocator) ![]u
 }
 
 pub const interactive_request_timeout_ms: i32 = 5;
+const async_pending_exit_status: u8 = 75;
 
 pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var config = try parsePrompt(args);
@@ -87,6 +88,7 @@ pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     var parsed = try std.json.parseFromSlice(proto.Response, allocator, response_payload, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
+    const async_pending = parsed.value.redraw_token != null;
     if (config.instant) {
         try writeInstantPrompt(allocator, parsed.value.prompt);
     }
@@ -99,9 +101,11 @@ pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
     if (config.right) {
         if (parsed.value.right_prompt) |right_prompt| try std.fs.File.stdout().writeAll(right_prompt);
+        if (config.async_status and async_pending) std.process.exit(async_pending_exit_status);
         return;
     }
     try writePromptText(allocator, parsed.value.prompt, config.a11y, cwd);
+    if (config.async_status and async_pending) std.process.exit(async_pending_exit_status);
 }
 
 pub fn traceCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -162,6 +166,10 @@ fn parsePrompt(args: []const []const u8) !PromptConfig {
             config.time = true;
         } else if (std.mem.eql(u8, arg, "--no-async")) {
             config.no_async = true;
+        } else if (std.mem.eql(u8, arg, "--render-continue")) {
+            config.render_continue = true;
+        } else if (std.mem.eql(u8, arg, "--async-status")) {
+            config.async_status = true;
         } else if (std.mem.eql(u8, arg, "--instant")) {
             config.instant = true;
         } else if (std.mem.eql(u8, arg, "--auto-spawn")) {
@@ -822,6 +830,12 @@ test "prompt args parse a11y" {
     const config = try parsePrompt(&.{ "--a11y", "--no-async" });
     try std.testing.expect(config.a11y);
     try std.testing.expect(config.no_async);
+}
+
+test "prompt args parse async continuation status" {
+    const config = try parsePrompt(&.{ "--render-continue", "--async-status" });
+    try std.testing.expect(config.render_continue);
+    try std.testing.expect(config.async_status);
 }
 
 test "prompt args parse explain a11y" {

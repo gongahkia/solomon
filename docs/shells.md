@@ -4,13 +4,13 @@
 
 | Shell | Init file | Prompt hook | Exit/jobs/duration | Async redraw handler | Transient prompt | Instant prompt | Integration test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | self-pipe `zle -F` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
+| zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | bounded `render_continue` poll + self-pipe `zle -F` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
 | bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | best effort | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
 | PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Register-EngineEvent` via `Shisa.AsyncFill`; host-limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
 
-The hooks provide shell-specific redraw handlers, but none of the checked-in hooks subscribes to daemon async-completion events or sends `render_continue` automatically. A Git or language-version cache miss is therefore visible as `[pending:<module>]` until a later prompt render; an external notifier may invoke the documented handler where the shell supports one.
+The zsh hook starts a bounded continuation worker only after the daemon returns a redraw token. It polls `render_continue` every 25 ms for up to 2 seconds, then signals the existing self-pipe redraw path when the cache is ready. It never blocks the interactive render. Bash, fish, Nushell, and PowerShell cannot safely repaint their parent shell from that worker, so their async values appear on the next prompt render unless a host-specific integration requests a redraw.
 
 ## Version Compatibility Matrix
 
@@ -45,7 +45,7 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 | Condition | zsh | bash | fish | nushell | PowerShell |
 | --- | --- | --- | --- | --- | --- |
 | Daemon socket missing, instant off | `%~> ` fallback | cwd fallback | `prompt_pwd` fallback | `pwd` fallback | `Get-Location` fallback |
-| Async redraw unavailable | external `USR1` notifications cannot repaint; a later prompt still uses the cache | no automatic repaint; bound key only works while Readline is active | no external repaint; a later prompt still uses the cache | no external parent-shell repaint; next `pre_prompt` consumes `shisa-reprompt` state | external event hook skipped if unsupported or disabled; a later prompt still uses the cache |
+| Async redraw unavailable | continuation worker exits after 2 seconds; a later prompt still uses the cache | no automatic repaint; bound key only works while Readline is active | no external repaint; a later prompt still uses the cache | no external parent-shell repaint; next `pre_prompt` consumes `shisa-reprompt` state | external event hook skipped if unsupported or disabled; a later prompt still uses the cache |
 | Old shell or host | zsh 5.0+ documented | Bash 3.x uses sync `--no-async` prompt | fish hook path documented | Nushell 0.113.x tested baseline | `Register-EngineEvent` host support required for event delivery |
 
 ## zsh
@@ -53,11 +53,11 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 - Requires zsh 5.0 or newer.
 - Captures duration with `zsh/datetime` and `$EPOCHREALTIME`.
 - Uses `%~> ` as fallback when the daemon socket is missing.
-- Redraw handler is signal-driven: an external `USR1` notifier reaches `TRAPUSR1`, which writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
+- When a render response contains a redraw token, starts a bounded background `render_continue` worker. Once it receives a completed response, it signals `USR1`; `TRAPUSR1` writes to a self-pipe when available, and `zle -F` drains it before calling `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `shisa prompt --transient` output when `transient_prompt` is configured.
 - Shisa sets `PROMPT` and `RPROMPT`; `RPROMPT` calls `shisa prompt --right` and renders `[prompt].right_modules`.
 - `command_context = "right"` appends configured context to `RPROMPT` while a matching command is being typed. `"message"` uses the ZLE message area instead. The hook never evaluates command text; quoted, piped, redirected, and compound commands are ignored.
-- An externally triggered async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
+- The completed continuation redraw recalculates both `PROMPT` and `RPROMPT`.
 - If another plugin owns `RPROMPT`, source that plugin after Shisa if it should win.
 - `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 

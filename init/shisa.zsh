@@ -97,6 +97,8 @@ typeset -g SHISA_PREEXEC_REALTIME=
 typeset -g SHISA_ASYNC_FILL=${SHISA_ASYNC_FILL:-1}
 typeset -g SHISA_ASYNC_SIGNAL=${SHISA_ASYNC_SIGNAL:-USR1}
 typeset -g SHISA_ASYNC_SELF_PIPE=${SHISA_ASYNC_SELF_PIPE:-${SHISA_ASYNC_FILL}}
+typeset -g SHISA_ASYNC_CONTINUE_INTERVAL_SECONDS=${SHISA_ASYNC_CONTINUE_INTERVAL_SECONDS:-0.025}
+typeset -g SHISA_ASYNC_CONTINUE_ATTEMPTS=${SHISA_ASYNC_CONTINUE_ATTEMPTS:-80}
 typeset -g SHISA_ASYNC_PIPE=
 typeset -g SHISA_ASYNC_FD=
 typeset -g SHISA_ASYNC_BYTE=${SHISA_ASYNC_BYTE:-A}
@@ -293,6 +295,33 @@ shisa_async_self_pipe_notify() {
   shisa_async_redraw
 }
 
+shisa_async_continue() {
+  emulate -L zsh
+  [[ ${SHISA_ASYNC_FILL:-1} == 1 ]] || return 0
+  local attempts=${SHISA_ASYNC_CONTINUE_ATTEMPTS:-80}
+  [[ ${attempts} == <-> ]] || attempts=80
+  (( attempts > 0 )) || return 0
+  local interval=${SHISA_ASYNC_CONTINUE_INTERVAL_SECONDS:-0.025}
+  [[ ${interval} == <-> || ${interval} == <->.<-> ]] || interval=0.025
+  local parent_pid=$$
+  local -a args
+  args=("$@" --render-continue)
+  (
+    local attempt=0 result_status=0
+    while (( attempt < attempts )); do
+      sleep "${interval}"
+      "${SHISA_BIN}" "${args[@]}" >/dev/null 2>&1
+      result_status=$?
+      if (( result_status == 0 )); then
+        kill -s "${SHISA_ASYNC_SIGNAL:-USR1}" "${parent_pid}" 2>/dev/null || true
+        return 0
+      fi
+      (( result_status == 75 )) || return 0
+      (( attempt += 1 ))
+    done
+  ) &!
+}
+
 shisa_reactive_self_pipe_notify() {
   emulate -L zsh
   if [[ -n ${SHISA_ASYNC_FD:-} ]]; then
@@ -454,11 +483,19 @@ shisa_prompt_render() {
   local socket_path
   socket_path=$(shisa_socket_path)
   local -a args
-  args=(prompt --auto-spawn --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  args=(prompt --auto-spawn --async-status --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_A11Y:-0} == 1 ]] && args+=(--a11y)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
-  "${SHISA_BIN}" "${args[@]}"
+  local rendered render_status
+  rendered=$("${SHISA_BIN}" "${args[@]}")
+  render_status=$?
+  print -rn -- "${rendered}"
+  if (( render_status == 75 )); then
+    shisa_async_continue "${args[@]}"
+    return 0
+  fi
+  return ${render_status}
 }
 
 shisa_transient_prompt_render() {
@@ -474,11 +511,18 @@ shisa_right_prompt_render() {
   [[ -S ${socket_path} ]] || return 0
 
   local -a args
-  args=(prompt --right --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
+  args=(prompt --right --async-status --shell zsh --exit "${SHISA_LAST_EXIT:-0}" --jobs "${SHISA_LAST_JOBS:-0}" --duration-ms "${SHISA_LAST_DURATION_MS:-0}" --socket "${socket_path}")
   [[ ${SHISA_ASYNC_FILL:-1} == 0 ]] && args+=(--no-async)
   [[ ${SHISA_RTL:-0} == 1 ]] && args+=(--rtl)
   local static
-  static=$("${SHISA_BIN}" "${args[@]}" 2>/dev/null) || static=
+  local render_status
+  static=$("${SHISA_BIN}" "${args[@]}" 2>/dev/null)
+  render_status=$?
+  if (( render_status == 75 )); then
+    shisa_async_continue "${args[@]}"
+  elif (( render_status != 0 )); then
+    static=
+  fi
   local context=${SHISA_COMMAND_CONTEXT_VALUE:-}
   if [[ -n ${static} && -n ${context} && ${SHISA_COMMAND_CONTEXT_TARGET:-off} == right ]]; then
     print -rn -- "${static} ${context}"

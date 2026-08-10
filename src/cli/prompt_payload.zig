@@ -13,6 +13,8 @@ pub const Config = struct {
     duration_ms: u64 = 0,
     time: bool = false,
     no_async: bool = false,
+    render_continue: bool = false,
+    async_status: bool = false,
     instant: bool = false,
     auto_spawn: bool = false,
     a11y: bool = false,
@@ -108,11 +110,12 @@ fn buildPromptPayloadV2(allocator: std.mem.Allocator, config: Config, cwd: []con
     else
         try allocator.dupe(u8, "");
     defer allocator.free(env_json);
+    const op = if (config.render_continue) "render_continue" else "render";
 
     return std.fmt.allocPrint(
         allocator,
-        "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},\"tmux_pane\":\"{s}\",\"trace\":{},\"rtl\":{},\"command_context\":{},\"commandline\":\"{s}\"}}",
-        .{ escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), promptUserId(), request_id, env_json, escaped_tmux_pane, config.trace, config.rtl, config.command_context, escaped_commandline },
+        "{{\"v\":2,\"op\":\"{s}\",\"cwd\":\"{s}\",\"exit\":{d},\"jobs\":{d},\"duration_ms\":{d},\"time\":{},\"no_async\":{},\"shell\":\"{s}\",\"cols\":{d},\"rows\":{d},\"tty\":\"/dev/tty\",\"color_caps\":\"{s}\",\"glyph_caps\":\"{s}\",\"user_id\":{d},\"session\":\"cli\",\"request_id\":\"{s}\"{s},\"tmux_pane\":\"{s}\",\"trace\":{},\"rtl\":{},\"command_context\":{},\"commandline\":\"{s}\"}}",
+        .{ op, escaped_cwd, config.exit, config.jobs, config.duration_ms, config.time, config.no_async, escaped_shell, config.cols, config.rows, promptColorCaps(config), promptGlyphCaps(config), promptUserId(), request_id, env_json, escaped_tmux_pane, config.trace, config.rtl, config.command_context, escaped_commandline },
     );
 }
 
@@ -379,6 +382,12 @@ test "prompt payload carries rtl flags" {
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\"") == null);
+}
+
+test "prompt payload can continue an async render" {
+    const payload = try buildPromptPayload(std.testing.allocator, .{ .render_continue = true }, "/tmp");
+    defer std.testing.allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"op\":\"render_continue\"") != null);
 }
 
 test "path hash inclusion follows the configured language invalidation setting" {

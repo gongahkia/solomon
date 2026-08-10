@@ -93,6 +93,7 @@ shisa doctor --socket /tmp/shisa.sock
 | `daemon/not-running` | daemon | Socket health check fails. |
 | `daemon/stale-socket` | daemon | Socket exists but daemon does not respond. |
 | `daemon/already-running` | daemon | Healthy daemon exists; starting another default daemon prints `AlreadyRunning`. |
+| `daemon/socket-permissions` | daemon | A Unix socket mode differs from owner-only `0600`. |
 | `daemon/socket-mismatch` | daemon | `SHISA_SOCKET` differs from the checked socket. |
 | `daemon/non-default-socket` | daemon | Doctor is checking an isolated socket. |
 | `daemon/protocol` | daemon | Version/protocol request fails or is malformed. |

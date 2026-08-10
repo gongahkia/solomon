@@ -108,7 +108,7 @@ msgid ""
 msgstr ""
 "shisa bench: hyperfine not found in PATH\n"
 
-#: src/cli/doctor.zig:134
+#: src/cli/doctor.zig:136
 msgid ""
 "usage: shisa doctor [--socket PATH] [--fix [--yes]] [--lint] [--json] [--severity-min LEVEL]\n"
 "                    [--list-checks] [--only IDS] [--skip IDS] [--online] [--report PATH]\n"
@@ -144,7 +144,7 @@ msgstr ""
 "  --report PATH          write a redacted doctor report JSON\n"
 "\n"
 
-#: src/cli/doctor.zig:1310
+#: src/cli/doctor.zig:1324
 msgid ""
 "usage: shisa report [--output path]\n"
 "\n"
@@ -158,7 +158,7 @@ msgstr ""
 "  -o, --output <path> write bundle path; defaults to ./shisa-report-<timestamp>.tar.gz\n"
 "\n"
 
-#: src/cli/doctor.zig:1481
+#: src/cli/doctor.zig:1495
 msgid ""
 "shisa report: tar not found in PATH\n"
 msgstr ""

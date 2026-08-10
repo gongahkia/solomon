@@ -19,6 +19,7 @@ const fsnotify = @import("fsnotify.zig");
 const framing = @import("framing.zig");
 const test_support = @import("test_support.zig");
 const runtime_paths = @import("runtime_paths.zig");
+const socket_security = @import("socket_security.zig");
 const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
@@ -264,6 +265,7 @@ const PosixServer = struct {
         });
         var listener_owned = true;
         errdefer if (listener_owned) listener.deinit();
+        try socket_security.enforceOwnerOnly(socket_path);
 
         const reload_gpa = try std.heap.page_allocator.create(ReloadAllocator);
         reload_gpa.* = .{};

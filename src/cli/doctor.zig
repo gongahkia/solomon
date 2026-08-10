@@ -7,6 +7,7 @@ const daemon_json = @import("../daemon/json.zig");
 const fsnotify = @import("../daemon/fsnotify.zig");
 const prompt_payload = @import("prompt_payload.zig");
 const paths = @import("../daemon/paths.zig");
+const socket_security = @import("../daemon/socket_security.zig");
 const plugin_lua = @import("../plugin/lua.zig");
 const plugin_manifest = @import("../plugin/manifest.zig");
 const proto = @import("../proto/types.zig");
@@ -103,6 +104,7 @@ const doctor_checks = [_]DoctorCheck{
     .{ .id = "daemon/not-running", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
     .{ .id = "daemon/stale-socket", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
     .{ .id = "daemon/already-running", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
+    .{ .id = "daemon/socket-permissions", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
     .{ .id = "daemon/socket-mismatch", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
     .{ .id = "daemon/non-default-socket", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
     .{ .id = "daemon/protocol", .category = "daemon", .docs_url = "docs/doctor.md#daemon" },
@@ -415,6 +417,7 @@ fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8, co
         try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/already-running", .severity = .info, .category = "daemon", .message = "daemon is already running; starting another daemon for this socket prints AlreadyRunning", .evidence = daemon_status, .path = socket_path, .fix_hint = "reuse the running daemon or choose a different `--socket`", .docs_url = "docs/troubleshooting.md#expected-states" });
         try appendDaemonOnlineFindings(allocator, &findings, socket_path, config);
     }
+    try appendSocketPermissionFinding(allocator, &findings, config, socket_path);
     if (env_socket) |path| {
         if (!std.mem.eql(u8, path, socket_path)) {
             try appendFindingIfAllowed(allocator, &findings, config, .{ .id = "daemon/socket-mismatch", .severity = .warning, .category = "daemon", .message = "SHISA_SOCKET differs from the socket being checked", .detail = "The shell hook and manual commands can talk to different daemons if socket paths differ.", .evidence = socket_path, .path = path, .fix_hint = "unset SHISA_SOCKET or pass the same --socket to shisa and shisad", .docs_url = "docs/troubleshooting.md#daemon-and-socket" });
@@ -460,6 +463,17 @@ fn doctorFindingsAlloc(allocator: std.mem.Allocator, socket_path: []const u8, co
     try appendTestFindings(allocator, &findings, config);
     try appendReleaseFindings(allocator, &findings, config);
     return findings;
+}
+
+fn appendSocketPermissionFinding(allocator: std.mem.Allocator, findings: *std.ArrayList(DoctorFinding), config: DoctorConfig, socket_path: []const u8) !void {
+    if (!checkAllowed(config, "daemon/socket-permissions") or builtin.os.tag == .windows) return;
+    const stat = std.fs.cwd().statFile(socket_path) catch return;
+    if (stat.kind != .unix_domain_socket or socket_security.isOwnerOnly(stat.mode)) return;
+
+    const mode = stat.mode & 0o777;
+    const evidence = try std.fmt.allocPrint(allocator, "mode={o}", .{mode});
+    defer allocator.free(evidence);
+    try appendFindingIfAllowed(allocator, findings, config, .{ .id = "daemon/socket-permissions", .severity = .warning, .category = "daemon", .message = "daemon socket mode is not owner-only (expected 0600)", .evidence = evidence, .path = socket_path, .fix_hint = "restart shisad to recreate the socket with mode 0600", .docs_url = "docs/doctor.md#daemon" });
 }
 
 fn deinitDoctorFindings(allocator: std.mem.Allocator, findings: []DoctorFinding) void {

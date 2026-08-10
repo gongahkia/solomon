@@ -54,6 +54,9 @@ shisa prompt --socket /tmp/shisa.sock --shell zsh --cwd "$PWD"
 
 If the shell uses `SHISA_SOCKET`, pass the same path to both `shisa` and `shisad`.
 
+On Unix, Shisa recreates its socket with mode `0600`. If `shisa doctor --only daemon/socket-permissions`
+reports a different mode, restart `shisad` rather than broadening access to the socket.
+
 Check only daemon state:
 
 ```sh

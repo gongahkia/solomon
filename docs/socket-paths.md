@@ -2,6 +2,10 @@
 
 Shisa uses one daemon socket per local user.
 
+On Unix, after binding, the daemon explicitly sets the socket mode to `0600`.
+`shisa doctor --only daemon/socket-permissions` reports a Unix socket whose
+mode differs from that policy.
+
 ## Linux
 
 Primary path:

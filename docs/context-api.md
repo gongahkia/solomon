@@ -40,7 +40,7 @@ The response has protocol version `v: 2` and schema identifier `shisa.context/v1
 - `unknown`: the daemon has not populated this cache.
 - `pending`: an async value for the requested working directory is being populated.
 - `ready`: the cache has completed; `value: null` means the check found no applicable context.
-- `stale`: a per-directory cache belongs to another working directory, so its value is withheld.
+- `stale`: a cwd-scoped cache currently holds another working directory's result, so its value is withheld.
 
 Cloud cache values are process-wide and currently use `unknown` or `ready`. The API reports cached display values only; it does not expose credentials, tokens, command history, environment variables, or plugin capabilities.
 

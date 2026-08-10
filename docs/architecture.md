@@ -14,7 +14,7 @@ The shell hook captures runtime state:
 - last command duration
 - terminal size and capability hints
 
-It sends that state to the daemon over a Unix-domain socket and prints the returned prompt. If the daemon is unreachable, the hook prints a minimal fallback prompt within 5 ms.
+It sends that state to the daemon over a Unix-domain socket and prints the returned prompt. The prompt client gives its daemon connection and request a 5 ms interactive deadline; when that attempt fails, it prints a minimal fallback prompt.
 
 ### Daemon
 
@@ -24,7 +24,7 @@ It sends that state to the daemon over a Unix-domain socket and prints the retur
 - render pipeline
 - module scheduler
 - filesystem watchers
-- per-directory cache
+- rendered-prompt L1 cache, module-owned async caches, and cloud-context caches
 - plugin runtime
 - metrics and health endpoints
 
@@ -52,7 +52,7 @@ The user-facing `shisa.toml` schema is defined in [config-schema.md](config-sche
 
 Shisa's cache contract is described in [RFC-0004](../rfcs/0004-cache-invalidation-rules.md) and the current source-level layout is detailed in [Cache Architecture](cache-architecture.md).
 
-Current daemon code uses module-owned caches for async git/language probes and cached cloud context, plus reusable generic stores for module output and active L1 rendered-prompt caching. Shared external-command caching remains a design target.
+Current daemon code uses one cwd-scoped module-owned cache each for async Git and language probes, provider-specific cloud-context caches, and an active L1 rendered-prompt cache. The reusable generic module-output store and shared external-command cache remain design targets for the render path.
 
 ### Plugins
 
@@ -64,16 +64,16 @@ Core modules are Zig. Third-party plugins are Lua and must declare capabilities 
 2. Shell `precmd` captures exit status, jobs, duration, cwd, and terminal capabilities.
 3. Shell hook sends a `render` request to `shisad`.
 4. Daemon drains pending cache invalidations and registers current watch scopes.
-5. Renderer reads sync/cached modules and schedules async misses.
+5. Renderer reads configured modules, returning ready async cache values and scheduling cache misses.
 6. Daemon returns prompt and optional `redraw_token`.
-7. Async completions update module caches and can trigger shell redraw.
+7. Async completions update module caches; a later render, including a protocol-level `render_continue` request, can use the completed value. The checked-in shell hooks do not subscribe to daemon completion events.
 
 ## Failure Model
 
 - Missing socket: auto-spawn daemon, then fallback if not ready.
 - Daemon crash: supervisor restarts with backoff.
 - Slow plugin: disable for session and report through `shisa doctor`.
-- Watcher limit: fall back to TTL refresh and report degraded cache.
+- Watcher limit: fall back to conservative periodic invalidation and report degraded cache.
 - Unsupported terminal capabilities: downgrade color and glyph output.
 
 ## Performance Contract

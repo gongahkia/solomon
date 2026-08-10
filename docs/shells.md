@@ -2,13 +2,15 @@
 
 ## Parity Matrix
 
-| Shell | Init file | Prompt hook | Exit/jobs/duration | Async redraw | Transient prompt | Instant prompt | Integration test |
+| Shell | Init file | Prompt hook | Exit/jobs/duration | Async redraw handler | Transient prompt | Instant prompt | Integration test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | zsh | `init/shisa.zsh` | `precmd` + `preexec` | yes | self-pipe `zle -F` + `zle reset-prompt` | yes | CLI supports `--instant`; hook does not enable by default | `test/integration/zsh_fake_socket.sh` |
 | bash | `init/shisa.bash` | `PROMPT_COMMAND` + `DEBUG` trap | yes | `bind -x` on `\C-x\C-s` | best effort | CLI supports `--instant`; hook does not enable by default | `test/integration/bash_fake_socket.sh` |
 | fish | `init/shisa.fish` | `fish_prompt` + `fish_preexec` | yes | `emit shisa_async_redraw` + `commandline -f repaint` | no | enabled by default via `--instant` | `test/integration/fish_fake_socket.sh` |
 | nushell | `init/shisa.nu` | `$env.PROMPT_COMMAND` | exit/jobs yes; duration 0 | documented limitation | no | CLI supports `--instant`; hook off by default | `test/integration/nu_fake_socket.sh` |
 | PowerShell | `init/shisa.ps1` | `prompt` | exit/jobs yes; duration 0 | `Register-EngineEvent` via `Shisa.AsyncFill`; host-limited | no | CLI supports `--instant`; hook off by default | `test/integration/pwsh_fake_socket.sh` |
+
+The hooks provide shell-specific redraw handlers, but none of the checked-in hooks subscribes to daemon async-completion events or sends `render_continue` automatically. A Git or language-version cache miss is therefore visible as `[pending:<module>]` until a later prompt render; an external notifier may invoke the documented handler where the shell supports one.
 
 ## Version Compatibility Matrix
 
@@ -43,7 +45,7 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 | Condition | zsh | bash | fish | nushell | PowerShell |
 | --- | --- | --- | --- | --- | --- |
 | Daemon socket missing, instant off | `%~> ` fallback | cwd fallback | `prompt_pwd` fallback | `pwd` fallback | `Get-Location` fallback |
-| Async redraw unavailable | `TRAPUSR1` calls direct `zle reset-prompt`; non-ZLE contexts no-op | no automatic repaint; bound key only works while Readline is active | `emit shisa_async_redraw` calls `commandline -f repaint`; non-interactive contexts no-op | no external parent-shell repaint; next `pre_prompt` consumes `shisa-reprompt` state | event hook skipped if unsupported or disabled; `Invoke-ShisaAsyncFill` falls back to `Invoke-ShisaRedraw` |
+| Async redraw unavailable | external `USR1` notifications cannot repaint; a later prompt still uses the cache | no automatic repaint; bound key only works while Readline is active | no external repaint; a later prompt still uses the cache | no external parent-shell repaint; next `pre_prompt` consumes `shisa-reprompt` state | external event hook skipped if unsupported or disabled; a later prompt still uses the cache |
 | Old shell or host | zsh 5.0+ documented | Bash 3.x uses sync `--no-async` prompt | fish hook path documented | Nushell 0.113.x tested baseline | `Register-EngineEvent` host support required for event delivery |
 
 ## zsh
@@ -51,11 +53,11 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 - Requires zsh 5.0 or newer.
 - Captures duration with `zsh/datetime` and `$EPOCHREALTIME`.
 - Uses `%~> ` as fallback when the daemon socket is missing.
-- Redraw path is signal-driven: `TRAPUSR1` writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
+- Redraw handler is signal-driven: an external `USR1` notifier reaches `TRAPUSR1`, which writes to a self-pipe when available; `zle -F` drains it and calls `zle reset-prompt`.
 - Transient prompt replaces accepted lines with `shisa prompt --transient` output when `transient_prompt` is configured.
 - Shisa sets `PROMPT` and `RPROMPT`; `RPROMPT` calls `shisa prompt --right` and renders `[prompt].right_modules`.
 - `command_context = "right"` appends configured context to `RPROMPT` while a matching command is being typed. `"message"` uses the ZLE message area instead. The hook never evaluates command text; quoted, piped, redirected, and compound commands are ignored.
-- Async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
+- An externally triggered async redraw calls `zle reset-prompt`, so zsh recalculates both `PROMPT` and `RPROMPT`.
 - If another plugin owns `RPROMPT`, source that plugin after Shisa if it should win.
 - `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 
@@ -78,7 +80,7 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 - Captures exit via `$status`, jobs via `jobs -p`, and duration via `$CMD_DURATION`.
 - Enables `SHISA_INSTANT=1` by default, so cached prompts render before a daemon request.
 - Defines `fish_right_prompt`, which calls `shisa prompt --right` and renders `[prompt].right_modules`.
-- Redraw path is fish-native: handlers can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
+- The redraw handler is fish-native: an external notifier can `emit shisa_async_redraw`, which calls `commandline -f repaint`.
 - Shisa does not source or require `fish-async-prompt`. If that plugin is installed, keep its scheduling separate and emit `shisa_async_redraw` after Shisa async state changes.
 - `SHISA_PROD_GUARD` is experimental and intentionally off by default.
 
@@ -95,7 +97,7 @@ Command-aware context is opt-in through `[prompt]`. It is currently implemented 
 
 - Uses a global `prompt` function and a cwd fallback.
 - Captures native exit status and running PowerShell jobs; generic command duration is reported as `0ms`.
-- Registers `Shisa.AsyncFill` with `Register-EngineEvent` when available; the action calls `Invoke-ShisaRedraw`.
+- Registers an externally raised `Shisa.AsyncFill` event with `Register-EngineEvent` when available; the action calls `Invoke-ShisaRedraw`.
 - Defines `shisa_right_prompt_render` for hosts that compose their own right prompt; default `prompt` output remains left-only.
 - Set `SHISA_PWSH_ASYNC_EVENT=0` before sourcing `init/shisa.ps1` to disable the event hook.
 

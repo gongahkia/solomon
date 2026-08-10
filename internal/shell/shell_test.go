@@ -792,7 +792,9 @@ bind() {
     return
   fi
   if [ "$1" = -x ]; then
-    BIND_G=_close_enough_undo_rewrite
+    case "$2" in
+      *C-g*) BIND_G=_close_enough_undo_rewrite ;;
+    esac
     return
   fi
   BIND_G="${1##*: }"

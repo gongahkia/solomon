@@ -106,8 +106,12 @@ pub const Cache = struct {
             return .{ .segment = segment };
         }
         if (self.in_flight) {
+            const stale_segment = if (self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and sameOptions(self.options, options))
+                if (self.segment) |value| try allocator.dupe(u8, value) else null
+            else
+                null;
             self.mutex.unlock();
-            return .{ .pending = true };
+            return .{ .segment = stale_segment, .pending = true };
         }
         self.mutex.unlock();
 
@@ -126,9 +130,17 @@ pub const Cache = struct {
         errdefer allocator.free(worker_cwd);
 
         self.mutex.lock();
-        self.clear(allocator);
-        self.cwd = try allocator.dupe(u8, cwd_path);
-        self.options = options;
+        const refreshes_existing = self.valid and self.cwd != null and std.mem.eql(u8, self.cwd.?, cwd_path) and sameOptions(self.options, options);
+        const stale_segment = if (refreshes_existing)
+            if (self.segment) |value| try allocator.dupe(u8, value) else null
+        else
+            null;
+        errdefer if (stale_segment) |value| allocator.free(value);
+        if (!refreshes_existing) {
+            self.clear(allocator);
+            self.cwd = try allocator.dupe(u8, cwd_path);
+            self.options = options;
+        }
         self.in_flight = true;
         self.generation += 1;
         const generation = self.generation;
@@ -144,18 +156,19 @@ pub const Cache = struct {
         self.worker = worker;
         self.mutex.unlock();
 
-        return .{ .pending = true };
+        return .{ .segment = stale_segment, .pending = true };
     }
 
     /// Prevent an L1 rendered-prompt cache hit from extending a Git result
-    /// beyond its configured lifetime. A zero TTL invalidates every result.
-    pub fn invalidateExpired(self: *Cache, allocator: std.mem.Allocator, cwd_path: []const u8, options: Options) void {
+    /// beyond its configured lifetime. The prior segment stays visible while
+    /// a replacement probe runs, including when the TTL is zero.
+    pub fn invalidateExpired(self: *Cache, cwd_path: []const u8, options: Options) void {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (!self.valid or self.cwd == null or !std.mem.eql(u8, self.cwd.?, cwd_path)) return;
         if (self.isReusable(cwd_path, options)) return;
+        if (self.in_flight) return;
         self.generation +%= 1;
-        self.clear(allocator);
     }
 
     fn takeWorker(self: *Cache) ?std.Thread {
@@ -619,6 +632,26 @@ test "zero TTL does not reuse a cached git segment" {
     try std.testing.expect(rendered.segment == null);
     try std.testing.expect(cache.valid);
     try std.testing.expect(cache.segment == null);
+}
+
+test "expired async result remains visible while it refreshes" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-git-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    var cache = Cache{};
+    defer cache.deinit(allocator);
+    const initial = (try cache.render(allocator, dir_path, .{ .cache_ttl_ms = 0 })).?;
+    defer allocator.free(initial);
+    cache.invalidateExpired(dir_path, .{ .cache_ttl_ms = 0 });
+
+    var refreshed = try cache.renderAsync(allocator, dir_path, .{ .cache_ttl_ms = 0 });
+    defer refreshed.deinit(allocator);
+    try std.testing.expect(refreshed.pending);
+    try std.testing.expectEqualStrings("git:main", refreshed.segment.?);
 }
 
 fn runSleepForCancelTest(cache: *Cache, allocator: std.mem.Allocator, term_out: *?std.process.Child.Term) void {

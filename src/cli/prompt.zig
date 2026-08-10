@@ -16,7 +16,7 @@ const theme_loader = @import("theme_loader");
 const max_config_bytes = 1024 * 1024;
 
 const PromptConfig = prompt_payload.Config;
-const buildPromptPayload = prompt_payload.buildPromptPayload;
+const buildPromptPayloadWithPathHashInvalidation = prompt_payload.buildPromptPayloadWithPathHashInvalidation;
 const buildPromptPayloadWithModuleOptions = prompt_payload.buildPromptPayloadWithModuleOptions;
 const defaultPromptModuleOptions = prompt_payload.defaultPromptModuleOptions;
 const promptModuleOptions = prompt_payload.promptModuleOptions;
@@ -55,7 +55,9 @@ pub fn promptCmd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const socket_path = if (config.socket_path) |path| path else try paths.defaultSocketPath(allocator);
     defer if (config.socket_path == null) allocator.free(socket_path);
 
-    const payload = try buildPromptPayload(allocator, config, cwd);
+    var module_options = try promptModuleOptions(allocator);
+    defer module_options.deinit(allocator);
+    const payload = try buildPromptPayloadWithPathHashInvalidation(allocator, config, cwd, module_options.language_versions.path_hash_invalidate);
     defer allocator.free(payload);
 
     if (config.instant) {
@@ -451,6 +453,24 @@ fn renderLocalPrompt(allocator: std.mem.Allocator, config: PromptConfig, cwd: []
             .gcp = module_options.cloud_ctx.gcp,
             .azure = module_options.cloud_ctx.azure,
             .kubernetes = module_options.cloud_ctx.kubernetes,
+        },
+        .git_branch = .{
+            .show_dirty = module_options.git_branch.show_dirty,
+            .cache_ttl_ms = module_options.git_branch.cache_ttl_ms,
+        },
+        .language_versions = .{
+            .python = module_options.language_versions.python,
+            .node = module_options.language_versions.node,
+            .rust = module_options.language_versions.rust,
+            .go = module_options.language_versions.go,
+        },
+        .exit_status_show_zero = module_options.exit_status.show_zero,
+        .jobs_show_zero = module_options.jobs.show_zero,
+        .cmd_duration_threshold_ms = module_options.cmd_duration.threshold_ms,
+        .user_host_mode = switch (module_options.user_host.mode) {
+            .ssh => .ssh,
+            .always => .always,
+            .never => .never,
         },
         .cdhint = module_options.cdhint,
         .tmux_pane = tmux_pane,

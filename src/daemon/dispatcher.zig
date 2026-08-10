@@ -110,6 +110,12 @@ pub const RenderInput = struct {
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
     cwd_options: cwd_module.Options = .{},
+    git_branch: git_branch_module.Options = .{},
+    language_versions: language_versions_module.Options = .{},
+    exit_status_show_zero: bool = false,
+    jobs_show_zero: bool = false,
+    cmd_duration_threshold_ms: u64 = 1000,
+    user_host_mode: user_host_module.Mode = .ssh,
     aws_profile: ?[]const u8 = null,
     aws_region: ?[]const u8 = null,
     aws_default_region: ?[]const u8 = null,
@@ -450,8 +456,8 @@ fn skipOsc(value: []const u8, start: usize) usize {
 
 fn dispatchAsync(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !AsyncRender {
     return switch (module_id) {
-        .git_branch => fromGit(try caches.git_branch.renderAsync(allocator, input.cwd)),
-        .language_versions => fromLanguageVersions(try caches.language_versions.renderAsync(allocator, input.cwd, input.env_hash, input.path_env)),
+        .git_branch => fromGit(try caches.git_branch.renderAsync(allocator, input.cwd, input.git_branch)),
+        .language_versions => fromLanguageVersions(try caches.language_versions.renderAsync(allocator, input.cwd, input.env_hash, input.path_env, input.language_versions)),
         else => .{ .pending = true },
     };
 }
@@ -467,13 +473,13 @@ fn fromLanguageVersions(rendered: language_versions_module.Cache.AsyncRender) As
 fn dispatch(allocator: std.mem.Allocator, caches: CacheSet, module_id: ModuleId, input: RenderInput) !?[]u8 {
     return switch (module_id) {
         .cwd => try cwd_module.render(allocator, input.cwd, input.home, input.cwd_options),
-        .git_branch => try caches.git_branch.render(allocator, input.cwd),
-        .language_versions => try language_versions_module.probe(allocator, input.cwd, input.path_env),
+        .git_branch => try caches.git_branch.render(allocator, input.cwd, input.git_branch),
+        .language_versions => try language_versions_module.probe(allocator, input.cwd, input.path_env, input.language_versions),
         .time => try time_module.render(allocator, input.time, input.timestamp),
-        .exit_status => try exit_status_module.render(allocator, input.exit),
-        .jobs => try jobs_module.render(allocator, input.jobs),
-        .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, 1000),
-        .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host),
+        .exit_status => try exit_status_module.render(allocator, input.exit, input.exit_status_show_zero),
+        .jobs => try jobs_module.render(allocator, input.jobs, input.jobs_show_zero),
+        .cmd_duration => try cmd_duration_module.render(allocator, input.duration_ms, input.cmd_duration_threshold_ms),
+        .user_host => try user_host_module.render(allocator, input.ssh, input.user, input.host, input.user_host_mode),
         .cloud_ctx => try cloud_ctx_module.render(allocator, input.aws_profile, input.kubeconfig, input.home, caches.cloud_ctx, input.cloud_ctx),
         .cdhint => try cdhint_module.render(allocator, input.cwd, input.cdhint),
         .tmux_pane => try tmux_pane_module.render(allocator, input.tmux_pane, input.tmux_pane_options),
@@ -581,6 +587,43 @@ test "renders stable sync pipeline" {
     defer rendered.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("/tmp/project time:01:01 \x1b[31mexit:2\x1b[0m jobs:1 took:1.2s> ", rendered.prompt);
     try std.testing.expect(rendered.redraw_token == null);
+}
+
+test "applies configured sync module options" {
+    var git_cache = git_branch_module.Cache{};
+    defer git_cache.deinit(std.testing.allocator);
+    var language_cache = language_versions_module.Cache{};
+    defer language_cache.deinit(std.testing.allocator);
+    var cloud_cache = cloud_ctx_module.Cache{};
+    defer cloud_cache.deinit(std.testing.allocator);
+    const pipeline = [_]ModuleSpec{
+        .{ .id = .exit_status, .execution_class = .sync },
+        .{ .id = .jobs, .execution_class = .sync },
+        .{ .id = .cmd_duration, .execution_class = .sync },
+        .{ .id = .user_host, .execution_class = .sync },
+    };
+    var rendered = try renderPipeline(std.testing.allocator, .{
+        .git_branch = &git_cache,
+        .language_versions = &language_cache,
+        .cloud_ctx = &cloud_cache,
+    }, .{
+        .cwd = "/tmp/project",
+        .home = null,
+        .exit = 0,
+        .jobs = 0,
+        .duration_ms = 7,
+        .time = false,
+        .timestamp = 0,
+        .ssh = null,
+        .user = "me",
+        .host = "host",
+        .exit_status_show_zero = true,
+        .jobs_show_zero = true,
+        .cmd_duration_threshold_ms = 0,
+        .user_host_mode = .always,
+    }, pipeline[0..]);
+    defer rendered.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("\x1b[31mexit:0\x1b[0m jobs:0 took:7ms me@host> ", rendered.prompt);
 }
 
 test "renders rtl opt-in reversed segment order" {

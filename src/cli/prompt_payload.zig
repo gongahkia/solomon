@@ -41,6 +41,11 @@ pub const ModuleOptions = struct {
     owns_theme: bool = false,
     owns_locale: bool = false,
     cwd: shisa_config.CwdOptions,
+    git_branch: shisa_config.GitBranchOptions,
+    exit_status: shisa_config.ExitStatusOptions,
+    jobs: shisa_config.JobsOptions,
+    cmd_duration: shisa_config.CmdDurationOptions,
+    user_host: shisa_config.UserHostOptions,
     cloud_ctx: shisa_config.CloudCtxOptions,
     cdhint: shisa_config.CdhintOptions,
     tmux_pane: shisa_config.TmuxPaneOptions,
@@ -75,13 +80,17 @@ const default_prompt_modules = [_]shisa_config.ModuleId{
 const command_context_primary_modules = [_]shisa_config.ModuleId{.cwd};
 
 pub fn buildPromptPayload(allocator: std.mem.Allocator, config: Config, cwd: []const u8) ![]u8 {
-    return buildPromptPayloadV2(allocator, config, cwd);
+    return buildPromptPayloadV2(allocator, config, cwd, false);
+}
+
+pub fn buildPromptPayloadWithPathHashInvalidation(allocator: std.mem.Allocator, config: Config, cwd: []const u8, path_hash_invalidate: bool) ![]u8 {
+    return buildPromptPayloadV2(allocator, config, cwd, path_hash_invalidate);
 }
 
 /// Render requests deliberately contain only shell-owned, per-invocation
 /// state. The daemon owns configuration, theme parsing, and module selection;
 /// keeping them out of this function prevents prompt-time config I/O.
-fn buildPromptPayloadV2(allocator: std.mem.Allocator, config: Config, cwd: []const u8) ![]u8 {
+fn buildPromptPayloadV2(allocator: std.mem.Allocator, config: Config, cwd: []const u8, path_hash_invalidate: bool) ![]u8 {
     const escaped_cwd = try daemon_json.escapeAlloc(allocator, cwd);
     defer allocator.free(escaped_cwd);
     const escaped_shell = try daemon_json.escapeAlloc(allocator, config.shell);
@@ -94,7 +103,10 @@ fn buildPromptPayloadV2(allocator: std.mem.Allocator, config: Config, cwd: []con
     defer allocator.free(escaped_tmux_pane);
     const request_id = try std.fmt.allocPrint(allocator, "cli-{x}", .{std.crypto.random.int(u64)});
     defer allocator.free(request_id);
-    const env_json = try pathEnvJsonAlloc(allocator);
+    const env_json = if (path_hash_invalidate)
+        try pathEnvJsonAlloc(allocator)
+    else
+        try allocator.dupe(u8, "");
     defer allocator.free(env_json);
 
     return std.fmt.allocPrint(
@@ -214,6 +226,11 @@ pub fn defaultPromptModuleOptions() ModuleOptions {
         .right_modules = &.{},
         .command_context = .{ .commands = &.{}, .modules = &.{} },
         .cwd = .{},
+        .git_branch = .{},
+        .exit_status = .{},
+        .jobs = .{},
+        .cmd_duration = .{},
+        .user_host = .{},
         .cloud_ctx = .{},
         .cdhint = .{},
         .tmux_pane = .{},
@@ -267,6 +284,11 @@ pub fn promptModuleOptions(allocator: std.mem.Allocator) !ModuleOptions {
         .owns_theme = true,
         .owns_locale = true,
         .cwd = parsed.modules.cwd,
+        .git_branch = parsed.modules.git_branch,
+        .exit_status = parsed.modules.exit_status,
+        .jobs = parsed.modules.jobs,
+        .cmd_duration = parsed.modules.cmd_duration,
+        .user_host = parsed.modules.user_host,
         .cloud_ctx = parsed.modules.cloud_ctx,
         .cdhint = parsed.modules.cdhint,
         .tmux_pane = parsed.modules.tmux_pane,
@@ -357,6 +379,20 @@ test "prompt payload carries rtl flags" {
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"rtl_reverse\"") == null);
+}
+
+test "path hash inclusion follows the configured language invalidation setting" {
+    const disabled = try buildPromptPayloadWithPathHashInvalidation(std.testing.allocator, .{}, "/tmp", false);
+    defer std.testing.allocator.free(disabled);
+    try std.testing.expect(std.mem.indexOf(u8, disabled, "\"env_hash\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, disabled, "\"path_env\"") == null);
+
+    const path = std.process.getEnvVarOwned(std.testing.allocator, "PATH") catch return error.SkipZigTest;
+    std.testing.allocator.free(path);
+    const enabled = try buildPromptPayloadWithPathHashInvalidation(std.testing.allocator, .{}, "/tmp", true);
+    defer std.testing.allocator.free(enabled);
+    try std.testing.expect(std.mem.indexOf(u8, enabled, "\"env_hash\":\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, enabled, "\"path_env\":\"") != null);
 }
 
 test "prompt payload locale override controls rtl" {

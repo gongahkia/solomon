@@ -469,9 +469,12 @@ test "detects project markers in ancestors" {
     var file = try std.fs.createFileAbsolute(marker, .{});
     file.close();
 
-    const detected = try detect(allocator, nested);
+    const detected = try detect(allocator, nested, .{});
     try std.testing.expect(detected.python);
     try std.testing.expect(!detected.node);
+
+    const disabled = try detect(allocator, nested, .{ .python = false });
+    try std.testing.expect(!disabled.python);
 }
 
 test "formats version segment" {
@@ -514,7 +517,7 @@ test "probe uses request path env for language commands" {
         try file.chmod(0o755);
     }
 
-    const rendered = (try probe(allocator, repo_path, bin_path)).?;
+    const rendered = (try probe(allocator, repo_path, bin_path, .{})).?;
     defer allocator.free(rendered);
     try std.testing.expectEqualStrings("lang:py:9.9.9", rendered);
 }
@@ -528,7 +531,7 @@ test "async render hides non project cwd without pending" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var rendered = try cache.renderAsync(allocator, dir_path, null, null);
+    var rendered = try cache.renderAsync(allocator, dir_path, null, null, .{});
     defer rendered.deinit(allocator);
     try std.testing.expect(!rendered.pending);
     try std.testing.expect(rendered.segment == null);
@@ -549,7 +552,7 @@ test "async cache invalidates when env hash changes" {
     };
     defer cache.deinit(allocator);
 
-    var rendered = try cache.renderAsync(allocator, dir_path, "inner", null);
+    var rendered = try cache.renderAsync(allocator, dir_path, "inner", null, .{});
     defer rendered.deinit(allocator);
     try std.testing.expect(!rendered.pending);
     try std.testing.expect(rendered.segment == null);
@@ -589,7 +592,7 @@ test "cancels active language child when cwd changes" {
     var term: ?std.process.Child.Term = null;
     const thread = try std.Thread.spawn(.{}, runSleepForCancelTest, .{ &cache, allocator, &term });
     try waitForActivePid(&cache);
-    _ = cache.cancelForCwdOrEnvChange(allocator, "/new", null);
+    _ = cache.cancelForRenderChange(allocator, "/new", null, .{});
     thread.join();
 
     try std.testing.expect(term != null);
@@ -618,12 +621,12 @@ test "async render fills python marker when python3 exists" {
 
     var cache = Cache{};
     defer cache.deinit(allocator);
-    var first = try cache.renderAsync(allocator, dir_path, null, null);
+    var first = try cache.renderAsync(allocator, dir_path, null, null, .{});
     defer first.deinit(allocator);
     try std.testing.expect(first.pending);
 
     for (0..100) |_| {
-        var rendered = try cache.renderAsync(allocator, dir_path, null, null);
+        var rendered = try cache.renderAsync(allocator, dir_path, null, null, .{});
         defer rendered.deinit(allocator);
         if (rendered.segment) |segment| {
             try std.testing.expect(std.mem.startsWith(u8, segment, "lang:py:"));

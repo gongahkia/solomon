@@ -16,6 +16,7 @@ const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
 const json = @import("json.zig");
 const fsnotify = @import("fsnotify.zig");
+const framing = @import("framing.zig");
 const daemon_cache = @import("cache.zig");
 const cost_refresh = @import("cost_refresh.zig");
 const subscribe = @import("subscribe.zig");
@@ -27,12 +28,9 @@ extern "kernel32" fn ConnectNamedPipe(hNamedPipe: win.HANDLE, lpOverlapped: ?*wi
 extern "kernel32" fn DisconnectNamedPipe(hNamedPipe: win.HANDLE) callconv(.winapi) win.BOOL;
 extern "kernel32" fn SetNamedPipeHandleState(hNamedPipe: win.HANDLE, lpMode: ?*win.DWORD, lpMaxCollectionCount: ?*win.DWORD, lpCollectDataTimeout: ?*win.DWORD) callconv(.winapi) win.BOOL;
 
-const header_bytes = 4;
-const max_frame_bytes = 1024 * 1024;
 const max_config_bytes = 1024 * 1024;
 pub const graceful_shutdown_timeout_ms: i64 = 5000;
 const shutdown_poll_ms: i32 = 100;
-const interactive_frame_timeout_ms: i32 = 5;
 const render_histogram_buckets = 5;
 const prompt_cache_module = "render_prompt";
 const ReloadAllocator = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true });
@@ -400,10 +398,20 @@ const PosixServer = struct {
             for (dirs) |dir| allocator.free(dir);
             allocator.free(dirs);
         }
+        const git_options: git_branch_module.Options = if (self.runtime_snapshot) |snapshot| .{
+            .show_dirty = snapshot.config.modules.git_branch.show_dirty,
+            .cache_ttl_ms = snapshot.config.modules.git_branch.cache_ttl_ms,
+        } else .{};
+        const language_options: language_versions_module.Options = if (self.runtime_snapshot) |snapshot| .{
+            .python = snapshot.config.modules.language_versions.python,
+            .node = snapshot.config.modules.language_versions.node,
+            .rust = snapshot.config.modules.language_versions.rust,
+            .go = snapshot.config.modules.language_versions.go,
+        } else .{};
         for (dirs) |dir| {
-            var git = self.git_branch_cache.renderAsync(allocator, dir) catch continue;
+            var git = self.git_branch_cache.renderAsync(allocator, dir, git_options) catch continue;
             git.deinit(allocator);
-            var lang = self.language_versions_cache.renderAsync(allocator, dir, null, null) catch continue;
+            var lang = self.language_versions_cache.renderAsync(allocator, dir, null, null, language_options) catch continue;
             lang.deinit(allocator);
         }
     }
@@ -421,7 +429,7 @@ const PosixServer = struct {
     fn handleConnection(self: *Server, connection: std.net.Server.Connection, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
         defer connection.stream.close();
 
-        const request = try readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, interactive_frame_timeout_ms);
+        const request = try framing.readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, framing.interactive_frame_timeout_ms);
         defer std.heap.page_allocator.free(request);
 
         try self.handleRequest(connection.stream.handle, request, shutdown_requested);
@@ -429,7 +437,7 @@ const PosixServer = struct {
 
     fn handlePooledConnection(self: *Server, connection: std.net.Server.Connection, shutdown_requested: *const std.atomic.Value(bool)) !void {
         defer connection.stream.close();
-        const request = try readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, interactive_frame_timeout_ms);
+        const request = try framing.readFrameAllocWithTimeout(std.heap.page_allocator, connection.stream.handle, framing.interactive_frame_timeout_ms);
         defer std.heap.page_allocator.free(request);
         if (isOpRequest(request, "subscribe")) {
             return subscribe.handleConnection(std.heap.page_allocator, connection.stream.handle, request, shutdown_requested);
@@ -443,39 +451,39 @@ const PosixServer = struct {
         if (std.mem.startsWith(u8, request, "metrics")) {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
-            try writeFrame(fd, line);
+            try framing.writeFrame(fd, line);
         } else if (isOpRequest(request, "context")) {
             const response = try self.contextResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else if (isOpRequest(request, "metrics")) {
             const response = try self.metricsResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else if (std.mem.startsWith(u8, request, "health")) {
-            try writeFrame(fd, "ok\n");
+            try framing.writeFrame(fd, "ok\n");
         } else if (isOpRequest(request, "health")) {
             const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else if (isOpRequest(request, "version")) {
             const response = try versionResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else if (isOpRequest(request, "reload")) {
             const response = try self.reloadResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else if (isOpRequest(request, "subscribe")) {
             try subscribe.handleConnection(std.heap.page_allocator, fd, request, shutdown_requested);
         } else if (isPreexecRequest(request)) {
             const response = try self.preexecResponse(request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         } else {
             const response = try self.renderResponse(request);
             defer std.heap.page_allocator.free(response);
-            try writeFrame(fd, response);
+            try framing.writeFrame(fd, response);
         }
     }
 
@@ -498,6 +506,17 @@ const PosixServer = struct {
         try PosixServer.registerGitInvalidation(self, parsed.value.cwd);
         if (self.runtime_snapshot == null) return error.RuntimeNotReady;
         const runtime = &self.runtime_snapshot.?;
+        const git_options: git_branch_module.Options = .{
+            .show_dirty = runtime.config.modules.git_branch.show_dirty,
+            .cache_ttl_ms = runtime.config.modules.git_branch.cache_ttl_ms,
+        };
+        const language_options: language_versions_module.Options = .{
+            .python = runtime.config.modules.language_versions.python,
+            .node = runtime.config.modules.language_versions.node,
+            .rust = runtime.config.modules.language_versions.rust,
+            .go = runtime.config.modules.language_versions.go,
+        };
+        self.git_branch_cache.invalidateExpired(parsed.value.cwd, git_options);
         const command_context_active = parsed.value.command_context and commandContextMatches(runtime.config.command_context, parsed.value.commandline);
         const configured_modules = if (command_context_active) command_context_primary_module_order[0..] else runtime.config.prompt_module_order;
         const configured_right_modules = if (command_context_active) runtime.config.command_context.module_order else runtime.config.right_prompt_module_order;
@@ -593,6 +612,16 @@ const PosixServer = struct {
                 .truncate_to = runtime.config.modules.cwd.truncate_to,
                 .home_tilde = runtime.config.modules.cwd.home_tilde,
                 .max_width = runtime.config.modules.cwd.max_width,
+            },
+            .git_branch = git_options,
+            .language_versions = language_options,
+            .exit_status_show_zero = runtime.config.modules.exit_status.show_zero,
+            .jobs_show_zero = runtime.config.modules.jobs.show_zero,
+            .cmd_duration_threshold_ms = runtime.config.modules.cmd_duration.threshold_ms,
+            .user_host_mode = switch (runtime.config.modules.user_host.mode) {
+                .ssh => .ssh,
+                .always => .always,
+                .never => .never,
             },
             .aws_profile = aws_profile,
             .aws_region = aws_region,
@@ -1421,48 +1450,48 @@ const WindowsServer = struct {
     }
 
     fn handlePipe(self: *WindowsServer, pipe: std.fs.File, shutdown_requested: ?*const std.atomic.Value(bool)) !void {
-        const request = try readFrameFromFileAlloc(std.heap.page_allocator, pipe);
+        const request = try framing.readFrameFromFileAlloc(std.heap.page_allocator, pipe);
         defer std.heap.page_allocator.free(request);
 
         if (std.mem.startsWith(u8, request, "metrics")) {
             var response: [128]u8 = undefined;
             const line = try std.fmt.bufPrint(&response, "{{\"connections\":{d}}}\n", .{self.connections});
-            try writeFrameFile(pipe, line);
+            try framing.writeFrameFile(pipe, line);
         } else if (isOpRequest(request, "context")) {
             const response = try PosixServer.contextResponseAlloc(self, std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (isOpRequest(request, "metrics")) {
             const response = try PosixServer.metricsResponseAlloc(self, std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (std.mem.startsWith(u8, request, "health")) {
-            try writeFrameFile(pipe, "ok\n");
+            try framing.writeFrameFile(pipe, "ok\n");
         } else if (isOpRequest(request, "health")) {
             const response = try healthResponseAlloc(std.heap.page_allocator, request, true);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (isOpRequest(request, "version")) {
             const response = try versionResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (isOpRequest(request, "reload")) {
             const response = try PosixServer.reloadResponseAlloc(self, std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (isOpRequest(request, "subscribe")) {
             const response = try unsupportedSubscribeResponseAlloc(std.heap.page_allocator, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else if (isPreexecRequest(request)) {
             const response = try PosixServer.preexecResponse(self, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         } else {
             _ = shutdown_requested;
             const response = try PosixServer.renderResponse(self, request);
             defer std.heap.page_allocator.free(response);
-            try writeFrameFile(pipe, response);
+            try framing.writeFrameFile(pipe, response);
         }
     }
 };
@@ -1566,55 +1595,6 @@ fn contextValueFromCloudCacheAlloc(allocator: std.mem.Allocator, valid: bool, ge
     };
 }
 
-fn writeFrame(fd: std.posix.fd_t, payload: []const u8) !void {
-    const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
-    defer std.heap.page_allocator.free(encoded);
-    const deadline_ns = std.time.nanoTimestamp() + @as(i128, interactive_frame_timeout_ms) * @as(i128, std.time.ns_per_ms);
-    try writeAllWithDeadline(fd, encoded, deadline_ns);
-}
-
-fn writeFrameFile(file: std.fs.File, payload: []const u8) !void {
-    const encoded = try encodeFrameAlloc(std.heap.page_allocator, payload);
-    defer std.heap.page_allocator.free(encoded);
-    try writeAllFile(file, encoded);
-}
-
-fn readFrameFromFileAlloc(allocator: std.mem.Allocator, file: std.fs.File) ![]u8 {
-    var header: [header_bytes]u8 = undefined;
-    try readExactFile(file, &header);
-    const payload_len = std.mem.readInt(u32, &header, .big);
-    if (payload_len > max_frame_bytes) return error.Oversize;
-    const payload = try allocator.alloc(u8, payload_len);
-    errdefer allocator.free(payload);
-    try readExactFile(file, payload);
-    return payload;
-}
-
-fn writeAllFile(file: std.fs.File, bytes: []const u8) !void {
-    var remaining = bytes;
-    while (remaining.len > 0) {
-        const written = try file.write(remaining);
-        remaining = remaining[written..];
-    }
-}
-
-fn readExactFile(file: std.fs.File, buffer: []u8) !void {
-    var offset: usize = 0;
-    while (offset < buffer.len) {
-        const n = try file.read(buffer[offset..]);
-        if (n == 0) return error.ConnectionClosed;
-        offset += n;
-    }
-}
-
-fn encodeFrameAlloc(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
-    if (payload.len > max_frame_bytes) return error.Oversize;
-    const encoded = try allocator.alloc(u8, header_bytes + payload.len);
-    std.mem.writeInt(u32, encoded[0..header_bytes], @as(u32, @intCast(payload.len)), .big);
-    @memcpy(encoded[header_bytes..], payload);
-    return encoded;
-}
-
 fn waitForPipeClient(pipe: win.HANDLE, shutdown_requested: *const std.atomic.Value(bool)) !bool {
     if (builtin.os.tag != .windows) return error.UnsupportedSocketPlatform;
 
@@ -1683,73 +1663,6 @@ fn executionClassName(class: dispatcher.ExecutionClass) []const u8 {
         .cached => "cached",
         .async => "async",
     };
-}
-
-fn readFrameAlloc(allocator: std.mem.Allocator, fd: std.posix.fd_t) ![]u8 {
-    var header: [header_bytes]u8 = undefined;
-    try readExact(fd, &header);
-    const payload_len = std.mem.readInt(u32, &header, .big);
-    if (payload_len > max_frame_bytes) return error.Oversize;
-    const payload = try allocator.alloc(u8, payload_len);
-    errdefer allocator.free(payload);
-    try readExact(fd, payload);
-    return payload;
-}
-
-fn readFrameAllocWithTimeout(allocator: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) ![]u8 {
-    if (timeout_ms <= 0) return error.Timeout;
-    const deadline_ns = std.time.nanoTimestamp() + @as(i128, timeout_ms) * @as(i128, std.time.ns_per_ms);
-    var header: [header_bytes]u8 = undefined;
-    try readExactWithDeadline(fd, &header, deadline_ns);
-    const payload_len = std.mem.readInt(u32, &header, .big);
-    if (payload_len > max_frame_bytes) return error.Oversize;
-    const payload = try allocator.alloc(u8, payload_len);
-    errdefer allocator.free(payload);
-    try readExactWithDeadline(fd, payload, deadline_ns);
-    return payload;
-}
-
-fn readExact(fd: std.posix.fd_t, buffer: []u8) !void {
-    var offset: usize = 0;
-    while (offset < buffer.len) {
-        const n = try std.posix.read(fd, buffer[offset..]);
-        if (n == 0) return error.ConnectionClosed;
-        offset += n;
-    }
-}
-
-fn readExactWithDeadline(fd: std.posix.fd_t, buffer: []u8, deadline_ns: i128) !void {
-    var offset: usize = 0;
-    while (offset < buffer.len) {
-        try waitForFdDeadline(fd, std.posix.POLL.IN, deadline_ns);
-        const n = try std.posix.read(fd, buffer[offset..]);
-        if (n == 0) return error.ConnectionClosed;
-        offset += n;
-    }
-}
-
-/// Poll before each bounded write. Small chunks avoid a single large blocking
-/// write after readiness has been observed.
-fn writeAllWithDeadline(fd: std.posix.fd_t, bytes: []const u8, deadline_ns: i128) !void {
-    var remaining = bytes;
-    while (remaining.len > 0) {
-        try waitForFdDeadline(fd, std.posix.POLL.OUT, deadline_ns);
-        const chunk_len = @min(remaining.len, 4096);
-        const written = try std.posix.write(fd, remaining[0..chunk_len]);
-        if (written == 0) return error.ConnectionClosed;
-        remaining = remaining[written..];
-    }
-}
-
-fn waitForFdDeadline(fd: std.posix.fd_t, events: i16, deadline_ns: i128) !void {
-    const remaining_ns = deadline_ns - std.time.nanoTimestamp();
-    if (remaining_ns <= 0) return error.Timeout;
-    const rounded_ms = @divTrunc(remaining_ns + @as(i128, std.time.ns_per_ms) - 1, @as(i128, std.time.ns_per_ms));
-    const timeout_ms: i32 = @intCast(@min(rounded_ms, std.math.maxInt(i32)));
-    var poll_fds = [_]std.posix.pollfd{.{ .fd = fd, .events = events, .revents = 0 }};
-    if (try std.posix.poll(&poll_fds, timeout_ms) == 0) return error.Timeout;
-    if ((poll_fds[0].revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL)) != 0) return error.ConnectionClosed;
-    if ((poll_fds[0].revents & events) == 0 and (poll_fds[0].revents & std.posix.POLL.HUP) != 0) return error.ConnectionClosed;
 }
 
 fn nowNs() u64 {
@@ -2231,6 +2144,118 @@ test "fs event invalidates git branch cache" {
     defer std.heap.page_allocator.free(dirty);
     try std.testing.expect(std.mem.indexOf(u8, dirty, "git:main*") != null);
     try std.testing.expectEqual(@as(u64, 1), server.cache_rev);
+}
+
+test "daemon render applies configured module options" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-options-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+    try runGit(allocator, dir_path, &.{ "git", "init", "-b", "main" });
+
+    const dirty_file = try std.fmt.allocPrint(allocator, "{s}/dirty.txt", .{dir_path});
+    defer allocator.free(dirty_file);
+    {
+        var file = try std.fs.createFileAbsolute(dirty_file, .{});
+        defer file.close();
+        try file.writeAll("dirty");
+    }
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["git_branch", "exit_status", "jobs", "cmd_duration", "user_host"]
+        \\
+        \\[modules.git_branch]
+        \\show_dirty = false
+        \\cache_ttl_ms = 250
+        \\
+        \\[modules.exit_status]
+        \\show_zero = true
+        \\
+        \\[modules.jobs]
+        \\show_zero = true
+        \\
+        \\[modules.cmd_duration]
+        \\threshold_ms = 0
+        \\
+        \\[modules.user_host]
+        \\mode = "always"
+        \\
+        ,
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    const reload = try server.reloadResponseAlloc(allocator, "{\"v\":2,\"op\":\"reload\",\"request_id\":\"options\"}");
+    defer allocator.free(reload);
+    try std.testing.expect(std.mem.indexOf(u8, reload, "\"reloaded\":true") != null);
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":7,\"no_async\":true,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"options-render\"}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+    try std.testing.expect(std.mem.indexOf(u8, response, "git:main*") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "git:main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "exit:0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "jobs:0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "took:7ms") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "@") != null);
+}
+
+test "daemon render passes configured language detection into the async cache" {
+    const allocator = std.testing.allocator;
+    const dir_path = try std.fmt.allocPrint(allocator, "/tmp/shisa-server-language-options-{x}", .{std.crypto.random.int(u64)});
+    defer allocator.free(dir_path);
+    defer std.fs.cwd().deleteTree(dir_path) catch {};
+    try std.fs.cwd().makePath(dir_path);
+
+    const socket_path = try std.fmt.allocPrint(allocator, "{s}/shisa.sock", .{dir_path});
+    defer allocator.free(socket_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/shisa.toml", .{dir_path});
+    defer allocator.free(config_path);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = config_path,
+        .data =
+        \\version = 1
+        \\theme = "plain"
+        \\
+        \\[prompt]
+        \\modules = ["language_versions"]
+        \\
+        \\[modules.language_versions]
+        \\detect = ["go"]
+        \\
+        ,
+    });
+
+    var server = try Server.init(socket_path);
+    defer server.deinit();
+    server.config_path_override = config_path;
+    const reload = try server.reloadResponseAlloc(allocator, "{\"v\":2,\"op\":\"reload\",\"request_id\":\"language-options\"}");
+    defer allocator.free(reload);
+
+    const request = try std.fmt.allocPrint(allocator, "{{\"v\":2,\"op\":\"render\",\"cwd\":\"{s}\",\"exit\":0,\"jobs\":0,\"duration_ms\":0,\"shell\":\"zsh\",\"cols\":80,\"rows\":24,\"request_id\":\"language-options-render\"}}", .{dir_path});
+    defer allocator.free(request);
+    const response = try server.renderResponse(request);
+    defer std.heap.page_allocator.free(response);
+
+    server.language_versions_cache.mutex.lock();
+    defer server.language_versions_cache.mutex.unlock();
+    try std.testing.expect(!server.language_versions_cache.options.python);
+    try std.testing.expect(!server.language_versions_cache.options.node);
+    try std.testing.expect(!server.language_versions_cache.options.rust);
+    try std.testing.expect(server.language_versions_cache.options.go);
 }
 
 test "render response carries request id and v2 shape" {

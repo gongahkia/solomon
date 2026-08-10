@@ -10,7 +10,7 @@ const language_versions_module = @import("modules/language_versions.zig");
 const prod_guard_module = @import("modules/prod_guard.zig");
 const risk_tier_module = @import("modules/risk_tier.zig");
 const sso_expiry_module = @import("modules/sso_expiry.zig");
-const theme_loader = @import("theme_loader");
+const render_style = @import("render_style.zig");
 const tmux_pane_module = @import("modules/tmux_pane.zig");
 const daemon_log = @import("log.zig");
 const warmup = @import("warmup.zig");
@@ -59,8 +59,8 @@ const RenderRequest = struct {
     shell: []const u8 = "zsh",
     cols: u16 = 80,
     rows: u16 = 24,
-    color_caps: RequestColorCaps = .truecolor,
-    glyph_caps: RequestGlyphCaps = .unicode,
+    color_caps: render_style.RequestColorCaps = .truecolor,
+    glyph_caps: render_style.RequestGlyphCaps = .unicode,
     request_id: []const u8 = "",
     env_hash: ?[]const u8 = null,
     path_env: ?[]const u8 = null,
@@ -82,19 +82,6 @@ const RenderRequest = struct {
     sso_expiry: sso_expiry_module.Options = .{},
     rtl: bool = false,
     rtl_reverse: bool = false,
-};
-
-const RequestColorCaps = enum {
-    truecolor,
-    @"256",
-    @"16",
-    none,
-};
-
-const RequestGlyphCaps = enum {
-    nerdfont,
-    unicode,
-    ascii,
 };
 
 const PreexecRequest = struct {
@@ -210,7 +197,7 @@ const RenderCacheContext = struct {
 
 const RuntimeSnapshot = struct {
     config: shisa_config.Config,
-    style: RenderStyleState,
+    style: render_style.State,
 
     fn deinit(self: *RuntimeSnapshot, allocator: std.mem.Allocator) void {
         self.config.deinit(allocator);
@@ -218,7 +205,7 @@ const RuntimeSnapshot = struct {
         self.* = undefined;
     }
 
-    fn styleFor(self: *const RuntimeSnapshot, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) dispatcher.StyleConfig {
+    fn styleFor(self: *const RuntimeSnapshot, color_caps: render_style.RequestColorCaps, glyph_caps: render_style.RequestGlyphCaps) dispatcher.StyleConfig {
         return self.style.styleFor(color_caps, glyph_caps);
     }
 };
@@ -1175,7 +1162,7 @@ const PosixServer = struct {
         var diagnostic: shisa_config.Diagnostic = .{};
         var config = try shisa_config.parse(allocator, source, &diagnostic);
         errdefer config.deinit(allocator);
-        var style = try PosixServer.loadRenderStyleAlloc(allocator, config.theme, .truecolor, .nerdfont);
+        var style = try render_style.loadAlloc(allocator, config.theme, .truecolor, .nerdfont);
         errdefer style.deinit(allocator);
         return .{ .config = config, .style = style };
     }
@@ -1203,19 +1190,6 @@ const PosixServer = struct {
         const plugins_dir = if (self.plugins_dir_override) |override| try allocator.dupe(u8, override) else try defaultPluginsDirPathAlloc(allocator);
         defer allocator.free(plugins_dir);
         return plugin_host.loadInstancesAlloc(allocator, plugins_dir);
-    }
-
-    fn loadRenderStyleAlloc(allocator: std.mem.Allocator, theme_arg: []const u8, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) !RenderStyleState {
-        const theme_path = try themePathAlloc(allocator, theme_arg);
-        defer allocator.free(theme_path);
-        const theme_source = try std.fs.cwd().readFileAlloc(allocator, theme_path, max_config_bytes);
-        defer allocator.free(theme_source);
-        var diagnostic: theme_loader.Diagnostic = .{};
-        var theme = try theme_loader.parse(allocator, theme_source, &diagnostic);
-        errdefer theme.deinit(allocator);
-        _ = color_caps;
-        _ = glyph_caps;
-        return .{ .theme = theme };
     }
 
     pub fn recordFsEvent(self: *Server, path: []const u8, timestamp_ns: u64) void {
@@ -1314,85 +1288,6 @@ const PosixServer = struct {
         }
     }
 };
-
-const RenderStyleState = struct {
-    theme: theme_loader.Theme,
-
-    fn deinit(self: *RenderStyleState, allocator: std.mem.Allocator) void {
-        self.theme.deinit(allocator);
-        self.* = undefined;
-    }
-
-    fn styleFor(self: *const RenderStyleState, color_caps: RequestColorCaps, glyph_caps: RequestGlyphCaps) dispatcher.StyleConfig {
-        return .{
-            .theme = &self.theme,
-            .color_caps = effectiveThemeColorCaps(self.theme, color_caps),
-            .glyph_tier = effectiveThemeGlyphTier(self.theme, glyph_caps),
-        };
-    }
-};
-
-fn themePathAlloc(allocator: std.mem.Allocator, theme_arg: []const u8) ![]u8 {
-    if (themePathForBuiltInId(theme_arg)) |path| return allocator.dupe(u8, path);
-    if (std.mem.startsWith(u8, theme_arg, "~/")) {
-        const home = try std.process.getEnvVarOwned(allocator, "HOME");
-        defer allocator.free(home);
-        return std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, theme_arg[2..] });
-    }
-    return allocator.dupe(u8, theme_arg);
-}
-
-fn themePathForBuiltInId(id: []const u8) ?[]const u8 {
-    if (std.mem.eql(u8, id, "plain")) return "themes/plain.toml";
-    if (std.mem.eql(u8, id, "minimal-monochrome")) return "themes/minimal-monochrome.toml";
-    if (std.mem.eql(u8, id, "okiya-night")) return "themes/okiya-night.toml";
-    if (std.mem.eql(u8, id, "okiya-day")) return "themes/okiya-day.toml";
-    if (std.mem.eql(u8, id, "nord-dark")) return "themes/nord-dark.toml";
-    if (std.mem.eql(u8, id, "gruvbox-rainbow")) return "themes/gruvbox-rainbow.toml";
-    if (std.mem.eql(u8, id, "tokyo-night")) return "themes/tokyo-night.toml";
-    if (std.mem.eql(u8, id, "pure")) return "themes/pure.toml";
-    if (std.mem.eql(u8, id, "a11y")) return "themes/a11y.toml";
-    return null;
-}
-
-fn effectiveThemeColorCaps(theme: theme_loader.Theme, request_caps: RequestColorCaps) theme_loader.contrast.ColorCaps {
-    const theme_caps = switch (theme.capabilities.color) {
-        .truecolor => theme_loader.contrast.ColorCaps.truecolor,
-        .ansi256 => theme_loader.contrast.ColorCaps.@"256",
-        .ansi => theme_loader.contrast.ColorCaps.@"16",
-        .none => theme_loader.contrast.ColorCaps.none,
-    };
-    const request_theme_caps = switch (request_caps) {
-        .truecolor => theme_loader.contrast.ColorCaps.truecolor,
-        .@"256" => theme_loader.contrast.ColorCaps.@"256",
-        .@"16" => theme_loader.contrast.ColorCaps.@"16",
-        .none => theme_loader.contrast.ColorCaps.none,
-    };
-    return if (colorCapRank(theme_caps) <= colorCapRank(request_theme_caps)) theme_caps else request_theme_caps;
-}
-
-fn colorCapRank(caps: theme_loader.contrast.ColorCaps) u8 {
-    return switch (caps) {
-        .none => 0,
-        .@"16" => 1,
-        .@"256" => 2,
-        .truecolor => 3,
-    };
-}
-
-fn effectiveThemeGlyphTier(theme: theme_loader.Theme, request_caps: RequestGlyphCaps) theme_loader.GlyphTier {
-    return switch (request_caps) {
-        .ascii => .ascii,
-        .unicode => switch (theme.capabilities.glyphs) {
-            .ascii => .ascii,
-            .nerd_font => .unicode,
-        },
-        .nerdfont => switch (theme.capabilities.glyphs) {
-            .ascii => .ascii,
-            .nerd_font => .nerdfont,
-        },
-    };
-}
 
 const WindowsServer = struct {
     socket_path: []const u8,

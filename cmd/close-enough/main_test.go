@@ -543,6 +543,36 @@ func TestPackDirectoryUsesAbsoluteXDGDataHome(t *testing.T) {
 	}
 }
 
+func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
+	base := t.TempDir()
+	environment := func(key string) string {
+		if key == "XDG_DATA_HOME" {
+			return base
+		}
+		return ""
+	}
+	directory, err := packDirectory(func() (string, error) { return "/unused", nil }, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "local.json")
+	data := []byte(`{"schema_version":1,"id":"local-tool","version":"1.0.0","publisher":"close-enough","rules":[{"id":"local-tool-typo","command":"local-tool","pattern":"teh","replacement":"the","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
+	if err := os.WriteFile(source, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := packs.Install(source, directory); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := runtimePackResolver(func() (string, error) { return "/unused", nil }, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := resolver.MatchWords([]string{"local-tool", "teh"})
+	if !ok || match.PackID != "local-tool" || match.RuleID != "local-tool-typo" || match.Suggestion != "local-tool the" {
+		t.Fatalf("installed match = %#v, %t", match, ok)
+	}
+}
+
 func TestConfigCauseToggleControlsPlainDiagnostic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := run([]string{"config", "set", "display.cause", "false"}, io.Discard, io.Discard); err != nil {

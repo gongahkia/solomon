@@ -287,7 +287,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
 		}
-		resolver, err := packs.NewBundledRuntimeResolver()
+		resolver, err := runtimePackResolver(os.UserHomeDir, os.Getenv)
 		if err != nil {
 			return clierr.Wrap(clierr.Operation, err)
 		}
@@ -642,11 +642,27 @@ func checkCommand(args []string, stdout io.Writer) error {
 }
 
 func bundledDiagnosticEngine(cfg config.Config) (diagnose.Engine, error) {
-	resolver, err := packs.NewBundledRuntimeResolver()
+	resolver, err := runtimePackResolver(os.UserHomeDir, os.Getenv)
 	if err != nil {
 		return diagnose.Engine{}, err
 	}
 	return diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd(), SemanticResolver: resolver}), nil
+}
+
+func runtimePackResolver(home func() (string, error), environment func(string) string) (packs.RuntimeResolver, error) {
+	bundled, err := packs.LoadBundled()
+	if err != nil {
+		return packs.RuntimeResolver{}, err
+	}
+	directory, err := packDirectory(home, environment)
+	if err != nil {
+		return packs.RuntimeResolver{}, err
+	}
+	installed, err := packs.LoadInstalled(directory)
+	if err != nil {
+		return packs.RuntimeResolver{}, err
+	}
+	return packs.NewRuntimeResolver(append(bundled, installed...))
 }
 
 func inspectDecisionCommand(args []string, stdout io.Writer) error {

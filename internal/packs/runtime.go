@@ -3,6 +3,10 @@ package packs
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
@@ -27,6 +31,63 @@ func NewBundledRuntimeResolver() (RuntimeResolver, error) {
 		return RuntimeResolver{}, err
 	}
 	return NewRuntimeResolver(loaded)
+}
+
+// LoadInstalled loads only canonical regular pack files from a managed directory.
+// Its result is sorted and resolved before it is returned so callers cannot depend
+// on directory iteration order or accept ambiguous pack matchers.
+func LoadInstalled(directory string) ([]Pack, error) {
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Pack{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("installed pack directory is not a real directory")
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Pack, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("installed pack %q is a symbolic link", entry.Name())
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return nil, fmt.Errorf("installed pack %q is not a regular file", entry.Name())
+		}
+		pack, err := Load(filepath.Join(directory, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("installed pack %q: %w", entry.Name(), err)
+		}
+		if entry.Name() != installedPackName(pack) {
+			return nil, fmt.Errorf("installed pack %q does not have its canonical name", entry.Name())
+		}
+		if _, err := Compile(pack); err != nil {
+			return nil, fmt.Errorf("installed pack %q: %w", entry.Name(), err)
+		}
+		result = append(result, pack)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].ID == result[right].ID {
+			return result[left].Version < result[right].Version
+		}
+		return result[left].ID < result[right].ID
+	})
+	if _, err := Resolve(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func NewRuntimeResolver(loaded []Pack) (RuntimeResolver, error) {

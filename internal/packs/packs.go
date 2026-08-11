@@ -75,7 +75,7 @@ func Install(source, directory string) (string, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", err
 	}
-	target := filepath.Join(directory, pack.ID+"-"+pack.Version+".json")
+	target := filepath.Join(directory, installedPackName(pack))
 	if _, err := os.Lstat(target); err == nil {
 		return "", fmt.Errorf("pack %q is already installed", pack.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -112,6 +112,8 @@ func Uninstall(directory, id, version string) (string, error) {
 	}
 	return target, nil
 }
+
+func installedPackName(pack Pack) string { return pack.ID + "-" + pack.Version + ".json" }
 
 func (p Pack) Validate() error {
 	if err := ValidateSchemaCompatibility(p.SchemaVersion); err != nil {

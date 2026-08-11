@@ -84,6 +84,8 @@ Release builds report injected version and commit metadata through `close-enough
 
 Run the local CI target with `make ci`.
 
+Run `make verify-local` for the Linux CI checks, latency gate, and Windows cross-compilation checks. It does not execute Windows runtime tests.
+
 Install a version-pinned macOS or Linux release with `cosign` already on `PATH`:
 
 ```sh

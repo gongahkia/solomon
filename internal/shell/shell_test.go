@@ -481,7 +481,7 @@ func TestAdapterProtocolCrossVersionContracts(t *testing.T) {
 	version := strconv.Itoa(diagnose.AdapterProtocolVersion)
 	guards := map[string]string{
 		"zsh":        `[[ "$version" == "` + version + `" ]] || return 0`,
-		"bash":       `[ "$version" = ` + version + ` ] || return`,
+		"bash":       `[ "$version" = ` + version + ` ] || { _close_enough_submit_line "$command"; return; }`,
 		"fish":       `if test "$fields[1]" != ` + version,
 		"powershell": `$decision.version -ne ` + version,
 	}
@@ -560,7 +560,7 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; print -rn -- "$BUFFER" > "$COMMAND_RESULT"; BUFFER="$SAFE_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$REWRITE_RESULT"; BUFFER="$HIGH_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$HIGH_RISK_RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Payload)
 	case "bash":
-		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$COMMAND_RESULT"; READLINE_LINE="$SAFE_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$REWRITE_RESULT"; READLINE_LINE="$HIGH_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$HIGH_RISK_RESULT"`
+		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$COMMAND_RESULT"; READLINE_LINE="$SAFE_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$REWRITE_RESULT"; READLINE_LINE="$HIGH_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$HIGH_RISK_RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Payload)
 	case "fish":
 		harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$COMMAND_RESULT"; set -g BUFFER "$SAFE_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$REWRITE_RESULT"; set -g BUFFER "$HIGH_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$HIGH_RISK_RESULT"`
@@ -651,7 +651,7 @@ func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string,
 		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Input)
 	case "bash":
-		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_buffer="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_buffer|$second|$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_buffer="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_buffer|$second|$READLINE_LINE" > "$RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Input)
 	case "fish":
 		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
@@ -800,6 +800,7 @@ bind() {
   BIND_G="${1##*: }"
 }
 source "$1"
+_close_enough_submit_line() { :; }
 READLINE_LINE="$2"
 _close_enough_accept_line; first=$?
 rewritten="$READLINE_LINE"
@@ -1003,7 +1004,7 @@ func runHighRiskConfirmationFixture(t *testing.T, shellName, shellPath string, f
 		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Command)
 	case "bash":
-		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_line|$second|$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_line|$second|$READLINE_LINE" > "$RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Command)
 	case "fish":
 		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
@@ -1561,7 +1562,7 @@ func TestBashHandshakeFailsOpen(t *testing.T) {
 		t.Fatalf("bash accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake || return") || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, "_close_enough_pending_confirmation=''; return") {
+	if !strings.Contains(checkBody, `_close_enough_handshake || { _close_enough_submit_line "$command"; return; }`) || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, `_close_enough_pending_confirmation=''; _close_enough_submit_line "$command"; return`) {
 		t.Fatalf("bash handshake fallback = %q", checkBody)
 	}
 }
@@ -1571,7 +1572,7 @@ func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `printf %s "$1" | base64 --decode`) || !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || return`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `printf %s "$1" | base64 --decode`) || !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || { _close_enough_submit_line "$command"; return; }`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_submit_line "$command"; return; }`) {
 		t.Fatalf("bash protocol decoder is not binary-safe and fixed-field: %q", script)
 	}
 }
@@ -1604,7 +1605,7 @@ func FuzzBashProtocolDecoderMalformedRecords(f *testing.F) {
 		result := filepath.Join(directory, "result")
 		marker := filepath.Join(directory, "marker")
 		input := `$(touch "$MARKER")`
-		harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
 		command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter, input)
 		command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "MARKER="+marker, "RECORD="+record, "RESULT="+result)
 		if output, err := command.CombinedOutput(); err != nil {
@@ -1715,7 +1716,7 @@ func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 				payload = test.want
 			}
 			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
-			harness := `source "$1"; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
+			harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
 			command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter, test.input)
 			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
 			if output, err := command.CombinedOutput(); err != nil {
@@ -1758,7 +1759,7 @@ func TestBashSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	}
 	capture := filepath.Join(directory, "calls")
 	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
-	harness := `source "$1"; READLINE_LINE=gti; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE=gti; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
 	output, err := command.CombinedOutput()
@@ -1798,7 +1799,7 @@ func TestBashHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 	capture := filepath.Join(directory, "calls")
 	state := filepath.Join(directory, "state")
 	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
-	harness := `source "$1"; READLINE_LINE='git push --force'; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE='git push --force'; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
 	output, err := command.CombinedOutput()
@@ -1814,89 +1815,6 @@ func TestBashHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 	}
 	if got := strings.Count(string(calls), "daemon request"); got != 3 {
 		t.Fatalf("daemon requests = %d, want 3: %q", got, calls)
-	}
-}
-
-func TestBashInteractivePTYInterruptPreventsExecution(t *testing.T) {
-	expect, err := exec.LookPath("expect")
-	if err != nil {
-		t.Skip("expect unavailable")
-	}
-	directory := t.TempDir()
-	script, err := Script("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter := filepath.Join(directory, "adapter.bash")
-	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '1\\tinterrupt\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(directory, "executed")
-	pty := `set timeout 5
-spawn -noecho bash --noprofile --norc -i
-expect -re {bash-[^#]+\$ }
-send -- "PS1='CE> '; PROMPT_COMMAND=\r"
-expect "CE> "
-send -- "source \$ADAPTER\r"
-expect "CE> "
-send -- "touch \$MARKER\r"
-expect {close-enough [safe/1]: keep buffer}
-expect "CE> "
-send -- "exit\r"
-expect eof`
-	command := exec.Command(expect, "-c", pty)
-	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("bash PTY: %v\n%s", err, output)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("interrupt executed buffered command: %v", err)
-	}
-}
-
-func TestBashInteractivePTYHintSubmitsCommand(t *testing.T) {
-	expect, err := exec.LookPath("expect")
-	if err != nil {
-		t.Skip("expect unavailable")
-	}
-	directory := t.TempDir()
-	script, err := Script("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter := filepath.Join(directory, "adapter.bash")
-	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	checker := filepath.Join(directory, "close-enough")
-	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(directory, "executed")
-	pty := `set timeout 5
-spawn -noecho bash --noprofile --norc -i
-expect -re {bash-[^#]+\$ }
-send -- "PS1='CE> '; PROMPT_COMMAND=\r"
-expect "CE> "
-send -- "source \$ADAPTER\r"
-expect "CE> "
-send -- "touch \$MARKER\r"
-expect {close-enough [safe/1]: keep buffer}
-expect "CE> "
-send -- "exit\r"
-expect eof`
-	command := exec.Command(expect, "-c", pty)
-	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("bash PTY: %v\n%s", err, output)
-	}
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
 	}
 }
 

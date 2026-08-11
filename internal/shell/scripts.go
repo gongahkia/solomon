@@ -298,6 +298,11 @@ _close_enough_undo_rewrite() {
   _close_enough_clear_pending_rewrite
   printf '\nclose-enough restored: %s\n' "$suggestion" >&2
 }
+_close_enough_submit_line() {
+  local command=$1
+  READLINE_LINE=''
+  eval -- "$command"
+}
 _close_enough_accept_line() {
   local command record version action risk confidence cause consequence suggestion suggestion_key undo_token separator
   local -a fields
@@ -306,6 +311,7 @@ _close_enough_accept_line() {
     if [ "$command" = "$_close_enough_pending_rewrite" ]; then
       _close_enough_clear_pending_rewrite
       _close_enough_automatic_rewrite="$command"
+      _close_enough_submit_line "$command"
       return
     fi
     _close_enough_clear_pending_rewrite
@@ -313,20 +319,21 @@ _close_enough_accept_line() {
   if [ -n "$_close_enough_pending_confirmation" ] && [ "$command" != "$_close_enough_pending_confirmation" ]; then
     _close_enough_pending_confirmation=''
   fi
-  _close_enough_handshake || return
-  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; _close_enough_pending_confirmation=''; return; }
+  _close_enough_handshake || { _close_enough_submit_line "$command"; return; }
+  record="$(command close-enough daemon request --operation pre-send --shell bash --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _close_enough_daemon_ready=0; _close_enough_pending_confirmation=''; _close_enough_submit_line "$command"; return; }
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
-  [ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || return
+  [ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || { _close_enough_submit_line "$command"; return; }
   version="${fields[0]}" action="${fields[1]}" risk="${fields[2]}" confidence="${fields[3]}" cause="${fields[4]}" consequence="${fields[5]}" suggestion="${fields[6]}"
-  [ "$version" = 1 ] || return
-  [ "$action" = none ] && return
+  [ "$version" = 1 ] || { _close_enough_submit_line "$command"; return; }
+  [ "$action" = none ] && { _close_enough_submit_line "$command"; return; }
   suggestion_key="$suggestion"
-  suggestion="$(_close_enough_decode "$suggestion")" || return
+  suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_submit_line "$command"; return; }
   cause="$(_close_enough_decode "$cause")" || cause=''
   if [ "$action" = submit ]; then
     _close_enough_pending_confirmation=''
+    _close_enough_submit_line "$command"
     return
   fi
   if [ "$action" = rewrite ]; then
@@ -354,6 +361,7 @@ _close_enough_accept_line() {
     if _close_enough_allow_suggestion "$suggestion_key"; then
       printf '\nclose-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause" >&2
     fi
+    _close_enough_submit_line "$command"
     return
   fi
   if [ "$action" = interrupt ]; then
@@ -361,6 +369,7 @@ _close_enough_accept_line() {
     _close_enough_pending_confirmation="$command"
     return 1
   fi
+  _close_enough_submit_line "$command"
 }
 _close_enough_enter_binding=''
 _close_enough_bind_enter() {

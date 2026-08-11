@@ -4,7 +4,7 @@ VERSION ?= dev
 COMMIT ?= unknown
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test vet ci latency-gate benchmark-daemon benchmark-pre-execution benchmark-path-cache benchmark-pack-loading
+.PHONY: build test vet ci latency-gate verify-local benchmark-daemon benchmark-pre-execution benchmark-path-cache benchmark-pack-loading
 
 build:
 	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/close-enough
@@ -19,6 +19,9 @@ ci: vet test build
 
 latency-gate:
 	go run ./cmd/latency-gate
+
+verify-local:
+	sh scripts/verify-local.sh
 
 benchmark-daemon:
 	go test -run '^$$' -bench '^BenchmarkWarmCuratedPreSend$$' -benchmem ./internal/daemon

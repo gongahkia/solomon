@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"time"
 )
 
@@ -21,8 +20,9 @@ func (c Client) Request(ctx context.Context, request Request) (Response, error) 
 	if timeout <= 0 {
 		timeout = 50 * time.Millisecond
 	}
-	dialer := net.Dialer{Timeout: timeout}
-	connection, err := dialer.DialContext(ctx, c.Endpoint.Network, c.Endpoint.Address)
+	dialContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	connection, err := dialEndpoint(dialContext, c.Endpoint)
 	if err != nil {
 		return Response{}, errors.Join(ErrUnavailable, err)
 	}

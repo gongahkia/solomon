@@ -39,7 +39,7 @@ func (s *Server) Listen() error {
 			return err
 		}
 	}
-	listener, err := net.Listen(s.endpoint.Network, s.endpoint.Address)
+	listener, err := listenEndpoint(s.endpoint)
 	if err != nil {
 		if errors.Is(err, syscall.EADDRINUSE) {
 			return errors.Join(ErrAlreadyRunning, err)

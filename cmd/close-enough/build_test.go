@@ -230,6 +230,24 @@ func TestReleaseWorkflowPublishesGitHubAssets(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesChecksumManifest(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"for artifact in close-enough_*.tar.gz close-enough_*.zip",
+		"sha256sum \"$artifact\"",
+		") > dist/checksums.txt",
+		"test \"$(wc -l < dist/checksums.txt | tr -d ' ')\" -eq 5",
+		"dist/checksums.txt",
+	} {
+		if !strings.Contains(string(workflow), marker) {
+			t.Fatalf("release workflow lacks checksum manifest marker %q", marker)
+		}
+	}
+}
+
 func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {

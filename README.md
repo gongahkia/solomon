@@ -84,4 +84,15 @@ Release builds report injected version and commit metadata through `close-enough
 
 Run the local CI target with `make ci`.
 
+Install a version-pinned macOS or Linux release with `cosign` already on `PATH`:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/gongahkia/close-enough/main/scripts/install.sh
+CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh
+```
+
+The installer downloads only the matching GitHub release archive, `checksums.txt`, and its Sigstore bundle; it verifies both the SHA-256 digest and the release-workflow identity before extracting. It adds one managed shell-init block for bash, zsh, or fish. Run `CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh --uninstall` to remove the binary and that block; it does not install a background service.
+
+On Windows PowerShell, download `scripts/install.ps1`, then run `./install.ps1 -Version vX.Y.Z`. The PowerShell installer has the same verification, initialization, and `-Uninstall` behavior.
+
 Exit codes are stable: `0` success, `1` unexpected internal failure, `2` invalid CLI usage, `3` configuration failure, `4` invalid command or pack input, and `5` local operation failure.

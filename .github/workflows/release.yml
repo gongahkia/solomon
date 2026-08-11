@@ -132,9 +132,19 @@ jobs:
           pattern: release-${{ github.ref_name }}-*
           merge-multiple: true
           path: dist
+      - run: |
+          (
+            cd dist
+            for artifact in close-enough_*.tar.gz close-enough_*.zip; do
+              test -f "$artifact" || continue
+              sha256sum "$artifact"
+            done | LC_ALL=C sort
+          ) > dist/checksums.txt
+          test "$(wc -l < dist/checksums.txt | tr -d ' ')" -eq 5
+          test -s dist/checksums.txt
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv dist/checksums.txt
   bundled-packs:
     runs-on: ubuntu-latest
     steps:

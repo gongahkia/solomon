@@ -178,6 +178,13 @@ func writeFakeCosign(t *testing.T, directory string) {
 set -eu
 [ "$1" = verify-blob ]
 [ -f "$2" ]
+[ "$3" = --bundle ]
+[ -f "$4" ]
+[ "$5" = --certificate-identity ]
+case "$6" in
+  https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/v*) ;;
+  *) exit 1 ;;
+esac
 [ "${CLOSE_ENOUGH_TEST_COSIGN_FAIL:-}" != 1 ] || exit 1
 printf '%s\n' "$@" > "$CLOSE_ENOUGH_TEST_COSIGN_LOG"
 `

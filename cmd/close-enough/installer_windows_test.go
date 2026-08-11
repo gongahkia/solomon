@@ -26,7 +26,7 @@ func TestWindowsInstallerVerifiesArtifactsAndManagesShellInitialization(t *testi
 	server := httptest.NewServer(http.FileServer(http.Dir(releaseDirectory)))
 	defer server.Close()
 	fakeDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fakeDirectory, "cosign.cmd"), []byte("@echo off\r\nif not \"%1\"==\"verify-blob\" exit /b 1\r\nif not exist \"%2\" exit /b 1\r\nexit /b 0\r\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(fakeDirectory, "cosign.cmd"), []byte("@echo off\r\nif not \"%1\"==\"verify-blob\" exit /b 1\r\nif not exist \"%2\" exit /b 1\r\nif not \"%3\"==\"--bundle\" exit /b 1\r\nif not exist \"%4\" exit /b 1\r\nif not \"%5\"==\"--certificate-identity\" exit /b 1\r\nexit /b 0\r\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	installDirectory := filepath.Join(t.TempDir(), "bin")

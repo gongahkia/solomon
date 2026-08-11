@@ -1858,6 +1858,48 @@ expect eof`
 	}
 }
 
+func TestBashInteractivePTYHintSubmitsCommand(t *testing.T) {
+	expect, err := exec.LookPath("expect")
+	if err != nil {
+		t.Skip("expect unavailable")
+	}
+	directory := t.TempDir()
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "executed")
+	pty := `set timeout 5
+spawn -noecho bash --noprofile --norc -i
+expect -re {bash-[^#]+\$ }
+send -- "PS1='CE> '; PROMPT_COMMAND=\r"
+expect "CE> "
+send -- "source \$ADAPTER\r"
+expect "CE> "
+send -- "touch \$MARKER\r"
+expect {close-enough [safe/1]: keep buffer}
+expect "CE> "
+send -- "exit\r"
+expect eof`
+	command := exec.Command(expect, "-c", pty)
+	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash PTY: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hint did not submit buffered command: %v\n%s", err, output)
+	}
+}
+
 func TestFishInitializationIsGuarded(t *testing.T) {
 	script, err := Script("fish")
 	if err != nil {

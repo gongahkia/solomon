@@ -784,7 +784,9 @@ func TestRequestDaemonCoordinatesConcurrentStarts(t *testing.T) {
 	failures := make(chan error, 8)
 	var group sync.WaitGroup
 	for range 8 {
-		group.Go(func() {
+		group.Add(1)
+		go func() {
+			defer group.Done()
 			<-start
 			response, err := requestDaemon(context.Background(), endpoint, daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation}, true)
 			if err != nil {
@@ -794,7 +796,7 @@ func TestRequestDaemonCoordinatesConcurrentStarts(t *testing.T) {
 			if response.Action != string(daemon.StatusOperation) {
 				failures <- errors.New("unexpected daemon response")
 			}
-		})
+		}()
 	}
 	close(start)
 	group.Wait()

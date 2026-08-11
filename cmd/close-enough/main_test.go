@@ -563,13 +563,25 @@ func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 	if _, err := packs.Install(source, directory); err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := runtimePackResolver(func() (string, error) { return "/unused", nil }, environment)
+	resolver, err := runtimePackResolver(config.Default(), func() (string, error) { return "/unused", nil }, environment)
 	if err != nil {
 		t.Fatal(err)
 	}
 	match, ok := resolver.MatchWords([]string{"local-tool", "teh"})
 	if !ok || match.PackID != "local-tool" || match.RuleID != "local-tool-typo" || match.Suggestion != "local-tool the" {
 		t.Fatalf("installed match = %#v, %t", match, ok)
+	}
+}
+
+func TestRuntimePackResolverRespectsCuratedPackEnablement(t *testing.T) {
+	cfg := config.Default()
+	cfg.CuratedPacksEnabled = false
+	resolver, err := runtimePackResolver(cfg, func() (string, error) { return "/unused", nil }, func(string) string { return t.TempDir() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolver.MatchWords([]string{"git", "sttaus"}); ok {
+		t.Fatal("disabled curated packs produced a match")
 	}
 }
 

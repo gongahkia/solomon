@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion         = 3
+	CurrentSchemaVersion         = 4
 	maxRuleExceptionCommandBytes = 8 << 10
 	defaultLearningRetentionDays = 30
 	maxLearningRetentionDays     = 90
@@ -37,6 +37,7 @@ type Config struct {
 	Display                  Display         `json:"display"`
 	AutoApplySafe            bool            `json:"auto_apply_safe"`
 	LocalHistoryEnabled      bool            `json:"local_history_enabled"`
+	CuratedPacksEnabled      bool            `json:"curated_packs_enabled"`
 	CuratedAutoCorrect       bool            `json:"curated_auto_correct"`
 	RiskInterrupt            bool            `json:"risk_interrupt"`
 	LocalLearningEnabled     bool            `json:"local_learning_enabled"`
@@ -64,7 +65,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", UndoEnabled: true, UndoTTLSeconds: defaultUndoTTLSeconds, Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedPacksEnabled: true, CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", UndoEnabled: true, UndoTTLSeconds: defaultUndoTTLSeconds, Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
 }
 
 func (c Config) HasRuleException(command string) bool {
@@ -227,6 +228,7 @@ var sessionOverrideKeys = map[string]string{
 	"CLOSE_ENOUGH_MODE":                   "mode",
 	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":        "auto_apply_safe",
 	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED":  "local_history_enabled",
+	"CLOSE_ENOUGH_CURATED_PACKS_ENABLED":  "curated_packs_enabled",
 	"CLOSE_ENOUGH_CURATED_AUTO_CORRECT":   "curated_auto_correct",
 	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
 	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
@@ -421,6 +423,10 @@ func migrate(cfg Config, version int) (Config, error) {
 		case 2:
 			cfg.SchemaVersion = 3
 			version = 3
+		case 3:
+			cfg.CuratedPacksEnabled = true
+			cfg.SchemaVersion = 4
+			version = 4
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}
@@ -443,7 +449,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "undo_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "local_history_enabled", "curated_packs_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "undo_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -453,6 +459,8 @@ func (c *Config) Set(key, value string) error {
 			c.AutoApplySafe = parsed
 		case "local_history_enabled":
 			c.LocalHistoryEnabled = parsed
+		case "curated_packs_enabled":
+			c.CuratedPacksEnabled = parsed
 		case "curated_auto_correct":
 			c.CuratedAutoCorrect = parsed
 		case "risk_interrupt":

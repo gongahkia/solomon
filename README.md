@@ -28,7 +28,9 @@ Adapters also suppress repeated hint suggestions within a loaded shell session.
 
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
-Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_CURATED_AUTO_CORRECT`, `CLOSE_ENOUGH_RISK_INTERRUPT`, `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`, `CLOSE_ENOUGH_UNDO_ENABLED`, and `CLOSE_ENOUGH_UNDO_TTL_SECONDS`; booleans must be `true` or `false`.
+Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_CURATED_PACKS_ENABLED`, `CLOSE_ENOUGH_CURATED_AUTO_CORRECT`, `CLOSE_ENOUGH_RISK_INTERRUPT`, `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`, `CLOSE_ENOUGH_UNDO_ENABLED`, and `CLOSE_ENOUGH_UNDO_TTL_SECONDS`; booleans must be `true` or `false`.
+
+Curated packs are enabled by default; set `curated_packs_enabled` to `false` with `close-enough config set` to disable bundled and installed curated repairs for that configuration or session.
 
 Undo is enabled for 30 seconds by default; set `undo_enabled` or `undo_ttl_seconds` with `close-enough config set`.
 

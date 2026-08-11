@@ -26,14 +26,14 @@ func TestDecodeMigrationPreservesLegacyCorrectionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if !cfg.CuratedPacksEnabled || !cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated policy: %#v", cfg)
 	}
 	cfg, err = decode([]byte(`{"schema_version":1,"mode":"interrupt"}`), Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated interrupt policy: %#v", cfg)
 	}
 }

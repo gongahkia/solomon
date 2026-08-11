@@ -287,7 +287,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
 		}
-		resolver, err := runtimePackResolver(os.UserHomeDir, os.Getenv)
+		resolver, err := runtimePackResolver(cfg, os.UserHomeDir, os.Getenv)
 		if err != nil {
 			return clierr.Wrap(clierr.Operation, err)
 		}
@@ -642,14 +642,17 @@ func checkCommand(args []string, stdout io.Writer) error {
 }
 
 func bundledDiagnosticEngine(cfg config.Config) (diagnose.Engine, error) {
-	resolver, err := runtimePackResolver(os.UserHomeDir, os.Getenv)
+	resolver, err := runtimePackResolver(cfg, os.UserHomeDir, os.Getenv)
 	if err != nil {
 		return diagnose.Engine{}, err
 	}
 	return diagnose.New(diagnose.Options{Config: cfg, Path: os.Getenv("PATH"), CWD: mustGetwd(), SemanticResolver: resolver}), nil
 }
 
-func runtimePackResolver(home func() (string, error), environment func(string) string) (packs.RuntimeResolver, error) {
+func runtimePackResolver(cfg config.Config, home func() (string, error), environment func(string) string) (packs.RuntimeResolver, error) {
+	if !cfg.CuratedPacksEnabled {
+		return packs.RuntimeResolver{}, nil
+	}
 	bundled, err := packs.LoadBundled()
 	if err != nil {
 		return packs.RuntimeResolver{}, err

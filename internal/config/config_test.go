@@ -132,7 +132,7 @@ func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
 
 func TestDefaultV1PolicySettings(t *testing.T) {
 	cfg := Default()
-	if !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if !cfg.CuratedPacksEnabled || !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
@@ -140,6 +140,7 @@ func TestDefaultV1PolicySettings(t *testing.T) {
 func TestSetV1PolicySettings(t *testing.T) {
 	cfg := Default()
 	for key, value := range map[string]string{
+		"curated_packs_enabled":       "false",
 		"curated_auto_correct":        "false",
 		"risk_interrupt":              "false",
 		"local_learning_enabled":      "true",
@@ -152,7 +153,7 @@ func TestSetV1PolicySettings(t *testing.T) {
 			t.Fatalf("Set(%q, %q) = %v", key, value, err)
 		}
 	}
-	if cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
+	if cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
 		t.Fatalf("unexpected configured policy: %#v", cfg)
 	}
 	if err := cfg.Set("learning_retention_days", "91"); err == nil {
@@ -163,6 +164,13 @@ func TestSetV1PolicySettings(t *testing.T) {
 	}
 	if err := cfg.Set("undo_ttl_seconds", "301"); err == nil {
 		t.Fatal("accepted excessive undo ttl")
+	}
+}
+
+func TestCuratedPackEnablementSessionOverride(t *testing.T) {
+	cfg, err := ApplySessionOverrides(Default(), map[string]string{"CLOSE_ENOUGH_CURATED_PACKS_ENABLED": "false"})
+	if err != nil || cfg.CuratedPacksEnabled {
+		t.Fatalf("curated pack session override = %#v, %v", cfg, err)
 	}
 }
 

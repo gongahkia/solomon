@@ -67,14 +67,14 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 	case PostFailureOperation:
 		s.clearPendingUndo(request.Session)
 		s.rememberFailure(request)
-		response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "post")
+		response, ok, err := s.curatedDecision(ctx, request.Shell, request.Command, request.Session, "post")
 		if err != nil {
 			return Response{}, err
 		}
 		if ok {
 			return s.attachKubernetesCloudFailureEvidence(request, s.attachContainerFailureEvidence(request, s.attachGoFailureEvidence(request, s.attachRustFailureEvidence(request, s.attachPythonFailureEvidence(request, s.attachJavaScriptFailureEvidence(request, s.attachPackageManagerFailureEvidence(request, s.attachGitFailureEvidence(request, response)))))))), nil
 		}
-		response, err = s.decision(ctx, request.Command, "post")
+		response, err = s.decision(ctx, request.Shell, request.Command, "post")
 		if err != nil {
 			return Response{}, err
 		}
@@ -103,7 +103,10 @@ func (s *Service) Handle(ctx context.Context, request Request) (Response, error)
 }
 
 func (s *Service) preSend(ctx context.Context, request Request) (Response, error) {
-	response, ok, err := s.curatedDecision(ctx, request.Command, request.Session, "pre")
+	if !diagnose.ShellCommandSupported(request.Shell, request.Command) {
+		return Response{Version: ProtocolVersion, Action: "none"}, nil
+	}
+	response, ok, err := s.curatedDecision(ctx, request.Shell, request.Command, request.Session, "pre")
 	if err != nil {
 		return Response{}, err
 	}
@@ -113,7 +116,7 @@ func (s *Service) preSend(ctx context.Context, request Request) (Response, error
 	if response, ok := s.learnedDecision(request.Command, "pre"); ok {
 		return response, nil
 	}
-	return s.decision(ctx, request.Command, "pre")
+	return s.decision(ctx, request.Shell, request.Command, "pre")
 }
 
 func (s *Service) issueUndoToken(request Request, response Response) Response {
@@ -399,7 +402,10 @@ func normalizedLearningCommand(command string) (string, bool) {
 	return value, !containsSecret
 }
 
-func (s *Service) curatedDecision(ctx context.Context, command, session, stage string) (Response, bool, error) {
+func (s *Service) curatedDecision(ctx context.Context, shellName, command, session, stage string) (Response, bool, error) {
+	if !diagnose.ShellCommandSupported(shellName, command) {
+		return Response{}, false, nil
+	}
 	match, ok, err := s.Packs.MatchLineContext(ctx, command)
 	if err != nil {
 		return Response{}, false, err
@@ -437,8 +443,8 @@ func (s *Service) curatedDecision(ctx context.Context, command, session, stage s
 	return response, true, nil
 }
 
-func (s *Service) decision(ctx context.Context, command, stage string) (Response, error) {
-	decision, err := s.Engine.CheckContext(ctx, command, stage)
+func (s *Service) decision(ctx context.Context, shellName, command, stage string) (Response, error) {
+	decision, err := s.Engine.CheckShellContext(ctx, shellName, command, stage)
 	if err != nil {
 		return Response{}, err
 	}

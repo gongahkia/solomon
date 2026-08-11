@@ -42,6 +42,19 @@ func TestServiceMapsDecisionToProtocolResponse(t *testing.T) {
 	}
 }
 
+func TestServiceSkipsUnsupportedShellInputBeforeLearnedRules(t *testing.T) {
+	cfg := config.Default()
+	cfg.LocalLearningEnabled = true
+	service := Service{Config: cfg, LearnedRules: []localstate.LearnedRule{{ID: 1, Failure: "gti $HOME", Correction: "git $HOME", Action: "rewrite", Enabled: true}}}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Shell: "bash", Command: "gti $HOME"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "none" || response.Suggestion != "" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
 func TestServiceInterruptsCuratedHighRiskRule(t *testing.T) {
 	resolver, err := packs.NewBundledRuntimeResolver()
 	if err != nil {

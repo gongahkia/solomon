@@ -296,6 +296,14 @@ func (e Engine) Check(line, stage string) (Decision, error) {
 }
 
 func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision, error) {
+	return e.CheckShellContext(ctx, "", line, stage)
+}
+
+func (e Engine) CheckShell(shellName, line, stage string) (Decision, error) {
+	return e.CheckShellContext(context.Background(), shellName, line, stage)
+}
+
+func (e Engine) CheckShellContext(ctx context.Context, shellName, line, stage string) (Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
 	}
@@ -307,10 +315,10 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 		return noDecision(), nil
 	}
 	started := e.now()
-	words, err := tokenize(line)
+	words, err := tokenizeForShell(shellName, line)
 	if err != nil {
 		decision := noDecision()
-		decision.Incomplete = true
+		decision.Incomplete = errors.Is(err, errIncompleteShellInput)
 		return decision, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -325,17 +333,17 @@ func (e Engine) CheckContext(ctx context.Context, line, stage string) (Decision,
 	if decision, err := e.commandDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, line, stage, started, limits)
+		return e.finish(ctx, decision, shellName, line, stage, started, limits)
 	}
-	if decision, err := e.semanticDecision(ctx, words); err != nil {
+	if decision, err := e.semanticDecision(ctx, shellName, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, line, stage, started, limits)
+		return e.finish(ctx, decision, shellName, line, stage, started, limits)
 	}
 	if decision, err := e.pathDecision(ctx, words); err != nil {
 		return noDecision(), err
 	} else if decision.Suggestion != "" {
-		return e.finish(ctx, decision, line, stage, started, limits)
+		return e.finish(ctx, decision, shellName, line, stage, started, limits)
 	}
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
@@ -367,7 +375,7 @@ func (e Engine) now() time.Time {
 	return time.Now()
 }
 
-func (e Engine) finish(ctx context.Context, decision Decision, line, stage string, started time.Time, limits Limits) (Decision, error) {
+func (e Engine) finish(ctx context.Context, decision Decision, shellName, line, stage string, started time.Time, limits Limits) (Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
 	}
@@ -378,6 +386,9 @@ func (e Engine) finish(ctx context.Context, decision Decision, line, stage strin
 		return noDecision(), ErrOutputLimit
 	}
 	decision = e.applyMode(decision, stage)
+	if decision.Action == "rewrite" && !rewriteCompatible(shellName, line) {
+		decision.Action = "hint"
+	}
 	if decision.Action == "rewrite" && decision.original != "" && decision.replacement != "" {
 		buffer, ok := replaceTokenOccurrence(line, decision.original, decision.replacement, decision.occurrence)
 		if !ok {
@@ -491,7 +502,7 @@ func (e Engine) commandDecision(ctx context.Context, words []string) (Decision, 
 	return Decision{}, nil
 }
 
-func (e Engine) semanticDecision(ctx context.Context, words []string) (Decision, error) {
+func (e Engine) semanticDecision(ctx context.Context, shellName string, words []string) (Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return Decision{}, err
 	}
@@ -508,7 +519,7 @@ func (e Engine) semanticDecision(ctx context.Context, words []string) (Decision,
 	if !ok || match.PackID == "" || match.RuleID == "" || match.Suggestion == "" || !validRisk(match.Risk) {
 		return Decision{}, nil
 	}
-	suggestedWords, err := tokenize(match.Suggestion)
+	suggestedWords, err := tokenizeForShell(shellName, match.Suggestion)
 	if err != nil || len(suggestedWords) == 0 || hasUnsupportedShellSyntax(suggestedWords) {
 		return Decision{}, nil
 	}
@@ -617,10 +628,144 @@ func tokenize(line string) ([]string, error) {
 		wordStarted = true
 	}
 	if escaped || quote != 0 {
-		return nil, fmt.Errorf("incomplete shell input")
+		return nil, errIncompleteShellInput
 	}
 	flush()
 	return result, nil
+}
+
+var (
+	errIncompleteShellInput   = errors.New("incomplete shell input")
+	errUnsupportedShellSyntax = errors.New("unsupported shell syntax")
+)
+
+type shellLexer int
+
+const (
+	shellPOSIX shellLexer = iota
+	shellFish
+	shellPowerShell
+)
+
+// ShellCommandSupported reports whether line is simple enough to analyze without
+// changing its shell semantics. Unknown shells are intentionally not analyzed.
+func ShellCommandSupported(shellName, line string) bool {
+	words, err := tokenizeForShell(shellName, line)
+	return err == nil && !hasUnsupportedShellSyntax(words)
+}
+
+func tokenizeForShell(shellName, line string) ([]string, error) {
+	switch strings.ToLower(strings.TrimSpace(shellName)) {
+	case "":
+		return tokenize(line)
+	case "bash", "zsh":
+		return tokenizeConservative(line, shellPOSIX, shellName)
+	case "fish":
+		return tokenizeConservative(line, shellFish, shellName)
+	case "powershell", "pwsh":
+		return tokenizeConservative(line, shellPowerShell, shellName)
+	default:
+		return nil, errUnsupportedShellSyntax
+	}
+}
+
+func tokenizeConservative(line string, lexer shellLexer, shellName string) ([]string, error) {
+	var result []string
+	var current strings.Builder
+	var quote rune
+	wordStarted := false
+	runes := []rune(line)
+	flush := func() {
+		if wordStarted {
+			result = append(result, current.String())
+			current.Reset()
+			wordStarted = false
+		}
+	}
+	for index := 0; index < len(runes); index++ {
+		character := runes[index]
+		if quote != 0 {
+			if quote == '\'' && lexer == shellPowerShell && character == '\'' && index+1 < len(runes) && runes[index+1] == '\'' {
+				current.WriteRune(character)
+				wordStarted = true
+				index++
+				continue
+			}
+			if character == quote {
+				quote = 0
+				continue
+			}
+			if quote == '"' && character == '\\' && lexer != shellPowerShell {
+				if index+1 == len(runes) {
+					return nil, errIncompleteShellInput
+				}
+				next := runes[index+1]
+				if lexer == shellPOSIX && !strings.ContainsRune("$`\\\"\n", next) {
+					current.WriteRune(character)
+				}
+				if next != '\n' {
+					current.WriteRune(next)
+				}
+				wordStarted = true
+				index++
+				continue
+			}
+			if character == '`' || quote == '"' && character == '$' {
+				return nil, errUnsupportedShellSyntax
+			}
+			current.WriteRune(character)
+			wordStarted = true
+			continue
+		}
+		if character == ' ' || character == '\t' {
+			flush()
+			continue
+		}
+		if character == '\'' || character == '"' {
+			quote = character
+			wordStarted = true
+			continue
+		}
+		if character == '\\' && lexer != shellPowerShell {
+			if index+1 == len(runes) {
+				return nil, errIncompleteShellInput
+			}
+			next := runes[index+1]
+			if next != '\n' {
+				current.WriteRune(next)
+			}
+			wordStarted = true
+			index++
+			continue
+		}
+		if unsafeShellCharacter(character, lexer, shellName, !wordStarted) {
+			return nil, errUnsupportedShellSyntax
+		}
+		current.WriteRune(character)
+		wordStarted = true
+	}
+	if quote != 0 {
+		return nil, errIncompleteShellInput
+	}
+	flush()
+	if hasUnsupportedShellSyntax(result) {
+		return nil, errUnsupportedShellSyntax
+	}
+	return result, nil
+}
+
+func unsafeShellCharacter(character rune, lexer shellLexer, shellName string, startsWord bool) bool {
+	if strings.ContainsRune(";|&()<>$*?[]{}\n#`", character) {
+		return true
+	}
+	if lexer == shellPowerShell && (character == '@' || character == ',') {
+		return true
+	}
+	return (lexer == shellPOSIX && strings.EqualFold(shellName, "zsh") && character == '!') || (startsWord && character == '~')
+}
+
+func rewriteCompatible(shellName, line string) bool {
+	return shellName == "" || !strings.ContainsAny(line, "'\\\"\\\\")
 }
 
 func tokenOccurrence(words []string, position int) int {

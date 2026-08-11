@@ -915,6 +915,72 @@ func TestTokenizeSeparatesUnquotedCompoundOperators(t *testing.T) {
 	}
 }
 
+func TestShellLexersTokenizeSimpleCommands(t *testing.T) {
+	for _, test := range []struct {
+		shell string
+		line  string
+		want  []string
+	}{
+		{shell: "bash", line: `gti 'two words' path\ with\ spaces`, want: []string{"gti", "two words", "path with spaces"}},
+		{shell: "zsh", line: `gti "two words"`, want: []string{"gti", "two words"}},
+		{shell: "fish", line: `gti 'two words' "three words"`, want: []string{"gti", "two words", "three words"}},
+		{shell: "powershell", line: `gti 'it''s fine' C:\tools`, want: []string{"gti", "it's fine", `C:\tools`}},
+	} {
+		words, err := tokenizeForShell(test.shell, test.line)
+		if err != nil || !slices.Equal(words, test.want) {
+			t.Fatalf("tokenizeForShell(%q, %q) = %#v, %v; want %#v", test.shell, test.line, words, err, test.want)
+		}
+	}
+}
+
+func TestShellLexersRejectDynamicAndCompoundInput(t *testing.T) {
+	for _, test := range []struct {
+		shell string
+		line  string
+	}{
+		{shell: "bash", line: "gti status && echo done"},
+		{shell: "zsh", line: "gti $HOME"},
+		{shell: "fish", line: "gti status (pwd)"},
+		{shell: "powershell", line: "gti $(Get-Location)"},
+		{shell: "powershell", line: "gti status | Write-Host"},
+		{shell: "unknown", line: "gti status"},
+	} {
+		if ShellCommandSupported(test.shell, test.line) {
+			t.Fatalf("ShellCommandSupported(%q, %q) = true", test.shell, test.line)
+		}
+	}
+}
+
+func TestShellLexersFailClosedAndAvoidAmbiguousRewrites(t *testing.T) {
+	directory := t.TempDir()
+	writeExecutable(t, directory, "git")
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
+	engine := New(Options{Config: cfg, Path: directory, CWD: directory})
+	for _, test := range []struct {
+		shell string
+		line  string
+	}{
+		{shell: "bash", line: "gti $(pwd)"},
+		{shell: "fish", line: "gti; pwd"},
+		{shell: "powershell", line: "gti | Write-Host"},
+	} {
+		decision, err := engine.CheckShell(test.shell, test.line, "pre")
+		if err != nil || decision.Action != "none" || decision.Incomplete {
+			t.Fatalf("CheckShell(%q, %q) = %#v, %v", test.shell, test.line, decision, err)
+		}
+	}
+	decision, err := engine.CheckShell("powershell", `gti "two words" C:\tools`, "pre")
+	if err != nil || decision.Action != "hint" || decision.Suggestion != `git two words C:\tools` {
+		t.Fatalf("ambiguous PowerShell rewrite = %#v, %v", decision, err)
+	}
+	decision, err = engine.CheckShell("powershell", "gti 'unterminated", "pre")
+	if err != nil || decision.Action != "none" || !decision.Incomplete {
+		t.Fatalf("incomplete PowerShell input = %#v, %v", decision, err)
+	}
+}
+
 func TestTokenizeQuotedRoundTripProperty(t *testing.T) {
 	config := &quick.Config{MaxCount: 512, Rand: rand.New(rand.NewSource(1))}
 	if err := quick.Check(func(first, second string) bool {

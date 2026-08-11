@@ -928,6 +928,28 @@ func TestAdaptersExposePendingRewriteUndoBindings(t *testing.T) {
 	}
 }
 
+func TestAdaptersForwardBoundedPostFailureEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want string
+	}{
+		{"zsh", `--failure-output "exit status $exit_status"`},
+		{"bash", `--failure-output "exit status $status"`},
+		{"fish", `--failure-output "exit status $command_status"`},
+		{"powershell", `--failure-output $failureOutput`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			script, err := Script(test.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(script, test.want) || !strings.Contains(script, "--operation post-failure") {
+				t.Fatalf("%s adapter does not forward bounded failure evidence", test.name)
+			}
+		})
+	}
+}
+
 func TestHighRiskConfirmationCorpus(t *testing.T) {
 	data, err := os.ReadFile("testdata/high_risk_confirmation.json")
 	if err != nil {

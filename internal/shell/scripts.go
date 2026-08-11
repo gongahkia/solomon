@@ -193,7 +193,7 @@ function _close_enough_precmd {
   (( ++_CLOSE_ENOUGH_FAILURE_SEQUENCE ))
   token="failure-$$-${_CLOSE_ENOUGH_FAILURE_SEQUENCE}"
   _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN="$token"
-  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" 2>/dev/null)" || return
+  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" --failure-output "exit status $exit_status" 2>/dev/null)" || return
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" suggestion="${fields[7]}"
@@ -402,7 +402,7 @@ _close_enough_prompt() {
   _close_enough_failure_sequence=$((_close_enough_failure_sequence + 1))
   token="failure-$$-${_close_enough_failure_sequence}"
   _close_enough_pending_failure_token=$token
-  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" 2>/dev/null)" || return
+  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" --failure-output "exit status $status" 2>/dev/null)" || return
   separator=$'\034'
   record="${record//$'\t'/$separator}"
   IFS="$separator" read -r -a fields <<< "$record"
@@ -661,7 +661,7 @@ function _close_enough_post_failure --on-event fish_postexec
     set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE (math $_CLOSE_ENOUGH_FAILURE_SEQUENCE + 1)
     set token "failure-$fish_pid-$_CLOSE_ENOUGH_FAILURE_SEQUENCE"
     set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN "$token"
-    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command" 2>/dev/null)
+    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command" --failure-output "exit status $command_status" 2>/dev/null)
     if test $status -ne 0
       return
     end
@@ -841,7 +841,8 @@ function global:prompt {
     $global:CloseEnoughFailureSequence += 1
     $token = "failure-$PID-$($global:CloseEnoughFailureSequence)"
     $global:CloseEnoughPendingFailureToken = $token
-    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine 2>$null
+    $failureOutput = "exit status $LASTEXITCODE"
+    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine --failure-output $failureOutput 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($record)) {
       try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $decision = $null }
       if ($null -ne $decision -and $decision.version -eq 1 -and $decision.action -ne 'none' -and -not [string]::IsNullOrEmpty($decision.suggestion) -and (Allow-CloseEnoughSuggestion $decision.suggestion)) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }

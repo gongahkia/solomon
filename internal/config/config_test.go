@@ -130,9 +130,9 @@ func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
 	}
 }
 
-func TestDefaultV1PolicySettings(t *testing.T) {
+func TestDefaultPolicyIsHintOnly(t *testing.T) {
 	cfg := Default()
-	if !cfg.CuratedPacksEnabled || !cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }

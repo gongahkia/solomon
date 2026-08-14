@@ -47,7 +47,7 @@ func TestCLIEndToEnd(t *testing.T) {
 			t.Fatalf("safe event = %#v, %v", event, err)
 		}
 	})
-	t.Run("high risk remains a hint", func(t *testing.T) {
+	t.Run("unclassified suffix is not repaired", func(t *testing.T) {
 		const secret = "super-secret"
 		result := harness.run(t, harness.configHome, "check", "--command", "git sttaus --token="+secret)
 		if result.exitCode != clierr.ExitSuccess || result.stderr != "" || strings.Contains(result.stdout, secret) {
@@ -58,8 +58,8 @@ func TestCLIEndToEnd(t *testing.T) {
 			Suggestion string `json:"suggestion"`
 			Risk       string `json:"risk"`
 		}
-		if err := json.Unmarshal([]byte(result.stdout), &event); err != nil || event.Action != "hint" || event.Suggestion != "git status --token=[REDACTED]" || event.Risk != "high" {
-			t.Fatalf("high-risk event = %#v, %v", event, err)
+		if err := json.Unmarshal([]byte(result.stdout), &event); err != nil || event.Action != "none" || event.Suggestion != "" || event.Risk != "safe" {
+			t.Fatalf("unclassified-suffix event = %#v, %v", event, err)
 		}
 	})
 	t.Run("usage failure", func(t *testing.T) {

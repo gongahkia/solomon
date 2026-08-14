@@ -10,7 +10,7 @@ go build ./cmd/close-enough
 ./close-enough check --command 'gti status'
 ```
 
-`close-enough` never sends command data over the network by default and does not auto-apply risky transformations.
+`close-enough` never sends command data over the network by default. New and migrated configurations are hint-only; a bundled safe rewrite requires both `mode=rewrite` and `auto_apply_safe=true` as an explicit opt-in.
 
 Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
 
@@ -22,7 +22,7 @@ Plain diagnostics present confidence as high, medium, low, or unknown; set `disp
 
 Risk output includes a static rationale and never includes raw command arguments.
 
-Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited.
+Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited. Bash is intentionally unsupported: use the standalone CLI from Bash, or initialize Zsh, Fish, or PowerShell.
 
 Adapters also suppress repeated hint suggestions within a loaded shell session.
 
@@ -50,7 +50,7 @@ Pack and rule identifiers use lowercase kebab case; pack versions use SemVer 2.0
 
 Pack matchers are compiled as in-process regular expressions and never execute manifest text.
 
-Transformation templates allow literal text, `$$`, and in-range `$1` capture references only.
+Transformation templates allow literal text, `$$`, and in-range `$1` capture references only. A matcher must cover the full command argument string; a safe rule never inherits unclassified trailing arguments.
 
 Explanation templates use the same capture syntax and reject control characters.
 
@@ -64,11 +64,11 @@ Packs can declare a minimum engine SemVer and supported capability identifiers; 
 
 Bundled packs are embedded read-only and discovered deterministically at runtime.
 
-Use `close-enough pack install <path>` to validate and atomically install a local pack without overwrite.
+Use `close-enough pack trust add <publisher> <base64-ed25519-public-key>` to explicitly enroll a publisher key obtained out of band. Use `close-enough pack install <pack.json> <signature>` to verify and atomically install an exact signed pack without overwrite.
 
 Use `close-enough pack uninstall <id> <version>` to remove that exact managed pack file.
 
-Pack signature verification uses detached Ed25519 signatures over exact pack bytes.
+Pack signature verification uses detached Ed25519 signatures over exact pack bytes and is repeated when installed packs load. Installed packs are hint-only: they never rewrite or interrupt commands, even when their rules declare `safe` risk.
 
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
@@ -86,15 +86,20 @@ Run the local CI target with `make ci`.
 
 Run `make verify-local` for the Linux CI checks, latency gate, and Windows cross-compilation checks. It does not execute Windows runtime tests.
 
-Install a version-pinned macOS or Linux release with `cosign` already on `PATH`:
+Install a version-pinned macOS or Linux release with `cosign` already on `PATH`. Verify the release-attached installer before executing it:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/gongahkia/close-enough/main/scripts/install.sh
-CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh
+version=vX.Y.Z
+base="https://github.com/gongahkia/close-enough/releases/download/$version"
+curl -fsSLO "$base/install.sh" -O "$base/install.sh.sigstore.json"
+cosign verify-blob install.sh --bundle install.sh.sigstore.json \
+  --certificate-identity "https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/$version" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+CLOSE_ENOUGH_VERSION="$version" sh install.sh
 ```
 
-The installer downloads only the matching GitHub release archive, `checksums.txt`, and its Sigstore bundle; it verifies both the SHA-256 digest and the release-workflow identity before extracting. It adds one managed shell-init block for bash, zsh, or fish. Run `CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh --uninstall` to remove the binary and that block; it does not install a background service.
+The verified installer downloads only the matching GitHub release archive, `checksums.txt`, and its Sigstore bundle; it verifies both the SHA-256 digest and the release-workflow identity before extracting. It adds one managed shell-init block for Zsh or Fish and removes legacy managed Bash blocks during upgrade. Run `CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh --uninstall` to remove the binary and managed blocks; it does not install a background service.
 
-On Windows PowerShell, download `scripts/install.ps1`, then run `./install.ps1 -Version vX.Y.Z`. The PowerShell installer has the same verification, initialization, and `-Uninstall` behavior.
+On Windows PowerShell, download `install.ps1` and `install.ps1.sigstore.json` from the selected release, run `cosign verify-blob` with the same identity and issuer, then run `./install.ps1 -Version vX.Y.Z`. The PowerShell installer has the same archive-verification, initialization, and `-Uninstall` behavior.
 
 Exit codes are stable: `0` success, `1` unexpected internal failure, `2` invalid CLI usage, `3` configuration failure, `4` invalid command or pack input, and `5` local operation failure.

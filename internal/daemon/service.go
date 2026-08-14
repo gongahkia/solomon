@@ -441,7 +441,7 @@ func (s *Service) curatedDecision(ctx context.Context, shellName, command, sessi
 	if match.Source == "installed" {
 		response.Source = "installed-pack"
 	}
-	if stage == "pre" && response.Risk == string(diagnose.RiskHigh) && s.Config.Mode == "interrupt" {
+	if stage == "pre" && response.Risk == string(diagnose.RiskHigh) && (s.Config.Mode == "interrupt" || s.Config.Mode == "rewrite" && s.Config.RiskInterrupt) {
 		if session == "" {
 			return response, true, nil
 		}

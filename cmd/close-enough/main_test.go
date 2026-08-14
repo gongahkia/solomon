@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"io"
@@ -546,7 +548,7 @@ func TestPackDirectoryUsesAbsoluteXDGDataHome(t *testing.T) {
 func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 	base := t.TempDir()
 	environment := func(key string) string {
-		if key == "XDG_DATA_HOME" {
+		if key == "XDG_DATA_HOME" || key == "XDG_CONFIG_HOME" {
 			return base
 		}
 		return ""
@@ -555,12 +557,23 @@ func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := filepath.Join(t.TempDir(), "local.json")
 	data := []byte(`{"schema_version":1,"id":"local-tool","version":"1.0.0","publisher":"close-enough","rules":[{"id":"local-tool-typo","command":"local-tool","pattern":"teh","replacement":"the","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
-	if err := os.WriteFile(source, data, 0o600); err != nil {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := packs.Install(source, directory); err != nil {
+	keyring := packs.Keyring{}
+	if err := keyring.Add("close-enough", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	keyringPath, err := packKeyringPath(func() (string, error) { return "/unused", nil }, environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := packs.WriteKeyring(keyringPath, keyring); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := packs.InstallVerified(data, ed25519.Sign(privateKey, data), directory, keyring); err != nil {
 		t.Fatal(err)
 	}
 	resolver, err := runtimePackResolver(config.Default(), func() (string, error) { return "/unused", nil }, environment)
@@ -568,7 +581,7 @@ func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	match, ok := resolver.MatchWords([]string{"local-tool", "teh"})
-	if !ok || match.PackID != "local-tool" || match.RuleID != "local-tool-typo" || match.Suggestion != "local-tool the" {
+	if !ok || match.Source != "installed" || match.PackID != "local-tool" || match.RuleID != "local-tool-typo" || match.Suggestion != "local-tool the" {
 		t.Fatalf("installed match = %#v, %t", match, ok)
 	}
 }

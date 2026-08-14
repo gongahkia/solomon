@@ -123,14 +123,37 @@ jobs:
           archive=$(find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
           test -n "$archive"
           sh scripts/release-smoke-test.sh "$archive" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$GITHUB_REF_NAME"
+  bootstrap:
+    needs: compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sigstore/cosign-installer@v4.1.0
+      - run: |
+          mkdir -p dist
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install.ps1 dist/install.ps1
+          cosign sign-blob --yes --bundle dist/install.sh.sigstore.json dist/install.sh
+          cosign sign-blob --yes --bundle dist/install.ps1.sigstore.json dist/install.ps1
+          test -s dist/install.sh.sigstore.json
+          test -s dist/install.ps1.sigstore.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ github.ref_name }}
+          path: dist/install.*
+          if-no-files-found: error
   publish:
-    needs: [build, smoke]
+    needs: [build, smoke, bootstrap]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5
         with:
           pattern: release-${{ github.ref_name }}-*
           merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v5
+        with:
+          name: bootstrap-${{ github.ref_name }}
           path: dist
       - run: |
           (
@@ -144,7 +167,7 @@ jobs:
           test -s dist/checksums.txt
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv dist/checksums.txt
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv dist/checksums.txt dist/install.sh dist/install.ps1
   bundled-packs:
     runs-on: ubuntu-latest
     steps:

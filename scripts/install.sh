@@ -124,7 +124,11 @@ detect_shell_init() {
     selected_shell=$(basename "${SHELL:-}")
   fi
   case "$selected_shell" in
-    bash|zsh|fish|none) ;;
+    bash)
+      selected_shell=none
+      printf '%s\n' 'close-enough: Bash integration is unavailable; installed the CLI without shell initialization' >&2
+      ;;
+    zsh|fish|none) ;;
     *) selected_shell=none ;;
   esac
   if [ "$selected_shell" = none ]; then
@@ -144,19 +148,25 @@ detect_shell_init() {
   esac
 }
 
-remove_shell_init() {
-  detect_shell_init
-  [ "$selected_shell" != none ] || return
-  [ -f "$shell_rc" ] || return
-  grep -Fqx "$start_marker" "$shell_rc" || return
-  grep -Fqx "$end_marker" "$shell_rc" || fail "managed shell initialization is incomplete in $shell_rc"
-  temporary=$(mktemp "${shell_rc}.close-enough.XXXXXX")
+remove_shell_init_at() {
+  target=$1
+  [ -f "$target" ] || return 0
+  grep -Fqx "$start_marker" "$target" || return 0
+  grep -Fqx "$end_marker" "$target" || fail "managed shell initialization is incomplete in $target"
+  temporary=$(mktemp "${target}.close-enough.XXXXXX")
   awk -v start="$start_marker" -v end="$end_marker" '
     $0 == start { skipping = 1; next }
     skipping && $0 == end { skipping = 0; next }
     !skipping { print }
-  ' "$shell_rc" > "$temporary"
-  mv "$temporary" "$shell_rc"
+  ' "$target" > "$temporary"
+  mv "$temporary" "$target"
+}
+
+remove_shell_init() {
+  detect_shell_init
+  remove_shell_init_at "$HOME/.bashrc"
+  [ "$selected_shell" != none ] || return
+  remove_shell_init_at "$shell_rc"
 }
 
 add_shell_init() {
@@ -180,7 +190,7 @@ add_shell_init() {
   {
     printf '%s\n' "$start_marker"
     case "$selected_shell" in
-      bash|zsh)
+      zsh)
         printf 'if [ -x %s ]; then\n' "$binary"
         printf '  eval "$(%s init --shell %s)"\n' "$binary" "$selected_shell"
         printf 'fi\n'

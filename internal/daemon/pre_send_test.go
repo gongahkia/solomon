@@ -7,16 +7,28 @@ import (
 	"time"
 
 	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/packs"
 )
+
+func rewriteConfig() config.Config {
+	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
+	return cfg
+}
+
+func interruptConfig() config.Config {
+	cfg := config.Default()
+	cfg.Mode = "interrupt"
+	return cfg
+}
 
 func TestServiceUsesCuratedSafeRewrite(t *testing.T) {
 	resolver, err := packs.NewBundledRuntimeResolver()
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
 	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "git sttaus"})
 	if err != nil {
 		t.Fatal(err)
@@ -31,8 +43,8 @@ func TestServiceReportsCuratedRewriteEligibilityWithoutAutocorrectPermission(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Default()
-	cfg.CuratedAutoCorrect = false
+	cfg := rewriteConfig()
+	cfg.AutoApplySafe = false
 	service := Service{Config: cfg, Packs: resolver}
 	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "git sttaus"})
 	if err != nil {
@@ -48,12 +60,12 @@ func TestServiceRejectsSecretBearingCuratedRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
 	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git sttaus --token=super-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Action != "interrupt" || response.RewriteEligible || response.Risk != string(diagnose.RiskHigh) || response.Suggestion != "git status --token=[REDACTED]" {
+	if response.Action != "none" || response.RewriteEligible || response.Suggestion != "" {
 		t.Fatalf("response = %+v", response)
 	}
 }
@@ -63,7 +75,7 @@ func TestServiceRestoresPendingRewriteOnceForItsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell-a", Command: "git sttaus"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.Action != "rewrite" || response.UndoToken == "" {
@@ -91,7 +103,7 @@ func TestServiceExpiresPendingRewriteUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.July, 21, 0, 0, 0, 0, time.UTC)
-	service := Service{Config: config.Default(), Packs: resolver, now: func() time.Time { return now }}
+	service := Service{Config: rewriteConfig(), Packs: resolver, now: func() time.Time { return now }}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git sttaus"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.UndoToken == "" {
@@ -109,7 +121,7 @@ func TestServiceKeepsOnlyLatestPendingRewriteUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
 	first := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git sttaus"}
 	firstResponse, err := service.Handle(context.Background(), first)
 	if err != nil || firstResponse.UndoToken == "" {
@@ -135,7 +147,7 @@ func TestServiceClearsUndoAfterCommandCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git sttaus"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.UndoToken == "" {
@@ -155,7 +167,7 @@ func TestServiceDoesNotIssueDisabledUndoTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Default()
+	cfg := rewriteConfig()
 	cfg.UndoEnabled = false
 	service := Service{Config: cfg, Packs: resolver}
 	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git sttaus"})

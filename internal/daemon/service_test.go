@@ -60,7 +60,7 @@ func TestServiceInterruptsCuratedHighRiskRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: interruptConfig(), Packs: resolver}
 	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestServiceConfirmEndpointRequiresMatchingToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: interruptConfig(), Packs: resolver}
 	preSend := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
 	response, err := service.Handle(context.Background(), preSend)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestServiceConfirmationTokenExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.July, 21, 0, 0, 0, 0, time.UTC)
-	service := Service{Config: config.Default(), Packs: resolver, now: func() time.Time { return now }}
+	service := Service{Config: interruptConfig(), Packs: resolver, now: func() time.Time { return now }}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.Action != "interrupt" || response.ConfirmationToken == "" {
@@ -132,7 +132,7 @@ func TestServiceConfirmationTokenBindsExactCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: interruptConfig(), Packs: resolver}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.Action != "interrupt" || response.ConfirmationToken == "" {
@@ -154,7 +154,7 @@ func TestServiceInvalidatesConfirmationOnBufferModification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Config: config.Default(), Packs: resolver}
+	service := Service{Config: interruptConfig(), Packs: resolver}
 	request := Request{Version: ProtocolVersion, Operation: PreSendOperation, Session: "shell", Command: "git push --force"}
 	response, err := service.Handle(context.Background(), request)
 	if err != nil || response.Action != "interrupt" {

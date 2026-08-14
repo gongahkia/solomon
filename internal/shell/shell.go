@@ -63,7 +63,7 @@ func Doctor(shellPath, osName string) DoctorResult {
 	contract, err := ContractFor(name)
 	if err != nil {
 		result.Limitations = []string{"unsupported shell"}
-		result.RemediationHints = []string{"use zsh, bash, fish, or powershell"}
+		result.RemediationHints = []string{"use zsh, fish, or powershell"}
 		return result
 	}
 	result.Supported, result.Tier = true, contract.Tier
@@ -115,7 +115,6 @@ func (a adapter) contract() Contract {
 
 var adapters = map[string]adapter{
 	"zsh":            {Contract: Contract{Shell: "zsh", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}}, script: zshScript},
-	"bash":           {Contract: Contract{Shell: "bash", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}}, script: bashScript},
 	"fish":           {Contract: Contract{Shell: "fish", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"adapter replaces enter binding"}}, script: fishScript},
 	"powershell":     {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"requires PSReadLine"}}, script: powerShellScript},
 	"powershell.exe": {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"requires PSReadLine"}}, script: powerShellScript},

@@ -305,6 +305,9 @@ func (e Engine) CheckShell(shellName, line, stage string) (Decision, error) {
 }
 
 func (e Engine) CheckShellContext(ctx context.Context, shellName, line, stage string) (Decision, error) {
+	if e.cache == nil {
+		e.cache = NewCache()
+	}
 	if err := ctx.Err(); err != nil {
 		return noDecision(), err
 	}
@@ -475,7 +478,7 @@ func (e Engine) evaluateRewriteBuffer(decision Decision) (Decision, bool) {
 
 func (e Engine) shouldInterrupt(decision Decision, stage string) bool {
 	return stage == "pre" &&
-		e.options.Config.Mode == "interrupt" &&
+		(e.options.Config.Mode == "interrupt" || e.options.Config.Mode == "rewrite" && e.options.Config.RiskInterrupt) &&
 		decision.Suggestion != "" &&
 		!decision.Incomplete &&
 		decision.Confidence >= 0.90 &&

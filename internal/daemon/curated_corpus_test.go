@@ -57,6 +57,9 @@ func testDaemonPackCorpus(t *testing.T, packName string, corpusNames []string) {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
+	cfg.Mode = "rewrite"
+	cfg.AutoApplySafe = true
+	cfg.RiskInterrupt = true
 	service := Service{Config: cfg, Packs: resolver, Engine: diagnose.New(diagnose.Options{Config: cfg, Path: t.TempDir(), CWD: t.TempDir()})}
 	rules := make(map[string]packs.Rule, len(pack.Rules))
 	for _, rule := range pack.Rules {

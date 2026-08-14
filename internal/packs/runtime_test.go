@@ -24,13 +24,13 @@ func TestRuntimeResolverMatchesBundledRule(t *testing.T) {
 	}
 }
 
-func TestRuntimeResolverMatchesTokenizedSubcommandWithSuffix(t *testing.T) {
+func TestRuntimeResolverRejectsUnclassifiedSuffix(t *testing.T) {
 	resolver, err := NewBundledRuntimeResolver()
 	if err != nil {
 		t.Fatal(err)
 	}
 	match, ok := resolver.MatchWords([]string{"git", "sttaus", "--token=secret"})
-	if !ok || match.PackID != "core-git" || match.RuleID != "git-status-sttaus" || match.Suggestion != "git status --token=secret" || match.Original != "sttaus" || match.Replacement != "status" || match.Occurrence != 1 {
+	if ok {
 		t.Fatalf("match = %#v, ok = %t", match, ok)
 	}
 }

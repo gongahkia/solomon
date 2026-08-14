@@ -2087,13 +2087,18 @@ func BenchmarkLoadBundledPacks(b *testing.B) {
 
 func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
-	source := filepath.Join(directory, "source.json")
 	data := []byte(`{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`)
-	if err := os.WriteFile(source, data, 0o600); err != nil {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
 		t.Fatal(err)
 	}
+	keyring := Keyring{}
+	if err := keyring.Add("close-enough", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	signature := ed25519.Sign(privateKey, data)
 	targetDirectory := filepath.Join(directory, "installed")
-	target, err := Install(source, targetDirectory)
+	target, err := InstallVerified(data, signature, targetDirectory, keyring)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2101,7 +2106,7 @@ func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	if err != nil || string(installed) != string(data) {
 		t.Fatalf("installed pack = %q, %v", installed, err)
 	}
-	if _, err := Install(source, targetDirectory); err == nil {
+	if _, err := InstallVerified(data, signature, targetDirectory, keyring); err == nil {
 		t.Fatal("expected no-overwrite failure")
 	}
 }
@@ -2112,12 +2117,18 @@ func TestUninstallPackOnlyRemovesManagedRegularFile(t *testing.T) {
 	if err := os.WriteFile(target, []byte("pack"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(target+".sig", []byte("signature"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	removed, err := Uninstall(directory, "core-git", "1.0.0")
 	if err != nil || removed != target {
 		t.Fatalf("uninstall = %q, %v", removed, err)
 	}
 	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("pack remains after uninstall: %v", err)
+	}
+	if _, err := os.Lstat(target + ".sig"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("signature remains after uninstall: %v", err)
 	}
 	if _, err := Uninstall(directory, "core-git", "1.0.0"); err == nil {
 		t.Fatal("expected missing pack error")

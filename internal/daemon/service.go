@@ -116,7 +116,24 @@ func (s *Service) preSend(ctx context.Context, request Request) (Response, error
 	if response, ok := s.learnedDecision(request.Command, "pre"); ok {
 		return response, nil
 	}
-	return s.decision(ctx, request.Shell, request.Command, "pre")
+	response, err = s.decision(ctx, request.Shell, request.Command, "pre")
+	if err != nil || response.Action != "interrupt" {
+		return response, err
+	}
+	if request.Session == "" {
+		return response, nil
+	}
+	if s.consumeConfirmation(request.Session, request.Command) {
+		response.Action = "submit"
+		return response, nil
+	}
+	token, err := newConfirmationToken()
+	if err != nil {
+		return Response{}, err
+	}
+	s.storeConfirmation(request.Session, request.Command, token)
+	response.ConfirmationToken = token
+	return response, nil
 }
 
 func (s *Service) issueUndoToken(request Request, response Response) Response {
@@ -402,15 +419,17 @@ func normalizedLearningCommand(command string) (string, bool) {
 	return value, !containsSecret
 }
 
+// curatedDecision applies the same input and rendered-suggestion shell checks
+// as diagnose.Engine before applying the explicit runtime mode policy.
 func (s *Service) curatedDecision(ctx context.Context, shellName, command, session, stage string) (Response, bool, error) {
 	if !diagnose.ShellCommandSupported(shellName, command) {
 		return Response{}, false, nil
 	}
 	match, ok, err := s.Packs.MatchLineContext(ctx, command)
-	if err != nil {
-		return Response{}, false, err
+	if err != nil || !ok {
+		return Response{}, ok, err
 	}
-	if !ok {
+	if !diagnose.ShellCommandSupported(shellName, match.Suggestion) {
 		return Response{}, false, nil
 	}
 	suggestion, containsSecret := redact.Command(strings.Fields(match.Suggestion))
@@ -418,9 +437,11 @@ func (s *Service) curatedDecision(ctx context.Context, shellName, command, sessi
 	if containsSecret {
 		risk = string(diagnose.RiskHigh)
 	}
-	action := "hint"
-	response := Response{Version: ProtocolVersion, Action: action, RewriteEligible: suggestion != "" && risk == string(diagnose.RiskSafe), Suggestion: suggestion, Explanation: match.Cause, Confidence: "high", Risk: risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
-	if stage == "pre" && response.Risk == string(diagnose.RiskHigh) && s.Config.RiskInterrupt {
+	response := Response{Version: ProtocolVersion, Action: "hint", RewriteEligible: match.Source != "installed" && suggestion != "" && risk == string(diagnose.RiskSafe), Suggestion: suggestion, Explanation: match.Cause, Confidence: "high", Risk: risk, Source: "curated", PackID: match.PackID, RuleID: match.RuleID}
+	if match.Source == "installed" {
+		response.Source = "installed-pack"
+	}
+	if stage == "pre" && response.Risk == string(diagnose.RiskHigh) && s.Config.Mode == "interrupt" {
 		if session == "" {
 			return response, true, nil
 		}
@@ -430,14 +451,14 @@ func (s *Service) curatedDecision(ctx context.Context, shellName, command, sessi
 		}
 		token, err := newConfirmationToken()
 		if err != nil {
-			return Response{}, false, nil
+			return Response{}, false, err
 		}
 		s.storeConfirmation(session, command, token)
 		response.Action = "interrupt"
 		response.ConfirmationToken = token
 		return response, true, nil
 	}
-	if stage == "pre" && response.RewriteEligible && s.Config.CuratedAutoCorrect {
+	if stage == "pre" && response.RewriteEligible && s.Config.Mode == "rewrite" && s.Config.AutoApplySafe {
 		response.Action = "rewrite"
 	}
 	return response, true, nil
@@ -457,6 +478,21 @@ func (s *Service) decision(ctx context.Context, shellName, command, stage string
 		Confidence:      strconv.FormatFloat(decision.Confidence, 'f', 2, 64),
 		Risk:            string(decision.Risk),
 		Source:          "heuristic",
+	}
+	if decision.Class == diagnose.RepairClassSemantic {
+		response.Source = "curated"
+		for _, evidence := range decision.Evidence {
+			switch evidence.Kind {
+			case "pack":
+				response.PackID = evidence.Value
+			case "rule":
+				response.RuleID = evidence.Value
+			case "source":
+				if evidence.Value == "installed" {
+					response.Source = "installed-pack"
+				}
+			}
+		}
 	}
 	if response.Action == "" {
 		response.Action = "none"

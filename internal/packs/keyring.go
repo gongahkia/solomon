@@ -56,6 +56,14 @@ func (k Keyring) PublicKey(id string) (ed25519.PublicKey, bool) {
 	return ed25519.PublicKey(key), err == nil
 }
 
+func ParsePublisherPublicKey(value string) (ed25519.PublicKey, error) {
+	key, err := base64.RawStdEncoding.DecodeString(value)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("invalid publisher public key")
+	}
+	return ed25519.PublicKey(key), nil
+}
+
 func (k *Keyring) Revoke(id string) bool {
 	if !identifier(id) || k.RevokedFor(id) {
 		return false

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -60,11 +61,7 @@ func decodePack(data []byte) (Pack, error) {
 	return pack, nil
 }
 
-func Install(source, directory string) (string, error) {
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return "", err
-	}
+func InstallVerified(data, signature []byte, directory string, keyring Keyring) (string, error) {
 	pack, err := decodePack(data)
 	if err != nil {
 		return "", err
@@ -72,27 +69,44 @@ func Install(source, directory string) (string, error) {
 	if _, err := Compile(pack); err != nil {
 		return "", err
 	}
+	if err := VerifyPublisherSignature(data, signature, pack.Publisher, keyring); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", err
 	}
 	target := filepath.Join(directory, installedPackName(pack))
+	signatureTarget := target + ".sig"
 	if _, err := os.Lstat(target); err == nil {
 		return "", fmt.Errorf("pack %q is already installed", pack.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	temporary, err := securetemp.Create(directory, "."+filepath.Base(target)+".tmp-*")
-	if err != nil {
+	if _, err := os.Lstat(signatureTarget); err == nil {
+		return "", fmt.Errorf("signature for pack %q is already installed", pack.ID)
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	defer temporary.Cleanup()
-	if _, err := temporary.Write(data); err != nil {
+	if err := writeInstalledFile(directory, signatureTarget, signature); err != nil {
 		return "", err
 	}
-	if err := temporary.Commit(target); err != nil {
+	if err := writeInstalledFile(directory, target, data); err != nil {
+		_ = os.Remove(signatureTarget)
 		return "", err
 	}
 	return target, nil
+}
+
+func writeInstalledFile(directory, target string, data []byte) (result error) {
+	temporary, err := securetemp.Create(directory, "."+filepath.Base(target)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, temporary.Cleanup()) }()
+	if _, err := temporary.Write(data); err != nil {
+		return err
+	}
+	return temporary.Commit(target)
 }
 
 func Uninstall(directory, id, version string) (string, error) {
@@ -106,6 +120,17 @@ func Uninstall(directory, id, version string) (string, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return "", errors.New("installed pack target is not a regular file")
+	}
+	signature := target + ".sig"
+	signatureInfo, err := os.Lstat(signature)
+	if err != nil {
+		return "", err
+	}
+	if !signatureInfo.Mode().IsRegular() {
+		return "", errors.New("installed pack signature is not a regular file")
+	}
+	if err := os.Remove(signature); err != nil {
+		return "", err
 	}
 	if err := os.Remove(target); err != nil {
 		return "", err
@@ -133,6 +158,9 @@ func (p Pack) Validate() error {
 		if !identifier(rule.ID) || rule.Command == "" || rule.Pattern == "" || rule.Replacement == "" || rule.Cause == "" {
 			return fmt.Errorf("invalid rule %q", rule.ID)
 		}
+		if !safeTransformationTemplate(rule.Replacement) {
+			return fmt.Errorf("rule %q: transformation contains unsupported shell syntax", rule.ID)
+		}
 		if _, ok := seen[rule.ID]; ok {
 			return fmt.Errorf("duplicate rule %q", rule.ID)
 		}
@@ -155,6 +183,18 @@ func (p Pack) Validate() error {
 		}
 	}
 	return nil
+}
+
+func safeTransformationTemplate(value string) bool {
+	if !utf8.ValidString(value) || strings.ContainsAny(value, "'\"\\`;&|<>()*?[]{}\r\n") {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) || unicode.Is(unicode.Bidi_Control, character) {
+			return false
+		}
+	}
+	return true
 }
 
 var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)

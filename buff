@@ -1,0 +1,67 @@
+  What is not product-complete:
+
+  - The “safe rewrite” guarantee is the central user promise, and it is
+    demonstrably false.
+
+  - The shell integration is the actual product surface, but Bash’s production
+    submission path uses eval (internal/shell/scripts.go:301). Its security
+    test stubs that function, so it does not exercise the real execution path
+    (internal/shell/shell_test.go:1719).
+
+  - Pack signing, keyrings, staged downloads, and update state are implemented
+    as libraries but are not connected to pack install or runtime trust
+    decisions. The README’s signature-verification claim is therefore
+    misleading as a user-facing capability.
+
+  - “History ranking” and OS credential-backed history keys have interfaces but
+    no production backend or runtime caller. Local learning exists, but it is
+    not the history product described in the README.
+
+  - Release automation builds/signs artifacts but does not rerun the full test
+    suite, static analysis, or vulnerability scan before publishing. It also
+    uses mutable GitHub Action tags rather than immutable commit SHAs.
+
+  - The bundled-pack and update-manifest jobs upload workflow artifacts but are
+    not attached by the release-publish command, and there is no installed
+    update client.
+
+  - Eight packs and 146 rules sounds broad, but it is still a shallow curated
+    rule set for Git, containers, cloud, package managers, and shells. This is
+    an alpha rule engine, not a mature terminal safety layer.
+
+  Failed or unavailable:
+
+  - staticcheck ./... fails: two unused production functions and five
+    capitalized production error strings, plus four test simplifications. CI
+    does not run Staticcheck.
+
+  - PowerShell runtime/integration and install.ps1 execution were not tested
+    locally because PowerShell was unavailable.
+
+  - ShellCheck, actionlint, and gosec were unavailable locally.
+
+  ## Minimum path to a defensible beta
+
+  1. Disable all automatic rewrites by default, including curated ones, until
+     the safety model is repaired.
+
+  2. Make matching context-aware: a safe git branch correction must reject or
+     reclassify -D, names, and every other suffix unless the whole command is
+     proven safe.
+
+  3. Render captures correctly, then send every generated suggestion through
+     one shared shell-safe validation path. The daemon must not bypass the
+     engine’s safeguards.
+
+  4. Replace Bash’s eval submission design and preserve existing hooks/traps;
+     add real keyboard-level tests for Bash, Zsh, Fish, and PowerShell.
+
+  5. Either require verified signed packs with a real trust store or remove
+     external pack installation from the public product.
+
+  6. Publish a versioned, verified bootstrap; gate releases on tests, static
+     analysis, vulnerability scanning, and immutable CI action references.
+
+  7. Remove or clearly label unfinished history/update/signature capabilities
+     until they are wired end-to-end.
+

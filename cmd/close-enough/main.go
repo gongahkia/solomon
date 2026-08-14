@@ -661,11 +661,19 @@ func runtimePackResolver(cfg config.Config, home func() (string, error), environ
 	if err != nil {
 		return packs.RuntimeResolver{}, err
 	}
-	installed, err := packs.LoadInstalled(directory)
+	keyringPath, err := packKeyringPath(home, environment)
 	if err != nil {
 		return packs.RuntimeResolver{}, err
 	}
-	return packs.NewRuntimeResolver(append(bundled, installed...))
+	keyring, err := packs.LoadKeyring(keyringPath)
+	if err != nil {
+		return packs.RuntimeResolver{}, err
+	}
+	installed, err := packs.LoadInstalledVerified(directory, keyring)
+	if err != nil {
+		return packs.RuntimeResolver{}, err
+	}
+	return packs.NewRuntimeResolverWithInstalled(bundled, installed)
 }
 
 func inspectDecisionCommand(args []string, stdout io.Writer) error {
@@ -907,7 +915,7 @@ func ruleCommand(args []string, stdout io.Writer) error {
 
 func packCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall> ...")
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall|trust> ...")
 	}
 	switch args[0] {
 	case "validate":
@@ -924,17 +932,34 @@ func packCommand(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)
 		return clierr.Wrap(clierr.Operation, err)
 	case "install":
-		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack install <path>")
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack install <pack.json> <signature>")
 		}
 		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
 		}
-		path, err := packs.Install(args[1], directory)
+		keyringPath, err := packKeyringPath(os.UserHomeDir, os.Getenv)
+		if err != nil {
+			return clierr.Wrap(clierr.Configuration, err)
+		}
+		keyring, err := packs.LoadKeyring(keyringPath)
+		if err != nil {
+			return clierr.Wrap(clierr.Configuration, err)
+		}
+		payload, err := os.ReadFile(args[1])
 		if err != nil {
 			return clierr.Wrap(clierr.Input, err)
 		}
+		signature, err := os.ReadFile(args[2])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		path, err := packs.InstallVerified(payload, signature, directory, keyring)
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		restartDaemonIfRunning()
 		_, err = fmt.Fprintln(stdout, "installed", path)
 		return clierr.Wrap(clierr.Operation, err)
 	case "uninstall":
@@ -949,11 +974,60 @@ func packCommand(args []string, stdout io.Writer) error {
 		if err != nil {
 			return clierr.Wrap(clierr.Input, err)
 		}
+		restartDaemonIfRunning()
 		_, err = fmt.Fprintln(stdout, "uninstalled", path)
 		return clierr.Wrap(clierr.Operation, err)
+	case "trust":
+		return packTrustCommand(args[1:], stdout)
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall> ...")
+		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall|trust> ...")
 	}
+}
+
+func packTrustCommand(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough pack trust <add|list|remove> ...")
+	}
+	path, err := packKeyringPath(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	keyring, err := packs.LoadKeyring(path)
+	if err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack trust list")
+		}
+		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(keyring))
+	case "add":
+		if len(args) != 3 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack trust add <publisher> <base64-ed25519-public-key>")
+		}
+		key, err := packs.ParsePublisherPublicKey(args[2])
+		if err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+		if err := keyring.Add(args[1], key); err != nil {
+			return clierr.Wrap(clierr.Input, err)
+		}
+	case "remove":
+		if len(args) != 2 {
+			return clierr.New(clierr.Usage, "usage: close-enough pack trust remove <publisher>")
+		}
+		if !keyring.Remove(args[1]) {
+			return clierr.New(clierr.Input, "publisher is not trusted")
+		}
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough pack trust <add|list|remove> ...")
+	}
+	if err := packs.WriteKeyring(path, keyring); err != nil {
+		return clierr.Wrap(clierr.Configuration, err)
+	}
+	restartDaemonIfRunning()
+	return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(keyring))
 }
 
 func packDirectory(home func() (string, error), environment func(string) string) (string, error) {
@@ -966,6 +1040,18 @@ func packDirectory(home func() (string, error), environment func(string) string)
 		base = filepath.Join(value, ".local", "share")
 	}
 	return filepath.Join(base, "close-enough", "packs"), nil
+}
+
+func packKeyringPath(home func() (string, error), environment func(string) string) (string, error) {
+	base := environment("XDG_CONFIG_HOME")
+	if base == "" || !filepath.IsAbs(base) {
+		value, err := home()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(value, ".config")
+	}
+	return filepath.Join(base, "close-enough", "pack-keyring.json"), nil
 }
 
 func doctorCommand(stdout io.Writer) error {

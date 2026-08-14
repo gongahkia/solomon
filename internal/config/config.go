@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion         = 4
+	CurrentSchemaVersion         = 5
 	maxRuleExceptionCommandBytes = 8 << 10
 	defaultLearningRetentionDays = 30
 	maxLearningRetentionDays     = 90
@@ -65,7 +65,7 @@ type Paths struct {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedPacksEnabled: true, CuratedAutoCorrect: true, RiskInterrupt: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", UndoEnabled: true, UndoTTLSeconds: defaultUndoTTLSeconds, Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
+	return Config{SchemaVersion: CurrentSchemaVersion, Mode: "hint", CuratedPacksEnabled: true, LearningRetentionDays: defaultLearningRetentionDays, LearnedRuleActionCeiling: "hint", UndoEnabled: true, UndoTTLSeconds: defaultUndoTTLSeconds, Display: Display{Cause: true, Change: true, Confidence: true, Risk: true, Consequence: true}}
 }
 
 func (c Config) HasRuleException(command string) bool {
@@ -427,6 +427,15 @@ func migrate(cfg Config, version int) (Config, error) {
 			cfg.CuratedPacksEnabled = true
 			cfg.SchemaVersion = 4
 			version = 4
+		case 4:
+			// Version 5 requires a fresh, explicit rewrite opt-in after the
+			// semantic safety policy was tightened.
+			cfg.Mode = "hint"
+			cfg.AutoApplySafe = false
+			cfg.CuratedAutoCorrect = false
+			cfg.RiskInterrupt = false
+			cfg.SchemaVersion = 5
+			version = 5
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}

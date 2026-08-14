@@ -235,6 +235,7 @@ type Options struct {
 type SemanticMatch struct {
 	PackID      string
 	RuleID      string
+	Source      string
 	Suggestion  string
 	Cause       string
 	Risk        Risk
@@ -448,7 +449,20 @@ func intrinsicRewriteEligible(decision Decision) bool {
 		!decision.Incomplete &&
 		decision.Risk == RiskSafe &&
 		decision.Confidence >= 0.80 &&
-		meetsConfidenceThreshold(decision.Class, decision.Confidence)
+		meetsConfidenceThreshold(decision.Class, decision.Confidence) &&
+		semanticRewriteAllowed(decision)
+}
+
+func semanticRewriteAllowed(decision Decision) bool {
+	if decision.Class != RepairClassSemantic {
+		return true
+	}
+	for _, evidence := range decision.Evidence {
+		if evidence.Kind == "source" && evidence.Value == "installed" {
+			return false
+		}
+	}
+	return true
 }
 
 func (e Engine) evaluateRewriteBuffer(decision Decision) (Decision, bool) {
@@ -530,7 +544,11 @@ func (e Engine) semanticDecision(ctx context.Context, shellName string, words []
 		rationale = defaultMessages[MessageRiskSecret]
 		rationaleKey = MessageRiskSecret
 	}
-	return Decision{Version: AdapterProtocolVersion, Cause: match.Cause, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: []Evidence{{Kind: "resolver", Value: "curated"}, {Kind: "pack", Value: match.PackID}, {Kind: "rule", Value: match.RuleID}}, Confidence: 1, Risk: risk, RiskRationale: rationale, RiskRationaleKey: rationaleKey, Trace: []string{"pack:" + match.PackID, "rule:" + match.RuleID}, original: match.Original, replacement: match.Replacement, occurrence: match.Occurrence}, nil
+	evidence := []Evidence{{Kind: "resolver", Value: "curated"}, {Kind: "pack", Value: match.PackID}, {Kind: "rule", Value: match.RuleID}}
+	if match.Source != "" {
+		evidence = append(evidence, Evidence{Kind: "source", Value: match.Source})
+	}
+	return Decision{Version: AdapterProtocolVersion, Cause: match.Cause, Suggestion: suggestion, Class: RepairClassSemantic, Evidence: evidence, Confidence: 1, Risk: risk, RiskRationale: rationale, RiskRationaleKey: rationaleKey, Trace: []string{"pack:" + match.PackID, "rule:" + match.RuleID}, original: match.Original, replacement: match.Replacement, occurrence: match.Occurrence}, nil
 }
 
 func (e Engine) pathDecision(ctx context.Context, words []string) (Decision, error) {

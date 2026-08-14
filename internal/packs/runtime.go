@@ -15,6 +15,7 @@ import (
 type RuntimeMatch struct {
 	PackID     string
 	RuleID     string
+	Source     string
 	Suggestion string
 	Cause      string
 	Risk       string
@@ -22,7 +23,12 @@ type RuntimeMatch struct {
 }
 
 type RuntimeResolver struct {
-	packs []CompiledPack
+	packs []runtimePack
+}
+
+type runtimePack struct {
+	compiled CompiledPack
+	source   string
 }
 
 func NewBundledRuntimeResolver() (RuntimeResolver, error) {
@@ -90,12 +96,63 @@ func LoadInstalled(directory string) ([]Pack, error) {
 	return result, nil
 }
 
+// LoadInstalledVerified fails closed unless every managed pack still has a
+// valid detached signature from a currently trusted publisher key.
+func LoadInstalledVerified(directory string, keyring Keyring) ([]Pack, error) {
+	loaded, err := LoadInstalled(directory)
+	if err != nil {
+		return nil, err
+	}
+	for _, pack := range loaded {
+		target := filepath.Join(directory, installedPackName(pack))
+		payload, err := os.ReadFile(target)
+		if err != nil {
+			return nil, err
+		}
+		signaturePath := target + ".sig"
+		info, err := os.Lstat(signaturePath)
+		if err != nil {
+			return nil, fmt.Errorf("installed pack %q signature: %w", pack.ID, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("installed pack %q signature is not a regular file", pack.ID)
+		}
+		signature, err := os.ReadFile(signaturePath)
+		if err != nil {
+			return nil, err
+		}
+		if err := VerifyPublisherSignature(payload, signature, pack.Publisher, keyring); err != nil {
+			return nil, fmt.Errorf("installed pack %q: %w", pack.ID, err)
+		}
+	}
+	return loaded, nil
+}
+
 func NewRuntimeResolver(loaded []Pack) (RuntimeResolver, error) {
+	return NewRuntimeResolverWithInstalled(loaded, nil)
+}
+
+// NewRuntimeResolverWithInstalled keeps embedded packs eligible for the
+// configured rewrite policy while making every installed pack hint-only.
+func NewRuntimeResolverWithInstalled(bundled, installed []Pack) (RuntimeResolver, error) {
+	loaded := append(append([]Pack(nil), bundled...), installed...)
 	resolved, err := Resolve(loaded)
 	if err != nil {
 		return RuntimeResolver{}, err
 	}
-	return RuntimeResolver{packs: resolved}, nil
+	installedIDs := make(map[string]struct{}, len(installed))
+	for _, pack := range installed {
+		installedIDs[pack.ID] = struct{}{}
+	}
+	runtimePacks := make([]runtimePack, 0, len(resolved))
+	for _, pack := range resolved {
+		source := "bundled"
+		if _, ok := installedIDs[pack.Pack.ID]; ok {
+			source = "installed"
+		}
+		runtimePacks = append(runtimePacks, runtimePack{compiled: pack, source: source})
+	}
+	return RuntimeResolver{packs: runtimePacks}, nil
 }
 
 func (r RuntimeResolver) MatchLine(line string) (RuntimeMatch, bool) {
@@ -117,7 +174,7 @@ func (r RuntimeResolver) MatchLineContext(ctx context.Context, line string) (Run
 	if !ok {
 		return RuntimeMatch{}, false, nil
 	}
-	return RuntimeMatch{PackID: match.PackID, RuleID: match.RuleID, Suggestion: match.Suggestion, Cause: match.Cause, Risk: string(match.Risk), Rationale: match.Rationale}, true, nil
+	return RuntimeMatch{PackID: match.PackID, RuleID: match.RuleID, Source: match.Source, Suggestion: match.Suggestion, Cause: match.Cause, Risk: string(match.Risk), Rationale: match.Rationale}, true, nil
 }
 
 func (r RuntimeResolver) MatchWords(words []string) (diagnose.SemanticMatch, bool) {
@@ -134,36 +191,33 @@ func (r RuntimeResolver) MatchWordsContext(ctx context.Context, words []string) 
 	}
 	command := words[0]
 	value := strings.Join(words[1:], " ")
-	for _, pack := range r.packs {
+	for _, runtimePack := range r.packs {
 		if err := ctx.Err(); err != nil {
 			return diagnose.SemanticMatch{}, false, err
 		}
-		rule, ok, err := pack.MatchContext(ctx, command, value)
-		if err != nil {
-			return diagnose.SemanticMatch{}, false, err
-		}
-		if ok {
-			return runtimeSemanticMatch(pack, rule, words, nil), true, nil
-		}
-		rule, ok, err = pack.MatchContext(ctx, command, words[1])
-		if err != nil {
-			return diagnose.SemanticMatch{}, false, err
-		}
-		if ok {
-			return runtimeSemanticMatch(pack, rule, words, words[2:]), true, nil
+		for _, rule := range runtimePack.compiled.Rules {
+			if err := ctx.Err(); err != nil {
+				return diagnose.SemanticMatch{}, false, err
+			}
+			if rule.Command != command {
+				continue
+			}
+			indices := rule.pattern.FindStringSubmatchIndex(value)
+			if indices == nil || indices[0] != 0 || indices[1] != len(value) {
+				continue
+			}
+			return runtimeSemanticMatch(runtimePack, rule, words, value, indices), true, nil
 		}
 	}
 	return diagnose.SemanticMatch{}, false, nil
 }
 
-func runtimeSemanticMatch(pack CompiledPack, rule Rule, words, suffix []string) diagnose.SemanticMatch {
-	replacement := rule.Replacement
-	if len(suffix) > 0 {
-		replacement += " " + strings.Join(suffix, " ")
-	}
-	match := diagnose.SemanticMatch{PackID: pack.Pack.ID, RuleID: rule.ID, Suggestion: words[0] + " " + replacement, Cause: rule.Cause, Risk: rule.Risk, Rationale: rule.RiskRationale}
-	if len(words) >= 2 && !strings.ContainsRune(rule.Replacement, ' ') {
-		match.Original, match.Replacement, match.Occurrence = words[1], rule.Replacement, 1
+func runtimeSemanticMatch(pack runtimePack, rule CompiledRule, words []string, value string, indices []int) diagnose.SemanticMatch {
+	replacement := string(rule.pattern.ExpandString(nil, rule.Replacement, value, indices))
+	cause := string(rule.pattern.ExpandString(nil, rule.Cause, value, indices))
+	match := diagnose.SemanticMatch{PackID: pack.compiled.Pack.ID, RuleID: rule.ID, Source: pack.source, Suggestion: words[0] + " " + replacement, Cause: cause, Risk: rule.Risk, Rationale: rule.RiskRationale}
+	if len(words) == 2 && !strings.ContainsRune(replacement, ' ') {
+		match.Original, match.Replacement, match.Occurrence = words[1], replacement, 1
 	}
 	return match
 }

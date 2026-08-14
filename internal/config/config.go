@@ -408,7 +408,6 @@ func migrate(cfg Config, version int) (Config, error) {
 	if version > CurrentSchemaVersion {
 		return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 	}
-	sourceVersion := version
 	for version < CurrentSchemaVersion {
 		switch version {
 		case 0:
@@ -429,11 +428,9 @@ func migrate(cfg Config, version int) (Config, error) {
 			cfg.SchemaVersion = 4
 			version = 4
 		case 4:
-			// Current schema-v4 configurations inherited a default curated
-			// rewrite capability. Require a fresh opt-in after the safety
-			// policy changed. Older/versionless files only retained rewrites
-			// when they explicitly configured them.
-			if sourceVersion == 4 {
+			// A schema migration must not retain authority to edit or block a
+			// command. Users can opt in again after reviewing the new policy.
+			if cfg.Mode == "rewrite" || cfg.Mode == "interrupt" {
 				cfg.Mode = "hint"
 				cfg.AutoApplySafe = false
 				cfg.CuratedAutoCorrect = false

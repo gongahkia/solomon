@@ -159,7 +159,6 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		post         string
 	}{
 		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
-		{"bash", "_close_enough_diagnostic_count=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [ "$action" = hint ]; then`, `if [ "$action" = interrupt ]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell bash"},
 		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "daemon request --operation post-failure --shell fish"},
 		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "daemon request --operation post-failure --shell powershell"},
 	} {
@@ -194,7 +193,6 @@ func TestAdaptersAssociateFailuresWithNextManualSuccess(t *testing.T) {
 		needles []string
 	}{
 		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", `_CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"`, `post-success --shell zsh --session "$$" --token "$token"`, `post-failure --shell zsh --session "$$" --token "$token"`}},
-		{"bash", []string{"_close_enough_pending_failure_token", `_close_enough_automatic_rewrite="$command"`, `post-success --shell bash --session "$$" --token "$token"`, `post-failure --shell bash --session "$$" --token "$token"`}},
 		{"fish", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", "_CLOSE_ENOUGH_AUTOMATIC_REWRITE 1", `post-success --shell fish --session "$fish_pid" --token "$token"`, `post-failure --shell fish --session "$fish_pid" --token "$token"`}},
 		{"pwsh", []string{"CloseEnoughPendingFailureToken", "CloseEnoughAutomaticRewrite = $true", "post-success --shell powershell --session $PID --token $token", "post-failure --shell powershell --session $PID --token $token"}},
 	}
@@ -220,7 +218,6 @@ func TestAdaptersSuppressRepeatedSuggestions(t *testing.T) {
 		allow string
 	}{
 		{"zsh", "typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
-		{"bash", "_close_enough_seen_suggestions=$'\\n'", "_close_enough_allow_suggestion"},
 		{"fish", "set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
 		{"pwsh", "CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()", "Allow-CloseEnoughSuggestion"},
 	} {
@@ -327,7 +324,6 @@ func TestAdapterScriptsParse(t *testing.T) {
 		args        func(string) []string
 	}{
 		{"zsh", "zsh", func(path string) []string { return []string{"-n", path} }},
-		{"bash", "bash", func(path string) []string { return []string{"-n", path} }},
 		{"fish", "fish", func(path string) []string { return []string{"-n", path} }},
 		{"pwsh", "pwsh", func(string) []string {
 			return []string{"-NoProfile", "-NonInteractive", "-Command", "[scriptblock]::Create([System.IO.File]::ReadAllText($env:ADAPTER_PATH)) | Out-Null"}
@@ -387,7 +383,6 @@ func TestSafeRuleAcceptances(t *testing.T) {
 func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
 	markers := map[string]string{
 		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,
-		"bash":       `close-enough [%s/%s]: %s`,
 		"fish":       `close-enough [$fields[3]/$fields[4]]: $suggestion`,
 		"powershell": `close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)`,
 	}
@@ -449,7 +444,7 @@ func TestCommandInjectionRegressionCorpus(t *testing.T) {
 	if len(fixtures) == 0 {
 		t.Fatal("command injection corpus is empty")
 	}
-	for _, shellName := range []string{"zsh", "bash", "fish"} {
+	for _, shellName := range []string{"zsh", "fish"} {
 		shellPath, err := exec.LookPath(shellName)
 		if err != nil {
 			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
@@ -481,7 +476,6 @@ func TestAdapterProtocolCrossVersionContracts(t *testing.T) {
 	version := strconv.Itoa(diagnose.AdapterProtocolVersion)
 	guards := map[string]string{
 		"zsh":        `[[ "$version" == "` + version + `" ]] || return 0`,
-		"bash":       `[ "$version" = ` + version + ` ] || { _close_enough_submit_line "$command"; return; }`,
 		"fish":       `if test "$fields[1]" != ` + version,
 		"powershell": `$decision.version -ne ` + version,
 	}
@@ -610,7 +604,7 @@ func TestSafeRewriteSecondEnterCorpus(t *testing.T) {
 	if len(fixtures) == 0 {
 		t.Fatal("safe rewrite corpus is empty")
 	}
-	for _, shellName := range []string{"zsh", "bash", "fish"} {
+	for _, shellName := range []string{"zsh", "fish"} {
 		shellPath, err := exec.LookPath(shellName)
 		if err != nil {
 			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
@@ -702,7 +696,7 @@ func TestRewriteUndoCorpus(t *testing.T) {
 		}
 		seenNames[fixture.Name] = struct{}{}
 	}
-	for _, shellName := range []string{"zsh", "bash", "fish"} {
+	for _, shellName := range []string{"zsh", "fish"} {
 		shellPath, err := exec.LookPath(shellName)
 		if err != nil {
 			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
@@ -910,7 +904,6 @@ func TestAdaptersExposePendingRewriteUndoBindings(t *testing.T) {
 		needles []string
 	}{
 		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell zsh", "press Ctrl-G to undo"}},
-		{"bash", []string{"_close_enough_pending_undo_token", "_close_enough_undo_rewrite", "--operation undo --shell bash", "press Ctrl-G to undo"}},
 		{"fish", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell fish", "press Ctrl-G to undo"}},
 		{"powershell", []string{"CloseEnoughPendingUndoToken", "Invoke-CloseEnoughPendingRewriteUndo", "--operation undo --shell powershell", "Ctrl+g", "press Ctrl-G to undo"}},
 	}
@@ -935,7 +928,6 @@ func TestAdaptersForwardBoundedPostFailureEvidence(t *testing.T) {
 		want string
 	}{
 		{"zsh", `--failure-output "exit status $exit_status"`},
-		{"bash", `--failure-output "exit status $status"`},
 		{"fish", `--failure-output "exit status $command_status"`},
 		{"powershell", `--failure-output $failureOutput`},
 	} {
@@ -963,7 +955,7 @@ func TestHighRiskConfirmationCorpus(t *testing.T) {
 	if len(fixtures) == 0 {
 		t.Fatal("high-risk confirmation corpus is empty")
 	}
-	for _, shellName := range []string{"zsh", "bash", "fish"} {
+	for _, shellName := range []string{"zsh", "fish"} {
 		shellPath, err := exec.LookPath(shellName)
 		if err != nil {
 			t.Run(shellName, func(t *testing.T) { t.Skip(shellName + " unavailable") })
@@ -1441,6 +1433,12 @@ expect eof`
 	}
 }
 
+/*
+The Bash adapter was removed because its bind-x implementation evaluated a
+buffer inside a shell function and replaced the user's DEBUG trap. The tests
+below document the retired adapter and are intentionally excluded until a
+semantics-preserving Bash integration exists.
+
 func TestBashInitializationIsGuarded(t *testing.T) {
 	script, err := Script("bash")
 	if err != nil {
@@ -1817,6 +1815,8 @@ func TestBashHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 		t.Fatalf("daemon requests = %d, want 3: %q", got, calls)
 	}
 }
+
+*/
 
 func TestFishInitializationIsGuarded(t *testing.T) {
 	script, err := Script("fish")
@@ -3046,14 +3046,16 @@ func TestContractReturnsIndependentSlices(t *testing.T) {
 }
 
 func TestUnsupportedAdapterFailsClosed(t *testing.T) {
-	if _, err := Script("csh"); err == nil {
-		t.Fatal("unsupported script succeeded")
-	}
-	if _, err := ContractFor("csh"); err == nil {
-		t.Fatal("unsupported contract succeeded")
-	}
-	if got := Doctor("/bin/csh", "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) || !slices.Equal(got.RemediationHints, []string{"use zsh, bash, fish, or powershell"}) {
-		t.Fatalf("unsupported doctor result: %#v", got)
+	for _, name := range []string{"bash", "csh"} {
+		if _, err := Script(name); err == nil {
+			t.Fatalf("unsupported script %q succeeded", name)
+		}
+		if _, err := ContractFor(name); err == nil {
+			t.Fatalf("unsupported contract %q succeeded", name)
+		}
+		if got := Doctor("/bin/"+name, "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) || !slices.Equal(got.RemediationHints, []string{"use zsh, fish, or powershell"}) {
+			t.Fatalf("unsupported doctor result for %q: %#v", name, got)
+		}
 	}
 }
 

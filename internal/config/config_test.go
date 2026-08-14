@@ -405,8 +405,8 @@ func TestLoadSkipsUntrustedProjectConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "rewrite" {
-		t.Fatalf("mode = %q, want rewrite", cfg.Mode)
+	if cfg.Mode != "hint" {
+		t.Fatalf("mode = %q, want hint", cfg.Mode)
 	}
 }
 
@@ -423,7 +423,7 @@ func TestApprovedProjectConfigurationOverridesOnlySpecifiedFields(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if merged.Mode != "rewrite" || merged.AutoApplySafe || !merged.Display.Trace || !merged.Display.Cause {
+	if merged.Mode != "hint" || merged.AutoApplySafe || !merged.Display.Trace || !merged.Display.Cause {
 		t.Fatalf("merged configuration = %#v", merged)
 	}
 }
@@ -623,7 +623,7 @@ func TestDecodeMigratesVersionlessConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != "rewrite" {
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != "hint" || cfg.AutoApplySafe || cfg.RiskInterrupt {
 		t.Fatalf("unexpected migrated config: %#v", cfg)
 	}
 }

@@ -9,15 +9,6 @@
     "markers": ["--operation pre-send", "--operation post-failure", "\"$action\" == rewrite", "\"$action\" == interrupt"]
   },
   {
-    "name": "bash",
-    "shell": "bash",
-    "tier": "first-class",
-    "capabilities": ["pre-execution", "post-failure", "hint", "interrupt", "rewrite"],
-    "configuration": ["mode", "display"],
-    "limitations": [],
-    "markers": ["--operation pre-send", "--operation post-failure", "\"$action\" = rewrite", "\"$action\" = interrupt"]
-  },
-  {
     "name": "fish",
     "shell": "fish",
     "tier": "tiered",

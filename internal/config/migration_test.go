@@ -21,19 +21,19 @@ type v1ConfigFixture struct {
 	} `json:"want"`
 }
 
-func TestDecodeMigrationPreservesLegacyCorrectionPolicy(t *testing.T) {
+func TestDecodeMigrationRequiresFreshCorrectionOptIn(t *testing.T) {
 	cfg, err := decode([]byte(`{"schema_version":1,"mode":"rewrite","auto_apply_safe":true}`), Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.CuratedPacksEnabled || !cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated policy: %#v", cfg)
 	}
 	cfg, err = decode([]byte(`{"schema_version":1,"mode":"interrupt"}`), Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || !cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated interrupt policy: %#v", cfg)
 	}
 }

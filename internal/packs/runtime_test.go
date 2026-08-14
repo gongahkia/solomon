@@ -35,6 +35,36 @@ func TestRuntimeResolverRejectsUnclassifiedSuffix(t *testing.T) {
 	}
 }
 
+func TestRuntimeResolverRequiresAnExactRuleMatchForDestructiveSuffixes(t *testing.T) {
+	resolver, err := NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, ok := resolver.MatchLine("git brnach -D close-enough-audit-target"); ok {
+		t.Fatalf("unsafe suffix matched bundled safe rule: %#v", match)
+	}
+}
+
+func TestRuntimeResolverExpandsCaptureTemplates(t *testing.T) {
+	resolver, err := NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{input: "docker search --stars=5", want: "docker search --filter=stars=5"},
+		{input: "helm uninstall close-enough", want: "helm status close-enough"},
+		{input: "aws s3 rm s3://example-bucket --recursive", want: "aws s3 ls s3://example-bucket"},
+	} {
+		match, ok := resolver.MatchLine(test.input)
+		if !ok || match.Suggestion != test.want {
+			t.Fatalf("MatchLine(%q) = %#v, %t; want %q", test.input, match, ok, test.want)
+		}
+	}
+}
+
 func TestRuntimeResolverPropagatesCancellation(t *testing.T) {
 	resolver, err := NewBundledRuntimeResolver()
 	if err != nil {

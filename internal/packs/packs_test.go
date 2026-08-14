@@ -2111,6 +2111,45 @@ func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	}
 }
 
+func TestInstallVerifiedAndLoadInstalledVerifiedFailClosed(t *testing.T) {
+	directory := t.TempDir()
+	data := []byte(`{"schema_version":1,"id":"trusted-pack","version":"1.0.0","publisher":"trusted-publisher","rules":[{"id":"trusted-rule","command":"trusted","pattern":"typo","replacement":"fixed","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring := Keyring{}
+	if err := keyring.Add("trusted-publisher", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	target, err := InstallVerified(data, ed25519.Sign(privateKey, data), directory, keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := LoadInstalledVerified(directory, keyring); err != nil || len(loaded) != 1 || loaded[0].ID != "trusted-pack" {
+		t.Fatalf("verified load = %#v, %v", loaded, err)
+	}
+	tampered := bytes.Replace(data, []byte(`"fixed"`), []byte(`"other"`), 1)
+	if err := os.WriteFile(target, tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadInstalledVerified(directory, keyring); err == nil {
+		t.Fatal("accepted a valid but tampered installed pack")
+	}
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target + ".sig"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadInstalledVerified(directory, keyring); err == nil {
+		t.Fatal("accepted an installed pack without its signature")
+	}
+	if _, err := InstallVerified(data, ed25519.Sign(privateKey, []byte("different")), t.TempDir(), keyring); err == nil {
+		t.Fatal("accepted a signature for different bytes")
+	}
+}
+
 func TestUninstallPackOnlyRemovesManagedRegularFile(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "core-git-1.0.0.json")

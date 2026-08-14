@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/close-enough/internal/diagnose"
 	"github.com/gongahkia/close-enough/internal/packs"
 )
 
@@ -66,6 +67,52 @@ func TestServiceRejectsSecretBearingCuratedRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.Action != "none" || response.RewriteEligible || response.Suggestion != "" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestServiceDoesNotApplyAReadOnlyRuleToDestructiveSuffixes(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "git brnach -D close-enough-audit-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "none" || response.RewriteEligible || response.Suggestion != "" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestServiceRendersCuratedCaptureTemplatesBeforePolicy(t *testing.T) {
+	resolver, err := packs.NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "docker search --stars=5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "rewrite" || response.Suggestion != "docker search --filter=stars=5" || response.Risk != string(diagnose.RiskSafe) {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestServiceTreatsInstalledPacksAsHintOnly(t *testing.T) {
+	installed := packs.Pack{SchemaVersion: 1, ID: "external-pack", Version: "1.0.0", Publisher: "publisher", Rules: []packs.Rule{{ID: "external-rule", Command: "external", Pattern: "^typo$", Replacement: "fixed", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only command"}}}
+	resolver, err := packs.NewRuntimeResolverWithInstalled(nil, []packs.Pack{installed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Config: rewriteConfig(), Packs: resolver}
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "external typo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Action != "hint" || response.RewriteEligible || response.Source != "installed-pack" || response.Suggestion != "external fixed" {
 		t.Fatalf("response = %+v", response)
 	}
 }

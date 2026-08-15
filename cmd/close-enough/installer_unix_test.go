@@ -58,6 +58,27 @@ func TestUnixInstallerVerifiesArtifactsAndManagesShellInitialization(t *testing.
 	}
 }
 
+func TestUnixInstallerRemovesLegacyBashInitialization(t *testing.T) {
+	version := "v1.2.3"
+	releaseDirectory := t.TempDir()
+	writeUnixInstallerRelease(t, releaseDirectory, version)
+	fakeDirectory := t.TempDir()
+	writeFakeCosign(t, fakeDirectory)
+	home := t.TempDir()
+	legacy := filepath.Join(home, ".bashrc")
+	legacyBlock := "# before\n# >>> close-enough initialize >>>\neval \"$(close-enough init --shell bash)\"\n# <<< close-enough initialize <<<\n# after\n"
+	if err := os.WriteFile(legacy, []byte(legacyBlock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment := installerEnvironment(releaseDirectory, version, fakeDirectory, filepath.Join(t.TempDir(), "bin"), filepath.Join(home, ".zshrc"), filepath.Join(t.TempDir(), "cosign.log"))
+	environment = replaceHarnessEnvironment(environment, "HOME", home)
+	runUnixInstaller(t, environment)
+	data, err := os.ReadFile(legacy)
+	if err != nil || strings.Contains(string(data), "close-enough initialize") || !strings.Contains(string(data), "# before") || !strings.Contains(string(data), "# after") {
+		t.Fatalf("legacy Bash initialization = %q, %v", data, err)
+	}
+}
+
 func TestUnixInstallerRejectsChecksumAndSignatureFailures(t *testing.T) {
 	version := "v1.2.3"
 	releaseDirectory := t.TempDir()

@@ -3,7 +3,6 @@ package packs
 import (
 	"crypto/ed25519"
 	"errors"
-	"os"
 )
 
 func VerifyDetachedSignature(payload, signature []byte, publicKey ed25519.PublicKey) error {
@@ -20,11 +19,11 @@ func VerifyDetachedSignature(payload, signature []byte, publicKey ed25519.Public
 }
 
 func VerifyDetachedFiles(packPath, signaturePath string, publicKey ed25519.PublicKey) error {
-	payload, err := os.ReadFile(packPath)
+	payload, err := readUserAuthorizedFile(packPath)
 	if err != nil {
 		return err
 	}
-	signature, err := os.ReadFile(signaturePath)
+	signature, err := readUserAuthorizedFile(signaturePath)
 	if err != nil {
 		return err
 	}

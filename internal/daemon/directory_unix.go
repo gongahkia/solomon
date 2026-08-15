@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 )
 
@@ -25,10 +26,12 @@ func PrepareDirectory(path string) error {
 		return errors.New("daemon directory is not a real directory")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
+	uid := os.Geteuid()
+	if uid < 0 || !ok || strconv.FormatUint(uint64(stat.Uid), 10) != strconv.Itoa(uid) {
 		return fmt.Errorf("daemon directory must be owned by the current user")
 	}
 	if info.Mode().Perm() != 0o700 {
+		// #nosec G302 -- A directory needs execute permission; 0700 is the intended owner-only mode.
 		if err := os.Chmod(path, 0o700); err != nil {
 			return err
 		}

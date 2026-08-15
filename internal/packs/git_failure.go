@@ -16,7 +16,7 @@ const (
 	maxGitFailureEvidenceSize = 256
 )
 
-var ErrGitFailureOutputTooLarge = errors.New("Git failure output exceeds size limit")
+var ErrGitFailureOutputTooLarge = errors.New("git failure output exceeds size limit")
 
 var gitFailurePatterns = []struct {
 	kind    string

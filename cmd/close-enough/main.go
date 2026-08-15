@@ -43,10 +43,12 @@ const (
 func main() {
 	args := os.Args[1:]
 	if err := startupError(args, runtimecheck.Current()); err != nil {
+		// #nosec G705 -- Errors are rendered for a terminal, not an HTML response.
 		fmt.Fprint(os.Stderr, renderError(err))
 		os.Exit(clierr.ExitOperation)
 	}
 	if err := run(args, os.Stdout, os.Stderr); err != nil {
+		// #nosec G705 -- Errors are rendered for a terminal, not an HTML response.
 		fmt.Fprint(os.Stderr, renderError(err))
 		os.Exit(clierr.Code(err))
 	}
@@ -445,6 +447,7 @@ func startDaemonProcessDefault() error {
 	if err != nil {
 		return err
 	}
+	// #nosec G204 -- os.Executable returns this already-running binary, not shell input.
 	command := exec.Command(path, "daemon", "serve")
 	detachDaemonProcess(command)
 	if err := command.Start(); err != nil {
@@ -496,6 +499,7 @@ func checksumFile(path string) (string, string, error) {
 	if !info.Mode().IsRegular() {
 		return "", "", fmt.Errorf("checksum file is not a regular file")
 	}
+	// #nosec G304 -- checksum deliberately reads the explicit local --file argument.
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", err
@@ -513,6 +517,7 @@ func verifyChecksumFile(path, manifestPath string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G304 -- checksum deliberately reads the explicit local --manifest argument.
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return err
@@ -627,6 +632,7 @@ func checkCommand(args []string, stdout io.Writer) error {
 		if len(output) > diagnose.MaxOutputBytes {
 			return clierr.Wrap(clierr.Operation, diagnose.ErrOutputLimit)
 		}
+		// #nosec G705 -- The diagnostic is terminal output, not an HTML response.
 		_, err = fmt.Fprint(stdout, output)
 		return clierr.Wrap(clierr.Operation, err)
 	case "record":
@@ -929,6 +935,7 @@ func packCommand(args []string, stdout io.Writer) error {
 		if _, err := packs.Compile(pack); err != nil {
 			return clierr.Wrap(clierr.Input, err)
 		}
+		// #nosec G705 -- Pack metadata is printed to a terminal, not an HTML response.
 		_, err = fmt.Fprintln(stdout, "valid", pack.ID, pack.Version)
 		return clierr.Wrap(clierr.Operation, err)
 	case "install":
@@ -947,10 +954,12 @@ func packCommand(args []string, stdout io.Writer) error {
 		if err != nil {
 			return clierr.Wrap(clierr.Configuration, err)
 		}
+		// #nosec G304,G703 -- pack install deliberately reads the explicit local pack argument.
 		payload, err := os.ReadFile(args[1])
 		if err != nil {
 			return clierr.Wrap(clierr.Input, err)
 		}
+		// #nosec G304,G703 -- pack install deliberately reads the explicit local signature argument.
 		signature, err := os.ReadFile(args[2])
 		if err != nil {
 			return clierr.Wrap(clierr.Input, err)
@@ -960,6 +969,7 @@ func packCommand(args []string, stdout io.Writer) error {
 			return clierr.Wrap(clierr.Input, err)
 		}
 		restartDaemonIfRunning()
+		// #nosec G705 -- The managed filesystem path is printed to a terminal, not an HTML response.
 		_, err = fmt.Fprintln(stdout, "installed", path)
 		return clierr.Wrap(clierr.Operation, err)
 	case "uninstall":
@@ -975,6 +985,7 @@ func packCommand(args []string, stdout io.Writer) error {
 			return clierr.Wrap(clierr.Input, err)
 		}
 		restartDaemonIfRunning()
+		// #nosec G705 -- The managed filesystem path is printed to a terminal, not an HTML response.
 		_, err = fmt.Fprintln(stdout, "uninstalled", path)
 		return clierr.Wrap(clierr.Operation, err)
 	case "trust":

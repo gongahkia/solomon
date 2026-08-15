@@ -28,7 +28,7 @@ Adapters also suppress repeated hint suggestions within a loaded shell session.
 
 Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
 
-Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED`, `CLOSE_ENOUGH_CURATED_PACKS_ENABLED`, `CLOSE_ENOUGH_CURATED_AUTO_CORRECT`, `CLOSE_ENOUGH_RISK_INTERRUPT`, `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`, `CLOSE_ENOUGH_UNDO_ENABLED`, and `CLOSE_ENOUGH_UNDO_TTL_SECONDS`; booleans must be `true` or `false`.
+Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_CURATED_PACKS_ENABLED`, `CLOSE_ENOUGH_RISK_INTERRUPT`, `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`, `CLOSE_ENOUGH_UNDO_ENABLED`, and `CLOSE_ENOUGH_UNDO_TTL_SECONDS`; booleans must be `true` or `false`.
 
 Curated packs are enabled by default; set `curated_packs_enabled` to `false` with `close-enough config set` to disable bundled and installed curated repairs for that configuration or session.
 
@@ -72,9 +72,9 @@ Pack signature verification uses detached Ed25519 signatures over exact pack byt
 
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
-Optional local-history encryption keys use an injected OS credential-store backend only; no file fallback is provided.
+History ranking and credential-backed history keys are not shipped features. The repository retains internal research abstractions only; close-enough does not create history keys, persist command history, or rank suggestions from history.
 
-History ranking is disabled by default and stores only SHA-256 command keys through an injected local backend after opt-in.
+No self-update client or update channel is shipped. The update-manifest and bundled-pack archive helpers are internal release experiments and are not published as release assets.
 
 Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories; `close-enough doctor` reports these findings without blocking.
 
@@ -91,7 +91,8 @@ Install a version-pinned macOS or Linux release with `cosign` already on `PATH`.
 ```sh
 version=vX.Y.Z
 base="https://github.com/gongahkia/close-enough/releases/download/$version"
-curl -fsSLO "$base/install.sh" -O "$base/install.sh.sigstore.json"
+curl -fsSLO "$base/install.sh"
+curl -fsSLO "$base/install.sh.sigstore.json"
 cosign verify-blob install.sh --bundle install.sh.sigstore.json \
   --certificate-identity "https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/$version" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -100,6 +101,19 @@ CLOSE_ENOUGH_VERSION="$version" sh install.sh
 
 The verified installer downloads only the matching GitHub release archive, `checksums.txt`, and its Sigstore bundle; it verifies both the SHA-256 digest and the release-workflow identity before extracting. It adds one managed shell-init block for Zsh or Fish and removes legacy managed Bash blocks during upgrade. Run `CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh --uninstall` to remove the binary and managed blocks; it does not install a background service.
 
-On Windows PowerShell, download `install.ps1` and `install.ps1.sigstore.json` from the selected release, run `cosign verify-blob` with the same identity and issuer, then run `./install.ps1 -Version vX.Y.Z`. The PowerShell installer has the same archive-verification, initialization, and `-Uninstall` behavior.
+On Windows PowerShell, verify the release-attached installer before running it:
+
+```powershell
+$version = 'vX.Y.Z'
+$base = "https://github.com/gongahkia/close-enough/releases/download/$version"
+Invoke-WebRequest "$base/install.ps1" -OutFile install.ps1
+Invoke-WebRequest "$base/install.ps1.sigstore.json" -OutFile install.ps1.sigstore.json
+cosign verify-blob install.ps1 --bundle install.ps1.sigstore.json `
+  --certificate-identity "https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/$version" `
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version $version
+```
+
+The PowerShell installer has the same archive-verification, initialization, and `-Uninstall` behavior.
 
 Exit codes are stable: `0` success, `1` unexpected internal failure, `2` invalid CLI usage, `3` configuration failure, `4` invalid command or pack input, and `5` local operation failure.

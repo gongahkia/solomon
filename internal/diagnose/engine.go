@@ -77,6 +77,7 @@ const (
 	MessageRiskUnknown               MessageKey = "diagnostic.risk.unknown"
 )
 
+// #nosec G101 -- These diagnostics intentionally identify secret-bearing command arguments; they contain no credential values.
 var defaultMessages = map[MessageKey]string{
 	MessageCauseCommandNotFound:      "command not found locally",
 	MessageConsequenceCommandRejects: "the shell would reject this command",
@@ -1051,6 +1052,7 @@ func (c *Cache) executableNamesFor(pathValue, platform, pathExt string) []string
 }
 
 func limitedReadDir(path string) ([]os.DirEntry, error) {
+	// #nosec G304,G703 -- PATH is intentionally inspected after runtime validation rejects unsafe entries.
 	directory, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -1063,10 +1065,6 @@ func limitedReadDir(path string) ([]os.DirEntry, error) {
 	return entries, err
 }
 
-func commandExists(name, pathValue string) bool {
-	return defaultExecutableCache.commandExistsFor(name, pathValue, runtime.GOOS, os.Getenv("PATHEXT"))
-}
-
 func commandExistsFor(name, pathValue, platform, pathExt string) bool {
 	return defaultExecutableCache.commandExistsFor(name, pathValue, platform, pathExt)
 }
@@ -1077,6 +1075,7 @@ func (c *Cache) commandExistsFor(name, pathValue, platform, pathExt string) bool
 			if index >= maxPathDirectories {
 				break
 			}
+			// #nosec G703 -- PATH is intentionally inspected after runtime validation rejects unsafe entries.
 			info, err := os.Stat(filepath.Join(dir, name))
 			if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 				return true
@@ -1101,6 +1100,7 @@ func pathSignature(pathValue string) string {
 			signature.WriteString("truncated\x00")
 			break
 		}
+		// #nosec G703 -- PATH is intentionally inspected after runtime validation rejects unsafe entries.
 		info, err := os.Stat(dir)
 		if err != nil {
 			signature.WriteString(dir)
@@ -1260,27 +1260,6 @@ func abs(value int) int {
 		return -value
 	}
 	return value
-}
-
-func levenshtein(a, b string) int {
-	aRunes, bRunes := []rune(a), []rune(b)
-	previous := make([]int, len(bRunes)+1)
-	for j := range previous {
-		previous[j] = j
-	}
-	for i, ra := range aRunes {
-		current := make([]int, len(bRunes)+1)
-		current[0] = i + 1
-		for j, rb := range bRunes {
-			cost := 0
-			if ra != rb {
-				cost = 1
-			}
-			current[j+1] = min(current[j]+1, previous[j+1]+1, previous[j]+cost)
-		}
-		previous = current
-	}
-	return previous[len(bRunes)]
 }
 
 func damerauLevenshtein(a, b string) int {

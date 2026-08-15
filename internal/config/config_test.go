@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,9 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/gongahkia/close-enough/internal/credential"
-	"github.com/gongahkia/close-enough/internal/history"
 )
 
 type trustedProjectFixture struct {
@@ -141,7 +137,6 @@ func TestSetV1PolicySettings(t *testing.T) {
 	cfg := Default()
 	for key, value := range map[string]string{
 		"curated_packs_enabled":       "false",
-		"curated_auto_correct":        "false",
 		"risk_interrupt":              "false",
 		"local_learning_enabled":      "true",
 		"learning_retention_days":     "45",
@@ -171,23 +166,6 @@ func TestCuratedPackEnablementSessionOverride(t *testing.T) {
 	cfg, err := ApplySessionOverrides(Default(), map[string]string{"CLOSE_ENOUGH_CURATED_PACKS_ENABLED": "false"})
 	if err != nil || cfg.CuratedPacksEnabled {
 		t.Fatalf("curated pack session override = %#v, %v", cfg, err)
-	}
-}
-
-func TestHistoryKeysRequireLocalHistoryOptIn(t *testing.T) {
-	if _, err := Default().HistoryKeys(nil).Generate(); !errors.Is(err, credential.ErrDisabled) {
-		t.Fatalf("default history key error = %v", err)
-	}
-}
-
-func TestHistoryRankerRequiresLocalHistoryOptIn(t *testing.T) {
-	if _, err := Default().HistoryRanker(nil).Score(context.Background(), "git"); err != nil {
-		t.Fatalf("default ranker error = %v", err)
-	}
-	cfg := Default()
-	cfg.LocalHistoryEnabled = true
-	if _, err := cfg.HistoryRanker(nil).Score(context.Background(), "git"); !errors.Is(err, history.ErrUnavailable) {
-		t.Fatalf("enabled ranker error = %v", err)
 	}
 }
 
@@ -253,17 +231,24 @@ func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 
 func TestApplySessionOverridesUsesStrictAllowlist(t *testing.T) {
 	cfg, err := ApplySessionOverrides(Default(), map[string]string{
-		"CLOSE_ENOUGH_MODE":                  "rewrite",
-		"CLOSE_ENOUGH_AUTO_APPLY_SAFE":       "true",
-		"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED": "true",
-		"CLOSE_ENOUGH_UNDO_ENABLED":          "false",
-		"CLOSE_ENOUGH_UNDO_TTL_SECONDS":      "45",
+		"CLOSE_ENOUGH_MODE":             "rewrite",
+		"CLOSE_ENOUGH_AUTO_APPLY_SAFE":  "true",
+		"CLOSE_ENOUGH_UNDO_ENABLED":     "false",
+		"CLOSE_ENOUGH_UNDO_TTL_SECONDS": "45",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "rewrite" || !cfg.AutoApplySafe || !cfg.LocalHistoryEnabled || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
+	if cfg.Mode != "rewrite" || !cfg.AutoApplySafe || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
 		t.Fatalf("unexpected override result: %#v", cfg)
+	}
+}
+
+func TestCurrentSchemaRejectsRetiredLocalHistorySetting(t *testing.T) {
+	input := []byte(`{"schema_version":` + strconv.Itoa(CurrentSchemaVersion) + `,"local_history_enabled":true}`)
+	_, err := decode(input, Default())
+	if err == nil || !strings.Contains(err.Error(), "local history is not supported") {
+		t.Fatalf("retired local history setting error = %v", err)
 	}
 }
 

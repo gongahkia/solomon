@@ -7,6 +7,7 @@ release_base=${CLOSE_ENOUGH_RELEASE_BASE_URL:-}
 install_dir=${CLOSE_ENOUGH_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}
 selected_shell=${CLOSE_ENOUGH_SHELL:-}
 shell_rc=${CLOSE_ENOUGH_SHELL_RC:-}
+legacy_bash_rc=$HOME/.bashrc
 start_marker='# >>> close-enough initialize >>>'
 end_marker='# <<< close-enough initialize <<<'
 
@@ -125,6 +126,12 @@ detect_shell_init() {
   fi
   case "$selected_shell" in
     bash)
+      if [ -n "$shell_rc" ]; then
+        case "$shell_rc" in
+          /*) legacy_bash_rc=$shell_rc ;;
+          *) fail "shell initialization path must be absolute" ;;
+        esac
+      fi
       selected_shell=none
       printf '%s\n' 'close-enough: Bash integration is unavailable; installed the CLI without shell initialization' >&2
       ;;
@@ -162,15 +169,21 @@ remove_shell_init_at() {
   mv "$temporary" "$target"
 }
 
+remove_legacy_bash_init() {
+  remove_shell_init_at "$HOME/.bashrc"
+  remove_shell_init_at "$legacy_bash_rc"
+}
+
 remove_shell_init() {
   detect_shell_init
-  remove_shell_init_at "$HOME/.bashrc"
+  remove_legacy_bash_init
   [ "$selected_shell" != none ] || return
   remove_shell_init_at "$shell_rc"
 }
 
 add_shell_init() {
   detect_shell_init
+  remove_legacy_bash_init
   [ "$selected_shell" != none ] || return
   case "$shell_rc" in
     /*) ;;
@@ -192,6 +205,7 @@ add_shell_init() {
     case "$selected_shell" in
       zsh)
         printf 'if [ -x %s ]; then\n' "$binary"
+        # shellcheck disable=SC2016 # write the command substitution into the managed Zsh startup file
         printf '  eval "$(%s init --shell %s)"\n' "$binary" "$selected_shell"
         printf 'fi\n'
         ;;

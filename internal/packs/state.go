@@ -17,7 +17,7 @@ type State struct {
 }
 
 func LoadState(path string) (State, error) {
-	data, err := os.ReadFile(path)
+	data, err := readUserAuthorizedFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return State{}, nil
 	}

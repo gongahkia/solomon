@@ -103,8 +103,7 @@ func removeStaleSocket(path string) error {
 	}
 	connection, err := net.DialTimeout("unix", path, requestDeadline)
 	if err == nil {
-		connection.Close()
-		return ErrAlreadyRunning
+		return errors.Join(ErrAlreadyRunning, connection.Close())
 	}
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		return err

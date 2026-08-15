@@ -2150,6 +2150,28 @@ func TestInstallVerifiedAndLoadInstalledVerifiedFailClosed(t *testing.T) {
 	}
 }
 
+func TestInstallVerifiedRejectsSymbolicLinkDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("symbolic-link behavior is covered outside short mode")
+	}
+	data := []byte(`{"schema_version":1,"id":"trusted-pack","version":"1.0.0","publisher":"trusted-publisher","rules":[{"id":"trusted-rule","command":"trusted","pattern":"typo","replacement":"fixed","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring := Keyring{}
+	if err := keyring.Add("trusted-publisher", publicKey); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, "packs")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallVerified(data, ed25519.Sign(privateKey, data), filepath.Join(root, "packs"), keyring); err == nil {
+		t.Fatal("accepted a symbolic-link pack directory")
+	}
+}
+
 func TestUninstallPackOnlyRemovesManagedRegularFile(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "core-git-1.0.0.json")

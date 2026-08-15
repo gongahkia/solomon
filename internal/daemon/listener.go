@@ -47,9 +47,9 @@ func (s *Server) Listen() error {
 		return err
 	}
 	if s.endpoint.Network == "unix" {
+		// #nosec G302 -- Unix sockets require a mode with owner read/write access; 0600 is exact.
 		if err := os.Chmod(s.endpoint.Address, 0o600); err != nil {
-			listener.Close()
-			return err
+			return errors.Join(err, listener.Close())
 		}
 	}
 	s.listener = listener

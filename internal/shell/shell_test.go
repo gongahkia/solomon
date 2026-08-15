@@ -1070,7 +1070,7 @@ func TestZshPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 	capture := `command="$BUFFER"`
 	check := `--operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record --command "$command"`
-	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$BUFFER"`) {
+	if !strings.Contains(script, capture) || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$BUFFER"`) {
 		t.Fatalf("zsh pre-execution check does not use a captured buffer: %q", script)
 	}
 	if !strings.Contains(script, `2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }`) {
@@ -1836,7 +1836,7 @@ func TestFishPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 	capture := "set -l command (commandline -b)"
 	check := `daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record --command "$command"`
-	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
+	if !strings.Contains(script, capture) || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command (commandline -b)") {
 		t.Fatalf("fish pre-execution check does not use a captured buffer: %q", script)
 	}
 }
@@ -2313,7 +2313,7 @@ func TestPowerShellPreExecutionUsesCapturedBuffer(t *testing.T) {
 	}
 	capture := "$command = $line"
 	check := "--operation pre-send --shell powershell --session $PID --ensure=false --command $command"
-	if strings.Index(script, capture) < 0 || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command $line") {
+	if !strings.Contains(script, capture) || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, "--command $line") {
 		t.Fatalf("PowerShell pre-execution check does not use a captured buffer: %q", script)
 	}
 }

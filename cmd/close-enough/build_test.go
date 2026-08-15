@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -127,7 +128,7 @@ func TestReleaseWorkflowConfiguresKeylessSigning(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"id-token: write",
-		"sigstore/cosign-installer@v4.1.0",
+		"sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22",
 		"cosign sign-blob --yes --bundle",
 		`test -n "$archive"`,
 		`test -s "$archive.sigstore.json"`,
@@ -147,7 +148,7 @@ func TestReleaseWorkflowAttestsPackagedArchive(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"attestations: write",
-		"actions/attest-build-provenance@v2",
+		"actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be",
 		"id: release-archive",
 		"subject-path: ${{ steps.release-archive.outputs.path }}",
 	} {
@@ -202,7 +203,7 @@ func TestReleaseWorkflowSmokeTestsEveryArchive(t *testing.T) {
 		"smoke:",
 		"needs: [build, compatibility]",
 		"matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}",
-		"actions/download-artifact@v5",
+		"actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
 		"scripts/release-smoke-test.sh",
 	} {
 		if !strings.Contains(string(workflow), marker) {
@@ -219,8 +220,12 @@ func TestReleaseWorkflowPublishesGitHubAssets(t *testing.T) {
 	for _, marker := range []string{
 		"contents: write",
 		"publish:",
-		"needs: [build, smoke]",
+		"needs: [build, smoke, bootstrap, verify]",
 		"pattern: release-${{ github.ref_name }}-*",
+		"bootstrap-${{ github.ref_name }}",
+		"dist/install.sh dist/install.ps1",
+		"cosign verify-blob dist/install.sh",
+		"cosign verify-blob dist/install.ps1",
 		"gh release create \"$GITHUB_REF_NAME\" --verify-tag --generate-notes",
 		"dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv",
 	} {
@@ -248,44 +253,38 @@ func TestReleaseWorkflowPublishesChecksumManifest(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowPublishesSignedBundledPacks(t *testing.T) {
+func TestReleaseWorkflowGatesPublishingOnQualityChecks(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, marker := range []string{
-		"bundled-packs:",
-		"scripts/release-pack-name.sh",
-		"scripts/release-pack-bundle.sh",
-		"id: bundled-pack",
-		"cosign sign-blob --yes --bundle",
-		"cosign verify-blob",
-		"name: bundled-packs-",
-		"name: bundled-packs-signature-",
+		"verify:",
+		"go-version: '1.26.6'",
+		"go vet ./...",
+		"go test -race -count=1 -timeout=2m ./...",
+		"staticcheck ./...",
+		"govulncheck ./...",
+		"gosec ./...",
+		"actionlint",
+		"shellcheck scripts/*.sh",
+		"needs: [compatibility, verify]",
+		"needs: [build, smoke, bootstrap, verify]",
 	} {
 		if !strings.Contains(string(workflow), marker) {
-			t.Fatalf("release workflow lacks bundled pack publication marker %q", marker)
+			t.Fatalf("release workflow lacks quality gate marker %q", marker)
 		}
 	}
 }
 
-func TestReleaseWorkflowPublishesUpdateManifest(t *testing.T) {
-	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, marker := range []string{
-		"update-manifest:",
-		"needs: [build, smoke]",
-		"cmd/update-manifest",
-		"--channel stable",
-		"--commit \"$GITHUB_SHA\"",
-		"cosign sign-blob --yes --bundle",
-		"name: update-manifest-",
-		"name: update-manifest-signature-",
-	} {
-		if !strings.Contains(string(workflow), marker) {
-			t.Fatalf("release workflow lacks update manifest marker %q", marker)
+func TestWorkflowsUseSupportedPatchedGo(t *testing.T) {
+	for _, name := range []string{"ci.yml", "release.yml", "release-dry-run.yml"} {
+		workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(workflow), "go-version-file:") || !strings.Contains(string(workflow), "go-version: '1.26.6'") {
+			t.Fatalf("%s does not pin the supported Go toolchain", name)
 		}
 	}
 }
@@ -324,8 +323,9 @@ func TestReleaseDryRunWorkflow(t *testing.T) {
 		"scripts/release-sbom.sh",
 		"scripts/release-license-audit.sh",
 		"scripts/release-smoke-test.sh",
-		"scripts/release-pack-bundle.sh",
-		"cmd/update-manifest",
+		"bootstrap:",
+		"bootstrap-dry-run",
+		"dist/install.sh",
 	} {
 		if !strings.Contains(string(workflow), marker) {
 			t.Fatalf("release dry-run workflow lacks marker %q", marker)
@@ -333,6 +333,36 @@ func TestReleaseDryRunWorkflow(t *testing.T) {
 	}
 	if strings.Contains(string(workflow), "cosign sign-blob") || strings.Contains(string(workflow), "TUF_") {
 		t.Fatal("release dry-run workflow performs production signing")
+	}
+}
+
+func TestReleaseWorkflowsDoNotPublishInactiveUpdateSurfaces(t *testing.T) {
+	for _, name := range []string{"release.yml", "release-dry-run.yml"} {
+		workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, marker := range []string{"bundled-packs:", "update-manifest:", "release-pack-bundle.sh", "cmd/update-manifest"} {
+			if strings.Contains(string(workflow), marker) {
+				t.Fatalf("%s publishes inactive surface %q", name, marker)
+			}
+		}
+	}
+}
+
+func TestWorkflowsPinActionsToFullCommitSHAs(t *testing.T) {
+	reference := regexp.MustCompile(`(?m)^\s*-\s+uses:\s+[^@\s]+@([^\s#]+)`)
+	sha := regexp.MustCompile(`^[0-9a-f]{40}$`)
+	for _, name := range []string{"ci.yml", "release.yml", "release-dry-run.yml"} {
+		workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range reference.FindAllStringSubmatch(string(workflow), -1) {
+			if !sha.MatchString(match[1]) {
+				t.Fatalf("%s has mutable action reference %q", name, match[1])
+			}
+		}
 	}
 }
 

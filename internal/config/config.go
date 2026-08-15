@@ -11,14 +11,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gongahkia/close-enough/internal/credential"
 	"github.com/gongahkia/close-enough/internal/filesystem"
-	"github.com/gongahkia/close-enough/internal/history"
 	"github.com/gongahkia/close-enough/internal/securetemp"
 )
 
 const (
-	CurrentSchemaVersion         = 5
+	CurrentSchemaVersion         = 6
 	maxRuleExceptionCommandBytes = 8 << 10
 	defaultLearningRetentionDays = 30
 	maxLearningRetentionDays     = 90
@@ -32,11 +30,13 @@ type RuleException struct {
 }
 
 type Config struct {
-	SchemaVersion            int             `json:"schema_version"`
-	Mode                     string          `json:"mode"`
-	Display                  Display         `json:"display"`
-	AutoApplySafe            bool            `json:"auto_apply_safe"`
-	LocalHistoryEnabled      bool            `json:"local_history_enabled"`
+	SchemaVersion int     `json:"schema_version"`
+	Mode          string  `json:"mode"`
+	Display       Display `json:"display"`
+	AutoApplySafe bool    `json:"auto_apply_safe"`
+	// LocalHistoryEnabled is retained only to migrate pre-v6 configuration.
+	// The product has no history persistence or ranking backend.
+	LocalHistoryEnabled      bool            `json:"local_history_enabled,omitempty"`
 	CuratedPacksEnabled      bool            `json:"curated_packs_enabled"`
 	CuratedAutoCorrect       bool            `json:"curated_auto_correct"`
 	RiskInterrupt            bool            `json:"risk_interrupt"`
@@ -167,14 +167,6 @@ func validRuleExceptionID(value string) bool {
 	return true
 }
 
-func (c Config) HistoryKeys(store credential.Store) credential.HistoryKeys {
-	return credential.NewHistoryKeys(c.LocalHistoryEnabled, store)
-}
-
-func (c Config) HistoryRanker(store history.Store) history.Ranker {
-	return history.New(c.LocalHistoryEnabled, store)
-}
-
 func GlobalPath(home func() (string, error)) (string, error) {
 	return globalPath(home, os.Getenv)
 }
@@ -227,9 +219,7 @@ func applySessionPrecedence(base Config, paths Paths) (Config, error) {
 var sessionOverrideKeys = map[string]string{
 	"CLOSE_ENOUGH_MODE":                   "mode",
 	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":        "auto_apply_safe",
-	"CLOSE_ENOUGH_LOCAL_HISTORY_ENABLED":  "local_history_enabled",
 	"CLOSE_ENOUGH_CURATED_PACKS_ENABLED":  "curated_packs_enabled",
-	"CLOSE_ENOUGH_CURATED_AUTO_CORRECT":   "curated_auto_correct",
 	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
 	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
 	"CLOSE_ENOUGH_UNDO_ENABLED":           "undo_enabled",
@@ -288,7 +278,7 @@ func ApplySessionOverrides(cfg Config, values map[string]string) (Config, error)
 
 func LoadGlobal(path string) (Config, error) {
 	cfg := Default()
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return cfg, nil
 	}
@@ -345,7 +335,7 @@ func mergeApprovedProject(base Config, path string) (Config, error) {
 	if !info.Mode().IsRegular() || !trustedProject(path) {
 		return base, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfigFile(path)
 	if err != nil {
 		return Config{}, err
 	}
@@ -398,10 +388,18 @@ func decode(data []byte, base Config) (Config, error) {
 	if base.UndoTTLSeconds < 1 || base.UndoTTLSeconds > maxUndoTTLSeconds {
 		return Config{}, fmt.Errorf("undo ttl seconds must be between 1 and %d", maxUndoTTLSeconds)
 	}
+	if base.LocalHistoryEnabled {
+		return Config{}, errors.New("local history is not supported")
+	}
 	if err := validateRuleExceptions(base.RuleExceptions); err != nil {
 		return Config{}, err
 	}
 	return base, nil
+}
+
+func readConfigFile(path string) ([]byte, error) {
+	// #nosec G304 -- These are the configured global or ownership-checked project configuration paths.
+	return os.ReadFile(path)
 }
 
 func migrate(cfg Config, version int) (Config, error) {
@@ -438,6 +436,13 @@ func migrate(cfg Config, version int) (Config, error) {
 			}
 			cfg.SchemaVersion = 5
 			version = 5
+		case 5:
+			// History was never wired to a production backend. Remove the
+			// old opt-in instead of retaining a configuration claim that the
+			// runtime cannot honor.
+			cfg.LocalHistoryEnabled = false
+			cfg.SchemaVersion = 6
+			version = 6
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}
@@ -460,7 +465,7 @@ func (c *Config) Set(key, value string) error {
 			return errors.New("mode must be hint, interrupt, off, or rewrite")
 		}
 		c.Mode = value
-	case "auto_apply_safe", "local_history_enabled", "curated_packs_enabled", "curated_auto_correct", "risk_interrupt", "local_learning_enabled", "undo_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
+	case "auto_apply_safe", "curated_packs_enabled", "risk_interrupt", "local_learning_enabled", "undo_enabled", "display.cause", "display.change", "display.confidence", "display.risk", "display.consequence", "display.trace":
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return err
@@ -468,12 +473,8 @@ func (c *Config) Set(key, value string) error {
 		switch key {
 		case "auto_apply_safe":
 			c.AutoApplySafe = parsed
-		case "local_history_enabled":
-			c.LocalHistoryEnabled = parsed
 		case "curated_packs_enabled":
 			c.CuratedPacksEnabled = parsed
-		case "curated_auto_correct":
-			c.CuratedAutoCorrect = parsed
 		case "risk_interrupt":
 			c.RiskInterrupt = parsed
 		case "local_learning_enabled":

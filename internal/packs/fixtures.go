@@ -25,7 +25,7 @@ type FixtureCase struct {
 }
 
 func LoadFixture(path string) (Fixture, error) {
-	data, err := os.ReadFile(path)
+	data, err := readUserAuthorizedFile(path)
 	if err != nil {
 		return Fixture{}, err
 	}

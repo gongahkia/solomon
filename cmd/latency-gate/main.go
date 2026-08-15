@@ -24,6 +24,7 @@ func main() {
 		fail(err)
 	}
 	defer os.RemoveAll(directory)
+	// #nosec G306 -- The latency fixture must be executable, and its temporary directory is private.
 	if err := os.WriteFile(filepath.Join(directory, "git"), []byte("#!/bin/sh\n"), 0o700); err != nil {
 		fail(err)
 	}

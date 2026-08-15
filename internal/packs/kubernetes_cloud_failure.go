@@ -10,7 +10,7 @@ import (
 
 const maxKubernetesCloudFailureOutputBytes = 8 << 10
 
-var ErrKubernetesCloudFailureOutputTooLarge = errors.New("Kubernetes/cloud failure output exceeds size limit")
+var ErrKubernetesCloudFailureOutputTooLarge = errors.New("kubernetes/cloud failure output exceeds size limit")
 
 var kubernetesCloudFailurePatterns = []struct {
 	kind    string

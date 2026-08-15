@@ -38,11 +38,16 @@ type Rule struct {
 }
 
 func Load(path string) (Pack, error) {
-	data, err := os.ReadFile(path)
+	data, err := readUserAuthorizedFile(path)
 	if err != nil {
 		return Pack{}, err
 	}
 	return decodePack(data)
+}
+
+func readUserAuthorizedFile(path string) ([]byte, error) {
+	// #nosec G304 -- Callers intentionally supply local paths; managed-pack callers separately require canonical regular files.
+	return os.ReadFile(path)
 }
 
 func decodePack(data []byte) (Pack, error) {
@@ -74,6 +79,13 @@ func InstallVerified(data, signature []byte, directory string, keyring Keyring) 
 	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", err
+	}
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("installed pack directory is not a real directory")
 	}
 	target := filepath.Join(directory, installedPackName(pack))
 	signatureTarget := target + ".sig"

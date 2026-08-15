@@ -10,7 +10,7 @@ import (
 
 const maxGoFailureOutputBytes = 8 << 10
 
-var ErrGoFailureOutputTooLarge = errors.New("Go failure output exceeds size limit")
+var ErrGoFailureOutputTooLarge = errors.New("go failure output exceeds size limit")
 
 var goFailurePatterns = []struct {
 	kind    string

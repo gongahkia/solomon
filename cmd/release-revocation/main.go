@@ -29,10 +29,10 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(*output), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(*output), 0o700); err != nil {
 		fail(err)
 	}
-	if err := os.WriteFile(*output, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*output, append(data, '\n'), 0o600); err != nil {
 		fail(err)
 	}
 }

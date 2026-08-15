@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -583,6 +585,42 @@ func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 	match, ok := resolver.MatchWords([]string{"local-tool", "teh"})
 	if !ok || match.Source != "installed" || match.PackID != "local-tool" || match.RuleID != "local-tool-typo" || match.Suggestion != "local-tool the" {
 		t.Fatalf("installed match = %#v, %t", match, ok)
+	}
+}
+
+func TestPackTrustCommandPersistsExplicitPublisherTrust(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.RawStdEncoding.EncodeToString(publicKey)
+	var output bytes.Buffer
+	if err := run([]string{"pack", "trust", "add", "trusted-publisher", encoded}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	path, err := packKeyringPath(os.UserHomeDir, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := packs.LoadKeyring(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, ok := keyring.PublicKey("trusted-publisher"); !ok || !bytes.Equal(key, publicKey) {
+		t.Fatalf("trusted publisher = %q, %t", key, ok)
+	}
+	output.Reset()
+	if err := run([]string{"pack", "trust", "remove", "trusted-publisher"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err = packs.LoadKeyring(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keyring.PublicKey("trusted-publisher"); ok {
+		t.Fatal("trusted publisher remains after removal")
 	}
 }
 

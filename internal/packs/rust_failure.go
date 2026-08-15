@@ -10,7 +10,7 @@ import (
 
 const maxRustFailureOutputBytes = 8 << 10
 
-var ErrRustFailureOutputTooLarge = errors.New("Rust failure output exceeds size limit")
+var ErrRustFailureOutputTooLarge = errors.New("rust failure output exceeds size limit")
 
 var rustFailurePatterns = []struct {
 	kind    string

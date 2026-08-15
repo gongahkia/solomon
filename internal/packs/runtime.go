@@ -105,7 +105,7 @@ func LoadInstalledVerified(directory string, keyring Keyring) ([]Pack, error) {
 	}
 	for _, pack := range loaded {
 		target := filepath.Join(directory, installedPackName(pack))
-		payload, err := os.ReadFile(target)
+		payload, err := readUserAuthorizedFile(target)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +117,7 @@ func LoadInstalledVerified(directory string, keyring Keyring) ([]Pack, error) {
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("installed pack %q signature is not a regular file", pack.ID)
 		}
-		signature, err := os.ReadFile(signaturePath)
+		signature, err := readUserAuthorizedFile(signaturePath)
 		if err != nil {
 			return nil, err
 		}

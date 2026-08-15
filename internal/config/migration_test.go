@@ -47,6 +47,16 @@ func TestDecodeV2PreservesUndoSettingsFromBase(t *testing.T) {
 	}
 }
 
+func TestDecodeV5RemovesRetiredLocalHistoryOptIn(t *testing.T) {
+	cfg, err := decode([]byte(`{"schema_version":5,"local_history_enabled":true}`), Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.LocalHistoryEnabled {
+		t.Fatalf("migrated v5 config = %#v", cfg)
+	}
+}
+
 func TestV1ConfigurationFixtureCorpus(t *testing.T) {
 	data, err := os.ReadFile("testdata/v1_configurations.json")
 	if err != nil {

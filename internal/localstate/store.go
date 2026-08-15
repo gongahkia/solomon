@@ -50,6 +50,7 @@ func Open(directory string) (*Store, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("local state directory is not a real directory")
 	}
+	// #nosec G302 -- A directory needs execute permission; 0700 is the intended owner-only mode.
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return nil, err
 	}
@@ -61,12 +62,10 @@ func Open(directory string) (*Store, error) {
 	database.SetMaxOpenConns(1)
 	store := &Store{database: database}
 	if err := store.migrate(context.Background()); err != nil {
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, database.Close())
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		database.Close()
-		return nil, err
+		return nil, errors.Join(err, database.Close())
 	}
 	return store, nil
 }

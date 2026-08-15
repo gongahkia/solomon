@@ -10,7 +10,7 @@ import (
 
 const maxPythonFailureOutputBytes = 8 << 10
 
-var ErrPythonFailureOutputTooLarge = errors.New("Python failure output exceeds size limit")
+var ErrPythonFailureOutputTooLarge = errors.New("python failure output exceeds size limit")
 
 var pythonFailurePatterns = []struct {
 	kind    string

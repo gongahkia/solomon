@@ -22,6 +22,7 @@ func Create(dir, pattern string) (*File, error) {
 	if err := file.Chmod(0o600); err != nil {
 		path := file.Name()
 		_ = file.Close()
+		// #nosec G703 -- path is the just-created temporary file returned by os.CreateTemp.
 		_ = os.Remove(path)
 		return nil, err
 	}

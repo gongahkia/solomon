@@ -43,7 +43,7 @@ func activateStagedPack(staged *StagedDownload, directory string, verify func(st
 	if staged == nil {
 		return "", errors.New("missing staged pack")
 	}
-	data, err := os.ReadFile(staged.Path())
+	data, err := readUserAuthorizedFile(staged.Path())
 	if err != nil {
 		return "", err
 	}
@@ -85,7 +85,7 @@ func stageActivationBackup(directory, target string) (*securetemp.File, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("activation target %q is not a regular file", target)
 	}
-	data, err := os.ReadFile(target)
+	data, err := readUserAuthorizedFile(target)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func stageActivationBackup(directory, target string) (*securetemp.File, error) {
 }
 
 func verifyActivatedPack(target string, expected []byte) error {
-	data, err := os.ReadFile(target)
+	data, err := readUserAuthorizedFile(target)
 	if err != nil {
 		return err
 	}

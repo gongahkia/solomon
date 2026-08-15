@@ -25,7 +25,7 @@ type Keyring struct {
 }
 
 func LoadKeyring(path string) (Keyring, error) {
-	data, err := os.ReadFile(path)
+	data, err := readUserAuthorizedFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return Keyring{}, nil
 	}

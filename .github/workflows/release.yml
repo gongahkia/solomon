@@ -15,25 +15,44 @@ jobs:
     outputs:
       targets: ${{ steps.matrix.outputs.targets }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.6'
       - id: matrix
         run: |
           targets=$(go run ./cmd/release-compatibility)
           printf 'targets=%s\n' "$targets" >> "$GITHUB_OUTPUT"
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=2m ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+      - run: $(go env GOPATH)/bin/staticcheck ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: $(go env GOPATH)/bin/govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+      - run: $(go env GOPATH)/bin/gosec ./...
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+      - run: $(go env GOPATH)/bin/actionlint
+      - run: shellcheck scripts/*.sh
   build:
-    needs: compatibility
+    needs: [compatibility, verify]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          go-version-file: go.mod
+          go-version: '1.26.6'
       - run: mkdir -p dist && GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/close-enough ./cmd/close-enough
       - if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: |
@@ -69,7 +88,7 @@ jobs:
             *) exit 2 ;;
           esac
           sh scripts/release-sbom.sh "$(go env GOPATH)/bin/cyclonedx-gomod" . "$sbom" "${{ matrix.goos }}" "${{ matrix.goarch }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sbom-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.cdx.json
@@ -83,27 +102,27 @@ jobs:
             *) exit 2 ;;
           esac
           sh scripts/release-license-audit.sh "$(go env GOPATH)/bin/go-licenses" . "$audit" "${{ matrix.goos }}" "${{ matrix.goarch }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: license-audit-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.licenses.csv
           if-no-files-found: error
-      - uses: sigstore/cosign-installer@v4.1.0
+      - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
       - run: |
           archive='${{ steps.release-archive.outputs.path }}'
           cosign sign-blob --yes --bundle "$archive.sigstore.json" "$archive"
           test -s "$archive.sigstore.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sigstore-bundle-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.sigstore.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist
           if-no-files-found: error
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.release-archive.outputs.path }}
   smoke:
@@ -113,8 +132,8 @@ jobs:
       matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: release
@@ -127,8 +146,8 @@ jobs:
     needs: compatibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: sigstore/cosign-installer@v4.1.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
       - run: |
           mkdir -p dist
           cp scripts/install.sh dist/install.sh
@@ -137,21 +156,24 @@ jobs:
           cosign sign-blob --yes --bundle dist/install.ps1.sigstore.json dist/install.ps1
           test -s dist/install.sh.sigstore.json
           test -s dist/install.ps1.sigstore.json
-      - uses: actions/upload-artifact@v4
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF"
+          cosign verify-blob dist/install.sh --bundle dist/install.sh.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          cosign verify-blob dist/install.ps1 --bundle dist/install.ps1.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bootstrap-${{ github.ref_name }}
           path: dist/install.*
           if-no-files-found: error
   publish:
-    needs: [build, smoke, bootstrap]
+    needs: [build, smoke, bootstrap, verify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: release-${{ github.ref_name }}-*
           merge-multiple: true
           path: dist
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: bootstrap-${{ github.ref_name }}
           path: dist
@@ -168,82 +190,3 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv dist/checksums.txt dist/install.sh dist/install.ps1
-  bundled-packs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - run: mkdir -p dist && go build -trimpath -buildvcs=false -mod=readonly -o dist/close-enough ./cmd/close-enough
-      - id: bundled-pack
-        run: |
-          archive=$(sh scripts/release-pack-name.sh "$GITHUB_REF_NAME")
-          sh scripts/release-pack-bundle.sh dist/close-enough internal/packs/bundled "dist/$archive" "${archive%.tar.gz}"
-          printf 'path=%s\n' "dist/$archive" >> "$GITHUB_OUTPUT"
-      - uses: sigstore/cosign-installer@v4.1.0
-      - run: |
-          bundle='${{ steps.bundled-pack.outputs.path }}'
-          cosign sign-blob --yes --bundle "$bundle.sigstore.json" "$bundle"
-          test -s "$bundle.sigstore.json"
-          cosign verify-blob "$bundle" --bundle "$bundle.sigstore.json" --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bundled-packs-${{ github.ref_name }}
-          path: dist/*.tar.gz
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bundled-packs-signature-${{ github.ref_name }}
-          path: dist/*.sigstore.json
-          if-no-files-found: error
-  update-manifest:
-    needs: [build, smoke]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-${{ github.ref_name }}-linux-amd64
-          path: dist/releases/linux-amd64
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-${{ github.ref_name }}-linux-arm64
-          path: dist/releases/linux-arm64
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-${{ github.ref_name }}-darwin-amd64
-          path: dist/releases/darwin-amd64
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-${{ github.ref_name }}-darwin-arm64
-          path: dist/releases/darwin-arm64
-      - uses: actions/download-artifact@v5
-        with:
-          name: release-${{ github.ref_name }}-windows-amd64
-          path: dist/releases/windows-amd64
-      - id: update-manifest
-        run: |
-          set -- dist/releases/linux-amd64/*.tar.gz dist/releases/linux-arm64/*.tar.gz dist/releases/darwin-amd64/*.tar.gz dist/releases/darwin-arm64/*.tar.gz dist/releases/windows-amd64/*.zip
-          for artifact in "$@"; do test -f "$artifact"; done
-          go run ./cmd/update-manifest --channel stable --version "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --output dist/update/stable.json --artifact "$1" --artifact "$2" --artifact "$3" --artifact "$4" --artifact "$5"
-          printf 'path=%s\n' dist/update/stable.json >> "$GITHUB_OUTPUT"
-      - uses: sigstore/cosign-installer@v4.1.0
-      - run: |
-          manifest='${{ steps.update-manifest.outputs.path }}'
-          cosign sign-blob --yes --bundle "$manifest.sigstore.json" "$manifest"
-          test -s "$manifest.sigstore.json"
-          cosign verify-blob "$manifest" --bundle "$manifest.sigstore.json" --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" --certificate-oidc-issuer https://token.actions.githubusercontent.com
-      - uses: actions/upload-artifact@v4
-        with:
-          name: update-manifest-${{ github.ref_name }}
-          path: dist/update/stable.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: update-manifest-signature-${{ github.ref_name }}
-          path: dist/update/stable.json.sigstore.json
-          if-no-files-found: error

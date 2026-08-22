@@ -1,0 +1,8 @@
+# POSIX shell syntax. Source only in trusted repo checkouts.
+VOUCHES_FORMAT=1
+VOUCH_0001_ID=founder
+VOUCH_0001_NAME='Gabriel Ong Zhe Mian'
+VOUCH_0001_GITHUB=gongahkia
+VOUCH_0001_ROLE=founder
+VOUCH_0001_DATE=2026-06-17
+VOUCH_0001_BY=self

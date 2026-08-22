@@ -1,4 +1,7 @@
-/dist/
-/coverage.out
-/close-enough
+CLAUDE.md
+.zig-cache/
+zig-out/
+.playwright-cli/
+output/
+
 AGENTS.md

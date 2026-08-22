@@ -2,7 +2,7 @@
 
 Local, deterministic terminal repair. Close Enough diagnoses likely command mistakes before submission and after supported failures, then presents a risk-classified hint. It supports command, Git subcommand, and path typo suggestions with configurable hint, interrupt, rewrite, and off modes.
 
-License: GPL-3.0-only. The complete license text is required before the first release artifact.
+License: GPL-3.0-only. See [LICENSE](LICENSE).
 
 ## Quick start
 

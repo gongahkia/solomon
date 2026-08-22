@@ -1,4 +1,0 @@
-[contracts.payments-prod.kubernetes]
-context = "payments-prod-admin"
-namespace = "payments"
-cluster_server = "https://payments.prod.example"

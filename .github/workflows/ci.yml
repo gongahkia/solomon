@@ -1,42 +1,108 @@
-name: CI
+name: ci
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  zig:
-    name: zig / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-14, ubuntu-24.04]
-
+  quality:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-${{ hashFiles('build.zig.zon') }}
+          go-version: '1.26.6'
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=2m ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+      - run: $(go env GOPATH)/bin/staticcheck ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: $(go env GOPATH)/bin/govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+      - run: $(go env GOPATH)/bin/gosec ./...
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+      - run: $(go env GOPATH)/bin/actionlint
+      - run: shellcheck scripts/*.sh
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - run: zig fmt --check build.zig src/main.zig src/target.zig src/cli/target.zig
-      - run: zig build test
-      - run: zig build
-      - run: zig build release
+      - run: sudo apt-get update && sudo apt-get install -y expect
 
-      - name: verify a matching target fixture
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: make latency-gate
+
+  macos-integration:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: ./close-enough version
+      - run: |
+          set +e
+          ./close-enough check
+          result_code=$?
+          set -e
+          test "$result_code" -eq 2
+
+  linux-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - run: sudo apt-get update && sudo apt-get install -y expect
+
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: ./close-enough version
+      - run: |
+          set +e
+          ./close-enough check
+          result_code=$?
+          set -e
+          test "$result_code" -eq 2
+
+  windows-integration:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - shell: pwsh
         run: |
-          TF_WORKSPACE=production ./zig-out/bin/shisa target inspect payments-prod --config testdata/targets.toml --json | grep '"status":"verified"'
-
-      - name: reject a mismatched target fixture
+          go vet ./...
+          go test -race ./...
+          go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=dev -X main.commit=unknown" -o close-enough.exe ./cmd/close-enough
+      - shell: pwsh
         run: |
-          if TF_WORKSPACE=staging ./zig-out/bin/shisa target run payments-prod --config testdata/targets.toml -- tofu plan; then
-            exit 1
-          fi
+          & .\close-enough.exe version
+          if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
+          & .\close-enough.exe check
+          if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }
+
+  race-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - run: sudo apt-get update && sudo apt-get install -y expect
+
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: go test -race -count=1 -timeout=2m ./...

@@ -1,8 +1,0 @@
-.{
-    .name = .shisa,
-    .version = "0.2.0",
-    .minimum_zig_version = "0.15.2",
-    .dependencies = .{},
-    .paths = .{""},
-    .fingerprint = 0xff6339ba774e5046,
-}

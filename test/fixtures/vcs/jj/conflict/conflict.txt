@@ -1,3 +1,0 @@
-conflict
-src/main.zig
-README.md

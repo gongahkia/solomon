@@ -3,52 +3,19 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  protocol-rfc:
-    name: RFC gate
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - run: bash .github/scripts/protocol-rfc-gate.sh
-        env:
-          SHISA_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          SHISA_PR_BODY: ${{ github.event.pull_request.body }}
-          SHISA_REQUIRE_PR_BODY_RFC: ${{ github.event_name == 'pull_request' && '1' || '0' }}
-
-  user-docs:
-    name: user docs gate
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - run: bash .github/scripts/user-docs-gate.sh
-        env:
-          SHISA_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          SHISA_PR_BODY: ${{ github.event.pull_request.body }}
-
   zig:
     name: zig / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-14
-          - ubuntu-22.04
-          - ubuntu-24.04
+        os: [macos-14, ubuntu-24.04]
 
     steps:
       - uses: actions/checkout@v4
@@ -59,156 +26,17 @@ jobs:
           use-cache: true
           cache-key: shisa-${{ hashFiles('build.zig.zon') }}
 
-      - run: zig version
-      - run: zig fmt --check build.zig src tools
-      - run: zig build schema
-      - run: git diff --exit-code docs/protocol/v1.schema.json
+      - run: zig fmt --check build.zig src/main.zig src/target.zig src/cli/target.zig
       - run: zig build test
-      - run: zig build debug
-      - run: zig build release
-      - run: zig build bench
-
-  hardening-e2e:
-    name: hardening e2e
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'area/ci'))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: bash test/e2e/docker-shells.sh --matrix test/e2e/hardening.tsv --require-hardening
-
-  windows-e2e:
-    name: windows native
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-windows-${{ hashFiles('build.zig.zon') }}
-
-      - run: zig build -Dtarget=x86_64-windows
-      - shell: pwsh
-        run: .\test\e2e\windows-native.ps1
-
-  tui-policy:
-    name: no interactive TUI without flag
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: bash scripts/no-interactive-tui-check.sh
-
-  daemon-file-size:
-    name: daemon file size guard
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: bash scripts/file-size-guard.sh
-
-  theme-contrast:
-    name: theme contrast
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-theme-${{ hashFiles('build.zig.zon') }}
-
-      - run: bash scripts/theme-contrast-gate.sh
-
-  theme-previews:
-    name: theme previews
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-theme-preview-${{ hashFiles('build.zig.zon') }}
-
-      - run: bash scripts/theme-preview-screenshots.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: theme-previews
-          path: zig-out/theme-previews
-          if-no-files-found: error
-
-  vcs-fixtures:
-    name: vcs fixtures / ${{ matrix.module }}
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        module:
-          - hg
-          - jj
-          - sl
-          - stack
-          - worktree
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-vcs-${{ matrix.module }}-${{ hashFiles('build.zig.zon') }}
-
-      - run: zig test src/vcs/${{ matrix.module }}.zig
-
-  first-run-smoke:
-    name: first-run smoke
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-first-run-${{ hashFiles('build.zig.zon') }}
-
       - run: zig build
-      - run: bash test/integration/first_run_smoke.sh
+      - run: zig build release
 
-  shell-hooks:
-    name: shell hooks / ${{ matrix.shell }}
-    runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - shell: nu
-            package: nushell
-            test: test/integration/nu_fake_socket.sh
-          - shell: pwsh
-            package: powershell
-            test: test/integration/pwsh_fake_socket.sh
+      - name: verify a matching target fixture
+        run: |
+          TF_WORKSPACE=production ./zig-out/bin/shisa target inspect payments-prod --config testdata/targets.toml --json | grep '"status":"verified"'
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2.2.1
-        with:
-          version: 0.15.2
-          use-cache: true
-          cache-key: shisa-shell-${{ matrix.shell }}-${{ hashFiles('build.zig.zon') }}
-
-      - run: brew install ${{ matrix.package }}
-      - run: zig build debug
-      - run: bash ${{ matrix.test }}
+      - name: reject a mismatched target fixture
+        run: |
+          if TF_WORKSPACE=staging ./zig-out/bin/shisa target run payments-prod --config testdata/targets.toml -- tofu plan; then
+            exit 1
+          fi

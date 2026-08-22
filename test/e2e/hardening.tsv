@@ -1,7 +1,0 @@
-# distro	image	dockerfile	shells	platform	scenario
-systemd-nspawn-fedora	shisa-e2e:systemd-nspawn-fedora	test/e2e/docker/fedora-hardening.Dockerfile	bash,zsh,fish		systemd-nspawn
-rootless-podman-fedora	shisa-e2e:rootless-podman-fedora	test/e2e/docker/fedora-hardening.Dockerfile	bash,zsh,fish		rootless-podman
-rootless-podman-rhel	shisa-e2e:rootless-podman-rhel	test/e2e/docker/ubi9-hardening.Dockerfile	bash,zsh		rootless-podman
-distrobox-fedora	shisa-e2e:distrobox-fedora	test/e2e/docker/fedora-hardening.Dockerfile	bash,zsh,fish		distrobox
-distrobox-arch	shisa-e2e:distrobox-arch	test/e2e/docker/arch-hardening.Dockerfile	bash,zsh,fish	linux/amd64	distrobox
-wayland-sway-fedora	shisa-e2e:wayland-sway-fedora	test/e2e/docker/fedora-wayland.Dockerfile	bash,zsh,fish		wayland-sway

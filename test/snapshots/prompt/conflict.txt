@@ -1,1 +1,0 @@
-<root>/conflict git:main* \x1b[31mexit:2\x1b[0m> 

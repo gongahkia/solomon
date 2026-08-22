@@ -1,3 +1,0 @@
-6f57871f668d user@example.test now, lasted 20 milliseconds
-add workspace 'default'
-000000000000 root()

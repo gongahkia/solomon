@@ -4,9 +4,4 @@ zig-out/
 .playwright-cli/
 output/
 
-bench/infra/**/.terraform/
-bench/infra/**/*.tfstate
-bench/infra/**/*.tfstate.*
-bench/infra/**/*.tfvars
-
 AGENTS.md

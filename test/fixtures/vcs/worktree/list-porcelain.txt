@@ -1,7 +1,0 @@
-worktree /repo
-HEAD a
-branch refs/heads/main
-
-worktree /repo-linked
-HEAD b
-branch refs/heads/feature

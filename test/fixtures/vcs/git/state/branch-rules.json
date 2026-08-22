@@ -1,4 +1,0 @@
-[
-  {"type":"pull_request","parameters":{"required_approving_review_count":2}},
-  {"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}}
-]

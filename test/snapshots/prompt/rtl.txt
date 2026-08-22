@@ -1,1 +1,0 @@
-took:1.5s jobs:1 \x1b[31mexit:2\x1b[0m git:main <root>/rtl> 

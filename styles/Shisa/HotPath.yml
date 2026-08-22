@@ -1,7 +1,0 @@
-extends: existence
-message: "Use 'hot path' as two words."
-level: warning
-ignorecase: true
-tokens:
-  - hotpath
-  - hot-path

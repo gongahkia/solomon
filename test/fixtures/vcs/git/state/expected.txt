@@ -1,9 +1,0 @@
-worktree=staged:2 unstaged:2 untracked:1 conflicts:1
-stash=2
-sparse=cone
-ahead_behind=behind:2 ahead:5
-submodules=dirty:1 uninit:1 conflicts:1 ahead:2 behind:4
-lfs=active:true pointers:1
-signature=valid:ssh
-protection=rules:2 reviews:2 checks:1 signal:protected:review+ci
-fetch_age=7200 warn:false

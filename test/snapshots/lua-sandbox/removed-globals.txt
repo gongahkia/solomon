@@ -1,7 +1,0 @@
-debug
-dofile
-io
-loadfile
-os
-package
-require

@@ -1,0 +1,3 @@
+# This fixture is also the smallest complete target-contract example.
+[contracts.payments-prod.terraform]
+workspace = "production"

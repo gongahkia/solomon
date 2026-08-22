@@ -1,5 +1,0 @@
- 1234567 clean (heads/main)
-+abcdef0 dirty (heads/main ahead 2, behind 1)
--1111111 missing libs/a
-U2222222 conflict libs/b
- 3333333 old (heads/main behind 3)

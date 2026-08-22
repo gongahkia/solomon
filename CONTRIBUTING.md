@@ -1,75 +1,14 @@
 # Contributing
 
-Shisa is pre-MVP. Keep changes small, benchmark-aware, and tied to the roadmap in [todo.md](todo.md).
+Shisa's scope is defined by [north-star.md](north-star.md). Keep changes inside the target-contract boundary: make local command inputs more truthful and inspectable without activating contexts, handling credentials, or pretending to enforce remote policy.
 
-## Toolchain
-
-- Zig: `0.15.2` from `.zigversion` and `build.zig.zon`
-- Shell: zsh, bash, or fish for integration work
-- OS targets: macOS and Linux
-
-## Build
+Use Zig `0.15.2`.
 
 ```sh
-zig build debug
+zig fmt --check build.zig src/main.zig src/target.zig src/cli/target.zig
+zig build test
+zig build
 zig build release
 ```
 
-## Test
-
-```sh
-zig fmt --check build.zig src
-zig build test
-zig build bench
-```
-
-Snapshot files are read-only by default. To rewrite generated snapshots, use the explicit confirmation gate:
-
-```sh
-scripts/update-snapshots.sh --confirm update-snapshots
-```
-
-Per-shell session coverage lives in `test/integration/*_fake_socket.sh` for `zsh`, `bash`, `fish`, `nu`, and `pwsh`, plus `test/integration/shell_expect.exp` for interactive expect sessions. These scripts are wired into `zig build test`.
-
-Hook/redraw/transient coverage is split by shell: Bash checks `PROMPT_COMMAND`, debug/precmd, and Readline redraw; Fish checks prompt and redraw functions; Nu checks reprompt hooks; PowerShell checks async fill events; Expect checks the Zsh transient prompt path.
-
-Run the full local gate before opening a PR:
-
-```sh
-zig fmt --check build.zig src
-zig build test
-zig build debug
-zig build release
-zig build bench
-```
-
-## Benchmarks
-
-Performance-sensitive changes must include benchmark evidence. The warm prompt render target is p99 under 2 ms. A warm-render regression over 10% blocks the change unless an RFC explicitly accepts the tradeoff.
-
-## RFC Process
-
-An RFC is required for changes to:
-
-- wire protocol
-- plugin API
-- security model
-- theme/rendering spec
-- governance process
-
-Use [rfcs/0000-template.md](rfcs/0000-template.md). RFCs must include rejected alternatives, compatibility impact, security impact, and performance impact.
-
-Initial workflow:
-
-1. Open an issue with the RFC proposal template.
-2. Draft `rfcs/NNNN-short-title.md`.
-3. Add it to [rfcs/README.md](rfcs/README.md).
-4. Link the RFC from the PR.
-
-## Pull Requests
-
-Keep PRs scoped to one behavior or one doc task. Update [todo.md](todo.md) when completing roadmap work. Update docs when changing a user-facing flag, config field, module, or workflow.
-
-## Conduct
-
-All community spaces follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Add a focused test for every parser, source-precedence rule, or refusal boundary you change. Update [docs/target-contracts.md](docs/target-contracts.md) when the contract format or accepted executable set changes.

@@ -1,143 +1,63 @@
 # Shisa
 
-[![release reproducibility gate](https://github.com/gongahkia/shisa/actions/workflows/release.yml/badge.svg)](https://github.com/gongahkia/shisa/actions/workflows/release.yml)
+Shisa verifies the effective local target immediately before a direct Kubernetes or Terraform/OpenTofu command starts.
 
-The daemon-backed, async-first shell prompt.
+It is not a prompt, context manager, credential broker, command corrector, or remote policy engine. Those are separate product categories with established tools. Shisa fills the smaller gap between “I intended to operate on production” and “what will this process actually use?”
 
-Shisa keeps slow prompt work out of the shell. A per-user daemon watches local state, caches module output, and serves rendered prompts over a Unix socket on macOS/Linux or a named pipe on Windows.
+## What it does
 
-## Status
+You declare a named target contract in a user-owned config file:
 
-**Alpha.** Shisa works from source on a developer machine. There is no signed release or packaged installer yet.
+```toml
+[contracts.payments-prod.kubernetes]
+context = "payments-prod-admin"
+namespace = "payments"
+cluster_server = "https://cluster.prod.example"
 
-Current release blockers:
-
-- Full Chromium cold-render evidence is still missing.
-- Warm end-to-end p99 is guarded at 10 ms; the north-star target remains under 2 ms.
-- Packaging and release verification are not complete.
-
-## Features
-
-- Cross-shell prompt support for zsh, bash, fish, nushell, and PowerShell.
-- Async git and language-version segments with daemon-side caching.
-- Quiet first-run profile: cwd, compact Git state, failures, jobs, duration, and SSH user/host.
-- Opt-in zsh command-aware context in the right prompt or ZLE message area.
-- Experimental, opt-in cloud, IaC, SSH, container, SSO, cost, VPN, and risk modules.
-- Capability-gated Lua plugins (experimental; install from an explicit local directory or signed bundle).
-- Starship, Powerlevel10k, Oh My Posh, Tide, and Pure migration helpers.
-- `shisa doctor` for local diagnostics, repair hints, and machine-readable lint.
-- Zero telemetry.
-
-## Install From Source
-
-Requirements:
-
-- Zig `0.15.2`
-- macOS, Linux, or Windows shell environment
-
-```sh
-git clone https://github.com/gongahkia/shisa.git
-cd shisa
-zig build release
+[contracts.payments-prod.terraform]
+workspace = "production"
 ```
 
-For development:
+Then inspect or gate a direct tool invocation:
 
 ```sh
-zig build debug
+shisa target inspect payments-prod
+shisa target run payments-prod -- kubectl delete deployment api
+shisa target run payments-prod -- tofu apply
+```
+
+Before it launches the child, Shisa reports or compares the local values that matter:
+
+- Kubernetes context, namespace, and cluster server from `kubectl config view`, including explicit context and namespace flags.
+- Terraform/OpenTofu workspace from `TF_WORKSPACE`, then `.terraform/environment` or local state.
+- Source and current observation status: `verified`, `mismatch`, `unknown`, or `not_configured`.
+
+It refuses to launch when the target relevant to the command is anything other than `verified`.
+
+## What it deliberately does not do
+
+- Switch or activate contexts. Use `ctx`, `kubectx`, `direnv`, and provider credential tooling for that.
+- Accept arbitrary scripts, wrappers, aliases, or `sh -c`. Those can select a target after Shisa's check. `run` is limited to direct `kubectl`, `helm`, `terraform`, and `tofu` invocations.
+- Treat labels such as `prod` as proof, retrieve cloud credentials, or replace cloud-side authorization/admission controls.
+- Render a shell prompt, run a daemon, import prompt themes, host plugins, classify destructive commands, or correct shell commands.
+
+See [target contracts](docs/target-contracts.md) for the user stories, format, commands, and limits.
+
+## Build
+
+Requires Zig `0.15.2`.
+
+```sh
 zig build test
-zig build bench
+zig build release
+./zig-out/bin/shisa --help
 ```
 
-## Setup
+The default config path is `~/.config/shisa/targets.toml`; `--config PATH` is available for explicit automation and testing.
 
-Initialize config and install the hook:
+## Product boundary
 
-```sh
-./zig-out/bin/shisa init --defaults --profile quiet --shell zsh --theme nord-dark --async on --write-hook
-```
-
-Start the daemon:
-
-```sh
-./zig-out/bin/shisad --foreground &
-exec zsh
-```
-
-Manual hook setup:
-
-```sh
-export SHISA_BIN=/path/to/shisa/zig-out/bin/shisa
-source /path/to/shisa/init/shisa.zsh
-```
-
-Use the matching file for other shells:
-
-| Shell | Hook |
-| --- | --- |
-| zsh | `init/shisa.zsh` |
-| bash | `init/shisa.bash` |
-| fish | `init/shisa.fish` |
-| nushell | `init/shisa.nu` |
-| PowerShell | `init/shisa.ps1` |
-
-## Configure
-
-Shisa reads:
-
-```text
-~/.config/shisa/shisa.toml
-```
-
-Common commands:
-
-```sh
-shisa doctor
-shisa doctor --json --severity-min warning
-shisa doctor --list-checks
-shisa explain
-shisa font check
-shisa theme preview nord-dark
-```
-
-Choose an operating profile at initialization: `quiet` is the default; `cloud` reveals local identity and risk context while composing cloud commands; `infra` adds local IaC, region, VPN, and container checks for cloud and IaC commands. The older `context-rich` profile remains available for compatibility, but enables every local module continuously. Network-backed cost collection stays opt-in in every profile.
-
-## Troubleshooting
-
-Doctor can isolate one subsystem:
-
-```sh
-shisa doctor --only daemon/not-running,daemon/socket-mismatch
-shisa doctor --only modules/vpn-active,prompt/async-pending --severity-min info
-shisa doctor --report /tmp/shisa-doctor.json --json --severity-min info
-```
-
-Expected first-run states:
-
-- `shisad: another daemon already owns the socket lock`: a daemon is already running.
-- `[pending:git_branch]`: async cache fill; render again.
-- skipped Pure or Nix tests: optional local prerequisites are missing.
-
-See [docs/troubleshooting.md](docs/troubleshooting.md) and [docs/doctor.md](docs/doctor.md).
-
-## Documentation
-
-- [Quickstart](docs/quickstart.md)
-- [Shell support](docs/shells.md)
-- [Config schema](docs/config-schema.md)
-- [Local context API](docs/context-api.md)
-- [Cloud and infrastructure profiles](docs/cloud-profiles.md)
-- [History interoperability](docs/history-interoperability.md)
-- [Migrate from Starship](docs/migrate-from-starship.md)
-- [Uninstall](docs/uninstall.md)
-- [Architecture](docs/architecture.md)
-- [Roadmap](todo.md)
-- [Product target](north-star.md)
-
-## Build Flags
-
-- `-Dvcs_extra=true` enables hg/jj/sapling stack and worktree CLI verbs. Default: off.
-- AI helpers are not in core; future opt-in pack scope lives in [north-star section 18](north-star.md).
+Shisa verifies local process inputs at one invocation boundary. A successful check does not prove cloud identity, authorization, a Terraform remote backend, or the outcome of a Kubernetes API request. Enforce those properties in the infrastructure control plane.
 
 ## License
 

@@ -1,18 +1,48 @@
 # Close Enough
 
-Local, deterministic terminal repair hints. The current slice supports command, Git subcommand, and path typo suggestions with configurable hint, interrupt, rewrite, and off modes.
+Local, deterministic terminal repair. Close Enough diagnoses likely command mistakes before submission and after supported failures, then presents a risk-classified hint. It supports command, Git subcommand, and path typo suggestions with configurable hint, interrupt, rewrite, and off modes.
 
 License: GPL-3.0-only. The complete license text is required before the first release artifact.
 
+## Quick start
+
+Close Enough currently supports source installation with Go 1.24 or newer. From a clone of this repository:
+
 ```sh
-go build ./cmd/close-enough
-./close-enough init --shell zsh >> ~/.zshrc
-./close-enough check --command 'gti status'
+go install ./cmd/close-enough
+
+# add $(go env GOPATH)/bin to PATH first if Go has not already done so
+eval "$(close-enough init --shell zsh)"
+
+# make the Zsh integration persistent
+close-enough init --shell zsh >> ~/.zshrc
+
+close-enough check --format plain --command 'git sttaus'
 ```
 
-`close-enough` never sends command data over the network by default. New and migrated configurations are hint-only; a bundled safe rewrite requires both `mode=rewrite` and `auto_apply_safe=true` as an explicit opt-in.
+New and migrated configurations are hint-only. A bundled safe rewrite requires both `mode=rewrite` and `auto_apply_safe=true` as an explicit opt-in; it edits the shell buffer, requires another Enter to submit, and can be undone with Ctrl-G.
 
-Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
+Zsh is first-class. Fish and PowerShell support the same repair modes, with their adapter limitations reported by `close-enough doctor`; PowerShell requires PSReadLine. Bash shell integration is intentionally unavailable because the retired adapter could evaluate a command buffer and replace the user's DEBUG trap. The standalone `check` command remains available from Bash.
+
+## How this differs from The Fuck
+
+The projects share the command-repair problem space, but Close Enough is designed as a conservative shell-integrated assistant rather than a command replay tool.
+
+| | The Fuck | Close Enough |
+| --- | --- | --- |
+| Interaction | Run an explicit alias after a command fails; choose a corrected command to execute. | Diagnose before submission and after supported failures; default to a non-blocking hint. |
+| Failure data | Matches extensible Python rules against command output and shell history. | Extracts bounded, allow-listed evidence for supported tools, redacts it before matching, and never persists command history. |
+| Applying a repair | Can execute the selected correction. | Rewrites only explicitly opted-in, bundled `safe` repairs in the shell buffer; high-risk and installed-pack repairs are never auto-applied. |
+| Extension model | Python rules, including third-party packages. | Declarative packs with strict schema validation, explicit risk metadata, and Ed25519 publisher trust. |
+| Shell command | Uses the `fuck` trigger alias in its recommended shell setup. | Uses only `close-enough`; it does not create a `fuck` or `thefuck` alias. |
+
+This lets both tools be installed while users evaluate Close Enough without alias conflicts. Close Enough's position should remain: explain a deterministic, locally evaluated repair before changing a command, and make any command-buffer rewrite explicit, reversible, and constrained by risk.
+
+## Installation from a release
+
+The release workflow is configured to produce signed archives and installers for macOS, Linux, and Windows. The verified install path is below; use it once a versioned release is available.
+
+`close-enough` does not send command data over the network during diagnosis. Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
 
 Pass `check --format=plain --screen-reader` for structured, ANSI-free diagnostics without visual diff markers.
 

@@ -84,6 +84,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usage(stderr)
 	}
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		return helpCommand(args[1:], stdout)
+	}
 	switch args[0] {
 	case "version":
 		_, err := fmt.Fprintln(stdout, versionString())
@@ -121,10 +124,35 @@ func versionString() string {
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|inspect-decision|config|rule|learn|pack|daemon|doctor|checksum|version>"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|config|doctor|version|help>\n\nstart here:\n  close-enough init --shell zsh\n  close-enough check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
+}
+
+func helpCommand(args []string, stdout io.Writer) error {
+	if len(args) > 1 {
+		return clierr.New(clierr.Usage, "usage: close-enough help [init|check|config|doctor]")
+	}
+	if len(args) == 0 {
+		_, err := fmt.Fprintln(stdout, "close-enough keeps shell repairs safe and quiet by default.\n\nusage: close-enough <init|check|config|doctor|version|help>\n\nstart here:\n  close-enough init --shell zsh\n  close-enough check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum")
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	var text string
+	switch args[0] {
+	case "init":
+		text = "usage: close-enough init --shell <bash|zsh|fish|powershell> [--experimental-output-capture]\n\nPrint shell integration. Experimental output capture is opt-in and currently available for Bash and Zsh."
+	case "check":
+		text = "usage: close-enough check --command <command> [--stage pre|post] [--format json|plain|record] [--color auto|always|never]"
+	case "config":
+		text = "usage: close-enough config [show|set <key> <value>]"
+	case "doctor":
+		text = "usage: close-enough doctor\n\nReport capabilities and limitations for the current shell."
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough help [init|check|config|doctor]")
+	}
+	_, err := fmt.Fprintln(stdout, text)
+	return clierr.Wrap(clierr.Operation, err)
 }
 
 func learnCommand(args []string, stdout io.Writer) error {

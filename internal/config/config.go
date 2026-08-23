@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion         = 6
+	CurrentSchemaVersion         = 7
 	maxRuleExceptionCommandBytes = 8 << 10
 	defaultLearningRetentionDays = 30
 	maxLearningRetentionDays     = 90
@@ -38,7 +38,6 @@ type Config struct {
 	// The product has no history persistence or ranking backend.
 	LocalHistoryEnabled      bool            `json:"local_history_enabled,omitempty"`
 	CuratedPacksEnabled      bool            `json:"curated_packs_enabled"`
-	CuratedAutoCorrect       bool            `json:"curated_auto_correct"`
 	RiskInterrupt            bool            `json:"risk_interrupt"`
 	LocalLearningEnabled     bool            `json:"local_learning_enabled"`
 	LearningRetentionDays    int             `json:"learning_retention_days"`
@@ -352,11 +351,6 @@ func decode(data []byte, base Config) (Config, error) {
 	}
 	delete(fields, "registry_enabled")
 	delete(fields, "auto_update_enabled")
-	filtered, err := json.Marshal(fields)
-	if err != nil {
-		return Config{}, fmt.Errorf("parse config: %w", err)
-	}
-	data = filtered
 	version := 0
 	if value, ok := fields["schema_version"]; ok {
 		if bytes.Equal(value, []byte("null")) {
@@ -366,6 +360,17 @@ func decode(data []byte, base Config) (Config, error) {
 			return Config{}, fmt.Errorf("parse config: schema_version must be an integer: %w", err)
 		}
 	}
+	// curated_auto_correct was exposed but never controlled runtime behavior.
+	// Accept it only in legacy configurations so v7 retains strict unknown-field
+	// validation while older files can migrate cleanly.
+	if version <= 6 {
+		delete(fields, "curated_auto_correct")
+	}
+	filtered, err := json.Marshal(fields)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	data = filtered
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&base); err != nil {
@@ -409,12 +414,10 @@ func migrate(cfg Config, version int) (Config, error) {
 	for version < CurrentSchemaVersion {
 		switch version {
 		case 0:
-			cfg.CuratedAutoCorrect = cfg.Mode == "rewrite" && cfg.AutoApplySafe
 			cfg.RiskInterrupt = cfg.Mode == "interrupt"
 			cfg.SchemaVersion = 1
 			version = 1
 		case 1:
-			cfg.CuratedAutoCorrect = cfg.Mode == "rewrite" && cfg.AutoApplySafe
 			cfg.RiskInterrupt = cfg.Mode == "interrupt"
 			cfg.SchemaVersion = 2
 			version = 2
@@ -431,7 +434,6 @@ func migrate(cfg Config, version int) (Config, error) {
 			if cfg.Mode == "rewrite" || cfg.Mode == "interrupt" {
 				cfg.Mode = "hint"
 				cfg.AutoApplySafe = false
-				cfg.CuratedAutoCorrect = false
 				cfg.RiskInterrupt = false
 			}
 			cfg.SchemaVersion = 5
@@ -443,6 +445,11 @@ func migrate(cfg Config, version int) (Config, error) {
 			cfg.LocalHistoryEnabled = false
 			cfg.SchemaVersion = 6
 			version = 6
+		case 6:
+			// curated_auto_correct never influenced decisions. Drop it instead of
+			// preserving a configuration claim the runtime cannot honor.
+			cfg.SchemaVersion = 7
+			version = 7
 		default:
 			return Config{}, fmt.Errorf("unsupported configuration schema version %d", version)
 		}

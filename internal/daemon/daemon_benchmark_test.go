@@ -40,7 +40,7 @@ func BenchmarkWarmCuratedPreSend(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		response, err := client.Request(context.Background(), request)
-		if err != nil || response.Action != "rewrite" {
+		if err != nil || response.Action != "hint" || response.Suggestion != "git status" || response.Risk != "safe" {
 			b.Fatalf("Request() = %+v, %v", response, err)
 		}
 	}

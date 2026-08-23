@@ -127,6 +127,10 @@ func (r *Relay) appendLocked(value string) {
 func (r *Relay) Snapshot(command string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.active && r.pending != "" {
+		r.appendLocked(r.pending)
+		r.pending = ""
+	}
 	output := strings.TrimSpace(r.output)
 	// Bash marks the prompt before Readline echoes the command. Zsh marks in
 	// preexec, so this removal is a no-op there. Only remove the first echo.

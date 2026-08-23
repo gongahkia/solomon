@@ -93,6 +93,18 @@ func TestUsageWritesUsage(t *testing.T) {
 	}
 }
 
+func TestHelpCommandsSucceedAndDescribeOnboarding(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}, {"help", "init"}} {
+		var output strings.Builder
+		if err := run(args, &output, io.Discard); err != nil {
+			t.Fatalf("run(%q) = %v", args, err)
+		}
+		if !strings.Contains(output.String(), "usage:") {
+			t.Fatalf("run(%q) output = %q", args, output.String())
+		}
+	}
+}
+
 func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
 	originalVersion, originalCommit := version, commit
 	t.Cleanup(func() { version, commit = originalVersion, originalCommit })

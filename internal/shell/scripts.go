@@ -489,7 +489,7 @@ _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT=0
 _CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT=5
 _CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE=0
 _CLOSE_ENOUGH_BASH_LAST_COMMAND=''
-declare -A _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS 2>/dev/null || true
+_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS=$'\n'
 _close_enough_bash_decode() {
   if base64 --decode </dev/null >/dev/null 2>&1; then
     printf '%s' "$1" | base64 --decode
@@ -500,10 +500,10 @@ _close_enough_bash_decode() {
 _close_enough_bash_allow_suggestion() {
   local key="$1"
   [[ -n "$key" ]] || return 1
-  [[ -z "${_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS[$key]+x}" ]] || return 1
+  case "$_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS" in *$'\n'"$key"$'\n'*) return 1 ;; esac
   (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT )) || return 1
   (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT++ ))
-  _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS[$key]=1
+  _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS+="$key"$'\n'
 }
 _close_enough_bash_capture_mark() {
   [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]] || return 0

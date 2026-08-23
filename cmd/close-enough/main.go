@@ -666,7 +666,8 @@ func captureStartCommand(args []string) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires the script utility"))
 	}
-	if _, err := exec.LookPath("mkfifo"); err != nil {
+	mkfifoPath, err := exec.LookPath("mkfifo")
+	if err != nil {
 		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires mkfifo"))
 	}
 	directory, err := os.MkdirTemp("", "close-enough-capture-*")
@@ -675,7 +676,7 @@ func captureStartCommand(args []string) error {
 	}
 	defer os.RemoveAll(directory)
 	fifo := filepath.Join(directory, "output")
-	if err := exec.Command("mkfifo", "-m", "600", fifo).Run(); err != nil {
+	if err := exec.Command(mkfifoPath, "-m", "600", fifo).Run(); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	token, err := randomCaptureToken()

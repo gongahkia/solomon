@@ -69,11 +69,15 @@ func (r *Relay) serveConnection(connection *net.UnixConn) {
 	defer connection.Close()
 	_ = connection.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	request, _ := io.ReadAll(io.LimitReader(connection, 8<<10))
-	if string(request) == "reset" {
+	if string(request) == "reset\n" {
 		r.Reset()
 		return
 	}
-	_, _ = connection.Write([]byte(r.Snapshot(string(request))))
+	requestText := string(request)
+	if !strings.HasPrefix(requestText, "read\n") {
+		return
+	}
+	_, _ = connection.Write([]byte(r.Snapshot(strings.TrimPrefix(requestText, "read\n"))))
 }
 
 func (r *Relay) FeedReader(reader io.Reader) error {
@@ -169,11 +173,11 @@ func terminalText(value string) string {
 }
 
 func Read(socket, command string) (string, error) {
-	return request(socket, command)
+	return request(socket, "read\n"+command)
 }
 
 func Reset(socket string) error {
-	_, err := request(socket, "reset")
+	_, err := request(socket, "reset\n")
 	return err
 }
 

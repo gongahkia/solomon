@@ -73,6 +73,24 @@ func TestRelayReadUsesPrivateSocket(t *testing.T) {
 	}
 }
 
+func TestRelaySocketReadDoesNotTreatACommandNamedResetAsAReset(t *testing.T) {
+	directory, err := os.MkdirTemp("", "ce-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(directory)
+	relay, err := Start(filepath.Join(directory, "relay.sock"), "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+	relay.Feed("\x1b]1337;CloseEnough=token\areset\ncommand failed")
+	got, err := Read(relay.listener.Addr().String(), "reset")
+	if err != nil || got != "command failed" {
+		t.Fatalf("Read() = %q, %v", got, err)
+	}
+}
+
 func TestScriptCanWriteToPrivateFIFO(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("script capture is Unix-only")

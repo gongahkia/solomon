@@ -35,6 +35,33 @@ func TestRuntimeResolverRejectsUnclassifiedSuffix(t *testing.T) {
 	}
 }
 
+func TestRuntimeResolverPreservesSafeHighRiskTails(t *testing.T) {
+	resolver, err := NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ input, want string }{
+		{"docker bulid .", "docker build ."},
+		{"go buid ./...", "go build ./..."},
+		{"cargo buid --release", "cargo build --release"},
+	} {
+		match, ok := resolver.MatchLine(test.input)
+		if !ok || match.Suggestion != test.want || match.Risk != "high" {
+			t.Fatalf("MatchLine(%q) = %#v, %t; want %q", test.input, match, ok, test.want)
+		}
+	}
+}
+
+func TestRuntimeResolverRejectsUnsafePreservedTails(t *testing.T) {
+	resolver, err := NewBundledRuntimeResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, ok := resolver.MatchWords([]string{"go", "buid", "path with spaces"}); ok {
+		t.Fatalf("unsafe tail matched: %#v", match)
+	}
+}
+
 func TestRuntimeResolverRequiresAnExactRuleMatchForDestructiveSuffixes(t *testing.T) {
 	resolver, err := NewBundledRuntimeResolver()
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/diagnose"
 )
@@ -190,7 +191,6 @@ func (r RuntimeResolver) MatchWordsContext(ctx context.Context, words []string) 
 		return diagnose.SemanticMatch{}, false, nil
 	}
 	command := words[0]
-	value := strings.Join(words[1:], " ")
 	for _, runtimePack := range r.packs {
 		if err := ctx.Err(); err != nil {
 			return diagnose.SemanticMatch{}, false, err
@@ -202,24 +202,51 @@ func (r RuntimeResolver) MatchWordsContext(ctx context.Context, words []string) 
 			if rule.Command != command {
 				continue
 			}
-			indices := rule.pattern.FindStringSubmatchIndex(value)
-			if indices == nil || indices[0] != 0 || indices[1] != len(value) {
-				continue
+			for argumentCount := len(words) - 1; argumentCount > 0; argumentCount-- {
+				if argumentCount != len(words)-1 && !rule.PreserveTail {
+					break
+				}
+				tail := words[argumentCount+1:]
+				if len(tail) > 0 && !safeTail(tail) {
+					continue
+				}
+				value := strings.Join(words[1:argumentCount+1], " ")
+				indices := rule.pattern.FindStringSubmatchIndex(value)
+				if indices == nil || indices[0] != 0 || indices[1] != len(value) {
+					continue
+				}
+				return runtimeSemanticMatch(runtimePack, rule, words, value, indices, tail), true, nil
 			}
-			return runtimeSemanticMatch(runtimePack, rule, words, value, indices), true, nil
 		}
 	}
 	return diagnose.SemanticMatch{}, false, nil
 }
 
-func runtimeSemanticMatch(pack runtimePack, rule CompiledRule, words []string, value string, indices []int) diagnose.SemanticMatch {
+func runtimeSemanticMatch(pack runtimePack, rule CompiledRule, words []string, value string, indices []int, tail []string) diagnose.SemanticMatch {
 	replacement := string(rule.pattern.ExpandString(nil, rule.Replacement, value, indices))
 	cause := string(rule.pattern.ExpandString(nil, rule.Cause, value, indices))
+	if len(tail) > 0 {
+		replacement += " " + strings.Join(tail, " ")
+	}
 	match := diagnose.SemanticMatch{PackID: pack.compiled.Pack.ID, RuleID: rule.ID, Source: pack.source, Suggestion: words[0] + " " + replacement, Cause: cause, Risk: rule.Risk, Rationale: rule.RiskRationale}
-	if len(words) == 2 && !strings.ContainsRune(replacement, ' ') {
+	if len(words) == 2 && len(tail) == 0 && !strings.ContainsRune(replacement, ' ') {
 		match.Original, match.Replacement, match.Occurrence = words[1], replacement, 1
 	}
 	return match
+}
+
+func safeTail(words []string) bool {
+	for _, word := range words {
+		if word == "" || strings.ContainsAny(word, " \t\r\n'\"\\`$;|&()<>*?[]{}") {
+			return false
+		}
+		for _, character := range word {
+			if unicode.IsControl(character) || unicode.Is(unicode.Bidi_Control, character) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func simpleCommandLine(line string) bool {

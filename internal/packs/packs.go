@@ -32,6 +32,7 @@ type Rule struct {
 	Command       string        `json:"command"`
 	Pattern       string        `json:"pattern"`
 	Replacement   string        `json:"replacement"`
+	PreserveTail  bool          `json:"preserve_tail,omitempty"`
 	Cause         string        `json:"cause"`
 	Risk          diagnose.Risk `json:"risk"`
 	RiskRationale string        `json:"risk_rationale"`
@@ -189,6 +190,9 @@ func (p Pack) Validate() error {
 		}
 		if rule.Risk != diagnose.RiskSafe && rule.Risk != diagnose.RiskHigh && rule.Risk != diagnose.RiskUnknown {
 			return fmt.Errorf("rule %q has invalid risk", rule.ID)
+		}
+		if rule.PreserveTail && rule.Risk != diagnose.RiskHigh {
+			return fmt.Errorf("rule %q: preserve_tail requires high risk", rule.ID)
 		}
 		if err := validateRiskMetadata(rule); err != nil {
 			return fmt.Errorf("rule %q: %w", rule.ID, err)

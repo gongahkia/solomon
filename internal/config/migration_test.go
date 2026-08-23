@@ -11,7 +11,6 @@ type v1ConfigFixture struct {
 	Input json.RawMessage `json:"input"`
 	Want  struct {
 		Mode                     string `json:"mode"`
-		CuratedAutoCorrect       bool   `json:"curated_auto_correct"`
 		RiskInterrupt            bool   `json:"risk_interrupt"`
 		LocalLearningEnabled     bool   `json:"local_learning_enabled"`
 		LearningRetentionDays    int    `json:"learning_retention_days"`
@@ -26,14 +25,14 @@ func TestDecodeMigrationRequiresFreshCorrectionOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated policy: %#v", cfg)
 	}
 	cfg, err = decode([]byte(`{"schema_version":1,"mode":"interrupt"}`), Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.RiskInterrupt || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected migrated interrupt policy: %#v", cfg)
 	}
 }
@@ -54,6 +53,16 @@ func TestDecodeV5RemovesRetiredLocalHistoryOptIn(t *testing.T) {
 	}
 	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.LocalHistoryEnabled {
 		t.Fatalf("migrated v5 config = %#v", cfg)
+	}
+}
+
+func TestDecodeV6DropsRetiredCuratedAutoCorrect(t *testing.T) {
+	cfg, err := decode([]byte(`{"schema_version":6,"curated_auto_correct":true}`), Default())
+	if err != nil || cfg.SchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("migrated v6 config = %#v, %v", cfg, err)
+	}
+	if _, err := decode([]byte(`{"schema_version":7,"curated_auto_correct":true}`), Default()); err == nil {
+		t.Fatal("accepted retired setting in current configuration")
 	}
 }
 
@@ -78,7 +87,7 @@ func TestV1ConfigurationFixtureCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != fixture.Want.Mode || cfg.CuratedAutoCorrect != fixture.Want.CuratedAutoCorrect || cfg.RiskInterrupt != fixture.Want.RiskInterrupt || cfg.LocalLearningEnabled != fixture.Want.LocalLearningEnabled || cfg.LearningRetentionDays != fixture.Want.LearningRetentionDays || cfg.LearnedRuleActionCeiling != fixture.Want.LearnedRuleActionCeiling || cfg.UndoEnabled != fixture.Want.UndoEnabled || cfg.UndoTTLSeconds != fixture.Want.UndoTTLSeconds {
+			if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Mode != fixture.Want.Mode || cfg.RiskInterrupt != fixture.Want.RiskInterrupt || cfg.LocalLearningEnabled != fixture.Want.LocalLearningEnabled || cfg.LearningRetentionDays != fixture.Want.LearningRetentionDays || cfg.LearnedRuleActionCeiling != fixture.Want.LearnedRuleActionCeiling || cfg.UndoEnabled != fixture.Want.UndoEnabled || cfg.UndoTTLSeconds != fixture.Want.UndoTTLSeconds {
 				t.Fatalf("decoded v1 config = %#v, want %#v", cfg, fixture.Want)
 			}
 		})

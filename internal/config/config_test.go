@@ -128,7 +128,7 @@ func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
 
 func TestDefaultPolicyIsHintOnly(t *testing.T) {
 	cfg := Default()
-	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
+	if cfg.Mode != "hint" || cfg.AutoApplySafe || !cfg.CuratedPacksEnabled || cfg.RiskInterrupt || cfg.LocalLearningEnabled || cfg.LearningRetentionDays != defaultLearningRetentionDays || cfg.LearnedRuleActionCeiling != "hint" || !cfg.UndoEnabled || cfg.UndoTTLSeconds != defaultUndoTTLSeconds {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
@@ -148,7 +148,7 @@ func TestSetV1PolicySettings(t *testing.T) {
 			t.Fatalf("Set(%q, %q) = %v", key, value, err)
 		}
 	}
-	if cfg.CuratedPacksEnabled || cfg.CuratedAutoCorrect || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
+	if cfg.CuratedPacksEnabled || cfg.RiskInterrupt || !cfg.LocalLearningEnabled || cfg.LearningRetentionDays != 45 || cfg.LearnedRuleActionCeiling != "rewrite" || cfg.UndoEnabled || cfg.UndoTTLSeconds != 45 {
 		t.Fatalf("unexpected configured policy: %#v", cfg)
 	}
 	if err := cfg.Set("learning_retention_days", "91"); err == nil {

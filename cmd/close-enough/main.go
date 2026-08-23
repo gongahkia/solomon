@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/gongahkia/close-enough/internal/clierr"
+	"github.com/gongahkia/close-enough/internal/capture"
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"
@@ -111,6 +112,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return doctorCommand(stdout)
 	case "checksum":
 		return checksumCommand(args[1:], stdout)
+	case "capture":
+		return captureCommand(args[1:], stdout)
 	default:
 		return usage(stderr)
 	}
@@ -591,6 +594,7 @@ func initCommand(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	shellName := fs.String("shell", "", "shell")
+	experimentalOutputCapture := fs.Bool("experimental-output-capture", false, "enable experimental output capture")
 	if err := fs.Parse(args); err != nil {
 		return clierr.Wrap(clierr.Usage, err)
 	}
@@ -601,8 +605,96 @@ func initCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Usage, err)
 	}
+	if *experimentalOutputCapture {
+		bootstrap, err := shell.ExperimentalCaptureBootstrap(*shellName)
+		if err != nil {
+			return clierr.Wrap(clierr.Usage, err)
+		}
+		script = bootstrap + "\n" + script
+	}
 	_, err = io.WriteString(stdout, script)
 	return clierr.Wrap(clierr.Operation, err)
+}
+
+func captureCommand(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read>")
+	}
+	switch args[0] {
+	case "start":
+		return captureStartCommand(args[1:])
+	case "read":
+		fs := flag.NewFlagSet("capture read", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		socket := fs.String("socket", "", "relay socket")
+		command := fs.String("command", "", "command line")
+		if err := fs.Parse(args[1:]); err != nil || *socket == "" || fs.NArg() != 0 {
+			return clierr.New(clierr.Usage, "usage: close-enough capture read --socket <socket> --command <command>")
+		}
+		output, err := capture.Read(*socket, *command)
+		if err != nil {
+			return clierr.Wrap(clierr.Operation, err)
+		}
+		_, err = io.WriteString(stdout, output)
+		return clierr.Wrap(clierr.Operation, err)
+	default:
+		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read>")
+	}
+}
+
+func captureStartCommand(args []string) error {
+	fs := flag.NewFlagSet("capture start", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	shellName := fs.String("shell", "", "shell")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*shellName != "bash" && *shellName != "zsh") {
+		return clierr.New(clierr.Usage, "usage: close-enough capture start --shell <bash|zsh>")
+	}
+	if runtime.GOOS == "windows" {
+		return clierr.New(clierr.Operation, "experimental output capture is unavailable on Windows")
+	}
+	if _, err := exec.LookPath("script"); err != nil {
+		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires the script utility"))
+	}
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires mkfifo"))
+	}
+	directory, err := os.MkdirTemp("", "close-enough-capture-*")
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	defer os.RemoveAll(directory)
+	fifo := filepath.Join(directory, "output")
+	if err := exec.Command("mkfifo", "-m", "600", fifo).Run(); err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	token, err := randomCaptureToken()
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	relay, err := capture.Start(filepath.Join(directory, "relay.sock"), token)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	defer relay.Close()
+	go func() {
+		reader, err := os.Open(fifo)
+		if err == nil {
+			defer reader.Close()
+			_ = relay.FeedReader(reader)
+		}
+	}()
+	command := exec.Command("script", "-q", fifo, *shellName, "-i")
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	command.Env = append(os.Environ(), "CLOSE_ENOUGH_CAPTURE_ACTIVE=1", "CLOSE_ENOUGH_CAPTURE_SOCKET="+filepath.Join(directory, "relay.sock"), "CLOSE_ENOUGH_CAPTURE_MARKER="+token)
+	return clierr.Wrap(clierr.Operation, command.Run())
+}
+
+func randomCaptureToken() (string, error) {
+	data := make([]byte, 16)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(data), nil
 }
 
 func checkCommand(args []string, stdout io.Writer) error {

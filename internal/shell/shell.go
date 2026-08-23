@@ -49,6 +49,19 @@ func Script(name string) (string, error) {
 	return adapter.script, nil
 }
 
+func ExperimentalCaptureBootstrap(name string) (string, error) {
+	switch shellName(name) {
+	case "bash", "zsh":
+		return `# close-enough experimental output capture (opt-in)
+if [[ -z "${CLOSE_ENOUGH_CAPTURE_ACTIVE:-}" ]]; then
+  export CLOSE_ENOUGH_CAPTURE_ACTIVE=bootstrap
+  exec close-enough capture start --shell ` + shellName(name) + `
+fi`, nil
+	default:
+		return "", fmt.Errorf("experimental output capture is available only for bash and zsh")
+	}
+}
+
 func ContractFor(name string) (Contract, error) {
 	adapter, ok := adapterFor(name)
 	if !ok {
@@ -63,7 +76,7 @@ func Doctor(shellPath, osName string) DoctorResult {
 	contract, err := ContractFor(name)
 	if err != nil {
 		result.Limitations = []string{"unsupported shell"}
-		result.RemediationHints = []string{"use zsh, fish, or powershell"}
+		result.RemediationHints = []string{"use bash, zsh, fish, or powershell"}
 		return result
 	}
 	result.Supported, result.Tier = true, contract.Tier
@@ -115,6 +128,7 @@ func (a adapter) contract() Contract {
 
 var adapters = map[string]adapter{
 	"zsh":            {Contract: Contract{Shell: "zsh", Tier: "first-class", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}}, script: zshScript},
+	"bash":           {Contract: Contract{Shell: "bash", Tier: "tiered", Capabilities: []Capability{PostFailure, Hint}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"post-failure hints only", "no pre-execution interrupt or rewrite", "experimental output capture requires init flag and script utility"}}, script: bashScript},
 	"fish":           {Contract: Contract{Shell: "fish", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"adapter replaces enter binding"}}, script: fishScript},
 	"powershell":     {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"requires PSReadLine"}}, script: powerShellScript},
 	"powershell.exe": {Contract: Contract{Shell: "powershell", Tier: "tiered", Capabilities: []Capability{PreExecution, PostFailure, Hint, Interrupt, Rewrite}, Configuration: []Configuration{ModeConfiguration, DisplayConfiguration}, Limitations: []string{"requires PSReadLine"}}, script: powerShellScript},

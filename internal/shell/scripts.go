@@ -169,6 +169,9 @@ function _close_enough_restore_enter {
 _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec {
+  if [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]]; then
+    print -rn -- $'\e]1337;CloseEnough='"$CLOSE_ENOUGH_CAPTURE_MARKER"$'\a'
+  fi
   _CLOSE_ENOUGH_LAST_COMMAND="$1"
   _CLOSE_ENOUGH_PENDING_REWRITE=''
   _close_enough_clear_pending_undo
@@ -193,7 +196,11 @@ function _close_enough_precmd {
   (( ++_CLOSE_ENOUGH_FAILURE_SEQUENCE ))
   token="failure-$$-${_CLOSE_ENOUGH_FAILURE_SEQUENCE}"
   _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN="$token"
-  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" --failure-output "exit status $exit_status" 2>/dev/null)" || return
+  local failure_output="exit status $exit_status" captured
+  if [[ -n "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]]; then
+    captured="$(command close-enough capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
+  fi
+  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" suggestion="${fields[7]}"
@@ -473,6 +480,63 @@ function _close_enough_post_failure --on-event fish_postexec
   end
 end
 end
+`
+
+const bashScript = `# close-enough bash integration
+if [[ -z "${_CLOSE_ENOUGH_BASH_LOADED:-}" ]]; then
+_CLOSE_ENOUGH_BASH_LOADED=1
+_CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT=0
+_CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT=5
+_CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE=0
+_CLOSE_ENOUGH_BASH_LAST_COMMAND=''
+declare -A _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS 2>/dev/null || true
+_close_enough_bash_decode() {
+  if base64 --decode </dev/null >/dev/null 2>&1; then
+    printf '%s' "$1" | base64 --decode
+  else
+    printf '%s' "$1" | base64 -D
+  fi
+}
+_close_enough_bash_allow_suggestion() {
+  local key="$1"
+  [[ -n "$key" ]] || return 1
+  [[ -z "${_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS[$key]+x}" ]] || return 1
+  (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT )) || return 1
+  (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT++ ))
+  _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS[$key]=1
+}
+_close_enough_bash_capture_mark() {
+  [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]] || return 0
+  printf '\033]1337;CloseEnough=%s\a' "$CLOSE_ENOUGH_CAPTURE_MARKER"
+}
+_close_enough_bash_precmd() {
+  local exit_status=$? command token record version action risk confidence cause suggestion suggestion_key failure_output captured
+  command="$(builtin fc -ln -1 2>/dev/null)" || { _close_enough_bash_capture_mark; return 0; }
+  command="${command%$'\n'}"
+  _close_enough_bash_capture_mark
+  [[ -n "$command" && "$command" != "$_CLOSE_ENOUGH_BASH_LAST_COMMAND" ]] || return 0
+  _CLOSE_ENOUGH_BASH_LAST_COMMAND="$command"
+  [[ "$exit_status" -ne 0 ]] || return 0
+  (( _CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE++ ))
+  token="failure-$$-$_CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE"
+  failure_output="exit status $exit_status"
+  if [[ -n "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]]; then
+    captured="$(command close-enough capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
+  fi
+  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return 0
+  IFS=$'\t' read -r version action risk confidence cause _ suggestion <<< "$record"
+  [[ "$version" == 1 && "$action" != none && -n "$suggestion" ]] || return 0
+  suggestion_key="$suggestion"
+  suggestion="$(_close_enough_bash_decode "$suggestion")" || return 0
+  cause="$(_close_enough_bash_decode "$cause")" || cause=''
+  if _close_enough_bash_allow_suggestion "$suggestion_key"; then
+    printf 'close-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause"
+  fi
+}
+if [[ "${PROMPT_COMMAND:-}" != *"_close_enough_bash_precmd"* ]]; then
+  PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}_close_enough_bash_precmd"
+fi
+fi
 `
 
 const powerShellScript = `# close-enough PowerShell integration

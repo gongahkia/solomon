@@ -21,8 +21,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/capture"
+	"github.com/gongahkia/close-enough/internal/clierr"
 	"github.com/gongahkia/close-enough/internal/config"
 	"github.com/gongahkia/close-enough/internal/daemon"
 	"github.com/gongahkia/close-enough/internal/diagnose"

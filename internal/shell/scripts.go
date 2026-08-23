@@ -170,6 +170,7 @@ _close_enough_bind_enter
 typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
 function _close_enough_preexec {
   if [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]]; then
+    [[ -z "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]] || command close-enough capture reset --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" >/dev/null 2>&1
     print -rn -- $'\e]1337;CloseEnough='"$CLOSE_ENOUGH_CAPTURE_MARKER"$'\a'
   fi
   _CLOSE_ENOUGH_LAST_COMMAND="$1"
@@ -507,6 +508,7 @@ _close_enough_bash_allow_suggestion() {
 }
 _close_enough_bash_capture_mark() {
   [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]] || return 0
+  [[ -z "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]] || command close-enough capture reset --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" >/dev/null 2>&1
   printf '\033]1337;CloseEnough=%s\a' "$CLOSE_ENOUGH_CAPTURE_MARKER"
 }
 _close_enough_bash_precmd() {

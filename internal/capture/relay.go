@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,8 @@ import (
 )
 
 const MaxOutputBytes = 8 << 10
+
+var terminalControl = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))`)
 
 // Relay keeps only redacted output from the command following its marker.
 // The marker is written by an opt-in shell adapter into a pseudoterminal
@@ -65,8 +68,12 @@ func (r *Relay) serve() {
 func (r *Relay) serveConnection(connection *net.UnixConn) {
 	defer connection.Close()
 	_ = connection.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-	command, _ := io.ReadAll(io.LimitReader(connection, 8<<10))
-	_, _ = connection.Write([]byte(r.Snapshot(string(command))))
+	request, _ := io.ReadAll(io.LimitReader(connection, 8<<10))
+	if string(request) == "reset" {
+		r.Reset()
+		return
+	}
+	_, _ = connection.Write([]byte(r.Snapshot(string(request))))
 }
 
 func (r *Relay) FeedReader(reader io.Reader) error {
@@ -112,6 +119,14 @@ func (r *Relay) Feed(value string) {
 	}
 }
 
+func (r *Relay) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pending = ""
+	r.output = ""
+	r.active = false
+}
+
 func (r *Relay) appendLocked(value string) {
 	if !r.active || value == "" {
 		return
@@ -141,6 +156,7 @@ func (r *Relay) Snapshot(command string) string {
 }
 
 func terminalText(value string) string {
+	value = terminalControl.ReplaceAllString(value, "")
 	return strings.Map(func(character rune) rune {
 		if character == '\n' || character == '\t' || character == '\r' {
 			return character
@@ -153,12 +169,21 @@ func terminalText(value string) string {
 }
 
 func Read(socket, command string) (string, error) {
+	return request(socket, command)
+}
+
+func Reset(socket string) error {
+	_, err := request(socket, "reset")
+	return err
+}
+
+func request(socket, value string) (string, error) {
 	connection, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
 	if err != nil {
 		return "", err
 	}
 	defer connection.Close()
-	if _, err := connection.Write([]byte(command)); err != nil {
+	if _, err := connection.Write([]byte(value)); err != nil {
 		return "", err
 	}
 	if unixConnection, ok := connection.(*net.UnixConn); ok {

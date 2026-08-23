@@ -324,6 +324,7 @@ func TestAdapterScriptsParse(t *testing.T) {
 		args        func(string) []string
 	}{
 		{"zsh", "zsh", func(path string) []string { return []string{"-n", path} }},
+		{"bash", "bash", func(path string) []string { return []string{"-n", path} }},
 		{"fish", "fish", func(path string) []string { return []string{"-n", path} }},
 		{"pwsh", "pwsh", func(string) []string {
 			return []string{"-NoProfile", "-NonInteractive", "-Command", "[scriptblock]::Create([System.IO.File]::ReadAllText($env:ADAPTER_PATH)) | Out-Null"}
@@ -924,20 +925,26 @@ func TestAdaptersExposePendingRewriteUndoBindings(t *testing.T) {
 
 func TestAdaptersForwardBoundedPostFailureEvidence(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		want string
+		name  string
+		wants []string
 	}{
-		{"zsh", `--failure-output "exit status $exit_status"`},
-		{"fish", `--failure-output "exit status $command_status"`},
-		{"powershell", `--failure-output $failureOutput`},
+		{"zsh", []string{`local failure_output="exit status $exit_status"`, `capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
+		{"bash", []string{`failure_output="exit status $exit_status"`, `capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
+		{"fish", []string{`--failure-output "exit status $command_status"`}},
+		{"powershell", []string{`--failure-output $failureOutput`}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			script, err := Script(test.name)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(script, test.want) || !strings.Contains(script, "--operation post-failure") {
+			if !strings.Contains(script, "--operation post-failure") {
 				t.Fatalf("%s adapter does not forward bounded failure evidence", test.name)
+			}
+			for _, want := range test.wants {
+				if !strings.Contains(script, want) {
+					t.Fatalf("%s adapter missing failure evidence behavior %q", test.name, want)
+				}
 			}
 		})
 	}
@@ -3046,16 +3053,76 @@ func TestContractReturnsIndependentSlices(t *testing.T) {
 }
 
 func TestUnsupportedAdapterFailsClosed(t *testing.T) {
-	for _, name := range []string{"bash", "csh"} {
+	for _, name := range []string{"csh"} {
 		if _, err := Script(name); err == nil {
 			t.Fatalf("unsupported script %q succeeded", name)
 		}
 		if _, err := ContractFor(name); err == nil {
 			t.Fatalf("unsupported contract %q succeeded", name)
 		}
-		if got := Doctor("/bin/"+name, "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) || !slices.Equal(got.RemediationHints, []string{"use zsh, fish, or powershell"}) {
+		if got := Doctor("/bin/"+name, "test"); got.Supported || !slices.Equal(got.Limitations, []string{"unsupported shell"}) || !slices.Equal(got.RemediationHints, []string{"use bash, zsh, fish, or powershell"}) {
 			t.Fatalf("unsupported doctor result for %q: %#v", name, got)
 		}
+	}
+}
+
+func TestExperimentalCaptureBootstrapIsRestrictedToBashAndZsh(t *testing.T) {
+	for _, name := range []string{"bash", "zsh"} {
+		bootstrap, err := ExperimentalCaptureBootstrap(name)
+		if err != nil || !strings.Contains(bootstrap, "exec close-enough capture start --shell "+name) || !strings.Contains(bootstrap, "CLOSE_ENOUGH_CAPTURE_ACTIVE") {
+			t.Fatalf("bootstrap(%q) = %q, %v", name, bootstrap, err)
+		}
+	}
+	if _, err := ExperimentalCaptureBootstrap("fish"); err == nil {
+		t.Fatal("accepted experimental capture for fish")
+	}
+}
+
+func TestBashAdapterPreservesPromptAndDebugTrapWithoutPreSendHook(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script, err := Script("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	adapter := filepath.Join(directory, "adapter.bash")
+	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checker := filepath.Join(directory, "close-enough")
+	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\nprintf '1\\thint\\thigh\\thigh\\tY2F1c2U=\\t\\tZ2l0IHN0YXR1cw==\\n'\n"
+	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	calls, trapState := filepath.Join(directory, "calls"), filepath.Join(directory, "trap")
+	harness := `set -o history
+PROMPT_COMMAND='printf existing'
+trap ':' DEBUG
+source "$1"
+history -s 'git sttaus'
+false
+_close_enough_bash_precmd
+printf '%s' "$PROMPT_COMMAND" > "$PROMPT_STATE"
+trap -p DEBUG > "$TRAP_STATE"`
+	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
+	command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CALLS="+calls, "PROMPT_STATE="+filepath.Join(directory, "prompt"), "TRAP_STATE="+trapState)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("bash adapter harness: %v: %s", err, output)
+	}
+	prompt, err := os.ReadFile(filepath.Join(directory, "prompt"))
+	if err != nil || !strings.HasPrefix(string(prompt), "printf existing;") || !strings.Contains(string(prompt), "_close_enough_bash_precmd") {
+		t.Fatalf("PROMPT_COMMAND = %q, %v", prompt, err)
+	}
+	trapOutput, err := os.ReadFile(trapState)
+	if err != nil || !strings.Contains(string(trapOutput), "DEBUG") {
+		t.Fatalf("DEBUG trap = %q, %v", trapOutput, err)
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil || !strings.Contains(string(data), "--operation post-failure --shell bash") || strings.Contains(string(data), "pre-send") {
+		t.Fatalf("daemon calls = %q, %v", data, err)
 	}
 }
 

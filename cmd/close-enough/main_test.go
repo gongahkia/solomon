@@ -105,6 +105,19 @@ func TestHelpCommandsSucceedAndDescribeOnboarding(t *testing.T) {
 	}
 }
 
+func TestInitExperimentalOutputCaptureIsExplicitAndShellBound(t *testing.T) {
+	var output strings.Builder
+	if err := run([]string{"init", "--shell", "bash", "--experimental-output-capture"}, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "exec close-enough capture start --shell bash") || !strings.Contains(output.String(), "PROMPT_COMMAND") {
+		t.Fatalf("experimental bash init = %q", output.String())
+	}
+	if err := run([]string{"init", "--shell", "fish", "--experimental-output-capture"}, io.Discard, io.Discard); clierr.Code(err) != clierr.ExitUsage {
+		t.Fatalf("fish experimental init code = %d", clierr.Code(err))
+	}
+}
+
 func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
 	originalVersion, originalCommit := version, commit
 	t.Cleanup(func() { version, commit = originalVersion, originalCommit })

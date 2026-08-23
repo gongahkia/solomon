@@ -22,7 +22,15 @@ close-enough check --format plain --command 'git sttaus'
 
 New and migrated configurations are hint-only. A bundled safe rewrite requires both `mode=rewrite` and `auto_apply_safe=true` as an explicit opt-in; it edits the shell buffer, requires another Enter to submit, and can be undone with Ctrl-G.
 
-Zsh is first-class. Fish and PowerShell support the same repair modes, with their adapter limitations reported by `close-enough doctor`; PowerShell requires PSReadLine. Bash shell integration is intentionally unavailable because the retired adapter could evaluate a command buffer and replace the user's DEBUG trap. The standalone `check` command remains available from Bash.
+Zsh is first-class. Fish and PowerShell support the same repair modes, with their adapter limitations reported by `close-enough doctor`; PowerShell requires PSReadLine. Bash provides non-blocking post-failure hints only: it preserves `PROMPT_COMMAND` and never installs or changes a `DEBUG` trap, so it cannot interrupt or rewrite a command before submission.
+
+Experimental failure-output capture is opt-in for Bash and Zsh only:
+
+```sh
+eval "$(close-enough init --shell zsh --experimental-output-capture)"
+```
+
+It runs the shell through the platform `script` utility. Output is relayed through a private FIFO, sanitized and redacted before Close Enough retains up to 8 KiB for the current command, and is not written as a transcript. This can affect terminal programs; if the relay is unavailable, Close Enough falls back to an exit-status-only hint.
 
 ## How this differs from The Fuck
 
@@ -31,7 +39,7 @@ The projects share the command-repair problem space, but Close Enough is designe
 | | The Fuck | Close Enough |
 | --- | --- | --- |
 | Interaction | Run an explicit alias after a command fails; choose a corrected command to execute. | Diagnose before submission and after supported failures; default to a non-blocking hint. |
-| Failure data | Matches extensible Python rules against command output and shell history. | Extracts bounded, allow-listed evidence for supported tools, redacts it before matching, and never persists command history. |
+| Failure data | Matches extensible Python rules against command output and shell history. | Uses exit status by default. The opt-in Bash/Zsh experiment extracts bounded, redacted evidence through a local relay; command history is never persisted. |
 | Applying a repair | Can execute the selected correction. | Rewrites only explicitly opted-in, bundled `safe` repairs in the shell buffer; high-risk and installed-pack repairs are never auto-applied. |
 | Extension model | Python rules, including third-party packages. | Declarative packs with strict schema validation, explicit risk metadata, and Ed25519 publisher trust. |
 | Shell command | Uses the `fuck` trigger alias in its recommended shell setup. | Uses only `close-enough`; it does not create a `fuck` or `thefuck` alias. |
@@ -52,7 +60,7 @@ Plain diagnostics present confidence as high, medium, low, or unknown; set `disp
 
 Risk output includes a static rationale and never includes raw command arguments.
 
-Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited. Bash is intentionally unsupported: use the standalone CLI from Bash, or initialize Zsh, Fish, or PowerShell.
+Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited. Bash is limited to post-failure hints; initialize Zsh, Fish, or PowerShell when pre-execution protection or buffer rewrites are required.
 
 Adapters also suppress repeated hint suggestions within a loaded shell session.
 
@@ -80,7 +88,7 @@ Pack and rule identifiers use lowercase kebab case; pack versions use SemVer 2.0
 
 Pack matchers are compiled as in-process regular expressions and never execute manifest text.
 
-Transformation templates allow literal text, `$$`, and in-range `$1` capture references only. A matcher must cover the full command argument string; a safe rule never inherits unclassified trailing arguments.
+Transformation templates allow literal text, `$$`, and in-range `$1` capture references only. A matcher normally covers the full command argument string; a `high`-risk rule may explicitly set `preserve_tail` to carry only safely serializable trailing arguments into a hint. Tail-preserving rules are never rewrite-eligible, and safe rules never inherit unclassified trailing arguments.
 
 Explanation templates use the same capture syntax and reject control characters.
 

@@ -620,7 +620,7 @@ func initCommand(args []string, stdout io.Writer) error {
 
 func captureCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read>")
+		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read|reset>")
 	}
 	switch args[0] {
 	case "start":
@@ -639,8 +639,16 @@ func captureCommand(args []string, stdout io.Writer) error {
 		}
 		_, err = io.WriteString(stdout, output)
 		return clierr.Wrap(clierr.Operation, err)
+	case "reset":
+		fs := flag.NewFlagSet("capture reset", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		socket := fs.String("socket", "", "relay socket")
+		if err := fs.Parse(args[1:]); err != nil || *socket == "" || fs.NArg() != 0 {
+			return clierr.New(clierr.Usage, "usage: close-enough capture reset --socket <socket>")
+		}
+		return clierr.Wrap(clierr.Operation, capture.Reset(*socket))
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read>")
+		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read|reset>")
 	}
 }
 
@@ -654,7 +662,8 @@ func captureStartCommand(args []string) error {
 	if runtime.GOOS == "windows" {
 		return clierr.New(clierr.Operation, "experimental output capture is unavailable on Windows")
 	}
-	if _, err := exec.LookPath("script"); err != nil {
+	scriptPath, err := exec.LookPath("script")
+	if err != nil {
 		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires the script utility"))
 	}
 	if _, err := exec.LookPath("mkfifo"); err != nil {
@@ -685,10 +694,25 @@ func captureStartCommand(args []string) error {
 			_ = relay.FeedReader(reader)
 		}
 	}()
-	command := exec.Command("script", "-q", fifo, *shellName, "-i")
+	shellPath, err := exec.LookPath(*shellName)
+	if err != nil {
+		return clierr.Wrap(clierr.Operation, err)
+	}
+	command := scriptCaptureCommand(scriptPath, fifo, shellPath)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	command.Env = append(os.Environ(), "CLOSE_ENOUGH_CAPTURE_ACTIVE=1", "CLOSE_ENOUGH_CAPTURE_SOCKET="+filepath.Join(directory, "relay.sock"), "CLOSE_ENOUGH_CAPTURE_MARKER="+token)
 	return clierr.Wrap(clierr.Operation, command.Run())
+}
+
+func scriptCaptureCommand(scriptPath, fifo, shellPath string) *exec.Cmd {
+	if runtime.GOOS == "linux" {
+		return exec.Command(scriptPath, "-q", "-f", fifo, "-c", "exec "+quotePOSIX(shellPath)+" -i")
+	}
+	return exec.Command(scriptPath, "-q", fifo, shellPath, "-i")
+}
+
+func quotePOSIX(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\\"'\\\"'") + "'"
 }
 
 func randomCaptureToken() (string, error) {

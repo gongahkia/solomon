@@ -1,12 +1,11 @@
 module github.com/gongahkia/close-enough
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
-	github.com/creack/pty v1.1.24
 	go.uber.org/goleak v1.3.0
-	golang.org/x/sys v0.37.0
+	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.46.1
 )
 

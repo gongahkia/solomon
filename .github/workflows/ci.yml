@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - run: sudo apt-get update && sudo apt-get install -y expect
+      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
 
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
@@ -75,6 +75,16 @@ jobs:
           result_code=$?
           set -e
           test "$result_code" -eq 2
+
+  shell-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: go test -race -count=1 -timeout=2m ./internal/shell
 
   windows-integration:
     runs-on: windows-latest

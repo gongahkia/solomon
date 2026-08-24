@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,16 +18,18 @@ import (
 	"testing"
 )
 
-func TestUnixInstallerVerifiesArtifactsAndManagesShellInitialization(t *testing.T) {
+func TestUnixInstallerDownloadsAndVerifiesReleaseAssets(t *testing.T) {
 	version := "v1.2.3"
 	releaseDirectory := t.TempDir()
 	archive := writeUnixInstallerRelease(t, releaseDirectory, version)
+	server := httptest.NewServer(http.FileServer(http.Dir(releaseDirectory)))
+	defer server.Close()
 	fakeDirectory := t.TempDir()
 	log := filepath.Join(t.TempDir(), "cosign.log")
 	writeFakeCosign(t, fakeDirectory)
 	installDirectory := filepath.Join(t.TempDir(), "bin")
 	rc := filepath.Join(t.TempDir(), "zshrc")
-	environment := installerEnvironment(releaseDirectory, version, fakeDirectory, installDirectory, rc, log)
+	environment := installerEnvironment(server.URL, version, fakeDirectory, installDirectory, rc, log)
 	runUnixInstaller(t, environment)
 	target := filepath.Join(installDirectory, "close-enough")
 	data, err := exec.Command(target, "version").Output()
@@ -62,6 +66,8 @@ func TestUnixInstallerRemovesLegacyBashInitialization(t *testing.T) {
 	version := "v1.2.3"
 	releaseDirectory := t.TempDir()
 	writeUnixInstallerRelease(t, releaseDirectory, version)
+	server := httptest.NewServer(http.FileServer(http.Dir(releaseDirectory)))
+	defer server.Close()
 	fakeDirectory := t.TempDir()
 	writeFakeCosign(t, fakeDirectory)
 	home := t.TempDir()
@@ -70,7 +76,7 @@ func TestUnixInstallerRemovesLegacyBashInitialization(t *testing.T) {
 	if err := os.WriteFile(legacy, []byte(legacyBlock), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	environment := installerEnvironment(releaseDirectory, version, fakeDirectory, filepath.Join(t.TempDir(), "bin"), filepath.Join(home, ".zshrc"), filepath.Join(t.TempDir(), "cosign.log"))
+	environment := installerEnvironment(server.URL, version, fakeDirectory, filepath.Join(t.TempDir(), "bin"), filepath.Join(home, ".zshrc"), filepath.Join(t.TempDir(), "cosign.log"))
 	environment = replaceHarnessEnvironment(environment, "HOME", home)
 	runUnixInstaller(t, environment)
 	data, err := os.ReadFile(legacy)
@@ -83,10 +89,12 @@ func TestUnixInstallerRejectsChecksumAndSignatureFailures(t *testing.T) {
 	version := "v1.2.3"
 	releaseDirectory := t.TempDir()
 	writeUnixInstallerRelease(t, releaseDirectory, version)
+	server := httptest.NewServer(http.FileServer(http.Dir(releaseDirectory)))
+	defer server.Close()
 	fakeDirectory := t.TempDir()
 	writeFakeCosign(t, fakeDirectory)
 	log := filepath.Join(t.TempDir(), "cosign.log")
-	environment := installerEnvironment(releaseDirectory, version, fakeDirectory, filepath.Join(t.TempDir(), "bin"), filepath.Join(t.TempDir(), "bashrc"), log)
+	environment := installerEnvironment(server.URL, version, fakeDirectory, filepath.Join(t.TempDir(), "bin"), filepath.Join(t.TempDir(), "bashrc"), log)
 	if err := os.WriteFile(filepath.Join(releaseDirectory, "checksums.txt"), []byte(strings.Repeat("0", 64)+"  "+installerArchiveName(version)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -214,9 +222,9 @@ printf '%s\n' "$@" > "$CLOSE_ENOUGH_TEST_COSIGN_LOG"
 	}
 }
 
-func installerEnvironment(releaseDirectory, version, fakeDirectory, installDirectory, rc, log string) []string {
+func installerEnvironment(releaseBaseURL, version, fakeDirectory, installDirectory, rc, log string) []string {
 	environment := replaceHarnessEnvironment(os.Environ(), "CLOSE_ENOUGH_VERSION", version)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_RELEASE_BASE_URL", "file://"+releaseDirectory)
+	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_RELEASE_BASE_URL", releaseBaseURL)
 	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_INSTALL_DIR", installDirectory)
 	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_SHELL", "zsh")
 	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_SHELL_RC", rc)

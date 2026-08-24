@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible Close Enough behavior problem
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include passwords, tokens, cookies, private URLs, or full terminal logs. Report security vulnerabilities through SECURITY.md, not this form.
+  - type: input
+    id: version
+    attributes:
+      label: Close Enough version or commit
+      placeholder: v0.1.0 or abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      options:
+        - bash
+        - zsh
+        - fish
+        - PowerShell
+        - not shell integration
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal redacted reproduction
+      description: Include the command, configuration mode, observed output, and expected behavior.
+    validations:
+      required: true

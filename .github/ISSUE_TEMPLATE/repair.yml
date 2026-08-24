@@ -1,0 +1,23 @@
+name: Repair request
+description: Request a conservative command-repair hint or pack rule
+title: "repair: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never include credentials, private paths, or production output. Close Enough does not automatically run repairs.
+  - type: textarea
+    id: failure
+    attributes:
+      label: Failed command and result
+      description: Provide a minimal redacted command and the relevant error.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed correction and safety impact
+      description: Explain why the correction is appropriate and whether it can change remote state or delete data.
+    validations:
+      required: true

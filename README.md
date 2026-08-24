@@ -2,11 +2,11 @@
 
 Local, deterministic terminal repair. Close Enough diagnoses likely command mistakes before submission and after supported failures, then presents a risk-classified hint. It supports command, Git subcommand, and path typo suggestions with configurable hint, interrupt, rewrite, and off modes.
 
-License: GPL-3.0-only. See [LICENSE](LICENSE).
+License: Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Quick start
 
-Close Enough currently supports source installation with Go 1.24 or newer. From a clone of this repository:
+Close Enough currently supports source installation with Go 1.25 or newer. From a clone of this repository:
 
 ```sh
 go install ./cmd/close-enough
@@ -32,6 +32,14 @@ eval "$(close-enough init --shell zsh --experimental-output-capture)"
 
 It runs the shell through the platform `script` utility. Output is relayed through a private FIFO, sanitized and redacted before Close Enough retains up to 8 KiB for the current command, and is not written as a transcript. This can affect terminal programs; if the relay is unavailable, Close Enough falls back to an exit-status-only hint.
 
+## Privacy and local learning
+
+Diagnosis runs locally and does not send command data over the network. The shell integrations do not write a general shell-history file or terminal transcript.
+
+Local learning is disabled by default. If you explicitly set `local_learning_enabled=true`, Close Enough stores a local, owner-only SQLite database under `$XDG_STATE_HOME/close-enough` (or `$HOME/.local/state/close-enough`). It records a failed/corrected command pair only when its credential detector finds no secret in either command, and stores recognized-secret-redacted failure output capped at 8 KiB. Redaction is a best-effort safeguard, not a substitute for keeping credentials out of commands and terminal output.
+
+On daemon startup, observations older than `learning_retention_days` are removed; the default is 30 days and the supported range is 1–90. Learning produces a reviewable draft after three matching pairs; it does not automatically enable a rule. Inspect drafts with `close-enough learn list`, then remove all learning data with `close-enough learn purge --confirm=PURGE`.
+
 ## How this differs from The Fuck
 
 The projects share the command-repair problem space, but Close Enough is designed as a conservative shell-integrated assistant rather than a command replay tool.
@@ -39,7 +47,7 @@ The projects share the command-repair problem space, but Close Enough is designe
 | | The Fuck | Close Enough |
 | --- | --- | --- |
 | Interaction | Run an explicit alias after a command fails; choose a corrected command to execute. | Diagnose before submission and after supported failures; default to a non-blocking hint. |
-| Failure data | Matches extensible Python rules against command output and shell history. | Uses exit status by default. The opt-in Bash/Zsh experiment extracts bounded, redacted evidence through a local relay; command history is never persisted. |
+| Failure data | Matches extensible Python rules against command output and shell history. | Uses exit status by default. The opt-in Bash/Zsh experiment extracts bounded, redacted evidence through a local relay; general shell history is never persisted. |
 | Applying a repair | Can execute the selected correction. | Rewrites only explicitly opted-in, bundled `safe` repairs in the shell buffer; high-risk and installed-pack repairs are never auto-applied. |
 | Extension model | Python rules, including third-party packages. | Declarative packs with strict schema validation, explicit risk metadata, and Ed25519 publisher trust. |
 | Shell command | Uses the `fuck` trigger alias in its recommended shell setup. | Uses only `close-enough`; it does not create a `fuck` or `thefuck` alias. |
@@ -48,7 +56,15 @@ This lets both tools be installed while users evaluate Close Enough without alia
 
 ## Installation from a release
 
-The release workflow is configured to produce signed archives and installers for macOS, Linux, and Windows. The verified install path is below; use it once a versioned release is available.
+There is no published release yet. The release workflow is configured to produce signed archives and installers for macOS, Linux, and Windows; use the verified installer path below once a public versioned release is available.
+
+Once a public tag exists, Go users can install a versioned command directly:
+
+```sh
+go install github.com/gongahkia/close-enough/cmd/close-enough@vX.Y.Z
+```
+
+Direct signed archives remain the recommended option when you want to verify the release identity before executing an installer. Homebrew, WinGet, and AUR distribution are not yet published; their release-gated rollout is tracked in [docs/distribution.md](docs/distribution.md).
 
 `close-enough` does not send command data over the network during diagnosis. Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
 
@@ -110,7 +126,7 @@ Pack signature verification uses detached Ed25519 signatures over exact pack byt
 
 Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
 
-History ranking and credential-backed history keys are not shipped features. The repository retains internal research abstractions only; close-enough does not create history keys, persist command history, or rank suggestions from history.
+History ranking and credential-backed history keys are not shipped features. The repository retains internal research abstractions only; Close Enough does not create history keys, persist general shell history, or rank suggestions automatically from history. Optional local learning is described above.
 
 No self-update client or update channel is shipped. The update-manifest and bundled-pack archive helpers are internal release experiments and are not published as release assets.
 

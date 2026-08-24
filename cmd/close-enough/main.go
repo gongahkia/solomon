@@ -676,6 +676,7 @@ func captureStartCommand(args []string) error {
 	}
 	defer os.RemoveAll(directory)
 	fifo := filepath.Join(directory, "output")
+	// #nosec G204 -- mkfifoPath is resolved with exec.LookPath and fifo is fixed under a new private temporary directory.
 	if err := exec.Command(mkfifoPath, "-m", "600", fifo).Run(); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
@@ -689,6 +690,7 @@ func captureStartCommand(args []string) error {
 	}
 	defer relay.Close()
 	go func() {
+		// #nosec G304 -- fifo is created above with mode 0600 under a new private temporary directory.
 		reader, err := os.Open(fifo)
 		if err == nil {
 			defer reader.Close()
@@ -707,8 +709,10 @@ func captureStartCommand(args []string) error {
 
 func scriptCaptureCommand(scriptPath, fifo, shellPath string) *exec.Cmd {
 	if runtime.GOOS == "linux" {
+		// #nosec G204 -- scriptPath and shellPath are resolved with exec.LookPath; shellPath is POSIX-quoted before script evaluates it.
 		return exec.Command(scriptPath, "-q", "-f", fifo, "-c", "exec "+quotePOSIX(shellPath)+" -i")
 	}
+	// #nosec G204 -- scriptPath and shellPath are resolved with exec.LookPath and passed as distinct arguments.
 	return exec.Command(scriptPath, "-q", fifo, shellPath, "-i")
 }
 

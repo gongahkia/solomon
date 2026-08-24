@@ -88,7 +88,7 @@ jobs:
             *) exit 2 ;;
           esac
           sh scripts/release-sbom.sh "$(go env GOPATH)/bin/cyclonedx-gomod" . "$sbom" "${{ matrix.goos }}" "${{ matrix.goarch }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.cdx.json
@@ -102,7 +102,7 @@ jobs:
             *) exit 2 ;;
           esac
           sh scripts/release-license-audit.sh "$(go env GOPATH)/bin/go-licenses" . "$audit" "${{ matrix.goos }}" "${{ matrix.goarch }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: license-audit-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.licenses.csv
@@ -112,12 +112,12 @@ jobs:
           archive='${{ steps.release-archive.outputs.path }}'
           cosign sign-blob --yes --bundle "$archive.sigstore.json" "$archive"
           test -s "$archive.sigstore.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sigstore-bundle-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.sigstore.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist
@@ -159,7 +159,7 @@ jobs:
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF"
           cosign verify-blob dist/install.sh --bundle dist/install.sh.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
           cosign verify-blob dist/install.ps1 --bundle dist/install.ps1.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bootstrap-${{ github.ref_name }}
           path: dist/install.*

@@ -8,6 +8,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from solomon.consistency.inspection import ConsistencyInspector
 from solomon.consistency.models import ConsistencyFindingCode, ConsistencyScope
 from solomon.currency.models import now_utc
@@ -236,3 +238,18 @@ def test_inspector_selects_only_exact_or_scope_derived_operations() -> None:
     )
 
     assert [operation.id for operation in selected] == ["exact", "evidence", "suggestions", "assertion"]
+
+
+def test_inspector_handles_invalid_threshold_and_unavailable_source_without_expanding_scope() -> None:
+    def unavailable(_: str) -> Any:
+        raise KeyError("missing document")
+
+    inspector = _inspector(SimpleNamespace(get_document=unavailable))
+    scope = ConsistencyScope(tenant_id="tenant-a", matter_id="matter-a", client_id="client-a")
+    with pytest.raises(ValueError, match="threshold"):
+        inspector.check(scope, stuck_after=timedelta())
+    assert inspector._source_documents([_assertion(source_document_id=None)]) == []
+    assert inspector._source_documents([_assertion(source_document_id="missing-document")]) == []
+    assert inspector._source_findings([_assertion(source_document_id=None)], []) == []
+    no_target_operation: Any = SimpleNamespace(target_resource_id=None)
+    assert inspector._authority_change_affects_items(no_target_operation, {"item-a"}) is False

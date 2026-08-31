@@ -13,6 +13,7 @@ from solomon.store.migrations import (
     SchemaMigration,
     apply_postgres_migrations,
     apply_sqlite_migrations,
+    operation_store_migrations,
 )
 
 
@@ -86,6 +87,21 @@ def test_sqlite_migrations_roll_back_failed_fresh_batch() -> None:
         ).fetchall()
         == []
     )
+
+
+def test_operation_store_upgrade_applies_the_new_index_without_rewriting_history() -> None:
+    connection = sqlite3.connect(":memory:")
+    initial = operation_store_migrations()[0]
+    current = operation_store_migrations()
+
+    assert apply_sqlite_migrations(connection, (initial,)) == [initial]
+    assert apply_sqlite_migrations(connection, current) == [current[1]]
+    assert connection.execute(
+        "SELECT version FROM schema_migrations WHERE scope = 'operation-store' ORDER BY version"
+    ).fetchall() == [(1,), (2,)]
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_knowledge_operations_status_updated'"
+    ).fetchone() == ("idx_knowledge_operations_status_updated",)
 
 
 @dataclass

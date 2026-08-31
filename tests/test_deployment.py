@@ -18,6 +18,7 @@ from solomon.deployment import (
     deployment_preflight,
     initialize_deployment,
     read_metadata,
+    upgrade_preflight,
 )
 from solomon.errors import PolicyRefusalError
 from solomon.worker import run_pending_operations
@@ -161,3 +162,29 @@ def test_concurrent_initialization_creates_one_stable_layout_marker(tmp_path: Pa
     assert created_one != created_two
     assert metadata_one == metadata_two == read_metadata(tmp_path / "data")
     assert MaintenanceGate(tmp_path / "data").active() is None
+
+
+def test_upgrade_preflight_is_read_only_and_requires_initialized_healthy_layout(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    report = upgrade_preflight(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=str(tmp_path / "data" / "solomon.sqlite3"),
+    )
+    assert report.ready is False
+
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=str(tmp_path / "data" / "solomon.sqlite3"),
+    )
+    ready = upgrade_preflight(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=str(tmp_path / "data" / "solomon.sqlite3"),
+    )
+
+    assert service.audit.verify().ok
+    assert ready.ready is True
+    assert ready.rollback_strategy == "restore-verified-pre-upgrade-backup"
+    assert ready.compatibility.rollback_supported is False

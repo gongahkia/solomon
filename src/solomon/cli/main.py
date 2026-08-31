@@ -61,6 +61,7 @@ from solomon.deployment import (
     compatibility_report,
     deployment_preflight,
     initialize_deployment,
+    upgrade_preflight,
 )
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
@@ -458,6 +459,29 @@ def deployment_compatibility() -> None:
     settings = get_settings()
     try:
         report = compatibility_report(data_dir=settings.data_dir, database_url=_service_database_url(settings))
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(report.model_dump(mode="json"), sort_keys=True)
+
+
+@deployment_app.command(
+    "upgrade-preflight",
+    epilog=_example("uv run solomon deployment upgrade-preflight --format json"),
+)
+def deployment_upgrade_preflight(
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")] = "json",
+) -> None:
+    """Verify a forward-only upgrade without touching migrations or data."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    settings = get_settings()
+    try:
+        report = upgrade_preflight(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            database_url=_service_database_url(settings),
+        )
     except DeploymentError as exc:
         raise typer.BadParameter(str(exc)) from exc
     _print_json(report.model_dump(mode="json"), sort_keys=True)

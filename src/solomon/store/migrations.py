@@ -287,6 +287,23 @@ def operation_store_migrations() -> tuple[SchemaMigration, ...]:
                 """,
             ),
         ),
+        SchemaMigration(
+            scope="operation-store",
+            version=2,
+            name="operation-status-age-index",
+            sqlite_statements=(
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_status_updated
+                ON knowledge_operations(status, updated_at, operation_id)
+                """,
+            ),
+            postgres_statements=(
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_status_updated
+                ON knowledge_operations(status, updated_at, operation_id)
+                """,
+            ),
+        ),
     )
 
 

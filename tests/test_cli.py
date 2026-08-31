@@ -234,6 +234,7 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         ["deployment", "preflight"],
         ["deployment", "init"],
         ["deployment", "compatibility"],
+        ["deployment", "upgrade-preflight"],
         ["deployment", "maintenance"],
         ["deployment", "release-maintenance"],
         ["deployment", "backup"],
@@ -261,12 +262,16 @@ def test_cli_deployment_commands_emit_stable_json(monkeypatch: pytest.MonkeyPatc
     initialized = runner.invoke(app, ["deployment", "init", "--owner", "operator-a"])
     preflight = runner.invoke(app, ["deployment", "preflight", "--require-initialized", "--format", "json"])
     compatibility = runner.invoke(app, ["deployment", "compatibility"])
+    upgrade = runner.invoke(app, ["deployment", "upgrade-preflight", "--format", "json"])
     maintenance = runner.invoke(app, ["deployment", "maintenance", "--format", "json"])
 
-    assert initialized.exit_code == preflight.exit_code == compatibility.exit_code == maintenance.exit_code == 0
+    assert all(
+        result.exit_code == 0 for result in (initialized, preflight, compatibility, upgrade, maintenance)
+    )
     assert json.loads(initialized.output)["created"] is True
     assert json.loads(preflight.output)["ready"] is True
     assert json.loads(compatibility.output)["writable"] is True
+    assert json.loads(upgrade.output)["rollback_strategy"] == "restore-verified-pre-upgrade-backup"
     assert json.loads(maintenance.output) == {"active": False, "maintenance": None}
 
 

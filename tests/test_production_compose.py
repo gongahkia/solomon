@@ -31,11 +31,14 @@ def test_production_surface_ci_matrix_and_smoke_harness() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     smoke = ROOT / "scripts" / "production_compose_smoke.sh"
     rehearsal = ROOT / "scripts" / "production_operations_rehearsal.sh"
+    upgrade_rehearsal = ROOT / "scripts" / "production_upgrade_rehearsal.sh"
 
     assert smoke.is_file()
     assert smoke.stat().st_mode & 0o111
     assert rehearsal.is_file()
     assert rehearsal.stat().st_mode & 0o111
+    assert upgrade_rehearsal.is_file()
+    assert upgrade_rehearsal.stat().st_mode & 0o111
     for fragment in (
         "typescript-sdk:",
         "npm test",
@@ -65,6 +68,13 @@ def test_production_surface_ci_matrix_and_smoke_harness() -> None:
         "post_restore_write",
     ):
         assert fragment in rehearsal.read_text(encoding="utf-8")
+    for fragment in (
+        "git -C \"$root\" archive \"$starting_commit\"",
+        "operation-store",
+        '"rollback":',
+        "older application unexpectedly accepted",
+    ):
+        assert fragment in upgrade_rehearsal.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration

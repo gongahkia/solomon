@@ -88,6 +88,18 @@ class DeploymentCompatibilityReport(SolomonModel):
     metadata: DeploymentMetadata | None = None
 
 
+class DeploymentUpgradePreflightReport(SolomonModel):
+    """Read-only admission result for a controlled, forward-only upgrade."""
+
+    schema_id: Literal["solomon.deployment_upgrade_preflight.v1"] = "solomon.deployment_upgrade_preflight.v1"
+    ready: bool
+    profile: DeploymentProfile
+    preflight: DeploymentPreflightReport
+    compatibility: DeploymentCompatibilityReport
+    rollback_strategy: Literal["restore-verified-pre-upgrade-backup"] = "restore-verified-pre-upgrade-backup"
+    detail: str
+
+
 def profile_for_database_url(database_url: str) -> DeploymentProfile:
     return (
         DeploymentProfile.MIXED
@@ -261,9 +273,35 @@ def compatibility_report(*, data_dir: Path | str, database_url: str) -> Deployme
         profile=profile,
         compatible_for_startup=True,
         writable=True,
-        rollback_supported=True,
-        detail="this application can read and write the recorded layout; database downgrade remains restore-only",
+        rollback_supported=False,
+        detail="this application can read and write the recorded layout; database downgrade is restore-only",
         metadata=metadata,
+    )
+
+
+def upgrade_preflight(
+    *, data_dir: Path | str, journal_dir: Path | str, database_url: str
+) -> DeploymentUpgradePreflightReport:
+    """Check current prerequisites without migrating or creating state."""
+
+    preflight = deployment_preflight(
+        data_dir=data_dir,
+        journal_dir=journal_dir,
+        database_url=database_url,
+        require_initialized=True,
+    )
+    compatibility = compatibility_report(data_dir=data_dir, database_url=database_url)
+    ready = preflight.ready and compatibility.compatible_for_startup and compatibility.writable
+    return DeploymentUpgradePreflightReport(
+        ready=ready,
+        profile=preflight.profile,
+        preflight=preflight,
+        compatibility=compatibility,
+        detail=(
+            "take and inspect a coordinated backup before forward migration; rollback is a verified restore"
+            if ready
+            else "resolve blocked or uninitialized prerequisites before an upgrade"
+        ),
     )
 
 
@@ -452,7 +490,8 @@ def _postgres_check(database_url: str) -> DeploymentCheck:
 
 __all__ = [
     "CheckStatus", "DeploymentCheck", "DeploymentCompatibilityReport", "DeploymentError", "DeploymentMetadata",
-    "DeploymentPreflightReport", "DeploymentProfile", "MaintenanceGate", "MaintenanceRecord", "compatibility_report",
-    "deployment_preflight", "initialize_deployment", "metadata_path", "profile_for_database_url", "read_metadata",
+    "DeploymentPreflightReport", "DeploymentProfile", "DeploymentUpgradePreflightReport", "MaintenanceGate",
+    "MaintenanceRecord", "compatibility_report", "deployment_preflight", "initialize_deployment", "metadata_path",
+    "profile_for_database_url", "read_metadata", "upgrade_preflight",
     "redact_database_url", "required_components",
 ]

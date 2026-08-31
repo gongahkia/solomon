@@ -1,0 +1,110 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+
+# Proves a bounded N-to-N+1 PostgreSQL operation-store migration with real
+# containers. Every resource name includes this process ID and is removed on
+# exit; it never targets an operator database, volume, image, or data path.
+set -eu
+
+if ! command -v docker >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+    echo "docker and git are required for the production upgrade rehearsal" >&2
+    exit 2
+fi
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+starting_commit="${SOLOMON_UPGRADE_STARTING_COMMIT:-2d74983b0724ab9f9b4d19a4c8b2bbf0288723ab}"
+run_id="solomon-upgrade-$$"
+network="${run_id}-network"
+postgres="${run_id}-postgres"
+old_image="${run_id}-old-image"
+current_image="${run_id}-current-image"
+work="$(mktemp -d "${TMPDIR:-/tmp}/solomon-upgrade.XXXXXX")"
+old_root="$work/old"
+state="$work/state"
+
+cleanup() {
+    status=$?
+    docker rm --force "$postgres" >/dev/null 2>&1 || true
+    docker network rm "$network" >/dev/null 2>&1 || true
+    docker run --rm -v "$work:/state" --entrypoint /bin/sh "$current_image" \
+        -c 'find /state -mindepth 1 -delete' >/dev/null 2>&1 || true
+    rmdir "$work" >/dev/null 2>&1 || true
+    docker image rm "$old_image" "$current_image" >/dev/null 2>&1 || true
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+mkdir "$old_root" "$state"
+chmod 0777 "$state"
+git -C "$root" archive "$starting_commit" | tar -x -C "$old_root"
+docker build --quiet -t "$old_image" "$old_root" >/dev/null
+docker build --quiet -t "$current_image" "$root" >/dev/null
+docker network create "$network" >/dev/null
+docker run --detach --rm --name "$postgres" --network "$network" \
+    -e POSTGRES_DB=solomon \
+    -e POSTGRES_USER=solomon \
+    -e POSTGRES_PASSWORD=disposable-postgres-password \
+    pgvector/pgvector:0.8.2-pg16-bookworm >/dev/null
+
+attempts=0
+while ! docker exec "$postgres" pg_isready -U solomon -d solomon >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 60 ]; then
+        echo "PostgreSQL did not become ready within 60 seconds" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+database_url="postgresql://solomon:disposable-postgres-password@${postgres}:5432/solomon"
+
+run_image() {
+    image="$1"
+    shift
+    timeout 120 docker run --rm --network "$network" -v "$state:/state" \
+        -e SOLOMON_SKU=server \
+        -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
+        -e SOLOMON_SERVER_API_KEY=disposable-server-key \
+        -e SOLOMON_DATABASE_URL="$database_url" \
+        -e SOLOMON_DATA_DIR=/state/data \
+        -e SOLOMON_JOURNAL_DIR=/state/journal \
+        "$image" "$@"
+}
+
+run_image "$old_image" solomon migrate >/dev/null
+run_image "$old_image" solomon ingest "N release source position" --source-ref upgrade-n >/dev/null
+run_image "$current_image" solomon migrate >/dev/null
+run_image "$current_image" solomon deployment init --owner upgrade-rehearsal >/dev/null
+run_image "$current_image" solomon deployment upgrade-preflight --format json >/dev/null
+run_image "$current_image" solomon ingest "N plus one release position" --source-ref upgrade-n-plus-one >/dev/null
+run_image "$current_image" solomon health > "$work/health.json"
+
+migrations="$(docker exec "$postgres" psql -U solomon -d solomon -Atc \
+    "SELECT version FROM schema_migrations WHERE scope = 'operation-store' ORDER BY version")"
+if [ "$migrations" != "1
+2" ]; then
+    echo "N-to-N+1 operation-store migration did not reach versions 1 and 2" >&2
+    exit 1
+fi
+if run_image "$old_image" solomon health >/dev/null 2>&1; then
+    echo "older application unexpectedly accepted the N+1 operation-store schema" >&2
+    exit 1
+fi
+
+python - "$work/health.json" <<'PY'
+import json
+import sys
+
+health = json.load(open(sys.argv[1], encoding="utf-8"))
+if health["store"]["item_count"] != 2:
+    raise SystemExit("post-upgrade knowledge inventory differs from expected N and N+1 writes")
+if not health["journal"]["ok"]:
+    raise SystemExit("post-upgrade audit journal failed verification")
+print(json.dumps({
+    "schema_id": "solomon.production_upgrade_rehearsal.v1",
+    "operation_store_migrations": [1, 2],
+    "rollback": "refused-by-older-binary",
+    "post_upgrade_write": "succeeded",
+    "result": "passed",
+}, sort_keys=True))
+PY

@@ -38,13 +38,14 @@ correlation), verifies the retained audit pack, and completes a new governed pos
 assertion provenance. This demonstrates component recovery and continued operation; it does not prove distributed
 atomic restore.
 
-The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. N creates the PostgreSQL store and
-writes one record. The current release creates and verifies a pre-upgrade checkpoint before migration, restores it
-into a second empty pgvector target, and proves the N binary still reads that isolated recovery state. N+1 then
-applies operation-store migration 2 and writes a second record, followed by a verified post-upgrade checkpoint.
-PostgreSQL reports versions `[1, 2]`. N refuses the unknown source-schema version; N+1 health verifies its audit
-chain and reports the two-record inventory. This is a safe rollback refusal and isolated restore rehearsal, not an
-in-place database downgrade.
+The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. The actual N binary creates the
+same two-scope governed fixture: source/version lineage, confirmed/rejected/deferred/withdrawn assertions, graph and
+currency effects, audit pack, and lifecycle safeguards. The current release creates and verifies a pre-upgrade
+checkpoint before migration, restores it into a second empty pgvector target, and proves the N binary still reads the
+four-item isolated recovery state. N+1 then applies operation-store migration 2, performs a new governed
+confirmation, and produces a verified post-upgrade checkpoint. PostgreSQL reports versions `[1, 2]`. N refuses the
+unknown source-schema version; N+1 health verifies its audit chain and reports the five-item inventory. This is a
+safe rollback refusal and isolated restore rehearsal, not an in-place database downgrade.
 
 ## Failure and guard coverage
 

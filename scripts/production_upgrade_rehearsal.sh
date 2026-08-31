@@ -75,6 +75,7 @@ run_image() {
     image="$1"
     shift
     timeout 120 docker run --rm --network "$network" -v "$state:/state" \
+        -v "$root/examples:/app/examples:ro" \
         -e SOLOMON_SKU=server \
         -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
         -e SOLOMON_SERVER_API_KEY=disposable-server-key \
@@ -110,7 +111,12 @@ run_restored_old() {
 }
 
 run_image "$old_image" solomon migrate >/dev/null
-run_image "$old_image" solomon ingest "N release source position" --source-ref upgrade-n >/dev/null
+run_image "$old_image" python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
+    --workspace /state/old-fixture \
+    --data-dir /state/data \
+    --journal-dir /state/journal \
+    --database-url "$database_url" \
+    --audit-pack-dir /state/data/pre-upgrade-audit-pack > "$work/old-fixture.json"
 run_image "$current_image" solomon deployment init --owner upgrade-rehearsal >/dev/null
 run_image "$current_image" solomon deployment upgrade-preflight --format json >/dev/null
 run_image "$current_image" solomon deployment backup /state/pre-upgrade.enc >/dev/null
@@ -126,7 +132,12 @@ fi
 run_restore_control solomon deployment restore --plan /state/pre-upgrade-restore-plan.json --apply >/dev/null
 run_restored_old solomon health > "$work/pre-upgrade-old-health.json"
 run_image "$current_image" solomon migrate >/dev/null
-run_image "$current_image" solomon ingest "N plus one release position" --source-ref upgrade-n-plus-one >/dev/null
+run_image "$current_image" python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
+    --workspace /state/post-upgrade-proof \
+    --data-dir /state/data \
+    --journal-dir /state/journal \
+    --database-url "$database_url" \
+    --post-restore-write > "$work/post-upgrade-write.json"
 run_image "$current_image" solomon health > "$work/health.json"
 run_image "$current_image" solomon deployment backup /state/post-upgrade.enc >/dev/null
 run_image "$current_image" solomon deployment backup-inspect /state/post-upgrade.enc >/dev/null
@@ -143,30 +154,37 @@ if run_image "$old_image" solomon health >/dev/null 2>&1; then
     exit 1
 fi
 
-python - "$work/health.json" "$work/pre-upgrade-old-health.json" "$report_path" <<'PY'
+python - "$work/health.json" "$work/pre-upgrade-old-health.json" "$work/old-fixture.json" "$work/post-upgrade-write.json" "$report_path" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 health = json.load(open(sys.argv[1], encoding="utf-8"))
 pre_upgrade_old = json.load(open(sys.argv[2], encoding="utf-8"))
-if health["store"]["item_count"] != 2:
+old_fixture = json.load(open(sys.argv[3], encoding="utf-8"))
+post_upgrade_write = json.load(open(sys.argv[4], encoding="utf-8"))
+if health["store"]["item_count"] != 5:
     raise SystemExit("post-upgrade knowledge inventory differs from expected N and N+1 writes")
 if not health["journal"]["ok"]:
     raise SystemExit("post-upgrade audit journal failed verification")
-if pre_upgrade_old["store"]["item_count"] != 1 or not pre_upgrade_old["journal"]["ok"]:
+if pre_upgrade_old["store"]["item_count"] != 4 or not pre_upgrade_old["journal"]["ok"]:
     raise SystemExit("verified pre-upgrade backup was not readable by the previous application")
+if old_fixture["decisions"] != {"confirmed": 1, "deferred": 1, "rejected": 1, "withdrawn": 1}:
+    raise SystemExit("N fixture did not preserve governed assertion lifecycle coverage")
+if post_upgrade_write["result"] != "passed" or not post_upgrade_write["edge_provenance_matches"]:
+    raise SystemExit("post-upgrade governed write did not retain edge provenance")
 result = {
     "schema_id": "solomon.production_upgrade_rehearsal.v2",
     "operation_store_migrations": [1, 2],
     "pre_upgrade_backup_restore": "previous-binary-readable",
+    "governed_fixture": old_fixture,
     "post_upgrade_backup": "verified",
     "rollback": "refused-by-older-binary",
-    "post_upgrade_write": "succeeded",
+    "post_upgrade_write": post_upgrade_write,
     "result": "passed",
 }
 serialized = json.dumps(result, sort_keys=True)
-report_path = sys.argv[3]
+report_path = sys.argv[5]
 if report_path:
     target = Path(report_path)
     if not target.parent.is_dir():

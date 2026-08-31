@@ -12,3 +12,4 @@
 - [0008: Audit Journal Design](0008-audit-journal.md)
 - [0009: Governed Explicit Dependency Assertions](0009-governed-dependency-assertions.md)
 - [0010: Durable Operations And Reconciliation Across Persistence Boundaries](0010-crash-consistency-reconciliation.md)
+- [0011: Single-Host Mixed-Store Production Operations Profile](0011-production-operations-profile.md)

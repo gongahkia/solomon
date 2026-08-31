@@ -22,6 +22,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Known limitations](./known-limitations.md)
 - [Deployment profiles](./deployment.md)
 - [Crash consistency operations guide](./operations/crash-consistency.md)
+- [Production backup, restore, and upgrade guide](./operations/production-backup-restore.md)
 
 ## Architecture and evidence
 
@@ -30,9 +31,11 @@ contested. It does not decide the law or replace lawyer review.
 - [Boundary audit checklist](./boundary-audit-checklist.md)
 - [Audit evidence and regulatory mapping](./regulatory-evidence.md)
 - [Crash consistency ADR](./adr/0010-crash-consistency-reconciliation.md)
+- [Production operations ADR](./adr/0011-production-operations-profile.md)
 - [Consistency model](./consistency-model.md)
 - [Cross-boundary operation matrix](./cross-boundary-operation-matrix.md)
 - [Crash consistency proof record](./evaluations/crash-consistency-reconciliation-proof.md)
+- [Production operations rehearsal record](./evaluations/production-operations-rehearsal.md)
 - [Interview architecture narrative](./interview/crash-consistency.md)
 
 ## Demonstrations

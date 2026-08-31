@@ -21,7 +21,10 @@ legal research database, drafting copilot, agent-memory system, or legal-advice 
 
 For its documented deployment profiles, Solomon durably records the governed multi-stage operations behind that
 answer and can inspect or safely reconcile defined incomplete projections after interruption. This is a bounded
-recovery claim, not a distributed transaction across source SQLite, PostgreSQL, and the audit journal.
+recovery claim, not a distributed transaction across source SQLite, PostgreSQL, and the audit journal. The
+recommended single-host profile also has a rehearsed encrypted full checkpoint, guarded restore, and forward-only
+upgrade procedure; it does not claim point-in-time atomic restore, an external recovery objective, or disaster
+recovery across sites.
 
 ## The wedge: currency, not retrieval
 

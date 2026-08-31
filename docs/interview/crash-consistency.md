@@ -26,3 +26,11 @@ The tradeoff is intentional. A full PostgreSQL consolidation could shrink some p
 migration of immutable evidence, audit semantics, and the offline local profile; it still would not make JSONL atomic
 without a larger redesign. The present architecture makes failures observable and convergent while saying precisely
 what it does not guarantee: no distributed ACID transaction and no automatic legal or human-review decision.
+
+Operationally, the same boundary drives the deployment profile. Production is one host with PostgreSQL 16/pgvector,
+the source/workflow SQLite volume, and the audit JSONL volume retained as one recovery set. A maintenance-gated full
+backup uses a PostgreSQL logical dump plus SQLite snapshots and verified audit chain. Restore is plan-first and
+requires an empty database and absent local root; PostgreSQL restore is transactional only inside PostgreSQL, so a
+crash before local activation is an operator case. The N-to-N+1 rehearsal proves forward migration and intentionally
+shows the old binary refusing an unknown newer migration. That is a more honest rollback story than pretending an
+automatic database downgrade exists.

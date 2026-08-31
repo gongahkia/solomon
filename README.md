@@ -428,8 +428,7 @@ uv run solomon restore ./solomon-backup.enc ./restored-deployment
 fresh deployment at those paths with `SOLOMON_DATA_DIR` and `SOLOMON_JOURNAL_DIR`. `recovery-drill` restores to a
 temporary fresh deployment, checks every SQLite database, initializes the local service, and verifies the audit
 journal. Run backups during a brief writer quiescence when cross-database point-in-time consistency is required.
-The commands intentionally reject Postgres deployments; use a database-native Postgres backup until a
-coordinated server-storage backup contract is available.
+These root commands intentionally reject Postgres deployments; use the server-only coordinated procedure below.
 
 ## Prometheus Metrics
 
@@ -678,6 +677,13 @@ the PostgreSQL, `solomon-data`, and `solomon-journal` volumes together, run the 
 use the scoped consistency inspector before attempting repair. See
 [`docs/deployment.md`](./docs/deployment.md) and
 [`docs/operations/crash-consistency.md`](./docs/operations/crash-consistency.md).
+
+Use `solomon deployment backup`, `backup-inspect`, `restore-plan`, and `restore --apply` for an encrypted full
+server checkpoint and guarded empty-target restore. The same command group has read-only `upgrade-preflight`; forward
+migrations are serialized and an older binary refuses an unknown newer schema rather than downgrading it. This does
+not make PostgreSQL restore and local-volume activation one transaction. Follow the exact
+[`production backup, restore, and upgrade guide`](./docs/operations/production-backup-restore.md), including its
+operator recovery step for a crash between those actions.
 
 Run the full local production smoke test (build, pgvector, migrations, API, console, and worker) with:
 

@@ -21,3 +21,7 @@ edge.
   authorization-invalid cases require an operator.
 - SQLite is a supported offline, single-writer profile. It is not a cluster-scale shared-filesystem multi-writer
   deployment claim.
+- The recommended production Compose profile has a tested encrypted full logical checkpoint and guarded restore, but
+  no incremental backup, remote object-store replication, external RPO/RTO, managed-service, multi-host, or
+  Kubernetes disaster-recovery claim. PostgreSQL restore and local-volume activation are separate actions; a hard
+  crash between them requires an operator to recover into fresh isolated targets.

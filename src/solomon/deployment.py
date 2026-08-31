@@ -152,30 +152,35 @@ def initialize_deployment(
     data = _ensure_private_directory(data_dir, label="data")
     journal = _ensure_private_directory(journal_dir, label="journal")
     profile = profile_for_database_url(database_url)
-    existing = read_metadata(data)
-    if existing is not None:
-        if existing.profile is not profile:
-            raise DeploymentError("deployment metadata profile does not match configured database backend")
-        return existing, False
-    metadata = DeploymentMetadata(
-        deployment_id=str(uuid4()),
-        profile=profile,
-        created_at=now_utc(),
-        initialized_by_version=__version__,
-        components=required_components(profile),
-    )
-    _write_new_json(metadata_path(data), metadata.model_dump(mode="json"))
-    AuditJournal(journal / "journal.jsonl").append_idempotent(
-        "deployment_initialized",
-        {
-            "deployment_id": metadata.deployment_id,
-            "profile": metadata.profile.value,
-            "layout_version": metadata.layout_version,
-            "owner": owner,
-        },
-        operation_id=f"deployment-initialized:{metadata.deployment_id}",
-    )
-    return metadata, True
+    gate = MaintenanceGate(data)
+    # Bootstrap needs serialization but does not claim a long-lived maintenance
+    # interval: service processes are not started until Compose observes this
+    # one-shot command complete.
+    with gate._exclusive_lock():
+        existing = read_metadata(data)
+        if existing is not None:
+            if existing.profile is not profile:
+                raise DeploymentError("deployment metadata profile does not match configured database backend")
+            return existing, False
+        metadata = DeploymentMetadata(
+            deployment_id=str(uuid4()),
+            profile=profile,
+            created_at=now_utc(),
+            initialized_by_version=__version__,
+            components=required_components(profile),
+        )
+        _write_new_json(metadata_path(data), metadata.model_dump(mode="json"))
+        AuditJournal(journal / "journal.jsonl").append_idempotent(
+            "deployment_initialized",
+            {
+                "deployment_id": metadata.deployment_id,
+                "profile": metadata.profile.value,
+                "layout_version": metadata.layout_version,
+                "owner": owner,
+            },
+            operation_id=f"deployment-initialized:{metadata.deployment_id}",
+        )
+        return metadata, True
 
 
 def deployment_preflight(

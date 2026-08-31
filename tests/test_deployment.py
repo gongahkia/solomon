@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,24 @@ def test_invalid_metadata_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(DeploymentError, match="metadata is invalid"):
         read_metadata(data)
+
+
+def test_concurrent_initialization_creates_one_stable_layout_marker(tmp_path: Path) -> None:
+    database_url = str(tmp_path / "data" / "solomon.sqlite3")
+
+    def initialize() -> tuple[object, bool]:
+        return initialize_deployment(
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            database_url=database_url,
+            owner="concurrent-bootstrap",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = [future.result() for future in (executor.submit(initialize), executor.submit(initialize))]
+
+    metadata_one, created_one = first
+    metadata_two, created_two = second
+    assert created_one != created_two
+    assert metadata_one == metadata_two == read_metadata(tmp_path / "data")
+    assert MaintenanceGate(tmp_path / "data").active() is None

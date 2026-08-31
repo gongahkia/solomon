@@ -43,6 +43,8 @@ class SQLiteWorkflowStore:
                     authority_id TEXT NOT NULL,
                     event_json TEXT NOT NULL,
                     received_at TEXT NOT NULL,
+                    processed_at TEXT,
+                    processing_error TEXT,
                     UNIQUE(source_id, idempotency_key)
                 )
                 """
@@ -62,6 +64,13 @@ class SQLiteWorkflowStore:
                 )
                 """
             )
+            authority_columns = {
+                str(row["name"]) for row in self._conn.execute("PRAGMA table_info(authority_change_events)").fetchall()
+            }
+            if "processed_at" not in authority_columns:
+                self._conn.execute("ALTER TABLE authority_change_events ADD COLUMN processed_at TEXT")
+            if "processing_error" not in authority_columns:
+                self._conn.execute("ALTER TABLE authority_change_events ADD COLUMN processing_error TEXT")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_review_tasks_state ON review_tasks(state, created_at)")
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_review_tasks_reviewer ON review_tasks(reviewer_id, state)"
@@ -102,6 +111,41 @@ class SQLiteWorkflowStore:
         if row is None:
             raise AuthorityEventNotFoundError(event_id)
         return AuthorityChangeEvent.model_validate_json(str(row["event_json"]))
+
+    def authority_event_processed(self, event_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT processed_at FROM authority_change_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        if row is None:
+            raise AuthorityEventNotFoundError(event_id)
+        return row["processed_at"] is not None
+
+    def authority_event_processing_error(self, event_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT processing_error FROM authority_change_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        if row is None:
+            raise AuthorityEventNotFoundError(event_id)
+        return str(row["processing_error"]) if row["processing_error"] is not None else None
+
+    def mark_authority_event_processed(self, event_id: str, *, processed_at: datetime | None = None) -> None:
+        timestamp = processed_at or now_utc()
+        with self._conn:
+            result = self._conn.execute(
+                "UPDATE authority_change_events SET processed_at = ?, processing_error = NULL WHERE event_id = ?",
+                (timestamp.isoformat(), event_id),
+            )
+        if result.rowcount != 1:
+            raise AuthorityEventNotFoundError(event_id)
+
+    def mark_authority_event_failed(self, event_id: str, *, error: Exception) -> None:
+        with self._conn:
+            result = self._conn.execute(
+                "UPDATE authority_change_events SET processing_error = ? WHERE event_id = ?",
+                (error.__class__.__name__, event_id),
+            )
+        if result.rowcount != 1:
+            raise AuthorityEventNotFoundError(event_id)
 
     def create_review_task(self, task: ReviewTask) -> ReviewTask:
         existing = self._conn.execute(

@@ -123,21 +123,21 @@ def test_oidc_validator_allows_registered_claims_within_configured_clock_skew() 
 
 
 @pytest.mark.parametrize(
-    ("name", "claims"),
+    ("name", "claim_factory"),
     [
-        ("wrong issuer", {"iss": "https://other-issuer.example"}),
-        ("wrong audience", {"aud": "another-api"}),
-        ("empty subject", {"sub": ""}),
-        ("expired beyond skew", {"exp": datetime.now(timezone.utc) - timedelta(minutes=2)}),
-        ("not valid yet beyond skew", {"nbf": datetime.now(timezone.utc) + timedelta(minutes=2)}),
+        ("wrong issuer", lambda _now: {"iss": "https://other-issuer.example"}),
+        ("wrong audience", lambda _now: {"aud": "another-api"}),
+        ("empty subject", lambda _now: {"sub": ""}),
+        ("expired beyond skew", lambda now: {"exp": now - timedelta(minutes=2)}),
+        ("not valid yet beyond skew", lambda now: {"nbf": now + timedelta(minutes=2)}),
     ],
 )
-def test_oidc_validator_rejects_invalid_registered_claims(name: str, claims: dict[str, Any]) -> None:
+def test_oidc_validator_rejects_invalid_registered_claims(name: str, claim_factory: Any) -> None:
     private_key = _private_key()
     validator = _validator(DiscoveryTransport([_jwk(private_key, "first")]))
 
     with pytest.raises(OIDCValidationError):
-        validator.validate(_token(private_key, "first", **claims))
+        validator.validate(_token(private_key, "first", **claim_factory(datetime.now(timezone.utc))))
 
 
 def test_oidc_validator_rejects_unapproved_algorithm_before_discovery() -> None:

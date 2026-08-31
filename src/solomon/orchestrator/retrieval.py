@@ -553,9 +553,17 @@ class RetrievalOrchestrator:
         query: str,
         *,
         as_of: datetime,
+        matter_context: MatterContext | None = None,
         options: RecallOptions | None = None,
     ) -> list[RecallResult]:
         historical_items = self.store.as_of(as_of)
+        if matter_context is not None:
+            historical_items = [
+                item
+                for item in historical_items
+                if (matter_context.matter_id is None or item.matter_id == matter_context.matter_id)
+                and (matter_context.client_id is None or item.client_id == matter_context.client_id)
+            ]
         query_tokens = tokenize(query)
         hits: dict[str, IndexedHit] = {}
         for item in historical_items:

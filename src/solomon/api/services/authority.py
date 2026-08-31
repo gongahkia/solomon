@@ -18,7 +18,7 @@ from solomon.api.service_models import (
 )
 from solomon.api.services.base import ServiceDelegate
 from solomon.api.services.common import digest, parse_iso_datetime
-from solomon.audit.journal import sign_verification_attestation
+from solomon.audit.journal import AuditAttribution, sign_verification_attestation
 from solomon.currency.contradiction import (
     ContradictionSignal,
     append_contradiction_signal,
@@ -187,7 +187,13 @@ class AuthorityService(ServiceDelegate):
             )
         return sorted(rows, key=lambda row: (str(row.get("reviewer_id") or ""), str(row["item"]["id"])))
 
-    def register_authority_change(self, authority_id: str, request: AuthorityChangeRequest) -> dict[str, Any]:
+    def register_authority_change(
+        self,
+        authority_id: str,
+        request: AuthorityChangeRequest,
+        *,
+        change_id: str | None = None,
+    ) -> dict[str, Any]:
         from datetime import datetime
 
         impact = register_authority_change(
@@ -196,6 +202,7 @@ class AuthorityService(ServiceDelegate):
             changed_at=datetime.fromisoformat(request.changed_at),
             graph=self.graph,
             store=self.store,
+            change_id=change_id,
         )
         self.currency_cache.invalidate(set(impact.stale_item_ids))
         for stale_item_id in impact.stale_item_ids:
@@ -203,7 +210,17 @@ class AuthorityService(ServiceDelegate):
             event = latest_verification_event(item)
             if event is not None and event.state is VerificationLifecycleState.REQUESTED:
                 self.audit.log_verification_lifecycle(event)
-        self.audit.log_impact(impact)
+        self.audit.log_impact(
+            impact,
+            attribution=(
+                AuditAttribution(
+                    actor_id="system:authority-monitor",
+                    correlation_id=f"authority_event:{change_id}",
+                )
+                if change_id is not None
+                else None
+            ),
+        )
         return impact.model_dump(mode="json")
 
     def add_dependency(self, request: DependencyRequest) -> DependencyEdge:

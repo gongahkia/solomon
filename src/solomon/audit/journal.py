@@ -240,8 +240,17 @@ class AuditJournal:
             payload["model"] = model_audit.model_dump(mode="json")
         return self.append("query", payload)
 
-    def log_impact(self, impact: ImpactResult) -> AuditEntry:
-        return self.append("impact", impact.model_dump(mode="json"))
+    def log_impact(
+        self,
+        impact: ImpactResult,
+        *,
+        attribution: AuditAttribution | None = None,
+    ) -> AuditEntry:
+        if impact.change_id is not None:
+            for entry in self.list_entries():
+                if entry.event_type == "impact" and entry.payload.get("change_id") == impact.change_id:
+                    return entry
+        return self.append("impact", impact.model_dump(mode="json"), attribution=attribution)
 
     def log_verification_attestation(self, attestation: VerificationAttestation) -> AuditEntry:
         return self.append("verification_attestation", attestation.model_dump(mode="json"))

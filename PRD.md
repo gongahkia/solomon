@@ -201,11 +201,15 @@ Side-by-side with the warehouse baseline failing step 3 is the demo GIF and the 
 
 ---
 
-## 9. Explicit relationship to Shibahama (why it's not a reskin)
+## 9. Why currency is not decay
 
-Shibahama's thesis is **decay**: significance fades with neglect; the engine forgets adaptively. Solomon's thesis is the **inverse**: in law nothing should fade, because an old position is not a less-important position — it is either still-good or superseded, which is a currency question, not a significance one. Solomon therefore *cannot* be Shibahama with legal config; it needs a different core (dependency-driven currency, not usage-driven decay). Building both, and being able to articulate *why they needed opposite mechanisms*, is the strongest possible demonstration that each problem was understood rather than pattern-matched.
+Significance decay treats neglect or age as a reason to lower the importance of a memory. Solomon deliberately
+rejects that premise for legal knowledge: an old position is not less important because it is old. It is either still
+live, superseded, retired, or due for human re-verification because a dependency moved. Solomon therefore uses
+dependency-driven currency rather than usage-driven decay.
 
-Shared concepts (bi-temporality, credence, verification, never-delete) are implemented directly in Solomon because the constraints differ from generic memory systems.
+Bi-temporality, credence, verification, and supersession are implemented directly because legal knowledge requires
+historical reconstruction and a human decision about whether a position still holds.
 
 ---
 

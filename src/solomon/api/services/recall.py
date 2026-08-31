@@ -64,6 +64,7 @@ class RecallService(ServiceDelegate):
         results = self.retrieval.timeline(
             request.query,
             as_of=parse_iso_datetime(as_of),
+            matter_context=MatterContext(matter_id=request.matter_id, client_id=request.client_id),
             options=RecallOptions(
                 limit=request.limit,
                 review_mode=True,

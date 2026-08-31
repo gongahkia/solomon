@@ -26,6 +26,18 @@ class FakePostgresConnection:
             return self._conn.execute("SELECT 1")
         if "FROM pg_extension WHERE extname" in sql:
             return self._conn.execute("SELECT 1")
+        match = re.fullmatch(
+            r'\s*ALTER TABLE\s+((?:"[A-Za-z_][A-Za-z0-9_]*"\.)?"[A-Za-z_][A-Za-z0-9_]*")\s+'
+            r'ALTER COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\s+SET NOT NULL\s*',
+            sql,
+        )
+        if match is not None:
+            table = _translate(match.group(1))
+            column = match.group(2)
+            null_count = self._conn.execute(f'SELECT COUNT(*) FROM {table} WHERE "{column}" IS NULL').fetchone()[0]
+            if null_count:
+                raise sqlite3.IntegrityError(f"column {column} contains null values")
+            return self._conn.execute("SELECT 1")
         return self._conn.execute(_translate(sql), params)
 
     def begin(self) -> None:

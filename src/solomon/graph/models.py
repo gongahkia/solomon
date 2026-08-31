@@ -63,6 +63,7 @@ class StalenessReason(SolomonModel):
     changed_at: datetime
     reason: str
     edge_id: str | None = None
+    change_id: str | None = None
 
     @field_validator("changed_at")
     @classmethod
@@ -76,3 +77,4 @@ class ImpactResult(SolomonModel):
     changed_dependency_id: str
     stale_item_ids: list[str]
     reasons: dict[str, list[StalenessReason]]
+    change_id: str | None = None

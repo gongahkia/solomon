@@ -28,6 +28,7 @@ class CurrencyPropagator:
         *,
         changed_at: datetime | None = None,
         reason: str,
+        change_id: str | None = None,
         collect_reasons: bool = True,
         record_verification_events: bool = True,
         record_staleness_metadata: bool = True,
@@ -55,38 +56,44 @@ class CurrencyPropagator:
                     continue
                 staleness: StalenessReason | None = None
                 metadata = item.metadata
+                existing = list(item.metadata.get("staleness_reasons", []))
+                already_recorded = change_id is not None and any(
+                    isinstance(existing_reason, dict) and existing_reason.get("change_id") == change_id
+                    for existing_reason in existing
+                )
                 if record_staleness_metadata or collect_reasons:
                     staleness = StalenessReason(
                         dependency_id=dependency_id,
                         changed_at=timestamp,
                         reason=reason,
                         edge_id=edge.id,
+                        change_id=change_id,
                     )
-                if record_staleness_metadata:
+                if record_staleness_metadata and not already_recorded:
                     if staleness is None:
                         raise RuntimeError("staleness reason required when recording propagation metadata")
-                    existing = list(item.metadata.get("staleness_reasons", []))
                     existing.append(staleness.model_dump(mode="json"))
                     metadata = {**item.metadata, "staleness_reasons": existing}
-                updated = item.model_copy(
-                    update={
-                        "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
-                        "metadata": metadata,
-                    }
-                )
-                if record_verification_events:
-                    updated = append_verification_event(
-                        updated,
-                        VerificationLifecycleEvent(
-                            item_id=item_id,
-                            state=VerificationLifecycleState.REQUESTED,
-                            actor_id="system",
-                            occurred_at=timestamp,
-                            basis=reason,
-                            source_ref=dependency_id,
-                        ),
+                if not already_recorded:
+                    updated = item.model_copy(
+                        update={
+                            "currency_state": CurrencyState.STALE_PENDING_REVERIFICATION,
+                            "metadata": metadata,
+                        }
                     )
-                self.store.update_item(updated, event_type="knowledge_item_stale_flagged", occurred_at=timestamp)
+                    if record_verification_events:
+                        updated = append_verification_event(
+                            updated,
+                            VerificationLifecycleEvent(
+                                item_id=item_id,
+                                state=VerificationLifecycleState.REQUESTED,
+                                actor_id="system",
+                                occurred_at=timestamp,
+                                basis=reason,
+                                source_ref=dependency_id,
+                            ),
+                        )
+                    self.store.update_item(updated, event_type="knowledge_item_stale_flagged", occurred_at=timestamp)
                 if item_id not in stale_item_id_set:
                     stale_item_ids.append(item_id)
                     stale_item_id_set.add(item_id)
@@ -100,6 +107,7 @@ class CurrencyPropagator:
             changed_dependency_id=changed_dependency_id,
             stale_item_ids=stale_item_ids,
             reasons=reasons,
+            change_id=change_id,
         )
 
     def impact_query(self, authority_or_item_id: str, *, as_of: datetime | None = None) -> ImpactResult:

@@ -881,7 +881,7 @@ class SolomonService:
 
     def _register_polled_authority_event(self, authority_event: AuthorityChangeEvent) -> dict[str, Any]:
         event, created = self.workflow_store.record_authority_event(authority_event)
-        if not created:
+        if not created and self.workflow_store.authority_event_processed(event.id):
             existing_tasks = [
                 task.model_dump(mode="json")
                 for task in self.workflow_store.list_review_tasks()
@@ -893,34 +893,51 @@ class SolomonService:
                 "impact": None,
                 "review_tasks": existing_tasks,
             }
-        impact = self.register_authority_change(
-            event.authority_id,
-            AuthorityChangeRequest(new_version=event.new_version, changed_at=event.changed_at.isoformat()),
-        )
-        review_tasks: list[ReviewTask] = []
-        for item_id in impact["stale_item_ids"]:
-            item = self._get_item(str(item_id))
-            review_tasks.append(
-                self.workflow_store.create_review_task(
-                    ReviewTask(
-                        event_id=event.id,
-                        item_id=item.id,
-                        priority=_review_priority(item),
-                        reason=f"authority {event.authority_id} changed to {event.new_version}",
+        try:
+            impact = self._authority.register_authority_change(
+                event.authority_id,
+                AuthorityChangeRequest(new_version=event.new_version, changed_at=event.changed_at.isoformat()),
+                change_id=event.id,
+            )
+            review_tasks: list[ReviewTask] = []
+            for item_id in impact["stale_item_ids"]:
+                item = self._get_item(str(item_id))
+                review_tasks.append(
+                    self.workflow_store.create_review_task(
+                        ReviewTask(
+                            event_id=event.id,
+                            item_id=item.id,
+                            priority=_review_priority(item),
+                            reason=f"authority {event.authority_id} changed to {event.new_version}",
+                        )
                     )
                 )
-            )
-        self.audit.append(
-            "authority_event_registered",
-            {
-                "event_id": event.id,
-                "source_id": event.source_id,
-                "authority_id": event.authority_id,
-                "new_version": event.new_version,
-                "review_task_ids": [task.id for task in review_tasks],
-            },
-            occurred_at=event.received_at,
-        )
+            if not any(
+                entry.event_type == "authority_event_registered" and entry.payload.get("event_id") == event.id
+                for entry in self.audit.list_entries()
+            ):
+                self.audit.append(
+                    "authority_event_registered",
+                    {
+                        "event_id": event.id,
+                        "source_id": event.source_id,
+                        "authority_id": event.authority_id,
+                        "new_version": event.new_version,
+                        "affected_item_ids": impact["stale_item_ids"],
+                        "review_task_ids": [task.id for task in review_tasks],
+                        "reason": "authority change flagged for human review",
+                        "decision": "flag_for_review",
+                    },
+                    occurred_at=event.received_at,
+                    attribution=AuditAttribution(
+                        actor_id="system:authority-monitor",
+                        correlation_id=f"authority_event:{event.id}",
+                    ),
+                )
+            self.workflow_store.mark_authority_event_processed(event.id)
+        except Exception as exc:
+            self.workflow_store.mark_authority_event_failed(event.id, error=exc)
+            raise
         return {
             "event": event.model_dump(mode="json"),
             "duplicate": False,

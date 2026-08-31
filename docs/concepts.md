@@ -4,9 +4,8 @@
 
 ## Currency vs Significance
 
-Shibahama-style decay asks whether a memory still matters. Solomon asks whether a legal position still
-holds. Old is not stale; stale means a dependency moved, verification expired, or a successor closed the
-validity window.
+Significance decay asks whether a memory still matters. Solomon asks whether a legal position still holds. Old is
+not stale; stale means a dependency moved, verification expired, or a successor closed the validity window.
 
 ## Bi-Temporality
 
@@ -27,4 +26,3 @@ retrieved for review but cannot be presented as settled load-bearing output.
 
 Verification refreshes `last_verified_at`, records `verified_by`, and can reaffirm, retire, or supersede an
 item. Supersession is human-confirmed.
-

@@ -214,10 +214,12 @@ def register_authority_change(
     changed_at: datetime,
     graph: DependencyGraphProtocol,
     store: KnowledgeStoreProtocol,
+    change_id: str | None = None,
 ) -> ImpactResult:
     reason = f"external authority {authority_id} changed to version {new_version}"
     return CurrencyPropagator(graph=graph, store=store).propagate_dependency_change(
         authority_id,
         changed_at=changed_at,
         reason=reason,
+        change_id=change_id,
     )

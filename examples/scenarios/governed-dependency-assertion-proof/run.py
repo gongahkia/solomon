@@ -27,6 +27,7 @@ from solomon.currency.models import CurrencyState, KnowledgeKind, SourceKind
 from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
+from solomon.operations.models import OperationRecord, OperationScope, OperationType
 from solomon.sources.models import DocumentSourceKind, SourceDocument
 
 
@@ -43,6 +44,16 @@ def main() -> None:
         "--post-restore-write",
         action="store_true",
         help="perform one valid governed write against an existing fixture deployment",
+    )
+    parser.add_argument(
+        "--queue-recovery-operation",
+        action="store_true",
+        help="queue one idempotent governed confirmation for crash-recovery rehearsal",
+    )
+    parser.add_argument(
+        "--serial-confirmation",
+        action="store_true",
+        help="use one confirmation caller in a single-connection production fixture",
     )
     arguments = parser.parse_args()
     workspace = arguments.workspace.resolve()
@@ -63,6 +74,8 @@ def main() -> None:
         journal_dir=arguments.journal_dir,
         database_url=arguments.database_url,
         audit_pack_dir=arguments.audit_pack_dir,
+        queue_recovery_operation=arguments.queue_recovery_operation,
+        serial_confirmation=arguments.serial_confirmation,
     )
     (workspace / "governed-dependency-assertion-proof-result.json").write_text(
         json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8"
@@ -80,6 +93,8 @@ def run(
     journal_dir: Path | None = None,
     database_url: str | None = None,
     audit_pack_dir: Path | None = None,
+    queue_recovery_operation: bool = False,
+    serial_confirmation: bool = False,
 ) -> tuple[dict[str, object], dict[str, object]]:
     started = time.perf_counter()
     service = SolomonService(
@@ -274,8 +289,11 @@ def run(
             raise RuntimeError("confirmed assertion did not return an edge")
         return outcome
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        concurrent_edges = list(executor.map(lambda _: confirm_human(), range(2)))
+    if serial_confirmation:
+        concurrent_edges = [confirm_human()]
+    else:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            concurrent_edges = list(executor.map(lambda _: confirm_human(), range(2)))
     confirmed_edge = concurrent_edges[0]
     retry_edge = confirm_human()
     rejected = service.decide_dependency_assertion(
@@ -342,6 +360,11 @@ def run(
         AuthorityChangeRequest(new_version="2026-09", changed_at="2026-09-01T00:00:00+00:00"),
     )
     confirmed_currency = service.store.get_item(alpha_item).currency_state
+    queued_recovery_operation = (
+        _queue_recovery_confirmation(service, commentary_item, commentary_document.id)
+        if queue_recovery_operation
+        else None
+    )
     audit_pack = service.export_audit_pack(audit_pack_dir or workspace / "audit-pack")
     audit_verified = service.audit.verify().ok and AuditJournal.verify_pack(audit_pack).ok
     history = service.dependency_assertion_history(human.id, matter_id="matter-alpha", client_id="client-alpha")
@@ -420,7 +443,11 @@ def run(
             "decision_denied": out_of_scope_decision_denied,
             "withdraw_denied": out_of_scope_withdraw_denied,
         },
-        "idempotency": {"confirmation_retry": True, "concurrent_confirmations": 2, "edges_for_assertion": 1},
+        "idempotency": {
+            "confirmation_retry": True,
+            "concurrent_confirmations": len(concurrent_edges),
+            "edges_for_assertion": 1,
+        },
         "currency": {"confirmed_impacts": 1, "unconfirmed_impacts": 0, "other_scope_impacts": 0},
         "revision": {"new_source_version": 2, "needs_reverification": True, "original_evidence_reconstructible": True},
         "audit": {
@@ -428,6 +455,8 @@ def run(
             "audit_pack_verified": True,
         },
     }
+    if queued_recovery_operation is not None:
+        snapshot["operation_recovery"] = {"queued_confirmation": True}
     result = {**snapshot, "latency_ms": round((time.perf_counter() - started) * 1000, 3), "latency_budget_ms": 2_000}
     return result, snapshot
 
@@ -487,6 +516,48 @@ def post_restore_write(
         "currency_state": service.store.get_item(item.id).currency_state.value,
         "result": "passed",
     }
+
+
+def _queue_recovery_confirmation(service: SolomonService, item_id: str, document_id: str) -> str:
+    """Queue a duplicate confirmation that can only re-observe a valid reviewed edge."""
+
+    assertion = service.create_dependency_assertion(
+        _assertion_request(
+            item_id=item_id,
+            document_id=document_id,
+            assertion_type=DependencyAssertionType.PROCEDURAL,
+            evidence_kind=AssertionEvidenceKind.COMMENTARY,
+            commentary="A durable retry may only reuse this already-reviewed confirmation.",
+            authority_identifier="SG-R-15",
+            idempotency_key="backup-recovery-confirmation-source",
+        )
+    )
+    edge = service.decide_dependency_assertion(
+        assertion.id,
+        DependencyAssertionDecisionRequest(by="reviewer-alpha", decision="confirmed"),
+    )
+    if not isinstance(edge, DependencyEdge):
+        raise RuntimeError("recovery fixture confirmation did not create a graph edge")
+    operation, created = service.operation_store.create(
+        OperationRecord(
+            operation_type=OperationType.ASSERTION_CONFIRM,
+            scope=OperationScope(tenant_id=service.tenant_id, matter_id="matter-alpha", client_id="client-alpha"),
+            actor_id="recovery-worker",
+            authorization_context={"service_access": "review", "actor_type": "reviewer"},
+            correlation_id=assertion.audit_correlation_id or f"recovery-confirm:{assertion.id}",
+            causation_id=assertion.id,
+            idempotency_key="backup-recovery-confirmation-operation",
+            source_resource_id=assertion.source_document_id,
+            source_version=assertion.source_document_version,
+            target_resource_id=assertion.suggested_edge.target_id,
+            assertion_id=assertion.id,
+            requested_transition="confirmed",
+            payload={"expected_state_version": assertion.state_version},
+        )
+    )
+    if not created:
+        raise RuntimeError("recovery fixture operation idempotency key was unexpectedly reused")
+    return str(operation.id)
 
 
 def _promote_source_item(

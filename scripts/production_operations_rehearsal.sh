@@ -122,7 +122,9 @@ source_run python /app/examples/scenarios/governed-dependency-assertion-proof/ru
     --data-dir /state/source-data \
     --journal-dir /state/source-journal \
     --database-url "$source_url" \
-    --audit-pack-dir /state/source-data/pre-backup-audit-pack > "$work/source-fixture.json"
+    --audit-pack-dir /state/source-data/pre-backup-audit-pack \
+    --queue-recovery-operation \
+    --serial-confirmation > "$work/source-fixture.json"
 source_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/source-consistency.json"
 source_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/source-verify.json"
 source_run solomon deployment backup /state/checkpoint.enc >/dev/null
@@ -145,6 +147,9 @@ restored_run solomon consistency check --matter-id matter-alpha --client-id clie
 restored_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/restored-verify.json"
 restored_run python -c 'import json; from solomon.audit.journal import AuditJournal; print(json.dumps(AuditJournal.verify_pack("/state/restored/data/pre-backup-audit-pack").model_dump(mode="json"), sort_keys=True))' > "$work/restored-audit-pack.json"
 restored_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.semantic_inventory import semantic_inventory; s=get_settings(); print(json.dumps(semantic_inventory(SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url)), sort_keys=True))' > "$work/restored-inventory.json"
+restored_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.worker import run_pending_operations; s=get_settings(); service=SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url); print(json.dumps(run_pending_operations(service, worker_id="backup-recovery-worker").model_dump(mode="json"), sort_keys=True))' > "$work/recovery-worker.json"
+restored_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/restored-recovery-consistency.json"
+restored_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/recovered-verify.json"
 restored_run python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
     --workspace /state/restored-proof \
     --data-dir /state/restored/data \
@@ -152,7 +157,7 @@ restored_run python /app/examples/scenarios/governed-dependency-assertion-proof/
     --database-url "$restore_url" \
     --post-restore-write > "$work/post-restore-write.json"
 
-python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" "$work/source-fixture.json" "$work/source-consistency.json" "$work/restored-consistency.json" "$work/source-verify.json" "$work/restored-verify.json" "$work/restored-audit-pack.json" "$work/post-restore-write.json" "$report_path" <<'PY'
+python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" "$work/source-fixture.json" "$work/source-consistency.json" "$work/restored-consistency.json" "$work/source-verify.json" "$work/restored-verify.json" "$work/restored-audit-pack.json" "$work/recovery-worker.json" "$work/restored-recovery-consistency.json" "$work/recovered-verify.json" "$work/post-restore-write.json" "$report_path" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -167,7 +172,10 @@ restored_consistency = json.load(open(sys.argv[7], encoding="utf-8"))
 source_verify = json.load(open(sys.argv[8], encoding="utf-8"))
 restored_verify = json.load(open(sys.argv[9], encoding="utf-8"))
 restored_audit_pack = json.load(open(sys.argv[10], encoding="utf-8"))
-post_restore_write = json.load(open(sys.argv[11], encoding="utf-8"))
+recovery_worker = json.load(open(sys.argv[11], encoding="utf-8"))
+restored_recovery_consistency = json.load(open(sys.argv[12], encoding="utf-8"))
+recovered_verify = json.load(open(sys.argv[13], encoding="utf-8"))
+post_restore_write = json.load(open(sys.argv[14], encoding="utf-8"))
 if source["store"]["item_count"] != restored["store"]["item_count"]:
     raise SystemExit("restored knowledge inventory differs from checkpoint")
 if not source["journal"]["ok"] or not restored["journal"]["ok"]:
@@ -184,12 +192,20 @@ if source_inventory != restored_inventory:
     raise SystemExit(f"restored semantic inventory differs from checkpoint: {json.dumps(differences, sort_keys=True)}")
 if source_consistency["findings"] or restored_consistency["findings"]:
     raise SystemExit("fixture deployment has consistency findings")
-if source_verify["state"] != "ready" or restored_verify["state"] != "ready":
-    raise SystemExit("source or restored deployment verification is not ready")
+if source_verify["state"] != "degraded" or restored_verify["state"] != "degraded":
+    raise SystemExit("queued operation was not visible in source or restored deployment verification")
 if not source_fixture["audit"]["audit_pack_verified"]:
     raise SystemExit("fixture audit pack failed verification before backup")
 if not restored_audit_pack["ok"]:
     raise SystemExit("restored audit pack failed verification")
+if not source_fixture.get("operation_recovery", {}).get("queued_confirmation"):
+    raise SystemExit("fixture did not include a recoverable operation")
+if recovery_worker["completed"] < 1 or recovery_worker["failed"] or recovery_worker["terminal"]:
+    raise SystemExit("restored worker did not safely resume the queued operation")
+if restored_recovery_consistency["findings"]:
+    raise SystemExit("recovered fixture has consistency findings")
+if recovered_verify["state"] != "ready":
+    raise SystemExit("deployment verification did not return to ready after operation recovery")
 if post_restore_write["result"] != "passed" or not post_restore_write["edge_provenance_matches"]:
     raise SystemExit("post-restore governed write did not retain edge provenance")
 result = {
@@ -206,12 +222,14 @@ result = {
     "fixture": source_fixture,
     "source_verification": source_verify["state"],
     "restored_verification": restored_verify["state"],
+    "recovered_verification": recovered_verify["state"],
     "restored_audit_pack": restored_audit_pack,
+    "recovered_operations": recovery_worker["completed"],
     "post_restore_write": post_restore_write,
     "result": "passed",
 }
 serialized = json.dumps(result, sort_keys=True)
-report_path = sys.argv[12]
+report_path = sys.argv[15]
 if report_path:
     target = Path(report_path)
     if not target.parent.is_dir():

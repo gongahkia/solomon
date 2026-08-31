@@ -116,7 +116,8 @@ run_image "$old_image" python /app/examples/scenarios/governed-dependency-assert
     --data-dir /state/data \
     --journal-dir /state/journal \
     --database-url "$database_url" \
-    --audit-pack-dir /state/data/pre-upgrade-audit-pack > "$work/old-fixture.json"
+    --audit-pack-dir /state/data/pre-upgrade-audit-pack \
+    --serial-confirmation > "$work/old-fixture.json"
 run_image "$current_image" solomon deployment init --owner upgrade-rehearsal >/dev/null
 run_image "$current_image" solomon deployment upgrade-preflight --format json >/dev/null
 run_image "$current_image" solomon deployment backup /state/pre-upgrade.enc >/dev/null

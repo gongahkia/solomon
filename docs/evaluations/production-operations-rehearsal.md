@@ -35,8 +35,10 @@ consistency findings. It creates and inspects an encrypted full backup, refuses 
 restores an empty isolated PostgreSQL target and absent local root, compares 12 canonical content-redacting semantic
 component hashes (including source documents, candidates, local SQLite state, graph, operations, and audit
 correlation), verifies the retained audit pack, and completes a new governed post-restore graph write with matching
-assertion provenance. This demonstrates component recovery and continued operation; it does not prove distributed
-atomic restore.
+assertion provenance. The checkpoint also contains a queued duplicate confirmation for an existing validly confirmed
+assertion: source and restored readiness report it as degraded, the restarted worker completes it without a duplicate
+edge or currency effect, the consistency report remains empty, and readiness returns to ready. This demonstrates
+component recovery and continued operation; it does not prove distributed atomic restore.
 
 The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. The actual N binary creates the
 same two-scope governed fixture: source/version lineage, confirmed/rejected/deferred/withdrawn assertions, graph and

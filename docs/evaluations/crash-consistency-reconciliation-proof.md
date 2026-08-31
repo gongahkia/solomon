@@ -22,8 +22,9 @@ SOLOMON_TEST_POSTGRES_DSN=<local disposable DSN> \
 SOLOMON_TEST_POSTGRES_DSN=<local disposable DSN> \
   SOLOMON_CRASH_DATABASE_URL=<same DSN> \
   uv run pytest -q tests/test_migrations.py tests/test_postgres_live_integration.py \
-    tests/test_mixed_store_live_integration.py tests/test_crash_recovery_subprocess.py
-# 9 passed in 2.56s
+    tests/test_mixed_store_live_integration.py tests/test_crash_recovery_subprocess.py \
+    tests/test_crash_consistency_proof.py
+# 10 passed in 6.25s
 ```
 
 The first test runs the scenario twice and compares normalized semantic output. It uses two scopes and covers normal
@@ -41,8 +42,28 @@ uv run pytest -q tests/test_cli.py tests/test_crash_consistency_proof.py
 # 16 passed, 1 skipped in 7.35s
 ```
 
-Final repository-wide verification is recorded with the milestone handoff after the final artifact and release gates
-run. This record deliberately does not turn those focused outcomes into a claim about a distributed transaction.
+## Final verification and gate result
+
+The final live-profile suite used the same disposable PostgreSQL instance and a writable temporary directory because
+the host `/tmp` quota is consumed by unrelated artifacts:
+
+```text
+TMPDIR=<writable disposable directory> \
+SOLOMON_TEST_POSTGRES_DSN=<local disposable DSN> \
+SOLOMON_CRASH_DATABASE_URL=<same DSN> \
+uv run pytest --cov
+# 498 passed, 2 skipped (external model endpoints), in 169.76s
+# coverage: 88.40%; configured 90.0% gate FAILED
+```
+
+This is a failed acceptance gate, not a waived result. No coverage exclusion, lowered threshold, or parser-baseline
+change was made. The same live run passed the immutable reliance corpus (27 tests), real PostgreSQL migrations,
+mixed-store recovery, the SIGKILL test, the headless two-run scenario, Helm validation, and Compose validation.
+
+The final non-coverage gates passed: `ruff`, `mypy`, `mkdocs build --strict`, the aggregate
+`scripts/release_quality_gates.py` (security, performance, restore, source review, MCP read-only checks),
+`pip-audit`, source/wheel build, PyInstaller build, and the local binary smoke. This record deliberately does not
+turn passing focused outcomes into a distributed-transaction claim or turn the failed coverage threshold into a pass.
 
 ## Failure classification proved
 

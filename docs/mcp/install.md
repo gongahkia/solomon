@@ -1,190 +1,60 @@
-# MCP install
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
-Research date: 2026-06-14
+# MCP installation
 
-Access caveat: Claude Code CLI was verified locally. Claude Desktop was not installed in this environment.
+Solomon supports the MCP stdio process contract and optional HTTP/SSE transports. Host applications vary in how they register a server, so this guide documents Solomon's supported configuration and smoke test rather than claiming compatibility with a particular desktop application.
 
-## Prereqs
+## Stdio
 
-From repo root:
+From the repository root:
 
 ```bash
 uv sync --extra dev
 uv run solomon mcp serve --help
 ```
 
-Seed data before trying client prompts:
-
-```bash
-uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1 --kind position --source-kind partner
-```
-
-## Stdio config
-
-Use [`examples/mcp/mcp.json`](https://github.com/gongahkia/solomon/blob/main/examples/mcp/mcp.json) as the shared
-stdio config.
-
-Replace `/absolute/path/to/solomon` with this repo path. The server command is:
+Use [`examples/mcp/mcp.json`](https://github.com/gongahkia/solomon/blob/main/examples/mcp/mcp.json) as a template and replace `/absolute/path/to/solomon`.
 
 ```bash
 uv --directory /absolute/path/to/solomon run python -m solomon.mcp.server
 ```
 
-Stdio has no HTTP bearer exchange; bind a trusted launch identity when authorization is required. It reads these env
-vars:
+The server writes protocol traffic to stdout. Hosts should keep human logs on stderr. The generic tool/schema smoke tests are `tests/test_mcp_runtime.py`, `tests/test_mcp_schemas.py`, and `tests/test_mcp_authorization.py`; the Currency Loop Proof adds a restricted-scope MCP impact check.
 
-- `SOLOMON_DATA_DIR`
-- `SOLOMON_JOURNAL_DIR`
-- `SOLOMON_DATABASE_URL`
-- `SOLOMON_MCP_PRINCIPAL_JSON` — trusted principal JSON with `subject`, `role`, `scopes`, `matter_ids`, and `client_ids`.
-- `SOLOMON_MCP_REQUIRE_IDENTITY=true` — refuse unbound calls.
+## Identity and scope
 
-For HTTP/SSE, combine `SOLOMON_MCP_TOKEN` with the same principal JSON. `solomon.read`, `solomon.write`, and
-`solomon.audit` are distinct tool scopes; `solomon.admin` grants all three. A scoped principal must explicitly provide
-its permitted matter/client scope. `audit_pack` and firm/practice-area currency reports require unrestricted scope
-because their current export formats are global. Caller-supplied `caller_id` is ignored when an identity is bound.
+Stdio has no HTTP bearer exchange. For a trusted local launch identity, configure:
 
 ```bash
 export SOLOMON_MCP_PRINCIPAL_JSON='{"subject":"lawyer-a","role":"lawyer","scopes":["solomon.read"],"matter_ids":["matter-a"],"client_ids":["client-a"]}'
 export SOLOMON_MCP_REQUIRE_IDENTITY=true
 ```
 
-Embedding hosts can supply a validated bearer-to-principal resolver to the HTTP/SSE app factory; the MCP layer does
-not parse unvalidated token claims.
+`solomon.read`, `solomon.write`, and `solomon.audit` are separate MCP scopes; `solomon.admin` grants all three. A restricted principal must supply a permitted matter and client scope. Caller-supplied identity is ignored when a principal is bound.
 
-## Claude Code
+Useful storage variables are `SOLOMON_DATA_DIR`, `SOLOMON_JOURNAL_DIR`, and `SOLOMON_DATABASE_URL`. The bound identity configuration is local process trust configuration; an embedding host must validate bearer tokens before supplying a principal to the HTTP/SSE app.
 
-Verified local CLI: `claude` 2.1.119.
+## HTTP and SSE
 
-One-shot config:
-
-```bash
-claude -p --strict-mcp-config --mcp-config examples/mcp/mcp.json "List the Solomon MCP tools."
-```
-
-Project registration:
-
-```bash
-claude mcp add --scope project solomon -- uv --directory "$PWD" run python -m solomon.mcp.server
-claude mcp list
-claude mcp get solomon
-```
-
-Use env flags when registering against non-default storage:
-
-```bash
-claude mcp add --scope project \
-  -e SOLOMON_DATA_DIR="$PWD/solomon-data" \
-  -e SOLOMON_JOURNAL_DIR="$PWD/solomon-journal" \
-  -e SOLOMON_DATABASE_URL="sqlite:///$PWD/solomon-data/solomon.sqlite3" \
-  solomon -- uv --directory "$PWD" run python -m solomon.mcp.server
-```
-
-Source: local `claude mcp --help`.
-
-## Claude Desktop
-
-[Unverified] No local Claude Desktop app was installed here.
-
-Use the app's Developer settings to edit the MCP config. On macOS, common docs place the file at:
-
-```text
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
-
-Add the contents of `examples/mcp/mcp.json`, after replacing paths, then restart Claude Desktop.
-
-Source for common path and JSON shape: https://www.files.com/docs/integrations/ai/model-context-protocol-mcp-server/quickstart-for-claude-desktop
-
-## Cursor
-
-Cursor's MCP docs cover connecting external tools/data through MCP: https://cursor.com/docs/mcp
-
-Use either:
-
-- Cursor Settings -> MCP -> add server.
-- Project file: `.cursor/mcp.json`.
-
-For project file use:
-
-```bash
-mkdir -p .cursor
-cp examples/mcp/mcp.json .cursor/mcp.json
-```
-
-Then edit absolute paths and restart/reload Cursor.
-
-## Continue
-
-Continue requires agent mode for MCP tool use. It accepts JSON MCP files copied from Claude/Cursor into `.continue/mcpServers/`.
-
-```bash
-mkdir -p .continue/mcpServers
-cp examples/mcp/mcp.json .continue/mcpServers/mcp.json
-```
-
-Alternative YAML block:
-
-```yaml
-name: Solomon mcpServer
-version: 0.0.1
-schema: v1
-mcpServers:
-  - name: Solomon
-    type: stdio
-    command: uv
-    args:
-      - --directory
-      - /absolute/path/to/solomon
-      - run
-      - python
-      - -m
-      - solomon.mcp.server
-```
-
-Sources:
-
-- https://docs.continue.dev/customize/mcp-tools
-- https://docs.continue.dev/customize/deep-dives/mcp
-
-## HTTP/SSE
-
-Start HTTP:
+Start a local HTTP or SSE endpoint:
 
 ```bash
 SOLOMON_MCP_TOKEN=change-me uv run solomon mcp serve --http --host 127.0.0.1 --port 8141
-```
-
-Start SSE:
-
-```bash
 SOLOMON_MCP_TOKEN=change-me uv run solomon mcp serve --sse --host 127.0.0.1 --port 8141
 ```
 
-Claude Code HTTP registration:
+Connect a compatible client to `/mcp` or `/sse` with `Authorization: Bearer <SOLOMON_MCP_TOKEN>`. For deployed identity, use the bearer-to-principal resolver rather than trusting caller-provided claims.
+
+## Protocol smoke prompt
+
+Seed one item and invoke a read tool through the configured host:
 
 ```bash
-claude mcp add --transport http \
-  --header "Authorization: Bearer change-me" \
-  solomon http://127.0.0.1:8141/mcp
+uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1 --kind position --source-kind partner
 ```
-
-Claude Code SSE registration:
-
-```bash
-claude mcp add --transport sse \
-  --header "Authorization: Bearer change-me" \
-  solomon http://127.0.0.1:8141/sse
-```
-
-Source: local `claude mcp --help`.
-
-## Smoke prompt
-
-After seeding data:
 
 ```text
-Use the Solomon MCP preflight_context tool with query "structure x regulation", matter_id "matter-a", client_id "client-a", and max_items 1. Return the item id and currency state.
+Use solomon.preflight_context with query "structure x regulation", matter_id "matter-a", client_id "client-a", and max_items 1. Return the item ID and currency state.
 ```
 
-Expected result: the client should call `solomon.preflight_context` and return one live Solomon item.
+Expected behavior: the host calls `solomon.preflight_context` and gets a live item. A host-specific failure should be recorded as a reproducible protocol/configuration defect only if the same process contract and tool schema work in the bundled smoke tests but fail in that host.

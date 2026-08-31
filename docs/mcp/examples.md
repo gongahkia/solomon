@@ -12,7 +12,7 @@ Request:
   "matter_id": "matter-new-client",
   "client_id": "client-b",
   "max_items": 3,
-  "caller_id": "claude-desktop:alice"
+  "caller_id": "mcp-host:alice"
 }
 ```
 
@@ -46,7 +46,7 @@ Response:
   "scope": {
     "matter_id": "matter-new-client",
     "client_id": "client-b",
-    "caller_id": "claude-desktop:alice"
+    "caller_id": "mcp-host:alice"
   },
   "boundary": {
     "status": "passed",

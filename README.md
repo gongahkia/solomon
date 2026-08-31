@@ -16,16 +16,17 @@
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">
 </p>
 
-**MCP-native currency infrastructure for verified legal knowledge.**
+**A self-hosted provenance and change-impact control plane for high-stakes AI systems, initially applied to internal legal knowledge.**
 
 Solomon tracks whether internal positions, clauses, house views, notes, and prior advice are still live,
-what they depend on, and why re-verification is due. It keeps firm knowledge behind a vendored
-Solomon zero-retention boundary and records a metadata-only audit trail for provenance, currency,
-credence, verification, deterministic primitive plans, and contestability.
+what they depend on, and why re-verification is due. Its core loop is authority change → dependency impact →
+human review → re-verification or supersession. It records a metadata-only audit trail for provenance,
+currency, credence, verification, deterministic primitive plans, and contestability. **Flag, do not adjudicate.**
 
 ## Table of Contents
 
 - [MCP Quick Start](#mcp-quick-start)
+- [Currency Loop Proof](#currency-loop-proof)
 - [Curator Console](#curator-console)
 - [CLI And SDK](#cli-and-sdk)
 - [Boundary And Memory](#boundary-and-memory)
@@ -56,27 +57,38 @@ Check the stdio server:
 uv run solomon mcp serve --help
 ```
 
-For Claude Desktop, add the following server after replacing `/absolute/path/to/solomon`:
+Configure any MCP-compatible host to launch this stdio server after replacing `/absolute/path/to/solomon`.
+The host-specific configuration key varies; the supported process contract is:
 
 ```json
 {
-  "mcpServers": {
-    "solomon": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/solomon",
-        "run",
-        "solomon",
-        "mcp",
-        "serve"
-      ]
-    }
-  }
+  "command": "uv",
+  "args": [
+    "--directory",
+    "/absolute/path/to/solomon",
+    "run",
+    "solomon",
+    "mcp",
+    "serve"
+  ]
 }
 ```
 
 Detailed host setup, seed data, and a smoke prompt: [`docs/mcp/install.md`](./docs/mcp/install.md).
+
+## Currency Loop Proof
+
+Run the deterministic, headless authority-change lifecycle proof:
+
+```bash
+uv run python examples/scenarios/currency-loop-proof/run.py --workspace /tmp/solomon-currency-loop-proof
+```
+
+It creates one authority, two confirmed direct dependencies, one transitive dependent, an isolated second
+scope, and a bounded dependency cycle. It then demonstrates stale-by-default recall exclusion, review-mode
+explanations, human reaffirmation/supersession, historical recall, a verified audit pack, and duplicate-event
+replay after restart. See [`docs/roadmap/currency-loop-proof.md`](./docs/roadmap/currency-loop-proof.md) for the
+scope, boundaries, and evaluation limits.
 
 ## Curator Console
 
@@ -128,7 +140,8 @@ The Python client quickstart and the source-installable TypeScript MCP client ar
   corrections, partner affirmations, and firm-authoritative credence floors.
 
 Solomon is not a legal-advice product, a general DMS, or a live Shepard's-scale authority monitor. It flags
-moved dependencies and overdue verification. It does not decide whether a legal position is wrong.
+moved dependencies and overdue verification. **Flag, do not adjudicate:** Solomon does not decide whether a legal
+position is wrong.
 
 ## API Surface
 
@@ -266,6 +279,8 @@ Included scenarios:
   partner-facing period report.
 - [`examples/scenarios/internal-supersession/`](./examples/scenarios/internal-supersession/): a 2024 position supersedes a
   2022 position while the older item remains available for review and audit.
+- [`examples/scenarios/currency-loop-proof/`](./examples/scenarios/currency-loop-proof/): a deterministic, headless
+  authority-change → impact → review → re-verification/supersession proof with an audit pack and restart replay.
 
 ## How It Works
 

@@ -38,7 +38,14 @@ def _service(tmp_path: Path) -> SolomonService:
     )
 
 
-def _ingest(service: SolomonService, *, content: str, matter_id: str, client_id: str) -> str:
+def _ingest(
+    service: SolomonService,
+    *,
+    content: str,
+    matter_id: str,
+    client_id: str,
+    timestamp: datetime = START,
+) -> str:
     return service.ingest(
         IngestRequest(
             kind=KnowledgeKind.HOUSE_VIEW,
@@ -48,8 +55,8 @@ def _ingest(service: SolomonService, *, content: str, matter_id: str, client_id:
             author="partner-a",
             matter_id=matter_id,
             client_id=client_id,
-            valid_from=START,
-            ingested_at=START,
+            valid_from=timestamp,
+            ingested_at=timestamp,
         )
     ).id
 
@@ -131,6 +138,17 @@ def test_currency_loop_proof_covers_scope_impact_review_history_and_restart(tmp_
             reason="confirmed downstream reliance in the reviewed advice",
         )
     )
+    service.add_dependency(
+        DependencyRequest(
+            source_id=direct_one,
+            target_id=transitive,
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_INTERNAL,
+            target_kind="knowledge_item",
+            confidence=EdgeConfidence.HUMAN_CONFIRMED,
+            created_by="lawyer-a",
+            reason="synthetic cycle probe; traversal must remain bounded",
+        )
+    )
 
     before = service.recall(RecallRequest(query="currency-loop", matter_id="matter-alpha", client_id="client-alpha"))
     registered = service.register_authority_event(_authority_event())
@@ -172,6 +190,7 @@ def test_currency_loop_proof_covers_scope_impact_review_history_and_restart(tmp_
         content="Successor currency-loop position applies the section 12 amendment.",
         matter_id="matter-alpha",
         client_id="client-alpha",
+        timestamp=REVIEW_AT,
     )
     for item_id, task in task_by_item.items():
         service.assign_review_task(
@@ -242,15 +261,13 @@ def test_incomplete_authority_event_retries_without_duplicate_propagation_or_aud
     with pytest.raises(RuntimeError, match="simulated task-store interruption"):
         service.register_authority_event(_authority_event())
 
-    event = service.workflow_store.get_authority_event(
-        service.workflow_store.list_review_tasks()[0].event_id if service.workflow_store.list_review_tasks() else "missing"
-    ) if service.workflow_store.list_review_tasks() else None
     recovered = service.register_authority_event(_authority_event())
     stale_events = service.store.list_events(event_types={"knowledge_item_stale_flagged"})
     impact_entries = [entry for entry in service.audit.list_entries() if entry.event_type == "impact"]
 
-    assert event is None
     assert recovered["duplicate"] is False
+    assert service.workflow_store.authority_event_processed(recovered["event"]["id"]) is True
+    assert service.workflow_store.authority_event_processing_error(recovered["event"]["id"]) is None
     assert len(service.review_tasks()) == 1
     assert len(stale_events) == 1
     assert len(impact_entries) == 1

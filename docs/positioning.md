@@ -4,7 +4,7 @@
 
 ## Tagline
 
-Selected: **MCP-native currency infrastructure for verified legal knowledge.**
+Selected: **A self-hosted provenance and change-impact control plane for high-stakes AI systems, initially applied to internal legal knowledge.**
 
 Alternatives considered:
 
@@ -12,12 +12,12 @@ Alternatives considered:
 2. Know what is current before you reuse it.
 3. Verified context for legal work.
 
-The selected line is seven words, names the integration surface, and avoids claiming that Solomon decides legal
-correctness. Use it verbatim in product metadata.
+The selected line names the deployment model, control-plane role, high-stakes scope, and initial vertical without
+claiming that Solomon decides legal correctness. Use it verbatim in product metadata.
 
 Solomon is the layer that tells a host application whether an internal legal position is still usable, what it
-depends on, and what evidence requires re-verification. It is not a general document-management system, legal
-research database, drafting copilot, or legal-advice product.
+depends on, and what evidence requires re-verification. It is not a citator, general document-management system,
+legal research database, drafting copilot, agent-memory system, or legal-advice product. **Flag, do not adjudicate.**
 
 ## The wedge: currency, not retrieval
 
@@ -27,7 +27,8 @@ events. When an authority or upstream position changes, Solomon propagates a `St
 through dependents. A host can then withhold stale text by default and present the reason for review.
 
 This makes Solomon complementary to a DMS, knowledge search product, research service, or legal assistant. Those
-systems may supply documents or draft work; Solomon supplies a deterministic currency decision and its evidence.
+systems may supply documents or draft work; Solomon supplies a deterministic currency gate and its evidence. A human
+decides whether an affected position remains legally correct.
 
 ## Market boundary
 

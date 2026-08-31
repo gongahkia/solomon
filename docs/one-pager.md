@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Solomon: currency infrastructure for verified legal knowledge
+# Solomon: provenance and change-impact control for high-stakes AI
 
 ## The problem
 
@@ -10,9 +10,10 @@ a lawyer contested it.
 
 ## The product
 
-Solomon is an MCP-native layer that records provenance, valid and ingestion time, dependencies, verification,
-supersession, contestability, and metadata-only audit evidence. It returns live positions by default and marks
-dependent positions stale-pending-reverification when a recorded authority change requires review.
+Solomon is a self-hosted provenance and change-impact control plane for high-stakes AI systems, initially applied to
+internal legal knowledge. It records provenance, valid and ingestion time, dependencies, verification, supersession,
+contestability, and metadata-only audit evidence. It returns live positions by default and marks dependent positions
+stale-pending-reverification when a recorded authority change requires review. Flag, do not adjudicate.
 
 ## How it fits
 

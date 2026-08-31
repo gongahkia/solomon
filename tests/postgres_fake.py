@@ -34,7 +34,9 @@ class FakePostgresConnection:
         if match is not None:
             table = _translate(match.group(1))
             column = match.group(2)
-            null_count = self._conn.execute(f'SELECT COUNT(*) FROM {table} WHERE "{column}" IS NULL').fetchone()[0]
+            null_count = self._conn.execute(
+                f'SELECT COUNT(*) FROM {table} WHERE "{column}" IS NULL'  # noqa: S608 - constrained DDL regex.
+            ).fetchone()[0]
             if null_count:
                 raise sqlite3.IntegrityError(f"column {column} contains null values")
             return self._conn.execute("SELECT 1")

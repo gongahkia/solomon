@@ -20,7 +20,7 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 3. Dependency edges are manually tagged or suggested from boundary-sanitized text and parsed legal references.
 4. Authority changes propagate staleness through graph dependents.
 5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
-6. Model context is pseudonymized by the vendored boundary before any remote endpoint.
+6. Model context is pseudonymized by the configured boundary before any remote endpoint.
 7. The audit journal records metadata-only evidence.
 
 ## Store

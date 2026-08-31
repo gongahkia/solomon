@@ -2,7 +2,7 @@
 
 # Solomon
 
-**MCP-native currency infrastructure for verified legal knowledge.**
+**A self-hosted provenance and change-impact control plane for high-stakes AI systems, initially applied to internal legal knowledge.**
 
 Solomon records why an internal legal position is current, stale-pending-reverification, superseded, retired, or
 contested. It does not decide the law or replace lawyer review.
@@ -12,6 +12,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Repository README](https://github.com/gongahkia/solomon)
 - [MCP installation](./mcp/install.md)
 - [Positioning](./positioning.md)
+- [Currency Loop Proof](./roadmap/currency-loop-proof.md)
 - [One-pager](./one-pager.md) and [PDF](https://github.com/gongahkia/solomon/blob/main/output/pdf/solomon-one-pager.pdf)
 - [Narrated five-minute tour](./assets/solomon-five-minute-tour.mp4) with
   [WebVTT chapter captions](./assets/solomon-five-minute-tour.vtt)
@@ -28,10 +29,8 @@ contested. It does not decide the law or replace lawyer review.
 ## Demonstrations
 
 - [Stale house-view scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/stale-house-view)
-- [MCP-host scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/01-vendor-integration)
+- [Currency Loop Proof scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/currency-loop-proof)
 - [Curator console walkthroughs](./console/index.md)
-
-![MCP-host comparison](./assets/vendor-integration-demo.gif)
 
 ## Jurisdictions
 

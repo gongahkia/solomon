@@ -1,13 +1,13 @@
 # MCP client config
 
-`mcp.json` is a portable stdio config for Claude Code, Cursor, Continue, and other MCP clients that read `mcpServers`.
+`mcp.json` is a portable stdio template for MCP clients that use an `mcpServers` registry.
 
 Before use, replace `/absolute/path/to/solomon` with this repo path.
 
-Quick Claude Code check:
+Check the server process contract:
 
 ```bash
-claude -p --strict-mcp-config --mcp-config examples/mcp/mcp.json "List the Solomon MCP tools."
+uv --directory /absolute/path/to/solomon run python -m solomon.mcp.server
 ```
 
-For HTTP/SSE, run `solomon mcp serve --http` or `--sse` and configure the client with `/mcp` or `/sse` plus `Authorization: Bearer <SOLOMON_MCP_TOKEN>`.
+For HTTP/SSE, run `solomon mcp serve --http` or `--sse` and configure a compatible client with `/mcp` or `/sse` plus `Authorization: Bearer <SOLOMON_MCP_TOKEN>`. See [`docs/mcp/install.md`](../../docs/mcp/install.md) for generic identity, scope, and smoke-test guidance.

@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 
 from solomon.currency.models import now_utc
-from solomon.graph.suggestions import SuggestionDecision
+from solomon.graph.models import DependencyEdge, EdgeType
+from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
 from solomon.operations.assertion_audit_projection import AssertionAuditProjection
 from solomon.operations.assertion_projection import AssertionConfirmationProjection
 from solomon.operations.authority_projection import AuthorityChangeProjection
@@ -394,3 +395,60 @@ def test_assertion_audit_refuses_unreviewed_transitions_and_scope_mismatch() -> 
         "dependency_assertion_rejected",
         "review_audit_id",
     )
+
+
+def test_edge_projection_collision_refuses_wrong_provenance_and_retries_matching_edge() -> None:
+    suggestion = DependencySuggestion(
+        id="suggestion-a",
+        item_id="item-a",
+        authority_ref="authority-a",
+        suggested_edge=DependencyEdge(
+            id="edge-a",
+            source_id="item-a",
+            target_id="authority-a",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        ),
+    )
+
+    def duplicate(_: DependencyEdge) -> DependencyEdge:
+        raise RuntimeError("duplicate edge")
+
+    missing_graph = SimpleNamespace(
+        add_dependency=duplicate,
+        get_edge=lambda _: (_ for _ in ()).throw(KeyError("edge-a")),
+    )
+    assertion_projection = AssertionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=missing_graph), operation_store=object()
+    )
+    with pytest.raises(RuntimeError, match="duplicate edge"):
+        assertion_projection._edge_for(suggestion, by="reviewer-a")
+    suggestion_projection = SuggestionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=missing_graph), operation_store=object()
+    )
+    with pytest.raises(RuntimeError, match="duplicate edge"):
+        suggestion_projection._edge_for(suggestion, by="reviewer-a")
+
+    invalid_edge = suggestion.suggested_edge.model_copy(update={"source_suggestion_id": "other-suggestion"})
+    invalid_graph = SimpleNamespace(add_dependency=duplicate, get_edge=lambda _: invalid_edge)
+    assertion_projection = AssertionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=invalid_graph), operation_store=object()
+    )
+    with pytest.raises(OperationRequiresIntervention, match="provenance"):
+        assertion_projection._edge_for(suggestion, by="reviewer-a")
+    suggestion_projection = SuggestionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=invalid_graph), operation_store=object()
+    )
+    with pytest.raises(OperationRequiresIntervention, match="provenance"):
+        suggestion_projection._edge_for(suggestion, by="reviewer-a")
+
+    matching_edge = suggestion.suggested_edge.model_copy(update={"source_suggestion_id": suggestion.id})
+    matching_graph = SimpleNamespace(add_dependency=duplicate, get_edge=lambda _: matching_edge)
+    assertion_projection = AssertionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=matching_graph), operation_store=object()
+    )
+    suggestion_projection = SuggestionConfirmationProjection(
+        lifecycle=SimpleNamespace(_graph=matching_graph), operation_store=object()
+    )
+    assert assertion_projection._edge_for(suggestion, by="reviewer-a") == matching_edge
+    assert suggestion_projection._edge_for(suggestion, by="reviewer-a") == matching_edge

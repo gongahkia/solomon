@@ -60,6 +60,10 @@ def run_pending_operations(
         raise ValueError("worker ID and positive limit are required")
     attempted = completed = retrying = terminal = failed = 0
     try:
+        service._authority.reconcile_evidence_ingestions()
+    except Exception:
+        failed += 1
+    try:
         service._authority.reconcile_source_revisions()
     except Exception:
         failed += 1

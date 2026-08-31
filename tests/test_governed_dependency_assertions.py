@@ -33,7 +33,7 @@ from solomon.graph.suggestions import (
 )
 from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
-from solomon.operations.models import OperationStatus
+from solomon.operations.models import OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind, SourceDocument
 from solomon.worker import run_pending_operations
 
@@ -186,8 +186,12 @@ def test_governed_confirmation_crash_after_edge_retries_without_duplicate_edge_o
         service.decide_dependency_assertion(
             assertion.id,
             DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
-        )
-    operation = service.operation_store.list()[0]
+    )
+    operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type is OperationType.ASSERTION_CONFIRM
+    )
     assert operation.status is OperationStatus.RETRYING
     assert service.graph.get_dependencies(item_id)[0].source_suggestion_id == assertion.id
     assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.PENDING
@@ -200,8 +204,74 @@ def test_governed_confirmation_crash_after_edge_retries_without_duplicate_edge_o
     assert recovered is not None
     assert recovered.status is OperationStatus.COMPLETED
     assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item_id)] == [assertion.id]
-    audit_events = [entry for entry in service.audit.list_entries() if entry.payload.get("operation_id")]
+    audit_events = [
+        entry
+        for entry in service.audit.list_entries()
+        if str(entry.payload.get("operation_id", "")).startswith(f"{operation.id}:")
+    ]
     assert [entry.event_type for entry in audit_events] == [
+        "dependency_assertion_confirmed",
+        "dependency_assertion_edge_linked",
+    ]
+
+
+def test_governed_confirmation_failure_before_authoritative_operation_leaves_no_projection(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    assertion = service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    service._authority.set_operation_failure_injector(OperationFailureInjector(["before_authoritative_write"]))
+
+    with pytest.raises(InjectedOperationFailure, match="before_authoritative_write"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+        )
+
+    assert not any(
+        current.operation_type is OperationType.ASSERTION_CONFIRM for current in service.operation_store.list()
+    )
+    assert service.graph.get_dependencies(item_id) == []
+    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.PENDING
+
+
+@pytest.mark.parametrize(
+    "point",
+    ["during_graph_edge_projection", "during_currency_propagation", "after_currency_before_audit"],
+)
+def test_governed_confirmation_resumes_each_projection_checkpoint_once(tmp_path: Path, point: str) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    assertion = service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    service._authority.set_operation_failure_injector(OperationFailureInjector([point]))
+
+    with pytest.raises(BadRequestError, match="durably queued"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+    )
+    operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type is OperationType.ASSERTION_CONFIRM
+    )
+    assert operation.status is OperationStatus.RETRYING
+    assert operation.next_eligible_retry_at is not None
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    recovered = service._authority.run_operation_once(
+        worker_id="checkpoint-restarted",
+        now=operation.next_eligible_retry_at,
+    )
+
+    assert recovered is not None
+    assert recovered.status is OperationStatus.COMPLETED
+    assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item_id)] == [assertion.id]
+    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.CONFIRMED
+    assert [
+        entry.event_type
+        for entry in service.audit.list_entries()
+        if str(entry.payload.get("operation_id", "")).startswith(f"{operation.id}:")
+    ] == [
         "dependency_assertion_confirmed",
         "dependency_assertion_edge_linked",
     ]
@@ -268,7 +338,7 @@ def test_worker_reconciles_source_revision_written_before_its_operation_record(t
 
     batch = run_pending_operations(service, worker_id="source-gap-reconciler")
 
-    assert batch.completed == 1
+    assert batch.completed == 2
     assert service.get_dependency_assertion(assertion.id).needs_reverification is True
 
 

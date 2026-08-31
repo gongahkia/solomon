@@ -60,6 +60,7 @@ from solomon.graph.suggestions import (
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.operations.assertion_projection import AssertionConfirmationProjection
 from solomon.operations.authority_projection import AuthorityChangeProjection
+from solomon.operations.evidence_projection import EvidenceIngestionProjection
 from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
 from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
@@ -195,6 +196,13 @@ class AuthorityService(ServiceDelegate):
         return result
 
     def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
+        if operation.operation_type is OperationType.EVIDENCE_INGESTION:
+            return EvidenceIngestionProjection(
+                document_store=self.document_store,
+                audit=self.audit,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
         if operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION:
             return AuthorityChangeProjection(
                 authority_service=self,
@@ -495,6 +503,24 @@ class AuthorityService(ServiceDelegate):
     ) -> dict[str, Any]:
         return self._assertion_lifecycle.history(assertion_id, matter_id=matter_id, client_id=client_id)
 
+    def record_source_document_ingestion(self, document: Any, *, candidate_count: int) -> OperationRecord:
+        """Durably schedule the audit projection for a SQLite-authoritative source document."""
+
+        operation, _ = self._create_evidence_ingestion_operation(document, candidate_count=candidate_count)
+        self._failure_injector.hit("after_evidence_authoritative_write_before_schedule")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                return cast(OperationRecord, current)
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("source document audit projection requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:evidence-ingestion")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("source document audit projection is durably queued for retry")
+
     def mark_dependency_assertions_for_source_revision(
         self,
         *,
@@ -548,6 +574,52 @@ class AuthorityService(ServiceDelegate):
                 _, scheduled = self._create_source_revision_operation(assertion, replacement.id)
                 created += int(scheduled)
         return created
+
+    def reconcile_evidence_ingestions(self) -> int:
+        """Discover source documents written before their durable audit operation was created."""
+
+        known_documents = {
+            operation.target_resource_id
+            for operation in self.operation_store.list(limit=10_000)
+            if operation.operation_type is OperationType.EVIDENCE_INGESTION
+        }
+        created = 0
+        for source in self.document_store.list_sources():
+            for document in self.document_store.list_documents(source.id):
+                if document.id in known_documents:
+                    continue
+                _, scheduled = self._create_evidence_ingestion_operation(
+                    document,
+                    candidate_count=len(self.document_store.list_candidates(document.id)),
+                )
+                created += int(scheduled)
+        return created
+
+    def _create_evidence_ingestion_operation(
+        self,
+        document: Any,
+        *,
+        candidate_count: int,
+    ) -> tuple[OperationRecord, bool]:
+        return cast(
+            tuple[OperationRecord, bool],
+            self.operation_store.create(
+                OperationRecord(
+                    operation_type=OperationType.EVIDENCE_INGESTION,
+                    scope=OperationScope(tenant_id=self.tenant_id),
+                    actor_id="system:source-ingestion",
+                    authorization_context={"service_access": "curate", "actor_type": "system"},
+                    correlation_id=f"source_document:{document.id}",
+                    causation_id=document.id,
+                    idempotency_key=f"evidence-ingestion:{document.id}",
+                    source_resource_id=document.source_id,
+                    source_version=document.version,
+                    target_resource_id=document.id,
+                    requested_transition="audit_recorded",
+                    payload={"candidate_count": candidate_count},
+                )
+            ),
+        )
 
     def _create_source_revision_operation(
         self,

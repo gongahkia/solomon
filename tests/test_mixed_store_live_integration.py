@@ -21,7 +21,7 @@ from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.errors import BadRequestError
 from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
 from solomon.operations.failure_injection import OperationFailureInjector
-from solomon.operations.models import OperationStatus
+from solomon.operations.models import OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind
 from solomon.store.postgres import PostgresDependencyError
 
@@ -109,7 +109,11 @@ def test_live_mixed_sqlite_documents_and_postgres_projections_resume_once(tmp_pa
                 assertion.id,
                 DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
             )
-        operation = first.operation_store.list()[0]
+        operation = next(
+            current
+            for current in first.operation_store.list()
+            if current.operation_type is OperationType.ASSERTION_CONFIRM
+        )
         assert operation.status is OperationStatus.RETRYING
         assert first.graph.get_dependencies(item.id)[0].source_suggestion_id == assertion.id
         assert first.document_store.get_document(document.id).content_sha256 == assertion.source_document_sha256
@@ -135,7 +139,9 @@ def test_live_mixed_sqlite_documents_and_postgres_projections_resume_once(tmp_pa
         assert [edge.source_suggestion_id for edge in restarted.graph.get_dependencies(item.id)] == [assertion.id]
         assert restarted.document_store.get_document(document.id).content_sha256 == assertion.source_document_sha256
         operation_events = [
-            entry.event_type for entry in restarted.audit.list_entries() if entry.payload.get("operation_id")
+            entry.event_type
+            for entry in restarted.audit.list_entries()
+            if str(entry.payload.get("operation_id", "")).startswith(f"{operation.id}:")
         ]
         assert operation_events == ["dependency_assertion_confirmed", "dependency_assertion_edge_linked"]
     finally:

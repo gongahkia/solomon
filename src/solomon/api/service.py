@@ -702,18 +702,7 @@ class SolomonService:
             document_id=document.id,
             candidate_count=len(candidates),
         )
-        self.audit.append(
-            "source_document_ingested",
-            {
-                "source_id": source_id,
-                "document_id": document.id,
-                "external_id_sha256": digest(document.external_id),
-                "version": document.version,
-                "content_sha256": document.content_sha256,
-                "extraction_state": document.extraction_state.value,
-                "candidate_count": len(candidates),
-            },
-        )
+        self._authority.record_source_document_ingestion(document, candidate_count=len(candidates))
         self._authority.mark_dependency_assertions_for_source_revision(
             previous_document_id=document.previous_version_id,
             replacement_document_id=document.id,

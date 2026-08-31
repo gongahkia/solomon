@@ -25,7 +25,7 @@ from solomon.graph.suggestions import (
     DependencySuggestion,
     SuggestionDecision,
 )
-from solomon.operations.models import OperationStatus
+from solomon.operations.models import OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind
 from solomon.store.postgres import PostgresDependencyError
 
@@ -103,7 +103,11 @@ def test_sigkill_after_edge_projection_recovers_once_with_real_mixed_stores(tmp_
             postgres_schema=schema,
             tenant_id="tenant-a",
         )
-        operation = restarted.operation_store.list()[0]
+        operation = next(
+            current
+            for current in restarted.operation_store.list()
+            if current.operation_type is OperationType.ASSERTION_CONFIRM
+        )
         assert operation.status is OperationStatus.CLAIMED
         assert restarted.graph.get_dependencies(item_id)[0].source_suggestion_id == assertion.id
         assert operation.lease_expires_at is not None
@@ -117,7 +121,11 @@ def test_sigkill_after_edge_projection_recovers_once_with_real_mixed_stores(tmp_
         assert restarted.get_dependency_assertion(assertion.id).decision is SuggestionDecision.CONFIRMED
         assert [edge.source_suggestion_id for edge in restarted.graph.get_dependencies(item_id)] == [assertion.id]
         assert restarted.document_store.get_document(document_id).content_sha256 == assertion.source_document_sha256
-        assert [entry.event_type for entry in restarted.audit.list_entries() if entry.payload.get("operation_id")] == [
+        assert [
+            entry.event_type
+            for entry in restarted.audit.list_entries()
+            if str(entry.payload.get("operation_id", "")).startswith(f"{operation.id}:")
+        ] == [
             "dependency_assertion_confirmed",
             "dependency_assertion_edge_linked",
         ]

@@ -2,6 +2,7 @@
 
 """Durable, bounded operation records for cross-persistence projections."""
 
+from solomon.operations.evidence_projection import EvidenceIngestionProjection
 from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
 from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.operations.models import (
@@ -22,6 +23,7 @@ __all__ = [
     "OperationRecord",
     "OperationRequiresIntervention",
     "OperationRunner",
+    "EvidenceIngestionProjection",
     "OperationScope",
     "OperationStatus",
     "OperationType",

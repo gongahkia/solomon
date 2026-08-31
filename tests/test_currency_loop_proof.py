@@ -276,7 +276,8 @@ def test_incomplete_authority_event_retries_without_duplicate_propagation_or_aud
     assert len(impact_entries) == 1
 
 
-def test_currency_projection_crash_after_staleness_resumes_without_duplicate_impact(tmp_path: Path) -> None:
+@pytest.mark.parametrize("point", ["during_currency_propagation", "after_currency_before_audit"])
+def test_currency_projection_interruption_resumes_without_duplicate_impact(tmp_path: Path, point: str) -> None:
     service = _service(tmp_path)
     direct = _ingest(
         service,
@@ -285,7 +286,7 @@ def test_currency_projection_crash_after_staleness_resumes_without_duplicate_imp
         client_id="client-alpha",
     )
     _confirmed_authority_edge(service, direct)
-    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_currency_before_audit"]))
+    service._authority.set_operation_failure_injector(OperationFailureInjector([point]))
 
     with pytest.raises(BadRequestError, match="durably queued"):
         service.register_authority_event(_authority_event())
@@ -296,7 +297,9 @@ def test_currency_projection_crash_after_staleness_resumes_without_duplicate_imp
     )
     assert operation.status is OperationStatus.RETRYING
     stale_before_restart = service.store.get_item(direct)
-    assert len(stale_before_restart.metadata["staleness_reasons"]) == 1
+    assert len(stale_before_restart.metadata.get("staleness_reasons", [])) == (
+        0 if point == "during_currency_propagation" else 1
+    )
 
     service._authority.set_operation_failure_injector(OperationFailureInjector())
     assert operation.next_eligible_retry_at is not None

@@ -1,0 +1,251 @@
+{
+  "corpus_manifest_sha256": "5910b94a002f8c702af00602251b949b93d985f4c59a1b08fc6181ef902311c4",
+  "corpus_size": 23,
+  "corpus_version": "1.0.0",
+  "deterministic_repeated_run": true,
+  "error_stage_distribution": {},
+  "metrics": {
+    "abstention_correctness": 1.0,
+    "authority_reference_precision": 1.0,
+    "authority_reference_recall": 1.0,
+    "confirmed_edge_creation_count_before_review": 0,
+    "cross_scope_leakage_count": 0,
+    "dependency_suggestion_precision": 1.0,
+    "dependency_suggestion_recall": 1.0,
+    "duplicate_suggestion_rate": 0.0,
+    "evidence_span_exact_match": 1.0,
+    "evidence_span_overlap_or_containment": 1.0
+  },
+  "predictions": [
+    {
+      "id": "dev-direct-regulation",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Larch position relies on Aster Regulation 7 section 4 to require a recorded approval.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "dev-alias-section",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "For this approval path, the position depends on Aster Reg. 7 s. 4.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Reg. 7 s. 4"
+        }
+      ]
+    },
+    {
+      "id": "dev-multiple-authorities",
+      "references": [
+        "aster-regulation-7-section-4",
+        "boreal-rule-2-section-8"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Cedar analysis relies on Aster Regulation 7 section 4 and Boreal Rule 2 section 8 before execution.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        },
+        {
+          "source_span": "The Cedar analysis relies on Aster Regulation 7 section 4 and Boreal Rule 2 section 8 before execution.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "dev-qualified-reliance",
+      "references": [
+        "boreal-rule-2-section-8"
+      ],
+      "suggestions": [
+        {
+          "source_span": "Subject to the client facts, the Larch view relies on Boreal Rule 2 section 8 for the timing requirement.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "dev-background-mention",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "dev-quoted-mention",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "dev-footnote-parenthetical",
+      "references": [
+        "boreal-rule-2-section-8"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Maple position depends on Boreal Rule 2 section 8 (see internal footnote 3) for the escalation step.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "dev-negated-reliance",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "dev-distinguishing-reference",
+      "references": [
+        "boreal-rule-2-section-8"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "dev-ambiguous-short-form",
+      "references": [],
+      "suggestions": []
+    },
+    {
+      "id": "dev-malformed-citation",
+      "references": [],
+      "suggestions": []
+    },
+    {
+      "id": "dev-similar-authority-name",
+      "references": [
+        "aster-regulation-7-section-4",
+        "aster-regulation-70-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Larch position relies on Aster Regulation 70 section 4, not Aster Regulation 7 section 4.",
+          "target_id": "aster-regulation-70-section-4",
+          "target_span": "Aster Regulation 70 section 4"
+        }
+      ]
+    },
+    {
+      "id": "dev-instruction-like-content",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "dev-no-authority",
+      "references": [],
+      "suggestions": []
+    },
+    {
+      "id": "dev-version-one",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Cedar view relies on Aster Regulation 7 section 4 (2019 text) for the prior filing sequence.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "holdout-case-dependency",
+      "references": [
+        "alder-pte-ltd-v-beacon-llc-2025-sgc-14"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Spruce position relies on Alder Pte Ltd v. Beacon LLC [2025] SGC 14 for the remedial test.",
+          "target_id": "alder-pte-ltd-v-beacon-llc-2025-sgc-14",
+          "target_span": "Alder Pte Ltd v. Beacon LLC [2025] SGC 14"
+        }
+      ]
+    },
+    {
+      "id": "holdout-section-symbol",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Spruce advice depends on Aster Regulation 7 \u00a7 4 for the disclosure control.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 \u00a7 4"
+        }
+      ]
+    },
+    {
+      "id": "holdout-contrary-reference",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "holdout-parenthetical-mention",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "holdout-revised-document",
+      "references": [
+        "aster-regulation-7-section-4",
+        "boreal-rule-2-section-8"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The revised Pine position relies on Boreal Rule 2 section 8 rather than Aster Regulation 7 section 4.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "holdout-transitive-candidate",
+      "references": [],
+      "suggestions": []
+    },
+    {
+      "id": "holdout-cross-tenant-lookalike",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Charlie Larch position relies on Aster Regulation 7 section 4 for a separate client matter.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "holdout-safe-abstention",
+      "references": [
+        "aster-regulation-7-section-4"
+      ],
+      "suggestions": []
+    }
+  ],
+  "runtime_ms": 163.89,
+  "schema": "solomon.evidence_to_dependency_evaluation.v1",
+  "split": "all"
+}

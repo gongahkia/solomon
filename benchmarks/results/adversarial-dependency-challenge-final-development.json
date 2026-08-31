@@ -1,0 +1,1142 @@
+{
+  "category_metrics": {
+    "acronym_alias": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "alternative_independent_grounds": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 200.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "ambiguous_pronoun": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "ambiguous_short_form": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 0.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 0.0,
+      "target_resolution_recall": 1.0
+    },
+    "attributed_other_party": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "authority_as_organization": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "background_only": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "bibliography": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "case_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "citation_after_proposition": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "cross_sentence_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 0.5,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 0.5,
+      "target_resolution_recall": 1.0
+    },
+    "distinguishing_or_criticism": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "duplicate_citation_one_dependency": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "explicit_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "footnote_like_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "hypothetical": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 0.0,
+      "reference_recall": 0.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 0.0,
+      "target_resolution_recall": 0.0
+    },
+    "instruction_like_text": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "line_break_citation": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "matter_limited_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "negation": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 2,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "ocr_like_noise": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "partial_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 0.5,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 0.5
+    },
+    "qualified_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "quotation_without_adoption": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "reliance_without_legacy_cue": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "revision_introduces_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "revision_removes_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "same_document_different_scope": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "smart_punctuation": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "unknown_authority": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "wrong_authority_near_cue": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    }
+  },
+  "corpus_manifest_sha256": "bf391fb28a7a76f595aa6399d578bc699c38c3e0745014fd63053ed6a7bf4256",
+  "corpus_size": 32,
+  "corpus_version": "1.0.0",
+  "deterministic_repeated_run": true,
+  "error_analysis": [
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "reference_span": "section 11(b)"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "adv-dev-07",
+      "pipeline_stage": "reference_not_detected",
+      "root_cause_hypothesis": "citation grammar or normalization did not recognize the declared span",
+      "semantic_category": "partial_reliance",
+      "target_id": "dune-act-5-section-11-b"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "The Elm recommendation follows Cedar Code 9 section 3 (fn. 4: notice timing) for dispatch.",
+        "target_id": "cedar-code-9-section-3",
+        "target_span": "Cedar Code 9 section 3"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "adv-dev-12",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "footnote_like_reliance",
+      "target_id": "cedar-code-9-section-3"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "reference_span": "Aster Regulation 7 section 4"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "adv-dev-22",
+      "pipeline_stage": "reference_not_detected",
+      "root_cause_hypothesis": "citation grammar or normalization did not recognize the declared span",
+      "semantic_category": "hypothetical",
+      "target_id": "aster-regulation-7-section-4"
+    }
+  ],
+  "error_stage_distribution": {
+    "reference_not_detected": 2,
+    "reliance_cue_not_recognized": 1
+  },
+  "metric_counts": {
+    "abstention_accuracy": {
+      "denominator": 15,
+      "numerator": 15
+    },
+    "cross_scope_leakage_count": {
+      "denominator": 1,
+      "numerator": 0
+    },
+    "duplicate_suggestion_rate": {
+      "denominator": 17,
+      "numerator": 0
+    },
+    "exact_evidence_span_accuracy": {
+      "denominator": 18,
+      "numerator": 17
+    },
+    "false_positive_suggestions_per_100_items": {
+      "denominator": 32,
+      "numerator": 0
+    },
+    "hard_negative_false_positive_rate": {
+      "denominator": 12,
+      "numerator": 0
+    },
+    "overlap_or_containment_span_accuracy": {
+      "denominator": 18,
+      "numerator": 17
+    },
+    "pre_review_confirmed_edge_count": {
+      "denominator": 1,
+      "numerator": 0
+    },
+    "reference_precision": {
+      "denominator": 36,
+      "numerator": 33
+    },
+    "reference_recall": {
+      "denominator": 35,
+      "numerator": 33
+    },
+    "suggestion_precision": {
+      "denominator": 17,
+      "numerator": 17
+    },
+    "suggestion_recall": {
+      "denominator": 18,
+      "numerator": 17
+    },
+    "suggestions_per_100_items": {
+      "denominator": 32,
+      "numerator": 1700
+    },
+    "target_resolution_precision": {
+      "denominator": 36,
+      "numerator": 33
+    },
+    "target_resolution_recall": {
+      "denominator": 35,
+      "numerator": 33
+    }
+  },
+  "metrics": {
+    "abstention_accuracy": 1.0,
+    "cross_scope_leakage_count": 0.0,
+    "duplicate_suggestion_rate": 0.0,
+    "exact_evidence_span_accuracy": 0.944444,
+    "false_positive_suggestions_per_100_items": 0.0,
+    "hard_negative_false_positive_rate": 0.0,
+    "overlap_or_containment_span_accuracy": 0.944444,
+    "pre_review_confirmed_edge_count": 0.0,
+    "reference_precision": 0.916667,
+    "reference_recall": 0.942857,
+    "suggestion_precision": 1.0,
+    "suggestion_recall": 0.944444,
+    "suggestions_per_100_items": 53.125,
+    "target_resolution_precision": 0.916667,
+    "target_resolution_recall": 0.942857
+  },
+  "predictions": [
+    {
+      "id": "adv-dev-01",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Lumen position expressly relies on Aster Regulation 7 section 4 for the approval threshold.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-02",
+      "references": [
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "For filings, Boreal Rule 2 section 8 supplies the operative deadline for the Orion memorandum.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-03",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Meridian view uses the statutory approval condition as its rule, namely Aster Regulation 7 section 4.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-04",
+      "references": [
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        },
+        {
+          "span": "The Vale team adopts the disclosure deadline for this matter",
+          "target_id": "the-vale-team-adopts-the-disclosure-deadline-for-this-matter"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Vale team adopts the disclosure deadline for this matter. That deadline is set by Boreal Rule 2 section 8.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-05",
+      "references": [
+        {
+          "span": "Cedar Code 9 section 3",
+          "target_id": "cedar-code-9-section-3"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Subject to the recorded facts, the Harbor assessment relies on Cedar Code 9 section 3 for only the notice calculation.",
+          "target_id": "cedar-code-9-section-3",
+          "target_span": "Cedar Code 9 section 3"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-06",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        },
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Ridge conclusion stands independently under Aster Regulation 7 section 4 and Boreal Rule 2 section 8.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7 section 4"
+        },
+        {
+          "source_span": "The Ridge conclusion stands independently under Aster Regulation 7 section 4 and Boreal Rule 2 section 8.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-07",
+      "references": [
+        {
+          "span": "Dune Act 5 section 11(a)",
+          "target_id": "dune-act-5-section-11-a"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Juniper note depends on Dune Act 5 section 11(a), not section 11(b), for the filing sequence.",
+          "target_id": "dune-act-5-section-11-a",
+          "target_span": "Dune Act 5 section 11(a)"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-08",
+      "references": [
+        {
+          "span": "Aster Regulation 7\nsection 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Delta advice relies on Aster Regulation 7\nsection 4 for the approval record.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster Regulation 7\nsection 4"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-09",
+      "references": [
+        {
+          "span": "Boreal Rule 2 \u00a7 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The \u201cNorth\u201d analysis is required by Boreal Rule 2 \u00a7 8 for the escalation notice.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 \u00a7 8"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-10",
+      "references": [
+        {
+          "span": "Aster  Regulation  7 section  4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Pine view relies on Aster  Regulation  7 section  4 for the recorded consent.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "Aster  Regulation  7 section  4"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-11",
+      "references": [
+        {
+          "span": "AR7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Nova memo treats AR7 section 4 as the controlling approval condition; AR7 denotes Aster Regulation 7.",
+          "target_id": "aster-regulation-7-section-4",
+          "target_span": "AR7 section 4"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-12",
+      "references": [
+        {
+          "span": "Cedar Code 9 section 3",
+          "target_id": "cedar-code-9-section-3"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-13",
+      "references": [
+        {
+          "span": "Fable Ltd v. Grove Inc [2025] SGC 21",
+          "target_id": "fable-ltd-v-grove-inc-2025-sgc-21"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Ash position relies on Fable Ltd v. Grove Inc [2025] SGC 21 for the remedial threshold.",
+          "target_id": "fable-ltd-v-grove-inc-2025-sgc-21",
+          "target_span": "Fable Ltd v. Grove Inc [2025] SGC 21"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-14",
+      "references": [
+        {
+          "span": "Eider Guidance 1 section 2",
+          "target_id": "eider-guidance-1-section-2"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Only for Matter Kestrel, the internal conclusion depends on Eider Guidance 1 section 2 for its timing premise.",
+          "target_id": "eider-guidance-1-section-2",
+          "target_span": "Eider Guidance 1 section 2"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-15",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-16",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        },
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        },
+        {
+          "span": "Cedar Code 9 section 3",
+          "target_id": "cedar-code-9-section-3"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-17",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-18",
+      "references": [
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-19",
+      "references": [
+        {
+          "span": "Cedar Code 9 section 3",
+          "target_id": "cedar-code-9-section-3"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-20",
+      "references": [
+        {
+          "span": "Dune Act 5 section 11",
+          "target_id": "dune-act-5-section-11"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-21",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-22",
+      "references": [
+        {
+          "span": "If Aster Regulation 7 section 4",
+          "target_id": "if-aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-23",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-24",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-25",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-26",
+      "references": [
+        {
+          "span": "version, or provision",
+          "target_id": "version-or-provision"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-27",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        },
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-28",
+      "references": [],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-29",
+      "references": [
+        {
+          "span": "Cedar Code 9 section 3",
+          "target_id": "cedar-code-9-section-3"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Revision 2 of the Cedar memo now depends on Cedar Code 9 section 3 for the dispatch date.",
+          "target_id": "cedar-code-9-section-3",
+          "target_span": "Cedar Code 9 section 3"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-30",
+      "references": [
+        {
+          "span": "Aster Regulation 7 section 4",
+          "target_id": "aster-regulation-7-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "adv-dev-31",
+      "references": [
+        {
+          "span": "Boreal Rule 2 section 8",
+          "target_id": "boreal-rule-2-section-8"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The Fir view relies on Boreal Rule 2 section 8 for timing.",
+          "target_id": "boreal-rule-2-section-8",
+          "target_span": "Boreal Rule 2 section 8"
+        }
+      ]
+    },
+    {
+      "id": "adv-dev-32",
+      "references": [
+        {
+          "span": "Eider Guidance 1 section 2",
+          "target_id": "eider-guidance-1-section-2"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The shared template relies on Eider Guidance 1 section 2 for this client\u2019s notification step.",
+          "target_id": "eider-guidance-1-section-2",
+          "target_span": "Eider Guidance 1 section 2"
+        }
+      ]
+    }
+  ],
+  "runtime_ms": 174.099,
+  "safety_invariants": {
+    "cross_scope_leakage_count": 0,
+    "duplicate_suggestions_from_unchanged_ingestion": 0,
+    "instruction_like_text_caused_privileged_action": 0,
+    "non_confirmed_suggestions_affecting_currency": 0,
+    "non_deterministic_outputs": 0,
+    "pre_review_confirmed_edge_count": 0,
+    "rejected_unchanged_evidence_resurfaced": 0
+  },
+  "schema": "solomon.adversarial_dependency_evaluation.v1",
+  "split": "development"
+}

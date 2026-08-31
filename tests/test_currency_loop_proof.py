@@ -20,9 +20,12 @@ from solomon.api.service import (
 )
 from solomon.currency.engine import VerificationOutcome, VerificationPolicy
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.errors import BadRequestError
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.mcp.auth import MCP_READ_SCOPE, MCPPrincipal
 from solomon.mcp.tools.runtime import SolomonMCPRuntime
+from solomon.operations.failure_injection import OperationFailureInjector
+from solomon.operations.models import OperationStatus
 
 START = datetime(2026, 6, 1, tzinfo=timezone.utc)
 CHANGE_AT = START + timedelta(days=1)
@@ -270,4 +273,40 @@ def test_incomplete_authority_event_retries_without_duplicate_propagation_or_aud
     assert service.workflow_store.authority_event_processing_error(recovered["event"]["id"]) is None
     assert len(service.review_tasks()) == 1
     assert len(stale_events) == 1
+    assert len(impact_entries) == 1
+
+
+def test_currency_projection_crash_after_staleness_resumes_without_duplicate_impact(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    direct = _ingest(
+        service,
+        content="Crash-safe currency-loop position relies on section 12.",
+        matter_id="matter-alpha",
+        client_id="client-alpha",
+    )
+    _confirmed_authority_edge(service, direct)
+    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_currency_before_audit"]))
+
+    with pytest.raises(BadRequestError, match="durably queued"):
+        service.register_authority_event(_authority_event())
+    operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type.value == "authority_change_propagation"
+    )
+    assert operation.status is OperationStatus.RETRYING
+    stale_before_restart = service.store.get_item(direct)
+    assert len(stale_before_restart.metadata["staleness_reasons"]) == 1
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    assert operation.next_eligible_retry_at is not None
+    recovered = service._authority.run_operation_once(
+        worker_id="worker-restarted",
+        now=operation.next_eligible_retry_at,
+    )
+    assert recovered is not None
+    assert recovered.status is OperationStatus.COMPLETED
+    stale_after_restart = service.store.get_item(direct)
+    assert len(stale_after_restart.metadata["staleness_reasons"]) == 1
+    impact_entries = [entry for entry in service.audit.list_entries() if entry.event_type == "impact"]
     assert len(impact_entries) == 1

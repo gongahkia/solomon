@@ -36,7 +36,6 @@ from solomon.currency.contradiction import (
     contradictions_for_item,
     detect_same_authority_opposite_conclusions,
 )
-from solomon.currency.engine import register_authority_change
 from solomon.currency.models import CurrencyState, KnowledgeContentRole, KnowledgeItem, VerifiedState
 from solomon.currency.prediction import StalenessRiskReport, predict_staleness_risk
 from solomon.currency.verification import (
@@ -60,6 +59,7 @@ from solomon.graph.suggestions import (
 )
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
 from solomon.operations.assertion_projection import AssertionConfirmationProjection
+from solomon.operations.authority_projection import AuthorityChangeProjection
 from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
 from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
@@ -148,6 +148,12 @@ class AuthorityService(ServiceDelegate):
         raise BadRequestError("dependency assertion confirmation is durably queued for retry")
 
     def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
+        if operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION:
+            return AuthorityChangeProjection(
+                authority_service=self,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
         if operation.operation_type is OperationType.ASSERTION_CONFIRM:
             return AssertionConfirmationProjection(
                 lifecycle=self._assertion_lifecycle,
@@ -302,34 +308,42 @@ class AuthorityService(ServiceDelegate):
         *,
         change_id: str | None = None,
     ) -> dict[str, Any]:
-        from datetime import datetime
-
-        impact = register_authority_change(
-            authority_id=authority_id,
-            new_version=request.new_version,
-            changed_at=datetime.fromisoformat(request.changed_at),
-            graph=self.graph,
-            store=self.store,
-            change_id=change_id,
+        idempotency_key = change_id or f"{authority_id}:{request.new_version}:{request.changed_at}"
+        self._failure_injector.hit("before_authoritative_write")
+        operation, _ = self.operation_store.create(
+            OperationRecord(
+                operation_type=OperationType.AUTHORITY_CHANGE_PROPAGATION,
+                scope=OperationScope(tenant_id=self.tenant_id),
+                actor_id="system:authority-monitor",
+                authorization_context={"service_access": "curate", "actor_type": "system"},
+                correlation_id=f"authority_event:{change_id or idempotency_key}",
+                causation_id=change_id,
+                idempotency_key=f"authority-change:{idempotency_key}",
+                source_resource_id=authority_id,
+                target_resource_id=authority_id,
+                requested_transition="authority_changed",
+                payload={
+                    "new_version": request.new_version,
+                    "changed_at": request.changed_at,
+                    "change_id": change_id,
+                },
+            )
         )
-        self.currency_cache.invalidate(set(impact.stale_item_ids))
-        for stale_item_id in impact.stale_item_ids:
-            item = self._get_item(stale_item_id)
-            event = latest_verification_event(item)
-            if event is not None and event.state is VerificationLifecycleState.REQUESTED:
-                self.audit.log_verification_lifecycle(event)
-        self.audit.log_impact(
-            impact,
-            attribution=(
-                AuditAttribution(
-                    actor_id="system:authority-monitor",
-                    correlation_id=f"authority_event:{change_id}",
-                )
-                if change_id is not None
-                else None
-            ),
-        )
-        return impact.model_dump(mode="json")
+        self._failure_injector.hit("after_authoritative_write_before_schedule")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                impact = CurrencyPropagator(graph=self.graph, store=self.store).impact_query(authority_id)
+                result_change_id = change_id or operation.id
+                return impact.model_copy(update={"change_id": result_change_id}).model_dump(mode="json")
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("authority change propagation requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:authority-change")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("authority change propagation is durably queued for retry")
 
     def add_dependency(self, request: DependencyRequest) -> DependencyEdge:
         edge = DependencyEdge(

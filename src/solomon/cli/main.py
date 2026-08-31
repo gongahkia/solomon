@@ -12,7 +12,6 @@ import typer
 from rich.console import Console
 
 from solomon import __version__
-from solomon.api.app import _model_router_from_settings
 from solomon.api.service import (
     AuthorityChangeRequest,
     DependencyAssertionCreateRequest,
@@ -68,6 +67,7 @@ from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertion
 from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
+from solomon.orchestrator.models import ModelRouter
 from solomon.telemetry import telemetry_from_settings
 from solomon.worker import run_pending_operations, sync_enabled_filesystem_sources
 
@@ -395,6 +395,17 @@ def _service_database_url(settings: Settings) -> str:
     return str(settings.data_dir / "solomon.sqlite3")
 
 
+def _model_router_for_cli(settings: Settings) -> ModelRouter:
+    """Load the API-only router lazily so administrative commands stay read-only."""
+
+    # Importing ``solomon.api.app`` constructs the ASGI application for Uvicorn.
+    # That application opens its storage bundle, so a module-level import here
+    # would make even ``deployment restore-plan`` initialize PostgreSQL.
+    from solomon.api.app import _model_router_from_settings
+
+    return _model_router_from_settings(settings)
+
+
 @deployment_app.command("preflight", epilog=_example("uv run solomon deployment preflight --require-initialized"))
 def deployment_preflight_command(
     require_initialized: Annotated[
@@ -550,6 +561,10 @@ def deployment_restore_plan(
         str,
         typer.Option("--database-url-env", help="Environment variable holding the empty target PostgreSQL URL."),
     ] = "SOLOMON_RESTORE_DATABASE_URL",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="New path at which to persist the exact JSON plan."),
+    ] = None,
 ) -> None:
     """Create a stable, non-mutating server restore plan."""
 
@@ -562,6 +577,16 @@ def deployment_restore_plan(
         )
     except BackupError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    if output is not None:
+        if output.exists():
+            raise typer.BadParameter("restore plan output must not already exist", param_hint="--output")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with output.open("x", encoding="utf-8") as plan_file:
+                plan_file.write(plan.model_dump_json(indent=2))
+                plan_file.write("\n")
+        except OSError as exc:
+            raise typer.BadParameter("restore plan output cannot be written", param_hint="--output") from exc
     _print_json(plan.model_dump(mode="json"), sort_keys=True)
 
 
@@ -889,7 +914,7 @@ def suggest_dependencies(
     settings = get_settings()
     suggestions = _service().suggest_dependencies(
         DependencySuggestionRequest(item_id=item_id, use_llm=llm),
-        router=_model_router_from_settings(settings) if llm else None,
+        router=_model_router_for_cli(settings) if llm else None,
     )
     _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
 

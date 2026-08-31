@@ -577,7 +577,8 @@ def _require_empty_postgres_database(database_url: str) -> None:
             existing = connection.execute(
                 """
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                WHERE table_schema <> 'information_schema'
+                AND table_schema NOT LIKE 'pg_%'
                 AND table_type = 'BASE TABLE'
                 LIMIT 1
                 """
@@ -741,8 +742,19 @@ def _validate_server_record(
         or record.maintenance_operation_id != manifest.maintenance_operation_id
     ):
         raise BackupError("server backup record does not match encrypted manifest")
-    if record.database_url != redact_database_url(database_url):
-        raise BackupError("restore database identity does not match the backup plan")
+    if _database_logical_identity(record.database_url) != _database_logical_identity(database_url):
+        raise BackupError("restore database logical identity does not match the backup plan")
+
+
+def _database_logical_identity(database_url: str) -> tuple[str, str]:
+    """Compare portable database identity while allowing an isolated restore host."""
+
+    parsed = urlparse(database_url)
+    database_name = parsed.path.strip("/")
+    username = parsed.username or ""
+    if parsed.scheme not in {"postgres", "postgresql"} or not database_name or not username:
+        raise BackupError("PostgreSQL database identity is invalid")
+    return username, database_name
 
 
 def _write_incomplete_marker(staging: Path, operation_id: str) -> None:

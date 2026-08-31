@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +20,7 @@ from solomon.api.service import (
     SolomonService,
     SourceDocumentIngestRequest,
 )
+from solomon.backup import ServerRestorePlan
 from solomon.cli.main import app
 from solomon.config import get_settings
 from solomon.contracts import AuthoritySource, AuthoritySourceKind
@@ -32,6 +36,34 @@ def _configure_cli_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("SOLOMON_JOURNAL_DIR", str(tmp_path / "journal"))
     monkeypatch.setenv("SOLOMON_VERIFICATION_ATTESTATION_KEY", "test-secret")
     get_settings.cache_clear()
+
+
+def test_cli_import_does_not_initialize_configured_postgres(tmp_path: Path) -> None:
+    """Administrative command loading must not mutate or contact a database."""
+
+    environment = {
+        **os.environ,
+        "SOLOMON_SKU": "server",
+        "SOLOMON_SERVER_AUTH_MODE": "legacy-api-key",
+        "SOLOMON_SERVER_API_KEY": "test-server-key",
+        "SOLOMON_DATABASE_URL": "postgresql://solomon:unreachable@127.0.0.1:1/solomon",
+        "SOLOMON_DATA_DIR": str(tmp_path / "data"),
+        "SOLOMON_JOURNAL_DIR": str(tmp_path / "journal"),
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from solomon.cli.main import app; print(app.info.help)"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "journal").exists()
 
 
 def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -236,6 +268,31 @@ def test_cli_deployment_commands_emit_stable_json(monkeypatch: pytest.MonkeyPatc
     assert json.loads(preflight.output)["ready"] is True
     assert json.loads(compatibility.output)["writable"] is True
     assert json.loads(maintenance.output) == {"active": False, "maintenance": None}
+
+
+def test_cli_restore_plan_writes_exact_plan_only_to_a_new_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SOLOMON_BACKUP_PASSPHRASE", "test-backup-passphrase")
+    monkeypatch.setenv("SOLOMON_RESTORE_DATABASE_URL", "postgresql://restore:secret@db/solomon")
+    plan = ServerRestorePlan(
+        archive_path=str(tmp_path / "backup.enc"),
+        destination=str(tmp_path / "restored"),
+        database_url="postgresql://restore@db/solomon",
+        archive_sha256="a" * 64,
+        deployment_id="deployment-a",
+        files=3,
+        plan_fingerprint="b" * 64,
+    )
+    monkeypatch.setattr("solomon.cli.main.plan_server_restore", lambda *_args, **_kwargs: plan)
+    output = tmp_path / "restore-plan.json"
+
+    created = runner.invoke(app, ["deployment", "restore-plan", "backup.enc", "restored", "--output", str(output)])
+    repeated = runner.invoke(app, ["deployment", "restore-plan", "backup.enc", "restored", "--output", str(output)])
+
+    assert created.exit_code == 0, created.output
+    assert json.loads(output.read_text(encoding="utf-8"))["plan_fingerprint"] == "b" * 64
+    assert repeated.exit_code != 0
+    assert "must not already exist" in repeated.output
 
 
 def test_cli_backup_restore_and_recovery_drill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

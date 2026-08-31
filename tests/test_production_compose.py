@@ -30,9 +30,12 @@ def test_production_compose_declares_required_services_and_secrets() -> None:
 def test_production_surface_ci_matrix_and_smoke_harness() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     smoke = ROOT / "scripts" / "production_compose_smoke.sh"
+    rehearsal = ROOT / "scripts" / "production_operations_rehearsal.sh"
 
     assert smoke.is_file()
     assert smoke.stat().st_mode & 0o111
+    assert rehearsal.is_file()
+    assert rehearsal.stat().st_mode & 0o111
     for fragment in (
         "typescript-sdk:",
         "npm test",
@@ -54,6 +57,14 @@ def test_production_surface_ci_matrix_and_smoke_harness() -> None:
         "down --volumes --remove-orphans",
     ):
         assert fragment in smoke.read_text(encoding="utf-8")
+    for fragment in (
+        "pgvector/pgvector:0.8.2-pg16-bookworm",
+        "deployment backup",
+        "deployment restore-plan",
+        "deployment restore --plan",
+        "post_restore_write",
+    ):
+        assert fragment in rehearsal.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration

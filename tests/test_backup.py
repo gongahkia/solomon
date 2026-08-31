@@ -292,7 +292,7 @@ def test_server_restore_refuses_stale_plan_and_database_identity_mismatch(tmp_pa
             passphrase=TEST_PASSPHRASE,
             restore_postgres=lambda _dump: None,
         )
-    with pytest.raises(BackupError, match="database identity"):
+    with pytest.raises(BackupError, match="database logical identity"):
         plan_server_restore(
             archive,
             tmp_path / "different-target",

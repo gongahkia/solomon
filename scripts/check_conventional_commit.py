@@ -11,12 +11,22 @@ CONVENTIONAL_SUBJECT = re.compile(
 )
 
 
+def is_valid_commit_subject(subject: str) -> bool:
+    """Accept a Conventional Commit or Git's exact wrapper around one."""
+
+    if CONVENTIONAL_SUBJECT.fullmatch(subject):
+        return True
+    if subject.startswith('Revert "') and subject.endswith('"'):
+        return bool(CONVENTIONAL_SUBJECT.fullmatch(subject.removeprefix('Revert "').removesuffix('"')))
+    return False
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("expected a commit-message file")
         return 2
     subject = Path(argv[1]).read_text(encoding="utf-8").splitlines()[0]
-    if CONVENTIONAL_SUBJECT.fullmatch(subject):
+    if is_valid_commit_subject(subject):
         return 0
     print("commit subject must use Conventional Commits, for example: feat: add currency report")
     return 1

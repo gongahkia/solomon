@@ -114,6 +114,7 @@ source_run solomon ingest "rehearsal source position under Regulation R section 
 source_run solomon deployment backup /state/checkpoint.enc >/dev/null
 source_run solomon deployment backup-inspect /state/checkpoint.enc >/dev/null
 source_run solomon health > "$work/source-health.json"
+source_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.semantic_inventory import semantic_inventory; s=get_settings(); print(json.dumps(semantic_inventory(SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url)), sort_keys=True))' > "$work/source-inventory.json"
 
 restore_run solomon deployment restore-plan /state/checkpoint.enc /state/restored --output /state/restore-plan.json >/dev/null
 restore_tables="$(docker exec "$restore_pg" psql -U solomon -d solomon -Atc \
@@ -126,18 +127,23 @@ fi
 restore_run solomon deployment restore --plan /state/restore-plan.json --apply >/dev/null
 restored_run solomon deployment preflight --require-initialized --format json >/dev/null
 restored_run solomon health > "$work/restored-health.json"
+restored_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.semantic_inventory import semantic_inventory; s=get_settings(); print(json.dumps(semantic_inventory(SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url)), sort_keys=True))' > "$work/restored-inventory.json"
 restored_run solomon ingest "post-restore write under Regulation R section 13" --source-ref rehearsal-restored >/dev/null
 
-python - "$work/source-health.json" "$work/restored-health.json" <<'PY'
+python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" <<'PY'
 import json
 import sys
 
 source = json.load(open(sys.argv[1], encoding="utf-8"))
 restored = json.load(open(sys.argv[2], encoding="utf-8"))
+source_inventory = json.load(open(sys.argv[3], encoding="utf-8"))
+restored_inventory = json.load(open(sys.argv[4], encoding="utf-8"))
 if source["store"]["item_count"] != restored["store"]["item_count"]:
     raise SystemExit("restored knowledge inventory differs from checkpoint")
 if not source["journal"]["ok"] or not restored["journal"]["ok"]:
     raise SystemExit("source or restored audit journal failed verification")
+if source_inventory != restored_inventory:
+    raise SystemExit("restored semantic inventory differs from checkpoint")
 print(json.dumps({
     "schema_id": "solomon.production_operations_rehearsal.v1",
     "profile": "mixed-postgresql-sqlite",
@@ -145,6 +151,7 @@ print(json.dumps({
     "restored_item_count": restored["store"]["item_count"],
     "source_audit_entries": source["journal"]["entries"],
     "restored_audit_entries": restored["journal"]["entries"],
+    "semantic_inventory": source_inventory["components"],
     "post_restore_write": "succeeded",
     "result": "passed",
 }, sort_keys=True))

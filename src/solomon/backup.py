@@ -41,6 +41,8 @@ from solomon.store.sqlite import SQLiteKnowledgeStore
 # This module invokes only fixed PostgreSQL client binaries without a shell.
 ARCHIVE_MANIFEST_NAME = "backup-manifest.json"
 SERVER_BACKUP_RECORD_NAME = "server-backup.json"
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_MEMBER_BYTES = 1_073_741_824
 
 
 class BackupError(RuntimeError):
@@ -784,6 +786,10 @@ def _extract_archive(
     files = allowed_files or set()
     with tarfile.open(archive_path, "r") as archive:
         members = archive.getmembers()
+        if len(members) > MAX_ARCHIVE_MEMBERS:
+            raise BackupError("backup archive exceeds the member-count limit")
+        if any(member.size > MAX_ARCHIVE_MEMBER_BYTES for member in members):
+            raise BackupError("backup archive contains an oversized member")
         names = [member.name for member in members]
         if len(names) != len(set(names)):
             raise BackupError("backup archive contains duplicate paths")

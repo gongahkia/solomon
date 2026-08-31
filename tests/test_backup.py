@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -441,3 +442,15 @@ def test_server_backup_refuses_missing_metadata_empty_dump_and_invalid_local_cop
         )
     with sqlite3.connect(data / "solomon.sqlite3") as database:
         assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_archive_extraction_refuses_excessive_member_count_before_reading_content(tmp_path: Path) -> None:
+    archive = tmp_path / "excessive-members.tar"
+    with tarfile.open(archive, "w") as created:
+        for index in range(10_001):
+            created.addfile(tarfile.TarInfo(f"data/member-{index}"))
+
+    from solomon.backup import _extract_archive
+
+    with pytest.raises(BackupError, match="member-count limit"):
+        _extract_archive(archive, tmp_path / "extracted")

@@ -102,13 +102,14 @@ class SQLiteOperationStore:
             params.extend(sorted(status.value for status in statuses))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._lock:
+            # `where` consists only of fixed clauses and generated placeholders.
             rows = self._conn.execute(
                 f"""
                 SELECT operation_json FROM knowledge_operations
                 {where}
                 ORDER BY created_at, operation_id
                 LIMIT ?
-                """,  # noqa: S608
+                """,  # noqa: S608  # nosec B608
                 [*params, limit],
             ).fetchall()
         return [OperationRecord.model_validate_json(str(row["operation_json"])) for row in rows]
@@ -148,12 +149,13 @@ class SQLiteOperationStore:
                 if scope is not None:
                     clauses.append("scope_key = ?")
                     params.append(scope.key)
+                # `clauses` contains fixed SQL fragments; scope remains parameterized.
                 row = self._conn.execute(
                     f"""
                     SELECT operation_json FROM knowledge_operations
                     WHERE {' AND '.join(clauses)}
                     ORDER BY created_at, operation_id LIMIT 1
-                    """,  # noqa: S608
+                    """,  # noqa: S608  # nosec B608
                     params,
                 ).fetchone()
                 if row is None:

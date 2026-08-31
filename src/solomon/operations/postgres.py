@@ -105,11 +105,12 @@ class PostgresOperationStore:
             clauses.append(f"status IN ({','.join('%s' for _ in statuses)})")
             params.extend(sorted(status.value for status in statuses))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        # `where` consists only of fixed clauses and generated placeholders.
         rows = self._execute(
             f"""
             SELECT operation_json FROM knowledge_operations {where}
             ORDER BY created_at, operation_id LIMIT %s
-            """,  # noqa: S608
+            """,  # noqa: S608  # nosec B608
             tuple([*params, limit]),
         ).fetchall()
         return [OperationRecord.model_validate_json(_value(row, "operation_json", 0)) for row in rows]
@@ -146,12 +147,13 @@ class PostgresOperationStore:
             clauses.append("scope_key = %s")
             params.append(scope.key)
         with self._transaction():
+            # `clauses` contains fixed SQL fragments; scope remains parameterized.
             row = self._execute(
                 f"""
                 SELECT operation_json FROM knowledge_operations
                 WHERE {' AND '.join(clauses)}
                 ORDER BY created_at, operation_id FOR UPDATE SKIP LOCKED LIMIT 1
-                """,  # noqa: S608
+                """,  # noqa: S608  # nosec B608
                 tuple(params),
             ).fetchone()
             if row is None:

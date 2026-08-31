@@ -9,10 +9,10 @@ from types import SimpleNamespace
 from typing import Any
 
 from solomon.consistency.inspection import ConsistencyInspector
-from solomon.consistency.models import ConsistencyFindingCode
+from solomon.consistency.models import ConsistencyFindingCode, ConsistencyScope
 from solomon.currency.models import now_utc
 from solomon.graph.suggestions import SuggestionDecision
-from solomon.operations.models import OperationStatus, OperationType
+from solomon.operations.models import OperationScope, OperationStatus, OperationType
 
 
 def _assertion(**updates: Any) -> Any:
@@ -187,3 +187,52 @@ def test_inspector_exposes_missing_audit_links_unknown_operations_and_missing_ed
         ConsistencyFindingCode.AUDIT_REFERENCE_MISSING,
         ConsistencyFindingCode.UNKNOWN_OPERATION_PROJECTION,
     }
+
+
+def test_inspector_selects_only_exact_or_scope_derived_operations() -> None:
+    scope = ConsistencyScope(tenant_id="tenant-a", matter_id="matter-a", client_id="client-a")
+    exact = OperationScope(tenant_id="tenant-a", matter_id="matter-a", client_id="client-a")
+    other_scope = OperationScope(tenant_id="tenant-a", matter_id="matter-other", client_id="client-other")
+    operations: list[Any] = [
+        SimpleNamespace(id="other-tenant", scope=OperationScope(tenant_id="tenant-other")),
+        SimpleNamespace(id="exact", scope=exact),
+        SimpleNamespace(
+            id="evidence",
+            scope=other_scope,
+            operation_type=OperationType.EVIDENCE_INGESTION,
+            target_resource_id="document-a",
+            assertion_id=None,
+        ),
+        SimpleNamespace(
+            id="suggestions",
+            scope=other_scope,
+            operation_type=OperationType.SUGGESTION_GENERATION,
+            target_resource_id="item-a",
+            assertion_id=None,
+        ),
+        SimpleNamespace(
+            id="assertion",
+            scope=other_scope,
+            operation_type=OperationType.ASSERTION_CONFIRM,
+            target_resource_id=None,
+            assertion_id="assertion-a",
+        ),
+        SimpleNamespace(
+            id="excluded",
+            scope=other_scope,
+            operation_type=OperationType.SUGGESTION_GENERATION,
+            target_resource_id="item-other",
+            assertion_id=None,
+        ),
+    ]
+    service: Any = SimpleNamespace(operation_store=SimpleNamespace(list=lambda **_: operations))
+    inspector = ConsistencyInspector(service)
+
+    selected = inspector._operations(
+        scope,
+        item_ids={"item-a"},
+        assertions=[_assertion()],
+        source_documents=[SimpleNamespace(id="document-a")],
+    )
+
+    assert [operation.id for operation in selected] == ["exact", "evidence", "suggestions", "assertion"]

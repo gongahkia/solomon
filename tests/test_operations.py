@@ -9,7 +9,14 @@ from pathlib import Path
 import pytest
 
 from solomon.currency.models import now_utc
-from solomon.operations.models import OperationPhase, OperationRecord, OperationScope, OperationStatus, OperationType
+from solomon.operations.models import (
+    OperationPhase,
+    OperationRecord,
+    OperationScope,
+    OperationStatus,
+    OperationType,
+    is_terminal,
+)
 from solomon.operations.store import OperationConflictError, OperationNotFoundError, SQLiteOperationStore
 
 
@@ -224,3 +231,20 @@ def test_operation_store_operator_resolution_and_model_transition_guards(tmp_pat
     invalid_context["authorization_context"] = {"token": "not-recorded"}
     with pytest.raises(ValueError, match="credentials"):
         OperationRecord.model_validate(invalid_context)
+
+    retained_lease = _operation(key="retained-lease").model_dump()
+    retained_lease["lease_owner"] = "worker-a"
+    with pytest.raises(ValueError, match="only claimed"):
+        OperationRecord.model_validate(retained_lease)
+    terminal_retry = _operation(key="terminal-retry").model_dump()
+    terminal_retry.update(
+        {"status": OperationStatus.TERMINAL_FAILED, "next_eligible_retry_at": now_utc()}
+    )
+    with pytest.raises(ValueError, match="terminal operations"):
+        OperationRecord.model_validate(terminal_retry)
+    invalid_phase = _operation(key="invalid-phase").model_dump()
+    invalid_phase["phase"] = OperationPhase.COMPLETED
+    with pytest.raises(ValueError, match="completed phase"):
+        OperationRecord.model_validate(invalid_phase)
+    assert is_terminal(OperationStatus.COMPLETED) is True
+    assert is_terminal(OperationStatus.QUEUED) is False

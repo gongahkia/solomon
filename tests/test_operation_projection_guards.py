@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import signal
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +20,7 @@ from solomon.operations.authority_projection import AuthorityChangeProjection
 from solomon.operations.candidate_promotion_projection import CandidatePromotionProjection
 from solomon.operations.evidence_projection import EvidenceIngestionProjection
 from solomon.operations.execution import OperationRequiresIntervention
+from solomon.operations.failure_injection import SubprocessKillOperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.operations.reverification_projection import SourceRevisionReverificationProjection
 from solomon.operations.suggestion_confirmation_projection import SuggestionConfirmationProjection
@@ -452,3 +454,20 @@ def test_edge_projection_collision_refuses_wrong_provenance_and_retries_matching
     )
     assert assertion_projection._edge_for(suggestion, by="reviewer-a") == matching_edge
     assert suggestion_projection._edge_for(suggestion, by="reviewer-a") == matching_edge
+
+
+def test_subprocess_failure_injector_only_terminates_the_declared_test_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr("solomon.operations.failure_injection.os.getpid", lambda: 4321)
+    monkeypatch.setattr(
+        "solomon.operations.failure_injection.os.kill",
+        lambda process_id, received_signal: calls.append((process_id, received_signal)),
+    )
+    injector = SubprocessKillOperationFailureInjector(["hard-crash"])
+
+    injector.hit("unconfigured")
+    injector.hit("hard-crash")
+
+    assert calls == [(4321, signal.SIGKILL)]

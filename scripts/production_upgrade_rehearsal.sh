@@ -16,15 +16,21 @@ starting_commit="${SOLOMON_UPGRADE_STARTING_COMMIT:-2d74983b0724ab9f9b4d19a4c8b2
 run_id="solomon-upgrade-$$"
 network="${run_id}-network"
 postgres="${run_id}-postgres"
+restore_postgres="${run_id}-restore-postgres"
 old_image="${run_id}-old-image"
 current_image="${run_id}-current-image"
 work="$(mktemp -d "${TMPDIR:-/tmp}/solomon-upgrade.XXXXXX")"
 old_root="$work/old"
 state="$work/state"
+report_path="${SOLOMON_UPGRADE_REPORT_PATH:-}"
+if [ -n "$report_path" ] && [ -e "$report_path" ]; then
+    echo "upgrade rehearsal report path must not already exist" >&2
+    exit 2
+fi
 
 cleanup() {
     status=$?
-    docker rm --force "$postgres" >/dev/null 2>&1 || true
+    docker rm --force "$postgres" "$restore_postgres" >/dev/null 2>&1 || true
     docker network rm "$network" >/dev/null 2>&1 || true
     docker run --rm -v "$work:/state" --entrypoint /bin/sh "$current_image" \
         -c 'find /state -mindepth 1 -delete' >/dev/null 2>&1 || true
@@ -40,23 +46,30 @@ git -C "$root" archive "$starting_commit" | tar -x -C "$old_root"
 docker build --quiet -t "$old_image" "$old_root" >/dev/null
 docker build --quiet -t "$current_image" "$root" >/dev/null
 docker network create "$network" >/dev/null
-docker run --detach --rm --name "$postgres" --network "$network" \
-    -e POSTGRES_DB=solomon \
-    -e POSTGRES_USER=solomon \
-    -e POSTGRES_PASSWORD=disposable-postgres-password \
-    pgvector/pgvector:0.8.2-pg16-bookworm >/dev/null
+wait_for_postgres() {
+    name="$1"
+    attempts=0
+    while ! docker exec "$name" pg_isready -U solomon -d solomon >/dev/null 2>&1; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 60 ]; then
+            echo "PostgreSQL did not become ready within 60 seconds" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+}
 
-attempts=0
-while ! docker exec "$postgres" pg_isready -U solomon -d solomon >/dev/null 2>&1; do
-    attempts=$((attempts + 1))
-    if [ "$attempts" -ge 60 ]; then
-        echo "PostgreSQL did not become ready within 60 seconds" >&2
-        exit 1
-    fi
-    sleep 1
+for name in "$postgres" "$restore_postgres"; do
+    docker run --detach --rm --name "$name" --network "$network" \
+        -e POSTGRES_DB=solomon \
+        -e POSTGRES_USER=solomon \
+        -e POSTGRES_PASSWORD=disposable-postgres-password \
+        pgvector/pgvector:0.8.2-pg16-bookworm >/dev/null
+    wait_for_postgres "$name"
 done
 
 database_url="postgresql://solomon:disposable-postgres-password@${postgres}:5432/solomon"
+restore_database_url="postgresql://solomon:disposable-postgres-password@${restore_postgres}:5432/solomon"
 
 run_image() {
     image="$1"
@@ -68,16 +81,55 @@ run_image() {
         -e SOLOMON_DATABASE_URL="$database_url" \
         -e SOLOMON_DATA_DIR=/state/data \
         -e SOLOMON_JOURNAL_DIR=/state/journal \
+        -e SOLOMON_BACKUP_PASSPHRASE=disposable-backup-passphrase \
         "$image" "$@"
+}
+
+run_restore_control() {
+    timeout 120 docker run --rm --network "$network" -v "$state:/state" \
+        -e SOLOMON_SKU=server \
+        -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
+        -e SOLOMON_SERVER_API_KEY=disposable-server-key \
+        -e SOLOMON_DATABASE_URL="$restore_database_url" \
+        -e SOLOMON_RESTORE_DATABASE_URL="$restore_database_url" \
+        -e SOLOMON_DATA_DIR=/tmp/restore-control-data \
+        -e SOLOMON_JOURNAL_DIR=/tmp/restore-control-journal \
+        -e SOLOMON_BACKUP_PASSPHRASE=disposable-backup-passphrase \
+        "$current_image" "$@"
+}
+
+run_restored_old() {
+    timeout 120 docker run --rm --network "$network" -v "$state:/state" \
+        -e SOLOMON_SKU=server \
+        -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
+        -e SOLOMON_SERVER_API_KEY=disposable-server-key \
+        -e SOLOMON_DATABASE_URL="$restore_database_url" \
+        -e SOLOMON_DATA_DIR=/state/pre-upgrade-restored/data \
+        -e SOLOMON_JOURNAL_DIR=/state/pre-upgrade-restored/journal \
+        "$old_image" "$@"
 }
 
 run_image "$old_image" solomon migrate >/dev/null
 run_image "$old_image" solomon ingest "N release source position" --source-ref upgrade-n >/dev/null
-run_image "$current_image" solomon migrate >/dev/null
 run_image "$current_image" solomon deployment init --owner upgrade-rehearsal >/dev/null
 run_image "$current_image" solomon deployment upgrade-preflight --format json >/dev/null
+run_image "$current_image" solomon deployment backup /state/pre-upgrade.enc >/dev/null
+run_image "$current_image" solomon deployment backup-inspect /state/pre-upgrade.enc >/dev/null
+run_restore_control solomon deployment restore-plan /state/pre-upgrade.enc /state/pre-upgrade-restored \
+    --output /state/pre-upgrade-restore-plan.json >/dev/null
+restore_tables="$(docker exec "$restore_postgres" psql -U solomon -d solomon -Atc \
+    "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_schema <> 'information_schema' AND table_schema NOT LIKE 'pg_%' AND table_type = 'BASE TABLE' ORDER BY 1")"
+if [ -n "$restore_tables" ]; then
+    echo "isolated pre-upgrade restore target contains application tables" >&2
+    exit 1
+fi
+run_restore_control solomon deployment restore --plan /state/pre-upgrade-restore-plan.json --apply >/dev/null
+run_restored_old solomon health > "$work/pre-upgrade-old-health.json"
+run_image "$current_image" solomon migrate >/dev/null
 run_image "$current_image" solomon ingest "N plus one release position" --source-ref upgrade-n-plus-one >/dev/null
 run_image "$current_image" solomon health > "$work/health.json"
+run_image "$current_image" solomon deployment backup /state/post-upgrade.enc >/dev/null
+run_image "$current_image" solomon deployment backup-inspect /state/post-upgrade.enc >/dev/null
 
 migrations="$(docker exec "$postgres" psql -U solomon -d solomon -Atc \
     "SELECT version FROM schema_migrations WHERE scope = 'operation-store' ORDER BY version")"
@@ -91,20 +143,35 @@ if run_image "$old_image" solomon health >/dev/null 2>&1; then
     exit 1
 fi
 
-python - "$work/health.json" <<'PY'
+python - "$work/health.json" "$work/pre-upgrade-old-health.json" "$report_path" <<'PY'
 import json
 import sys
+from pathlib import Path
 
 health = json.load(open(sys.argv[1], encoding="utf-8"))
+pre_upgrade_old = json.load(open(sys.argv[2], encoding="utf-8"))
 if health["store"]["item_count"] != 2:
     raise SystemExit("post-upgrade knowledge inventory differs from expected N and N+1 writes")
 if not health["journal"]["ok"]:
     raise SystemExit("post-upgrade audit journal failed verification")
-print(json.dumps({
-    "schema_id": "solomon.production_upgrade_rehearsal.v1",
+if pre_upgrade_old["store"]["item_count"] != 1 or not pre_upgrade_old["journal"]["ok"]:
+    raise SystemExit("verified pre-upgrade backup was not readable by the previous application")
+result = {
+    "schema_id": "solomon.production_upgrade_rehearsal.v2",
     "operation_store_migrations": [1, 2],
+    "pre_upgrade_backup_restore": "previous-binary-readable",
+    "post_upgrade_backup": "verified",
     "rollback": "refused-by-older-binary",
     "post_upgrade_write": "succeeded",
     "result": "passed",
-}, sort_keys=True))
+}
+serialized = json.dumps(result, sort_keys=True)
+report_path = sys.argv[3]
+if report_path:
+    target = Path(report_path)
+    if not target.parent.is_dir():
+        raise SystemExit("upgrade rehearsal report parent directory does not exist")
+    with target.open("x", encoding="utf-8") as report:
+        report.write(serialized + "\n")
+print(serialized)
 PY

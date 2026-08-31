@@ -43,6 +43,7 @@ ARCHIVE_MANIFEST_NAME = "backup-manifest.json"
 SERVER_BACKUP_RECORD_NAME = "server-backup.json"
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 1_073_741_824
+MAX_ARCHIVE_TOTAL_BYTES = 4_294_967_296
 
 
 class BackupError(RuntimeError):
@@ -149,6 +150,7 @@ def create_encrypted_backup(
     source_journal = _require_directory(journal_dir, label="journal")
     target = Path(destination)
     sidecar = backup_manifest_path(target)
+    _require_external_backup_destination(target, source_data, source_journal)
     if target.exists() or sidecar.exists():
         raise BackupError("backup destination or manifest already exists")
     if not passphrase:
@@ -273,6 +275,7 @@ def create_server_encrypted_backup(
     metadata = _require_mixed_metadata(source_data, database_url)
     target = Path(destination)
     sidecar = backup_manifest_path(target)
+    _require_external_backup_destination(target, source_data, source_journal)
     if target.exists() or sidecar.exists():
         raise BackupError("backup destination or manifest already exists")
     if not passphrase:
@@ -605,6 +608,14 @@ def _require_directory(path: Path | str, *, label: str) -> Path:
     return directory
 
 
+def _require_external_backup_destination(target: Path, *active_roots: Path) -> None:
+    """Keep backup artifacts outside the source tree to avoid self-inclusion."""
+
+    resolved_target = target.resolve()
+    if any(resolved_target.is_relative_to(root.resolve()) for root in active_roots):
+        raise BackupError("backup destination must be outside active data and audit directories")
+
+
 def _require_mixed_metadata(data_dir: Path, database_url: str) -> DeploymentMetadata:
     try:
         metadata = read_metadata(data_dir)
@@ -790,6 +801,8 @@ def _extract_archive(
             raise BackupError("backup archive exceeds the member-count limit")
         if any(member.size > MAX_ARCHIVE_MEMBER_BYTES for member in members):
             raise BackupError("backup archive contains an oversized member")
+        if sum(member.size for member in members) > MAX_ARCHIVE_TOTAL_BYTES:
+            raise BackupError("backup archive exceeds the total-size limit")
         names = [member.name for member in members]
         if len(names) != len(set(names)):
             raise BackupError("backup archive contains duplicate paths")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 import tarfile
@@ -159,6 +160,35 @@ def test_backup_rejects_missing_or_unsafe_input_paths(tmp_path: Path) -> None:
             journal_dir=journal_dir,
             destination=tmp_path / "unsafe.enc",
             passphrase=TEST_PASSPHRASE,
+        )
+
+
+def test_backup_refuses_destination_inside_active_data_or_audit_paths(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    data = tmp_path / "data"
+    journal = tmp_path / "journal"
+    with pytest.raises(BackupError, match="outside active data"):
+        create_encrypted_backup(
+            data_dir=data,
+            journal_dir=journal,
+            destination=data / "recursive.enc",
+            passphrase=TEST_PASSPHRASE,
+        )
+
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(data_dir=data, journal_dir=journal, database_url=database_url)
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"dump")
+
+    with pytest.raises(BackupError, match="outside active data"):
+        create_server_encrypted_backup(
+            data_dir=data,
+            journal_dir=journal,
+            database_url=database_url,
+            destination=journal / "recursive-server.enc",
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=dump_postgres,
         )
 
 
@@ -453,4 +483,21 @@ def test_archive_extraction_refuses_excessive_member_count_before_reading_conten
     from solomon.backup import _extract_archive
 
     with pytest.raises(BackupError, match="member-count limit"):
+        _extract_archive(archive, tmp_path / "extracted")
+
+
+def test_archive_extraction_refuses_total_size_limit_before_extracting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "oversized-total.tar"
+    with tarfile.open(archive, "w") as created:
+        member = tarfile.TarInfo("data/member")
+        member.size = 2
+        created.addfile(member, io.BytesIO(b"ok"))
+
+    monkeypatch.setattr("solomon.backup.MAX_ARCHIVE_TOTAL_BYTES", 1)
+    from solomon.backup import _extract_archive
+
+    with pytest.raises(BackupError, match="total-size limit"):
         _extract_archive(archive, tmp_path / "extracted")

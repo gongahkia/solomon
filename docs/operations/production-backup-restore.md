@@ -19,11 +19,15 @@ docker compose -f docker-compose.production.yml --profile production exec api \
   solomon deployment preflight --require-initialized --format json
 docker compose -f docker-compose.production.yml --profile production exec api \
   solomon deployment compatibility
+docker compose -f docker-compose.production.yml --profile production exec api \
+  solomon deployment verify --matter-id <exact-matter> --client-id <exact-client> --format json
 ```
 
 `preflight` is read-only. A blocked audit chain, inaccessible local directory, profile mismatch, unreachable
 PostgreSQL, or unavailable pgvector is a stop condition. `compatibility` is an application/layout report, not a
-database-downgrade promise.
+database-downgrade promise. `deployment verify` adds runtime audit verification, durable-operation visibility, one
+exact scoped read, and the scoped consistency inspector. Its `liveness`, `readiness`, and `state` fields distinguish
+a failed dependency from a deployable but operator-visible degraded state; it never writes an application record.
 
 ## Full backup
 
@@ -39,7 +43,8 @@ docker compose -f docker-compose.production.yml --profile production run --rm --
   solomon deployment backup-inspect /backup/solomon-server-YYYYMMDD.enc
 ```
 
-The destination must be new. The full encrypted archive contains safe SQLite snapshots, the local JSON/JSONL state,
+The destination must be new and outside the active data and audit trees. The full encrypted archive contains safe
+SQLite snapshots, the local JSON/JSONL state,
 and a custom-format PostgreSQL logical dump. Its adjacent `.manifest.json` binds encrypted and decrypted SHA-256
 digests, deployment identity, maintenance operation ID, and archive metadata. The passphrase and connection password
 are not written to arguments, plan JSON, or the manifest. The backup is only complete after both archive and sidecar
@@ -49,7 +54,9 @@ record in the archive.
 
 There is no incremental backup, remote-object-store copy, retention scheduler, external RPO, external RTO, or
 managed PostgreSQL physical-backup claim. Copy the archive and sidecar off the host using the organisation's approved
-encrypted backup system, then test the copied pair with `backup-inspect`.
+encrypted backup system, then test the copied pair with `backup-inspect`. Archive inspection rejects links, duplicate
+paths, more than 10,000 entries, an entry over 1 GiB, or more than 4 GiB of declared extracted data before
+materializing files.
 
 An ordinary backup failure leaves an `INCOMPLETE.json` marker in the staging directory and releases maintenance. A
 hard process termination can leave the maintenance record behind because ordinary cleanup did not run. Do not delete
@@ -88,6 +95,7 @@ health, the scoped consistency inspector, the worker, and audit-pack verificatio
 
 ```bash
 solomon deployment preflight --require-initialized --format json
+solomon deployment verify --matter-id <exact-matter> --client-id <exact-client> --format json
 solomon health
 solomon consistency operations --format json
 solomon worker --once
@@ -121,5 +129,7 @@ The real N-to-N+1 rehearsal is available to an operator with Docker and the repo
 TMPDIR=/safe/temp scripts/production_upgrade_rehearsal.sh
 ```
 
-It uses `2d74983b` as its committed N revision by default, builds isolated images, creates no named volumes, verifies
-versions 1 and 2 in PostgreSQL, proves the old binary refuses N+1, and performs a current-version write afterward.
+It uses `2d74983b` as its committed N revision by default, builds isolated images, creates no named volumes, takes
+and verifies pre- and post-upgrade checkpoints, restores the pre-upgrade checkpoint into a second empty pgvector
+target, proves the N binary can read that isolated recovery target, verifies versions 1 and 2 in the upgraded
+PostgreSQL source, proves the old binary refuses N+1, and performs a current-version write afterward.

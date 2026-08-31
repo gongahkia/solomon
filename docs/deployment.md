@@ -32,6 +32,7 @@ a coordinated backup, then run the read-only admission check and forward migrati
 ```bash
 uv run solomon deployment upgrade-preflight --format json
 uv run solomon migrate
+uv run solomon deployment verify --matter-id <exact-matter> --client-id <exact-client> --format json
 uv run solomon worker --once
 uv run solomon consistency operations --format json
 ```

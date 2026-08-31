@@ -18,34 +18,43 @@ prerequisite for this rehearsal.
 | Check | Command | Observed result |
 | --- | --- | --- |
 | Baseline focused tests | `uv run pytest -q tests/test_backup.py tests/test_migrations.py tests/test_helm_chart.py tests/test_production_compose.py` | 17 passed before implementation. |
-| Focused implementation tests | `uv run pytest -q tests/test_backup.py tests/test_cli.py tests/test_deployment.py tests/test_migrations.py tests/test_production_compose.py` | Passed after backup/restore, read-only planning, and upgrade work. |
+| Focused implementation tests | `uv run pytest -q tests/test_backup.py tests/test_backup_subprocess_interruption.py tests/test_cli.py tests/test_deployment.py tests/test_semantic_inventory.py tests/test_governed_dependency_assertion_demo.py` | 49 passed after governed restore, readiness verification, archive-bound, and abrupt-interruption work. |
 | Full suite and coverage | `SOLOMON_TEST_POSTGRES_DSN=… uv run pytest --cov=src/solomon` | 540 collected with an isolated live pgvector PostgreSQL; coverage report passed at 90%. A first no-PostgreSQL invocation reached only 88%, so it is not used as release evidence. |
 | Static checks | `uv run ruff check …` and `uv run mypy …` over changed deployment, backup, CLI, migration, and test files | Passed at each implementation phase. |
 | Compose model | `TMPDIR=/home/gongahkia /bin/sh scripts/check_production_compose.sh` | Passed. |
 | Production Compose smoke | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker smoke. |
-| Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL. |
-| N-to-N+1 upgrade | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 900 scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL. |
+| Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_OPERATIONS_REPORT_PATH=… timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v2`. |
+| N-to-N+1 upgrade | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_UPGRADE_REPORT_PATH=… timeout 900 scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`. |
 | Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py` | Passed. Helm result is static validation only. |
 
-The checkpoint/restore scenario starts from a migrated, initialized source profile, writes one governed knowledge
-record, creates and inspects the encrypted full backup, refuses application tables before restore, restores an empty
-isolated PostgreSQL target and absent local root, verifies restored health/audit inventory, and completes a
-post-restore write. This demonstrates component recovery and continued operation; it does not prove distributed
+The checkpoint/restore scenario starts from a migrated, initialized source profile and exercises two isolated scopes.
+It creates human and trusted-upstream assertions in pending, confirmed, rejected, deferred, and withdrawn states;
+preserves source version lineage and a reverification request; proves the confirmed edge's currency effect; verifies
+scope denial, confirmation idempotency, audit-pack integrity, source and restored readiness, and zero scoped
+consistency findings. It creates and inspects an encrypted full backup, refuses application tables before restore,
+restores an empty isolated PostgreSQL target and absent local root, compares 12 canonical content-redacting semantic
+component hashes (including source documents, candidates, local SQLite state, graph, operations, and audit
+correlation), verifies the retained audit pack, and completes a new governed post-restore graph write with matching
+assertion provenance. This demonstrates component recovery and continued operation; it does not prove distributed
 atomic restore.
 
 The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. N creates the PostgreSQL store and
-writes one record. N+1 applies operation-store migration 2, initializes the current deployment marker, passes the
-read-only upgrade preflight, and writes a second record. PostgreSQL reports versions `[1, 2]`. N then refuses the
-unknown schema version; N+1 health verifies its audit chain and reports the two-record inventory. This is a safe
-rollback refusal, not an in-place rollback test.
+writes one record. The current release creates and verifies a pre-upgrade checkpoint before migration, restores it
+into a second empty pgvector target, and proves the N binary still reads that isolated recovery state. N+1 then
+applies operation-store migration 2 and writes a second record, followed by a verified post-upgrade checkpoint.
+PostgreSQL reports versions `[1, 2]`. N refuses the unknown source-schema version; N+1 health verifies its audit
+chain and reports the two-record inventory. This is a safe rollback refusal and isolated restore rehearsal, not an
+in-place database downgrade.
 
 ## Failure and guard coverage
 
 Focused tests cover tampered encrypted archives, manifest/archive digest drift, wrong passphrase, existing target
-refusal, unsafe paths and links, invalid audit journal, incomplete backup staging on injected PostgreSQL dump
-failure, stale plan refusal, database identity mismatch, password exclusion from PostgreSQL client arguments,
-maintenance write/worker blocking, concurrent bootstrap, read-only CLI load/restore planning, migration rollback on
-a failed fresh SQLite batch, and operation-store N-to-N+1 migration.
+refusal, unsafe paths and links, active-tree backup-destination refusal, member-count/per-member/total archive
+bounds, invalid audit journal, incomplete backup staging on injected PostgreSQL dump failure, a real `SIGKILL` during
+the PostgreSQL-capture boundary, stale plan refusal, database identity mismatch, password exclusion from PostgreSQL
+client arguments, maintenance write/worker blocking, concurrent bootstrap, read-only CLI load/restore planning,
+read-only scoped deployment verification, migration rollback on a failed fresh SQLite batch, and operation-store
+N-to-N+1 migration.
 
 The existing crash-consistency scenario and proof record remain the evidence for operation interruption, duplicate
 delivery, concurrent worker claims, safe repair, cross-scope refusal, and audit-pack verification. This operations

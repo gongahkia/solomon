@@ -148,6 +148,25 @@ Dependency suggestions are now durable review records. Ingest creates determinis
 list, confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
 `human_confirmed` dependency edges, while rejected suggestions remain review history.
 
+### Governed dependency assertions
+
+`/dependencies/assertions` reuses that durable suggestion lifecycle for an explicit human or trusted-upstream
+assertion. It is separate from parser output: creation requires one existing source knowledge item, the exact
+registered immutable document version bound to that item, one registered in-scope target, a bounded directional
+relationship type, a creator, rationale, and an idempotency key. A target is either an existing knowledge item in the
+same matter/client scope or an identifier canonicalized through a registered authority source; free-text targets do
+not enter the graph.
+
+Evidence is either an exact raw quotation whose supplied offsets reconstruct from the immutable source content, or
+explicit semantic commentary with no quote offsets. The record preserves its source document ID/version/content hash,
+raw evidence, origin, optional trusted-upstream reference, lifecycle state, and audit IDs. Creation does not create
+an edge. An authorized reviewer other than the creator may confirm it, creating at most one `human_asserted` edge
+that retains the assertion ID in `source_suggestion_id`; rejection, deferral, and withdrawal do not create an edge.
+Source-document revision preserves existing evidence and edges while marking the affected assertion for
+re-verification. Authority changes therefore affect only confirmed edges. The source-document store remains SQLite
+when graph/knowledge state uses PostgreSQL, so this boundary is validated and recovery-oriented rather than claimed
+as a cross-store atomic transaction.
+
 ## Boundary
 
 The boundary engine lives under `src/solomon/boundary/engine/`. If that in-process boundary errors, ingestion

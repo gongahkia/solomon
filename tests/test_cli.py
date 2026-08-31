@@ -10,10 +10,18 @@ from fastapi import FastAPI
 from typer.testing import CliRunner
 
 from solomon import __version__
-from solomon.api.service import IngestRequest, SolomonService
+from solomon.api.service import (
+    CandidateClaimPromotionRequest,
+    DocumentSourceRequest,
+    IngestRequest,
+    SolomonService,
+    SourceDocumentIngestRequest,
+)
 from solomon.cli.main import app
 from solomon.config import get_settings
+from solomon.contracts import AuthoritySource, AuthoritySourceKind
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.sources.models import DocumentSourceKind
 
 runner = CliRunner()
 
@@ -356,3 +364,152 @@ def test_cli_dependency_suggestion_queue(monkeypatch: pytest.MonkeyPatch, tmp_pa
     confirmed = runner.invoke(app, ["dependency-suggestions", "--item-id", item["id"], "--decision", "confirmed"])
     assert confirmed.exit_code == 0
     assert json.loads(confirmed.output)[0]["decision"] == "confirmed"
+
+
+def test_cli_governed_dependency_assertion_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    source = service.register_document_source(
+        DocumentSourceRequest(
+            source_id="cli-documents",
+            name="CLI documents",
+            kind=DocumentSourceKind.FILESYSTEM,
+            root_ref="/cli-documents",
+        )
+    )
+    document, candidates = service.ingest_source_document(
+        source.id,
+        SourceDocumentIngestRequest(
+            external_id="cli-assertion-memo",
+            filename="cli-assertion-memo.txt",
+            mime_type="text/plain",
+            content="We rely on Regulation R section 12. The conclusion applies to the operating rule.",
+        ),
+    )
+    item = service.promote_candidate_claim(
+        candidates[0].id,
+        CandidateClaimPromotionRequest(
+            by="curator-a",
+            kind=KnowledgeKind.POSITION,
+            source_kind=SourceKind.MATTER_DOC,
+            matter_id="matter-a",
+            client_id="client-a",
+        ),
+    )
+    service.register_authority_source(
+        AuthoritySource(
+            id="cli-gazette",
+            name="CLI official gazette",
+            kind=AuthoritySourceKind.FEED,
+            root_ref="https://gazette.example.test/cli",
+        )
+    )
+    quote = "We rely on Regulation R section 12."
+    request_path = tmp_path / "assertion.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "item_id": item.id,
+                "source_document_id": document.id,
+                "source_document_version": document.version,
+                "target_kind": "external_authority",
+                "authority_source_id": "cli-gazette",
+                "authority_identifier": "SG-R-12",
+                "assertion_type": "normative_policy",
+                "evidence_kind": "quote",
+                "quote": quote,
+                "quote_start": 0,
+                "quote_end": len(quote),
+                "rationale": "CLI assertion lifecycle proof",
+                "created_by": "curator-a",
+                "idempotency_key": "cli-quote",
+            }
+        ),
+        encoding="utf-8",
+    )
+    created = runner.invoke(app, ["assert-dependency", "--json", str(request_path)])
+    assert created.exit_code == 0, created.output
+    quote_assertion = json.loads(created.output)
+
+    inspected = runner.invoke(
+        app,
+        ["dependency-assertion", quote_assertion["id"], "--matter-id", "matter-a", "--client-id", "client-a"],
+    )
+    listed = runner.invoke(app, ["dependency-assertions", "--item-id", item.id, "--state", "pending"])
+    confirmed = runner.invoke(
+        app,
+        [
+            "decide-dependency-assertion",
+            quote_assertion["id"],
+            "--by",
+            "reviewer-a",
+            "--decision",
+            "confirmed",
+            "--expected-state-version",
+            "1",
+        ],
+    )
+    assert inspected.exit_code == 0, inspected.output
+    assert listed.exit_code == 0, listed.output
+    assert confirmed.exit_code == 0, confirmed.output
+    assert json.loads(confirmed.output)["source_suggestion_id"] == quote_assertion["id"]
+
+    commentary = runner.invoke(
+        app,
+        [
+            "assert-dependency",
+            "--item-id",
+            item.id,
+            "--source-document-id",
+            document.id,
+            "--source-document-version",
+            str(document.version),
+            "--authority-source-id",
+            "cli-gazette",
+            "--authority-identifier",
+            "SG-R-13",
+            "--assertion-type",
+            "procedural",
+            "--evidence-kind",
+            "commentary",
+            "--commentary",
+            "The curator records a procedural dependency without claiming a quotation.",
+            "--rationale",
+            "CLI commentary lifecycle proof",
+            "--created-by",
+            "curator-a",
+            "--idempotency-key",
+            "cli-commentary",
+        ],
+    )
+    assert commentary.exit_code == 0, commentary.output
+    commentary_assertion = json.loads(commentary.output)
+    deferred = runner.invoke(
+        app,
+        [
+            "decide-dependency-assertion",
+            commentary_assertion["id"],
+            "--by",
+            "reviewer-a",
+            "--decision",
+            "deferred",
+            "--reason",
+            "needs review",
+        ],
+    )
+    withdrawn = runner.invoke(
+        app,
+        [
+            "withdraw-dependency-assertion",
+            commentary_assertion["id"],
+            "--by",
+            "curator-a",
+            "--reason",
+            "withdrawn before confirmation",
+            "--expected-state-version",
+            "2",
+        ],
+    )
+    assert deferred.exit_code == 0, deferred.output
+    assert withdrawn.exit_code == 0, withdrawn.output
+    assert json.loads(withdrawn.output)["decision"] == "withdrawn"

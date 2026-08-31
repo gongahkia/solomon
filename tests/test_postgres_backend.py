@@ -11,7 +11,12 @@ import pytest
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
-from solomon.graph.suggestions import DependencySuggestion, SuggestionDecision
+from solomon.graph.suggestions import (
+    AssertionEvidenceKind,
+    DependencyAssertionType,
+    DependencySuggestion,
+    SuggestionDecision,
+)
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
 from solomon.store.factory import create_storage_bundle
 from solomon.store.postgres import (
@@ -223,6 +228,55 @@ def test_postgres_graph_store_persists_dependency_suggestions(tmp_path: Path) ->
     assert reopened.get_dependency_suggestion("suggestion-1").decision is SuggestionDecision.REJECTED
     assert reopened.list_dependency_suggestions(item_id="item-1", decision=SuggestionDecision.REJECTED) == [rejected]
     reopened.close()
+
+
+def test_postgres_graph_store_filters_and_preserves_governed_assertion_projection(tmp_path: Path) -> None:
+    graph = PostgresGraphStore("postgresql://unit/solomon", connect=lambda _dsn: _connect(tmp_path))
+    quote = "We rely on Regulation R section 12."
+    suggestion = DependencySuggestion(
+        id="governed-suggestion",
+        item_id="item-1",
+        authority_ref="authority:official-gazette:sg-r-12",
+        source="human",
+        assertion_type=DependencyAssertionType.NORMATIVE_POLICY,
+        evidence_kind=AssertionEvidenceKind.QUOTE,
+        evidence_raw=quote,
+        source_resource_id="registered-documents",
+        source_document_id="document-1",
+        source_document_version=1,
+        source_document_sha256="a" * 64,
+        source_span_start=0,
+        source_span_end=len(quote),
+        source_span=quote,
+        rationale="registered evidence requires review",
+        created_by="curator-a",
+        idempotency_key="governed-key",
+        request_sha256="b" * 64,
+        needs_reverification=True,
+        suggested_edge=DependencyEdge(
+            id="governed-edge",
+            source_id="item-1",
+            target_id="authority:official-gazette:sg-r-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+            source_suggestion_id="governed-suggestion",
+        ),
+    )
+
+    graph.add_dependency_suggestion(suggestion)
+    graph.add_dependency(suggestion.suggested_edge)
+
+    assert graph.list_dependency_suggestions(
+        item_id="item-1",
+        decision=SuggestionDecision.PENDING,
+        source="human",
+        target_id="authority:official-gazette:sg-r-12",
+        created_by="curator-a",
+        needs_reverification=True,
+    ) == [suggestion]
+    assert graph.get_edge("governed-edge").source_suggestion_id == suggestion.id
+    assert graph.list_dependency_suggestion_events(suggestion.id)[0]["event_type"] == "dependency_suggestion_created"
+    graph.close()
 
 
 def test_storage_bundle_can_create_postgres_store_graph_and_index(tmp_path: Path) -> None:

@@ -9,6 +9,9 @@ ALLOWLIST = {
     Path("src/solomon/api/app.py"): "public FastAPI route facade retained while routes move to focused modules",
     Path("src/solomon/api/service.py"): "public service facade retained for stable API, CLI, MCP, and test imports",
     Path(
+        "src/solomon/api/services/authority.py"
+    ): "authority facade retains stable delegation for dependency suggestions and governed assertion lifecycle",
+    Path(
         "src/solomon/audit/journal.py"
     ): "tamper-evident journal persistence and verification stay transactionally cohesive",
     Path("src/solomon/cli/main.py"): "CLI command registration remains a stable public entrypoint",

@@ -204,11 +204,12 @@ Output:
 
 ### `solomon.dependency_suggestions`
 
-Purpose: Return proposed dependency edges for human confirmation.
+Purpose: Return scoped parser proposals and governed assertion provenance for human inspection.
 
 Read/write: read
 
-Backing API: `SolomonService.dependency_suggestions(...)`.
+Backing API: `SolomonService.dependency_suggestions(...)` plus the scoped governed-assertion listing.
+This is read-only: MCP cannot create, decide, withdraw, or otherwise mutate assertions.
 
 Input:
 
@@ -222,7 +223,7 @@ Output:
 
 | Field | Type | Notes |
 |---|---|---|
-| `suggestions` | array | suggested edges, confidence, evidence snippets |
+| `suggestions` | array | parser proposals and governed assertions matching the requested decision; governed rows expose `origin`, assertion/evidence fields, source-version provenance, lifecycle/audit fields, and a confirmed edge linkage where applicable |
 | `scope` | object | item matter/client scope |
 
 ### `solomon.impact`

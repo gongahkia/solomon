@@ -102,10 +102,11 @@ create → pending ──confirm──> confirmed → source revision → needs 
 ## Public interface contract
 
 The REST surface is additive and paginated: create `POST /dependencies/assertions`; inspect
-`GET /dependencies/assertions/{id}`; list `GET /dependencies/assertions` with `scope`, `origin`, `state`, `source`,
-`target`, `creator`, and `needs_reverification` filters; decision through the existing decision semantics; withdraw;
-and history/edge-linkage inspection. Error responses use existing Solomon error envelopes. Create accepts an
-idempotency key and an optional optimistic-concurrency revision token; decision and withdrawal reject stale tokens.
+`GET /dependencies/assertions/{id}`; list `GET /dependencies/assertions` with `item_id`, `origin`, `state`,
+`target_id`, `creator`, `needs_reverification`, `matter_id`, and `client_id` filters; decision through the existing
+decision semantics; withdraw; and history/edge-linkage inspection. Error responses use existing Solomon error
+envelopes. Create accepts an idempotency key and optional `revision_of` predecessor link; decision and withdrawal
+reject stale state-version tokens.
 
 The CLI is non-interactive and stable-JSON: `assert-dependency`, `dependency-assertion`, `dependency-assertions`,
 `decide-dependency-assertion`, and `withdraw-dependency-assertion`. Creation supports flags and one JSON request file.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +15,10 @@ from solomon.api.service import (
 )
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
-from solomon.graph.models import EdgeConfidence, EdgeType
+from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
+from solomon.graph.store import GraphStore
 from solomon.graph.suggestions import (
+    DependencySuggestion,
     SuggestionDecision,
     confirm_suggestion,
     extract_defined_terms_and_citations,
@@ -42,6 +45,65 @@ class SuggestionBoundaryClient:
 
     def scrub_document(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"document_base64": kwargs["document_base64"]}
+
+
+def test_graph_store_migrates_legacy_suggestion_uniqueness_without_losing_history(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-graph.sqlite3"
+    suggestion = DependencySuggestion(
+        id="legacy-suggestion",
+        item_id="item-1",
+        authority_ref="Regulation R section 12",
+        suggested_edge=DependencyEdge(
+            id="legacy-edge",
+            source_id="item-1",
+            target_id="regulation-r-section-12",
+            edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
+            target_kind="external_authority",
+        ),
+    )
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE dependency_suggestions (
+            suggestion_id TEXT PRIMARY KEY,
+            suggestion_json TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            edge_type TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            UNIQUE(item_id, target_id, edge_type)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO dependency_suggestions
+        (suggestion_id, suggestion_json, item_id, target_id, edge_type, decision, created_at, decided_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            suggestion.id,
+            suggestion.model_dump_json(),
+            suggestion.item_id,
+            suggestion.suggested_edge.target_id,
+            suggestion.suggested_edge.edge_type.value,
+            suggestion.decision.value,
+            suggestion.created_at.isoformat(),
+            None,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    graph = GraphStore(database)
+    persisted = graph.get_dependency_suggestion(suggestion.id)
+    columns = {row[1] for row in graph._conn.execute("PRAGMA table_info(dependency_suggestions)").fetchall()}
+
+    assert persisted == suggestion
+    assert {"source", "idempotency_key", "needs_reverification", "state_version"}.issubset(columns)
+    graph.close()
 
 
 def test_manual_dependency_tagging_service_api(tmp_path: Path) -> None:

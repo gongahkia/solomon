@@ -112,6 +112,23 @@ that only the confirmed edge reaches currency propagation. Suggestions are not k
 without an explicit curator decision. See [`docs/roadmap/evidence-to-dependency-proof.md`](./docs/roadmap/evidence-to-dependency-proof.md)
 for the corpus, baseline, measured limits, and lifecycle.
 
+## Governed Dependency Assertion Proof
+
+Explicit human and trusted-upstream assertions are a separate, review-gated path from parser suggestions. Run the
+deterministic proof with fictional material:
+
+```bash
+uv run python examples/scenarios/governed-dependency-assertion-proof/run.py --workspace /tmp/solomon-governed-dependency-assertion-proof
+```
+
+It verifies exact quote versus commentary evidence, registered targets, scope denial, separation of duties,
+idempotent concurrent confirmation, source revision/re-verification, asserted-edge provenance, bounded currency
+impact, and an exported audit pack. Only confirmation creates an edge. See
+[`docs/roadmap/governed-dependency-assertion-proof.md`](./docs/roadmap/governed-dependency-assertion-proof.md) and
+[`docs/api/governed-dependency-assertions.md`](./docs/api/governed-dependency-assertions.md) for the contract and
+limits. The repository-local proof record, including remaining release-gate failures, is in
+[`docs/evaluations/governed-dependency-assertion-proof.md`](./docs/evaluations/governed-dependency-assertion-proof.md).
+
 ## Adversarial Dependency Generalization
 
 The separate 84-fixture, hash-locked synthetic challenge measures how the deterministic parser behaves beyond the
@@ -220,6 +237,12 @@ Currency, dependency, and references:
 - `POST /dependencies/suggestions/{suggestion_id}/confirm`
 - `POST /dependencies/suggestions/{suggestion_id}/reject`
 - `POST /dependencies/suggestions/{suggestion_id}/defer`
+- `POST /dependencies/assertions`
+- `GET /dependencies/assertions`
+- `GET /dependencies/assertions/{assertion_id}`
+- `POST /dependencies/assertions/{assertion_id}/decision`
+- `POST /dependencies/assertions/{assertion_id}/withdraw`
+- `GET /dependencies/assertions/{assertion_id}/history`
 - `GET /impact/{authority_id}`
 - `GET /graph`
 - `POST /references/extract`
@@ -677,6 +700,10 @@ external Postgres, ingress TLS, and validation.
 - [`docs/benchmarks.md`](./docs/benchmarks.md): currency and retrieval evaluation results.
 - [`docs/release-artifacts.md`](./docs/release-artifacts.md): v0.1.0 artifact hashes and release evidence.
 - [`docs/api/openapi.json`](./docs/api/openapi.json): generated OpenAPI contract.
+- [`docs/api/governed-dependency-assertions.md`](./docs/api/governed-dependency-assertions.md): explicit assertion REST contract.
+- [`docs/cli-governed-dependency-assertions.md`](./docs/cli-governed-dependency-assertions.md): non-interactive assertion CLI.
+- [`docs/auth-governed-dependency-assertions.md`](./docs/auth-governed-dependency-assertions.md): assertion permission and scope matrix.
+- [`docs/evaluations/governed-dependency-assertion-proof.md`](./docs/evaluations/governed-dependency-assertion-proof.md): proof evidence and local verification limits.
 - [`docs/cli-mcp-verb-audit.md`](./docs/cli-mcp-verb-audit.md): CLI names aligned to MCP tool names.
 - [`docs/sdk/`](./docs/sdk/): Python and TypeScript SDK quickstarts.
 - [`docs/adr/README.md`](./docs/adr/README.md): architecture decision records.

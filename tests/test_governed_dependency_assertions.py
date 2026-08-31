@@ -23,9 +23,14 @@ from solomon.client import AsyncSolomonClient
 from solomon.config import Settings
 from solomon.contracts import AuthoritySource, AuthoritySourceKind
 from solomon.currency.models import KnowledgeKind, SourceKind
-from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError
+from solomon.errors import BadRequestError, ConflictError, NotFoundError, PolicyRefusalError
 from solomon.graph.models import DependencyEdge
-from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
+from solomon.graph.suggestions import (
+    AssertionEvidenceKind,
+    DependencyAssertionType,
+    DependencySuggestion,
+    SuggestionDecision,
+)
 from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.sources.models import DocumentSourceKind
 
@@ -179,18 +184,150 @@ def test_governed_assertion_rest_and_python_sdk_surface(tmp_path: Path) -> None:
         transport = httpx.ASGITransport(app=app)
         async with AsyncSolomonClient(base_url="http://testserver", transport=transport) as client:
             created = await client.create_dependency_assertion(payload)
+            inspected = await client.dependency_assertion(
+                str(created["id"]), params={"matter_id": "matter-a", "client_id": "client-a"}
+            )
             listed = await client.dependency_assertions(params={"matter_id": "matter-a", "client_id": "client-a"})
             decided = await client.decide_dependency_assertion(
                 str(created["id"]),
                 {"by": "reviewer-a", "decision": "confirmed", "expected_state_version": 1},
             )
             history = await client.dependency_assertion_history(str(created["id"]))
+            commentary = _quote_request(item_id=item_id, document_id=document_id).model_copy(
+                update={
+                    "assertion_type": DependencyAssertionType.PROCEDURAL,
+                    "evidence_kind": AssertionEvidenceKind.COMMENTARY,
+                    "quote": None,
+                    "quote_start": None,
+                    "quote_end": None,
+                    "commentary": "A separate operational assertion is retained for review.",
+                    "idempotency_key": "rest-withdrawal",
+                }
+            )
+            withdrawn = await client.withdraw_dependency_assertion(
+                str((await client.create_dependency_assertion(commentary.model_dump(mode="json")))["id"]),
+                {"by": "curator-a", "reason": "withdrawn before review", "expected_state_version": 1},
+            )
+        assert inspected["id"] == created["id"]
+        assert withdrawn["decision"] == "withdrawn"
         return listed, decided, history
 
     listed, decided, history = asyncio.run(exercise())
     assert listed["items"][0]["source"] == "human"  # type: ignore[index]
     assert decided["source_suggestion_id"]
     assert history["edge"] is not None
+
+
+def test_governed_assertion_rejects_conflicts_terminal_transitions_and_invalid_registered_sources(
+    tmp_path: Path,
+) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    request = _quote_request(item_id=item_id, document_id=document_id)
+    assertion = service.create_dependency_assertion(request)
+
+    with pytest.raises(ConflictError, match="idempotency key"):
+        service.create_dependency_assertion(request.model_copy(update={"rationale": "different"}))
+    with pytest.raises(ConflictError, match="state version"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed", expected_state_version=2),
+        )
+
+    rejected = service.decide_dependency_assertion(
+        assertion.id,
+        DependencyAssertionDecisionRequest(by="reviewer-a", decision="rejected", reason="not adopted"),
+    )
+    assert rejected.decision is SuggestionDecision.REJECTED
+    assert (
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="rejected", reason="not adopted"),
+        ).id
+        == assertion.id
+    )
+    with pytest.raises(BadRequestError, match="cannot be confirmed"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+        )
+    with pytest.raises(BadRequestError, match="require a traced"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="deferred", reason="late change"),
+        )
+
+    with pytest.raises(BadRequestError, match="traceable revision"):
+        service.create_dependency_assertion(request.model_copy(update={"idempotency_key": "untraced-successor"}))
+    replacement = service.create_dependency_assertion(
+        request.model_copy(update={"idempotency_key": "traced-successor", "revision_of": assertion.id})
+    )
+    assert replacement.revision_of == assertion.id
+
+    confirmed = service.create_dependency_assertion(
+        request.model_copy(
+            update={
+                "assertion_type": DependencyAssertionType.PROCEDURAL,
+                "evidence_kind": AssertionEvidenceKind.COMMENTARY,
+                "quote": None,
+                "quote_start": None,
+                "quote_end": None,
+                "commentary": "A distinct assertion must remain after confirmation.",
+                "idempotency_key": "confirmed-withdrawal",
+            }
+        )
+    )
+    service.decide_dependency_assertion(
+        confirmed.id, DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed")
+    )
+    with pytest.raises(BadRequestError, match="cannot be withdrawn"):
+        service.withdraw_dependency_assertion(
+            confirmed.id, DependencyAssertionWithdrawRequest(by="curator-a", reason="must remain historical")
+        )
+
+    disabled = _authority_source().model_copy(update={"id": "disabled-gazette", "enabled": False})
+    service.register_authority_source(disabled)
+    with pytest.raises(BadRequestError, match="disabled"):
+        service.create_dependency_assertion(
+            request.model_copy(update={"authority_source_id": disabled.id, "idempotency_key": "disabled-source"})
+        )
+    out_of_scope = _authority_source().model_copy(update={"id": "bravo-gazette", "matter_id": "matter-b"})
+    service.register_authority_source(out_of_scope)
+    with pytest.raises(PolicyRefusalError, match="outside"):
+        service.create_dependency_assertion(
+            request.model_copy(
+                update={"authority_source_id": out_of_scope.id, "idempotency_key": "out-of-scope-source"}
+            )
+        )
+
+
+def test_governed_assertion_request_and_projection_reject_ambiguous_evidence_contracts(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    request = _quote_request(item_id=item_id, document_id=document_id)
+    payload = request.model_dump(mode="json")
+
+    with pytest.raises(ValueError, match="target requires"):
+        DependencyAssertionCreateRequest.model_validate(
+            {**payload, "authority_source_id": None, "authority_identifier": None}
+        )
+    with pytest.raises(ValueError, match="quote evidence requires"):
+        DependencyAssertionCreateRequest.model_validate({**payload, "quote": None})
+    with pytest.raises(ValueError, match="commentary evidence requires"):
+        DependencyAssertionCreateRequest.model_validate(
+            {**payload, "evidence_kind": "commentary", "commentary": "semantic observation"}
+        )
+    with pytest.raises(ValueError, match="trusted upstream"):
+        DependencyAssertionCreateRequest.model_validate({**payload, "origin": "trusted_upstream"})
+
+    assertion = service.create_dependency_assertion(request)
+    persisted = assertion.model_dump(mode="json")
+    with pytest.raises(ValueError, match="trusted upstream"):
+        DependencySuggestion.model_validate({**persisted, "source": "trusted_upstream", "trusted_upstream_ref": None})
+    with pytest.raises(ValueError, match="must equal"):
+        DependencySuggestion.model_validate({**persisted, "source_span": "different quote"})
+    with pytest.raises(ValueError, match="withdrawn assertions"):
+        DependencySuggestion.model_validate({**persisted, "decision": "withdrawn"})
 
 
 def test_mcp_inspects_scoped_confirmed_assertion_provenance_without_mutation(tmp_path: Path) -> None:

@@ -67,4 +67,21 @@ except SolomonAPIError as exc:
     print(exc.status_code)
 ```
 
-Use the CLI or MCP server for curator workflows that need verification decisions, audit-pack export, or preflight prompt context.
+## Governed dependency assertions
+
+Both `SolomonClient` and `AsyncSolomonClient` provide matching HTTP methods:
+
+- `create_dependency_assertion(payload)`
+- `dependency_assertion(assertion_id, params=...)`
+- `dependency_assertions(params=...)`
+- `decide_dependency_assertion(assertion_id, payload)`
+- `withdraw_dependency_assertion(assertion_id, payload)`
+- `dependency_assertion_history(assertion_id, params=...)`
+
+Create payloads must bind a registered source document version to the source knowledge item and use either exact quote
+evidence (`quote`, `quote_start`, `quote_end`) or commentary evidence (`commentary`) exclusively. Decisions and
+withdrawals can carry `expected_state_version` to reject stale state transitions. Scope parameters use `matter_id`
+and `client_id`; callers outside the record scope receive the service's non-disclosing not-found/denial response.
+
+The HTTP client exposes the curator lifecycle. The MCP server is deliberately read-only and only exposes governed
+assertion provenance through `solomon.dependency_suggestions`.

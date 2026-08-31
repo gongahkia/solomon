@@ -50,6 +50,31 @@ def test_service_ingest_recall_why_and_timeline(tmp_path: Path) -> None:
     assert timeline[0]["item"]["id"] == item.id
 
 
+def test_sync_client_routes_governed_dependency_assertion_methods() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(200, json={"id": "assertion-1", "items": [], "edge": None})
+
+    with SolomonClient(base_url="http://testserver", transport=httpx.MockTransport(respond)) as client:
+        assert client.create_dependency_assertion({"idempotency_key": "key"})["id"] == "assertion-1"
+        assert client.dependency_assertion("assertion-1", params={"matter_id": "matter-a"})["id"] == "assertion-1"
+        assert client.dependency_assertions(params={"state": "pending"})["items"] == []
+        assert client.decide_dependency_assertion("assertion-1", {"decision": "confirmed"})["id"] == "assertion-1"
+        assert client.withdraw_dependency_assertion("assertion-1", {"reason": "withdrawn"})["id"] == "assertion-1"
+        assert client.dependency_assertion_history("assertion-1")["edge"] is None
+
+    assert seen == [
+        ("POST", "/dependencies/assertions"),
+        ("GET", "/dependencies/assertions/assertion-1"),
+        ("GET", "/dependencies/assertions"),
+        ("POST", "/dependencies/assertions/assertion-1/decision"),
+        ("POST", "/dependencies/assertions/assertion-1/withdraw"),
+        ("GET", "/dependencies/assertions/assertion-1/history"),
+    ]
+
+
 def test_service_ingest_calls_vendored_boundary_and_attaches_findings(tmp_path: Path) -> None:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
 

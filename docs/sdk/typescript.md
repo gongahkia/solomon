@@ -50,6 +50,11 @@ console.log(context.items);
 | `solomon.dependency_suggestions` | `dependencySuggestions()` |
 | `solomon.impact` | `impact()` |
 
+`dependencySuggestions()` is read-only. Its existing generic `suggestions` response can include governed assertion
+rows alongside parser proposals; those rows carry their origin, bounded assertion/evidence metadata, immutable
+source-version provenance, lifecycle state, and confirmed-edge linkage. The TypeScript MCP client exposes no
+assertion mutation method.
+
 ## MCP host preflight example
 
 ```ts

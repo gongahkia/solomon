@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from solomon.api.auth import SOURCE_MANAGE_SCOPE, TENANT_READ_SCOPE, TENANT_WRITE_SCOPE, AuthPrincipal, AuthRole
 from solomon.api.service_models import (
@@ -84,6 +85,8 @@ from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, S
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
+from solomon.operations.postgres import PostgresOperationStore
+from solomon.operations.store import SQLiteOperationStore
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalEmbeddingProvider, RetrievalOrchestrator
 from solomon.retention import ErasureRecord, LegalHoldNotFoundError, LegalHoldRecord, RetentionRegistry, RetentionScope
@@ -219,6 +222,7 @@ class SolomonService:
         boundary: SolomonBoundary | None = None,
         database_url: str | None = None,
         postgres_schema: str | None = None,
+        tenant_id: str | None = None,
         verification_policy: VerificationPolicy | None = None,
         verification_policy_version: str = "verification-policy.v1",
         credence_policy: CredencePolicy | None = None,
@@ -230,14 +234,22 @@ class SolomonService:
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
+        resolved_database_url = database_url or str(data_dir / "solomon.sqlite3")
         storage = create_storage_bundle(
-            database_url or str(data_dir / "solomon.sqlite3"),
+            resolved_database_url,
             postgres_schema=postgres_schema,
             embedding_provider=embedding_provider,
         )
         self.store = storage.store
         self.graph = storage.graph
         self.index = storage.index
+        self.tenant_id = tenant_id
+        self.operation_store: Any
+        if urlparse(resolved_database_url).scheme in {"postgres", "postgresql"}:
+            self.operation_store = PostgresOperationStore(resolved_database_url, schema=postgres_schema)
+        else:
+            operation_path = getattr(self.store, "path", data_dir / "solomon.sqlite3")
+            self.operation_store = SQLiteOperationStore(operation_path)
         self.telemetry = telemetry or SolomonTelemetry()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.verification_policy_version = verification_policy_version

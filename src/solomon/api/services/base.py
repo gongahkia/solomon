@@ -30,6 +30,8 @@ from solomon.store.types import KnowledgeStoreProtocol
 class ServiceContext(Protocol):
     store: KnowledgeStoreProtocol
     graph: DependencyGraphProtocol
+    operation_store: Any
+    tenant_id: str | None
     index: RetrievalIndexProtocol
     credence: CredenceLedger
     currency_cache: CurrencyEvaluationCache
@@ -103,6 +105,14 @@ class ServiceDelegate:
     @property
     def graph(self) -> DependencyGraphProtocol:
         return self._context.graph
+
+    @property
+    def operation_store(self) -> Any:
+        return self._context.operation_store
+
+    @property
+    def tenant_id(self) -> str | None:
+        return self._context.tenant_id
 
     @property
     def index(self) -> RetrievalIndexProtocol:

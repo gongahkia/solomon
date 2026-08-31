@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from time import sleep
 from typing import Any
 
 from solomon.api.service_models import (
@@ -58,12 +59,18 @@ from solomon.graph.suggestions import (
     suggest_authority_dependencies_with_llm,
 )
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
+from solomon.operations.assertion_projection import AssertionConfirmationProjection
+from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
+from solomon.operations.failure_injection import OperationFailureInjector
+from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.orchestrator.models import ModelRouter
 
 
 class AuthorityService(ServiceDelegate):
     def __init__(self, context: ServiceContext) -> None:
         super().__init__(context)
+        self._failure_injector = OperationFailureInjector()
+        self._operation_runner = OperationRunner(store=self.operation_store, dispatch=self._dispatch_operation)
         self._dependency_lifecycle = DependencySuggestionLifecycle(
             graph=self.graph,
             audit=self.audit,
@@ -80,7 +87,73 @@ class AuthorityService(ServiceDelegate):
             authority_sources=self.authority_sources,
             authority_identifiers=self.authority_identifiers,
             on_confirmed_edge=self._detect_for_edge,
+            schedule_confirmation=self._schedule_assertion_confirmation,
         )
+
+    def set_operation_failure_injector(self, injector: OperationFailureInjector) -> None:
+        """Install a test-only deterministic failure injector; no public route calls this method."""
+
+        self._failure_injector = injector
+
+    def run_operation_once(self, *, worker_id: str, now: datetime | None = None) -> OperationRecord | None:
+        return self._operation_runner.run_once(worker_id=worker_id, now=now)
+
+    def _schedule_assertion_confirmation(
+        self,
+        assertion: DependencySuggestion,
+        request: DependencyAssertionDecisionRequest,
+    ) -> DependencyEdge:
+        if assertion.decision is SuggestionDecision.CONFIRMED:
+            return assertion.suggested_edge
+        self._failure_injector.hit("before_authoritative_write")
+        operation, _ = self.operation_store.create(
+            OperationRecord(
+                operation_type=OperationType.ASSERTION_CONFIRM,
+                scope=OperationScope(
+                    tenant_id=self.tenant_id,
+                    matter_id=assertion.matter_id,
+                    client_id=assertion.client_id,
+                ),
+                actor_id=request.by,
+                authorization_context={"service_access": "review", "reviewer": request.by},
+                correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
+                causation_id=assertion.id,
+                idempotency_key=f"assertion-confirm:{assertion.id}:{assertion.state_version}",
+                source_resource_id=assertion.source_document_id,
+                source_version=assertion.source_document_version,
+                target_resource_id=assertion.suggested_edge.target_id,
+                assertion_id=assertion.id,
+                requested_transition="confirmed",
+                payload={"expected_state_version": assertion.state_version},
+            )
+        )
+        self._failure_injector.hit("after_authoritative_write_before_schedule")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                confirmed = self._assertion_lifecycle.get(
+                    assertion.id,
+                    matter_id=assertion.matter_id,
+                    client_id=assertion.client_id,
+                )
+                return confirmed.suggested_edge
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("dependency assertion confirmation requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:assertion-confirmation")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("dependency assertion confirmation is durably queued for retry")
+
+    def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
+        if operation.operation_type is OperationType.ASSERTION_CONFIRM:
+            return AssertionConfirmationProjection(
+                lifecycle=self._assertion_lifecycle,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
+        raise OperationRequiresIntervention(f"unsupported operation type: {operation.operation_type.value}")
 
     def evaluate_currency(self, item_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         return self.currency_cache.get_or_evaluate(self._get_item(item_id), as_of=as_of).model_dump(mode="json")

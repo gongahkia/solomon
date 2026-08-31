@@ -8,6 +8,7 @@ import sqlite3
 from builtins import list as builtins_list
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import RLock
 
 from solomon.currency.models import now_utc
 from solomon.operations.models import (
@@ -36,6 +37,7 @@ class SQLiteOperationStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._lock = RLock()
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
@@ -45,28 +47,29 @@ class SQLiteOperationStore:
         self._conn.close()
 
     def create(self, operation: OperationRecord) -> tuple[OperationRecord, bool]:
-        existing = self._by_idempotency(
-            operation.operation_type,
-            operation.scope,
-            operation.idempotency_key,
-        )
-        if existing is not None:
-            if _immutable_fingerprint(existing) != _immutable_fingerprint(operation):
-                raise OperationConflictError("idempotency key was already used for a different operation")
-            return existing, False
-        history = OperationHistoryEntry(
-            operation_id=operation.id,
-            state_version=operation.state_version,
-            event="created",
-            status=operation.status,
-            phase=operation.phase,
-            occurred_at=operation.created_at,
-            actor_id=operation.actor_id,
-        )
-        with self._conn:
-            self._insert(operation)
-            self._append_history(history)
-        return operation, True
+        with self._lock:
+            existing = self._by_idempotency(
+                operation.operation_type,
+                operation.scope,
+                operation.idempotency_key,
+            )
+            if existing is not None:
+                if _immutable_fingerprint(existing) != _immutable_fingerprint(operation):
+                    raise OperationConflictError("idempotency key was already used for a different operation")
+                return existing, False
+            history = OperationHistoryEntry(
+                operation_id=operation.id,
+                state_version=operation.state_version,
+                event="created",
+                status=operation.status,
+                phase=operation.phase,
+                occurred_at=operation.created_at,
+                actor_id=operation.actor_id,
+            )
+            with self._conn:
+                self._insert(operation)
+                self._append_history(history)
+            return operation, True
 
     def get(self, operation_id: str) -> OperationRecord:
         row = self._conn.execute(
@@ -130,58 +133,59 @@ class SQLiteOperationStore:
         if not worker_id or lease_seconds < 1:
             raise ValueError("worker ID and positive lease duration are required")
         timestamp = now or now_utc()
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            clauses = [
-                "((status IN ('queued', 'retrying') AND "
-                "(next_eligible_retry_at IS NULL OR next_eligible_retry_at <= ?)) "
-                "OR (status = 'claimed' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))",
-            ]
-            params: list[object] = [timestamp.isoformat(), timestamp.isoformat()]
-            if scope is not None:
-                clauses.append("scope_key = ?")
-                params.append(scope.key)
-            row = self._conn.execute(
-                f"""
-                SELECT operation_json FROM knowledge_operations
-                WHERE {' AND '.join(clauses)}
-                ORDER BY created_at, operation_id LIMIT 1
-                """,  # noqa: S608
-                params,
-            ).fetchone()
-            if row is None:
-                self._conn.commit()
-                return None
-            current = OperationRecord.model_validate_json(str(row["operation_json"]))
-            reclaimed = current.status is OperationStatus.CLAIMED
-            claimed = current.with_transition(
-                status=OperationStatus.CLAIMED,
-                phase=current.phase,
-                attempt_count=current.attempt_count + 1,
-                failure_category=None,
-                diagnostic=None,
-                next_eligible_retry_at=None,
-                lease_owner=worker_id,
-                lease_expires_at=timestamp + timedelta(seconds=lease_seconds),
-                updated_at=timestamp,
-            )
-            self._replace(current, claimed)
-            self._append_history(
-                OperationHistoryEntry(
-                    operation_id=claimed.id,
-                    state_version=claimed.state_version,
-                    event="reclaimed" if reclaimed else "claimed",
-                    status=claimed.status,
-                    phase=claimed.phase,
-                    occurred_at=timestamp,
-                    actor_id=worker_id,
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                clauses = [
+                    "((status IN ('queued', 'retrying') AND "
+                    "(next_eligible_retry_at IS NULL OR next_eligible_retry_at <= ?)) "
+                    "OR (status = 'claimed' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))",
+                ]
+                params: list[object] = [timestamp.isoformat(), timestamp.isoformat()]
+                if scope is not None:
+                    clauses.append("scope_key = ?")
+                    params.append(scope.key)
+                row = self._conn.execute(
+                    f"""
+                    SELECT operation_json FROM knowledge_operations
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY created_at, operation_id LIMIT 1
+                    """,  # noqa: S608
+                    params,
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                current = OperationRecord.model_validate_json(str(row["operation_json"]))
+                reclaimed = current.status is OperationStatus.CLAIMED
+                claimed = current.with_transition(
+                    status=OperationStatus.CLAIMED,
+                    phase=current.phase,
+                    attempt_count=current.attempt_count + 1,
+                    failure_category=None,
+                    diagnostic=None,
+                    next_eligible_retry_at=None,
+                    lease_owner=worker_id,
+                    lease_expires_at=timestamp + timedelta(seconds=lease_seconds),
+                    updated_at=timestamp,
                 )
-            )
-            self._conn.commit()
-            return claimed
-        except Exception:
-            self._conn.rollback()
-            raise
+                self._replace(current, claimed)
+                self._append_history(
+                    OperationHistoryEntry(
+                        operation_id=claimed.id,
+                        state_version=claimed.state_version,
+                        event="reclaimed" if reclaimed else "claimed",
+                        status=claimed.status,
+                        phase=claimed.phase,
+                        occurred_at=timestamp,
+                        actor_id=worker_id,
+                    )
+                )
+                self._conn.commit()
+                return claimed
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def checkpoint(
         self,

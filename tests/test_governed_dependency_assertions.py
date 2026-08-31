@@ -32,6 +32,8 @@ from solomon.graph.suggestions import (
     SuggestionDecision,
 )
 from solomon.mcp.tools import SolomonMCPRuntime
+from solomon.operations.failure_injection import OperationFailureInjector
+from solomon.operations.models import OperationStatus
 from solomon.sources.models import DocumentSourceKind
 
 
@@ -171,6 +173,37 @@ def test_governed_assertion_concurrent_confirmation_has_one_edge(tmp_path: Path)
 
     assert {outcome.id for outcome in outcomes} == {assertion.suggested_edge.id}
     assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item_id)] == [assertion.id]
+
+
+def test_governed_confirmation_crash_after_edge_retries_without_duplicate_edge_or_audit(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    assertion = service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_graph_edge_before_ack"]))
+
+    with pytest.raises(BadRequestError, match="durably queued"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+        )
+    operation = service.operation_store.list()[0]
+    assert operation.status is OperationStatus.RETRYING
+    assert service.graph.get_dependencies(item_id)[0].source_suggestion_id == assertion.id
+    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.PENDING
+
+    assert operation.next_eligible_retry_at is not None
+    recovered = service._authority.run_operation_once(
+        worker_id="worker-restarted",
+        now=operation.next_eligible_retry_at,
+    )
+    assert recovered is not None
+    assert recovered.status is OperationStatus.COMPLETED
+    assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item_id)] == [assertion.id]
+    audit_events = [entry for entry in service.audit.list_entries() if entry.payload.get("operation_id")]
+    assert [entry.event_type for entry in audit_events] == [
+        "dependency_assertion_confirmed",
+        "dependency_assertion_edge_linked",
+    ]
 
 
 def test_governed_assertion_rest_and_python_sdk_surface(tmp_path: Path) -> None:

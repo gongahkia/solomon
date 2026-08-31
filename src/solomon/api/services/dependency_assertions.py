@@ -26,7 +26,6 @@ from solomon.graph.suggestions import (
     AssertionEvidenceKind,
     DependencySuggestion,
     SuggestionDecision,
-    confirm_suggestion,
 )
 from solomon.graph.types import DependencyGraphProtocol
 from solomon.sources.models import SourceDocument
@@ -47,6 +46,7 @@ class GovernedDependencyAssertionLifecycle:
         authority_sources: SQLiteAuthoritySourceRegistry,
         authority_identifiers: SQLiteAuthorityIdentifierStore,
         on_confirmed_edge: Callable[[DependencyEdge], None],
+        schedule_confirmation: Callable[[DependencySuggestion, DependencyAssertionDecisionRequest], DependencyEdge],
     ) -> None:
         self._graph = graph
         self._audit = audit
@@ -56,6 +56,7 @@ class GovernedDependencyAssertionLifecycle:
         self._authority_sources = authority_sources
         self._authority_identifiers = authority_identifiers
         self._on_confirmed_edge = on_confirmed_edge
+        self._schedule_confirmation = schedule_confirmation
 
     def create(self, request: DependencyAssertionCreateRequest) -> DependencySuggestion:
         source_item = self._get_item(request.item_id)
@@ -178,7 +179,9 @@ class GovernedDependencyAssertionLifecycle:
         self._check_version(assertion, request.expected_state_version)
         self._require_separation_of_duties(assertion, reviewer=request.by)
         if request.decision == "confirmed":
-            return self._confirm(assertion, request)
+            if assertion.decision in {SuggestionDecision.REJECTED, SuggestionDecision.WITHDRAWN}:
+                raise BadRequestError("rejected or withdrawn dependency assertions cannot be confirmed")
+            return self._schedule_confirmation(assertion, request)
         if request.decision == "rejected":
             return self._transition(assertion, SuggestionDecision.REJECTED, by=request.by, reason=request.reason)
         return self._transition(assertion, SuggestionDecision.DEFERRED, by=request.by, reason=request.reason)
@@ -301,51 +304,6 @@ class GovernedDependencyAssertionLifecycle:
             raise PolicyRefusalError("registered authority target is outside the source item scope")
         target = self._authority_identifiers.resolve(authority_source, request.authority_identifier)
         return target.canonical_id, EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL
-
-    def _confirm(self, assertion: DependencySuggestion, request: DependencyAssertionDecisionRequest) -> DependencyEdge:
-        if assertion.decision is SuggestionDecision.CONFIRMED:
-            return assertion.suggested_edge
-        if assertion.decision in {SuggestionDecision.REJECTED, SuggestionDecision.WITHDRAWN}:
-            raise BadRequestError("rejected or withdrawn dependency assertions cannot be confirmed")
-        edge = confirm_suggestion(assertion, by=request.by)
-        try:
-            edge = self._graph.add_dependency(edge)
-        except Exception as exc:
-            try:
-                edge = self._graph.get_edge(edge.id)
-            except KeyError:
-                raise exc from None
-        latest = self._get_assertion(assertion.id)
-        if latest.decision is SuggestionDecision.CONFIRMED:
-            return latest.suggested_edge
-        confirmed = latest.model_copy(
-            update={
-                "decision": SuggestionDecision.CONFIRMED,
-                "decided_by": request.by,
-                "decided_at": datetime.now(timezone.utc),
-                "decision_reason": request.reason,
-                "suggested_edge": edge,
-                "state_version": latest.state_version + 1,
-            }
-        )
-        self._graph.update_dependency_suggestion(confirmed)
-        self._on_confirmed_edge(edge)
-        self._currency_cache.invalidate({edge.source_id})
-        review_entry = self._audit.append(
-            "dependency_assertion_confirmed",
-            {**_assertion_audit_payload(confirmed), "edge_id": edge.id},
-            attribution=AuditAttribution(actor_id=request.by, correlation_id=confirmed.audit_correlation_id),
-        )
-        edge_entry = self._audit.append(
-            "dependency_assertion_edge_linked",
-            {"assertion_id": confirmed.id, "edge_id": edge.id},
-            attribution=AuditAttribution(actor_id=request.by, correlation_id=confirmed.audit_correlation_id),
-        )
-        confirmed = confirmed.model_copy(
-            update={"review_audit_id": review_entry.entry_hash, "edge_audit_id": edge_entry.entry_hash}
-        )
-        self._graph.update_dependency_suggestion(confirmed)
-        return edge
 
     def _transition(
         self,

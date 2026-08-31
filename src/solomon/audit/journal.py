@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import shutil
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime
+from fcntl import LOCK_EX, LOCK_UN, flock
 from pathlib import Path
 from typing import Any, Literal
 
@@ -177,24 +179,46 @@ class AuditJournal:
         occurred_at: datetime | None = None,
         attribution: AuditAttribution | None = None,
     ) -> AuditEntry:
-        last = self._last_entry()
-        seq = 1 if last is None else last.seq + 1
-        prev_hash = GENESIS_HASH if last is None else last.entry_hash
-        timestamp = occurred_at or now_utc()
-        entry_hash = _entry_hash(seq, event_type, timestamp, payload, prev_hash, attribution)
-        entry = AuditEntry(
-            seq=seq,
-            event_type=event_type,
-            occurred_at=timestamp,
-            payload=payload,
-            attribution=attribution,
-            prev_hash=prev_hash,
-            entry_hash=entry_hash,
-        )
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(entry.to_json())
-            fh.write("\n")
-        return entry
+        with self.path.open("a+", encoding="utf-8") as fh:
+            flock(fh.fileno(), LOCK_EX)
+            try:
+                return self._append_locked(fh, event_type, payload, occurred_at=occurred_at, attribution=attribution)
+            finally:
+                flock(fh.fileno(), LOCK_UN)
+
+    def append_idempotent(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        operation_id: str,
+        occurred_at: datetime | None = None,
+        attribution: AuditAttribution | None = None,
+    ) -> AuditEntry:
+        """Append one phase event for an operation or return the existing event after a retry."""
+
+        if not operation_id:
+            raise ValueError("operation ID is required for an idempotent audit append")
+        operation_payload = {**payload, "operation_id": operation_id}
+        with self.path.open("a+", encoding="utf-8") as fh:
+            flock(fh.fileno(), LOCK_EX)
+            try:
+                fh.seek(0)
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    entry = AuditEntry.model_validate_json(line)
+                    if entry.event_type == event_type and entry.payload.get("operation_id") == operation_id:
+                        return entry
+                return self._append_locked(
+                    fh,
+                    event_type,
+                    operation_payload,
+                    occurred_at=occurred_at,
+                    attribution=attribution,
+                )
+            finally:
+                flock(fh.fileno(), LOCK_UN)
 
     def list_entries(
         self,
@@ -361,6 +385,45 @@ class AuditJournal:
         if last_line is None:
             return None
         return AuditEntry.model_validate_json(last_line)
+
+    @staticmethod
+    def _last_entry_from_handle(handle: Any) -> AuditEntry | None:
+        handle.seek(0)
+        last_line: str | None = None
+        for line in handle:
+            if line.strip():
+                last_line = line
+        return AuditEntry.model_validate_json(last_line) if last_line is not None else None
+
+    def _append_locked(
+        self,
+        handle: Any,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        occurred_at: datetime | None,
+        attribution: AuditAttribution | None,
+    ) -> AuditEntry:
+        last = self._last_entry_from_handle(handle)
+        seq = 1 if last is None else last.seq + 1
+        prev_hash = GENESIS_HASH if last is None else last.entry_hash
+        timestamp = occurred_at or now_utc()
+        entry_hash = _entry_hash(seq, event_type, timestamp, payload, prev_hash, attribution)
+        entry = AuditEntry(
+            seq=seq,
+            event_type=event_type,
+            occurred_at=timestamp,
+            payload=payload,
+            attribution=attribution,
+            prev_hash=prev_hash,
+            entry_hash=entry_hash,
+        )
+        handle.seek(0, os.SEEK_END)
+        handle.write(entry.to_json())
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+        return entry
 
 
 def knowledge_metadata_snapshot(items: list[KnowledgeItem]) -> list[dict[str, Any]]:

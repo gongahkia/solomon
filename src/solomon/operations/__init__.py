@@ -2,6 +2,8 @@
 
 """Durable, bounded operation records for cross-persistence projections."""
 
+from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.operations.models import (
     OperationHistoryEntry,
     OperationPhase,
@@ -15,11 +17,15 @@ from solomon.operations.store import SQLiteOperationStore
 
 __all__ = [
     "OperationHistoryEntry",
+    "OperationFailureInjector",
     "OperationPhase",
     "OperationRecord",
+    "OperationRequiresIntervention",
+    "OperationRunner",
     "OperationScope",
     "OperationStatus",
     "OperationType",
+    "InjectedOperationFailure",
     "PostgresOperationStore",
     "SQLiteOperationStore",
 ]

@@ -218,6 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             attestation_key=resolved_settings.verification_attestation_key,
             database_url=_service_database_url(resolved_settings, resolved_settings.data_dir / "tenants" / tenant_id),
             postgres_schema=_postgres_schema_for_tenant(resolved_settings, tenant_id),
+            tenant_id=tenant_id,
             verification_policy=vp,
             verification_policy_version=resolved_settings.verification_policy_version,
             credence_policy=cp,

@@ -21,6 +21,7 @@ from solomon.cli.main import app
 from solomon.config import get_settings
 from solomon.contracts import AuthoritySource, AuthoritySourceKind
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind
 
 runner = CliRunner()
@@ -66,6 +67,59 @@ def test_cli_consistency_check_and_dry_run_repair_are_stable_json(
     assert planned.exit_code == 0, planned.output
     assert json.loads(checked.output)["scope"] == {"client_id": "client-a", "matter_id": "matter-a", "tenant_id": None}
     assert json.loads(planned.output)["actions"] == []
+
+
+def test_cli_consistency_operations_and_manual_retry_emit_stable_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    operation, _ = service.operation_store.create(
+        OperationRecord(
+            operation_type=OperationType.SUGGESTION_GENERATION,
+            scope=OperationScope(matter_id="matter-a", client_id="client-a"),
+            actor_id="system:test",
+            authorization_context={"service_access": "curate"},
+            correlation_id="cli-operation-retry",
+            idempotency_key="cli-operation-retry",
+            target_resource_id="missing-item",
+            requested_transition="suggestions_generated",
+        )
+    )
+    assert service.operation_store.claim_next(worker_id="worker-a") is not None
+    terminal = service.operation_store.retry(
+        operation.id,
+        worker_id="worker-a",
+        retry_at=operation.created_at,
+        failure_category="injectedoperationfailure",
+        diagnostic="InjectedOperationFailure",
+        maximum_attempts=1,
+    )
+    assert terminal.status is OperationStatus.TERMINAL_FAILED
+
+    listed = runner.invoke(
+        app,
+        ["consistency", "operations", "--matter-id", "matter-a", "--client-id", "client-a", "--format", "json"],
+    )
+    retried = runner.invoke(
+        app,
+        [
+            "consistency",
+            "retry",
+            operation.id,
+            "--by",
+            "operator-a",
+            "--matter-id",
+            "matter-a",
+            "--client-id",
+            "client-a",
+        ],
+    )
+
+    assert listed.exit_code == retried.exit_code == 0
+    assert json.loads(listed.output)[0]["status"] == "terminal_failed"
+    assert json.loads(retried.output)["status"] == "queued"
 
 
 def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None:

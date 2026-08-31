@@ -73,13 +73,21 @@ services:
     command: ["solomon", "migrate"]
     restart: "no"
 
+  bootstrap:
+    <<: *solomon
+    command: ["solomon", "deployment", "init", "--owner", "compose-bootstrap"]
+    restart: "no"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
   api:
     <<: *solomon
     command: ["uvicorn", "solomon.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8140"]
     ports:
       - "${SOLOMON_API_BIND:-127.0.0.1:8140}:8140"
     depends_on:
-      migrations:
+      bootstrap:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8140/health', timeout=3).read()"]
@@ -103,7 +111,7 @@ services:
     ports:
       - "${SOLOMON_CONSOLE_BIND:-127.0.0.1:8150}:8150"
     depends_on:
-      migrations:
+      bootstrap:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8150/health', timeout=3).read()"]
@@ -119,7 +127,7 @@ services:
       <<: *solomon-environment
       SOLOMON_WORKER_SOURCE_SYNC_INTERVAL_SECONDS: "300"
     depends_on:
-      migrations:
+      bootstrap:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/solomon-entrypoint solomon health >/dev/null"]

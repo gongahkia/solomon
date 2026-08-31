@@ -29,7 +29,19 @@ from solomon.api.service import (
     VerificationRequest,
 )
 from solomon.api.service_models import OperationManualRetryRequest
-from solomon.backup import BackupError, create_encrypted_backup, restore_encrypted_backup, run_recovery_drill
+from solomon.backup import (
+    BackupError,
+    ServerRestorePlan,
+    apply_server_restore,
+    create_encrypted_backup,
+    create_server_encrypted_backup,
+    inspect_server_encrypted_backup,
+    plan_server_restore,
+    postgres_dump_runner,
+    postgres_restore_runner,
+    restore_encrypted_backup,
+    run_recovery_drill,
+)
 from solomon.boundary.solomon import SolomonBoundary, probe_boundary_client
 from solomon.config import (
     Settings,
@@ -474,6 +486,119 @@ def release_maintenance(
     except DeploymentError as exc:
         raise typer.BadParameter(str(exc)) from exc
     _print_json({"released": True, "operation_id": operation_id}, sort_keys=True)
+
+
+@deployment_app.command(
+    "backup",
+    epilog=_example("SOLOMON_BACKUP_PASSPHRASE=... uv run solomon deployment backup ./server-backup.enc"),
+)
+def deployment_backup(destination: Annotated[Path, typer.Argument(help="New encrypted backup archive path.")]) -> None:
+    """Create a maintenance-gated PostgreSQL/SQLite/JSONL checkpoint."""
+
+    settings = get_settings()
+    database_url = _service_database_url(settings)
+    try:
+        result = create_server_encrypted_backup(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            database_url=database_url,
+            destination=destination,
+            passphrase=_backup_passphrase(),
+            dump_postgres=postgres_dump_runner(database_url),
+        )
+    except (BackupError, DeploymentError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(result.model_dump(mode="json"), sort_keys=True)
+
+
+@deployment_app.command(
+    "backup-inspect",
+    epilog=_example("SOLOMON_BACKUP_PASSPHRASE=... uv run solomon deployment backup-inspect ./server-backup.enc"),
+)
+def deployment_backup_inspect(
+    archive: Annotated[Path, typer.Argument(help="Encrypted server backup archive path.")],
+) -> None:
+    """Verify a server backup without creating a restore target."""
+
+    try:
+        record = inspect_server_encrypted_backup(archive, passphrase=_backup_passphrase())
+    except BackupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(record.model_dump(mode="json"), sort_keys=True)
+
+
+def _restore_database_url(environment_variable: str) -> str:
+    if not environment_variable or not environment_variable.startswith("SOLOMON_"):
+        raise typer.BadParameter("restore database URL environment variable must begin with SOLOMON_")
+    value = os.environ.get(environment_variable)
+    if not value:
+        raise typer.BadParameter(f"set {environment_variable}")
+    return value
+
+
+@deployment_app.command(
+    "restore-plan",
+    epilog=_example(
+        "SOLOMON_BACKUP_PASSPHRASE=... SOLOMON_RESTORE_DATABASE_URL=... "
+        "uv run solomon deployment restore-plan ./server-backup.enc ./fresh-state"
+    ),
+)
+def deployment_restore_plan(
+    archive: Annotated[Path, typer.Argument(help="Encrypted server backup archive path.")],
+    destination: Annotated[Path, typer.Argument(help="New absent local-state root.")],
+    database_url_env: Annotated[
+        str,
+        typer.Option("--database-url-env", help="Environment variable holding the empty target PostgreSQL URL."),
+    ] = "SOLOMON_RESTORE_DATABASE_URL",
+) -> None:
+    """Create a stable, non-mutating server restore plan."""
+
+    try:
+        plan = plan_server_restore(
+            archive,
+            destination,
+            database_url=_restore_database_url(database_url_env),
+            passphrase=_backup_passphrase(),
+        )
+    except BackupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(plan.model_dump(mode="json"), sort_keys=True)
+
+
+@deployment_app.command(
+    "restore",
+    epilog=_example(
+        "SOLOMON_BACKUP_PASSPHRASE=... SOLOMON_RESTORE_DATABASE_URL=... "
+        "uv run solomon deployment restore --plan server-restore-plan.json --apply"
+    ),
+)
+def deployment_restore(
+    plan_path: Annotated[Path, typer.Option("--plan", help="Unmodified JSON output from deployment restore-plan.")],
+    apply: Annotated[bool, typer.Option("--apply", help="Apply the exact restore plan.")] = False,
+    database_url_env: Annotated[
+        str,
+        typer.Option("--database-url-env", help="Environment variable holding the empty target PostgreSQL URL."),
+    ] = "SOLOMON_RESTORE_DATABASE_URL",
+) -> None:
+    """Restore only an unchanged plan into an absent local root and empty PostgreSQL target."""
+
+    if not apply:
+        raise typer.BadParameter(
+            "--apply is required; restore-plan is the non-mutating operation",
+            param_hint="--apply",
+        )
+    try:
+        plan = ServerRestorePlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        database_url = _restore_database_url(database_url_env)
+        result = apply_server_restore(
+            plan,
+            database_url=database_url,
+            passphrase=_backup_passphrase(),
+            restore_postgres=postgres_restore_runner(database_url),
+        )
+    except (BackupError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(result.model_dump(mode="json"), sort_keys=True)
 
 
 def _backup_passphrase() -> str:

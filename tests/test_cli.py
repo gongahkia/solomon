@@ -204,6 +204,10 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         ["deployment", "compatibility"],
         ["deployment", "maintenance"],
         ["deployment", "release-maintenance"],
+        ["deployment", "backup"],
+        ["deployment", "backup-inspect"],
+        ["deployment", "restore-plan"],
+        ["deployment", "restore"],
         ["mcp", "serve"],
         ["console", "serve"],
     ]

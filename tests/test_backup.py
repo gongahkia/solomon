@@ -8,8 +8,20 @@ from pathlib import Path
 import pytest
 
 from solomon.api.service import IngestRequest, SolomonService
-from solomon.backup import BackupError, create_encrypted_backup, restore_encrypted_backup, run_recovery_drill
+from solomon.backup import (
+    BackupError,
+    apply_server_restore,
+    create_encrypted_backup,
+    create_server_encrypted_backup,
+    inspect_server_encrypted_backup,
+    plan_server_restore,
+    postgres_dump_runner,
+    postgres_restore_runner,
+    restore_encrypted_backup,
+    run_recovery_drill,
+)
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.deployment import MaintenanceGate, initialize_deployment
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 TEST_PASSPHRASE = "unit-test-backup-passphrase"  # noqa: S105
@@ -176,3 +188,145 @@ def test_restore_rejects_decrypted_archive_digest_drift(tmp_path: Path) -> None:
 
     with pytest.raises(BackupError, match="decrypted backup digest"):
         restore_encrypted_backup(archive, tmp_path / "drifted", passphrase=TEST_PASSPHRASE)
+
+
+def test_server_backup_and_guarded_restore_cover_postgres_and_local_state(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    metadata, _ = initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        owner="backup-test",
+    )
+    archive = tmp_path / "server-backup.enc"
+
+    created = create_server_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+        dump_postgres=lambda target: target.write_bytes(b"deterministic-postgres-dump"),
+        owner="backup-test",
+    )
+    inspected = inspect_server_encrypted_backup(archive, passphrase=TEST_PASSPHRASE)
+    plan = plan_server_restore(
+        archive,
+        tmp_path / "server-restored",
+        database_url=database_url,
+        passphrase=TEST_PASSPHRASE,
+    )
+    restored_dumps: list[bytes] = []
+    restored = apply_server_restore(
+        plan,
+        database_url=database_url,
+        passphrase=TEST_PASSPHRASE,
+        restore_postgres=lambda dump: restored_dumps.append(dump.read_bytes()),
+    )
+
+    assert created.deployment_id == inspected.deployment_id == restored.deployment_id == metadata.deployment_id
+    assert created.postgres_dump_bytes == len(b"deterministic-postgres-dump")
+    assert restored_dumps == [b"deterministic-postgres-dump"]
+    assert (tmp_path / "server-restored" / "data" / "solomon.sqlite3").is_file()
+    assert (tmp_path / "server-restored" / "data" / ".solomon-maintenance.json").exists() is False
+    assert (tmp_path / "server-restored" / "journal" / "journal.jsonl").is_file()
+
+
+def test_server_backup_failure_leaves_marker_and_releases_maintenance(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+
+    def fail_dump(_target: Path) -> None:
+        raise RuntimeError("injected dump interruption")
+
+    with pytest.raises(RuntimeError, match="injected dump interruption"):
+        create_server_encrypted_backup(
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            database_url=database_url,
+            destination=tmp_path / "server-backup.enc",
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=fail_dump,
+        )
+
+    assert MaintenanceGate(tmp_path / "data").active() is None
+    incomplete = list(tmp_path.glob(".server-backup.enc.incomplete-*/INCOMPLETE.json"))
+    assert len(incomplete) == 1
+
+
+def test_server_restore_refuses_stale_plan_and_database_identity_mismatch(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    archive = tmp_path / "server-backup.enc"
+    create_server_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+        dump_postgres=lambda target: target.write_bytes(b"postgres-dump"),
+    )
+    plan = plan_server_restore(
+        archive,
+        tmp_path / "server-restored",
+        database_url=database_url,
+        passphrase=TEST_PASSPHRASE,
+    )
+    (tmp_path / "server-restored").mkdir()
+
+    with pytest.raises(BackupError, match="destination"):
+        apply_server_restore(
+            plan,
+            database_url=database_url,
+            passphrase=TEST_PASSPHRASE,
+            restore_postgres=lambda _dump: None,
+        )
+    with pytest.raises(BackupError, match="database identity"):
+        plan_server_restore(
+            archive,
+            tmp_path / "different-target",
+            database_url="postgresql://solomon:backup-password@localhost:5432/different",
+            passphrase=TEST_PASSPHRASE,
+        )
+
+
+def test_postgres_client_callbacks_keep_password_out_of_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(command: list[str], **kwargs: object) -> Completed:
+        calls.append((command, kwargs["env"]))  # type: ignore[arg-type,index]
+        if command[0].endswith("pg_dump"):
+            Path(command[command.index("--file") + 1]).write_bytes(b"dump")
+        return Completed()
+
+    monkeypatch.setattr("solomon.backup.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("solomon.backup.subprocess.run", fake_run)
+    monkeypatch.setattr("solomon.backup._require_empty_postgres_database", lambda _url: None)
+    database_url = "postgresql://solomon:do-not-leak@db.example:5544/solomon?sslmode=require"
+
+    dump = tmp_path / "knowledge.dump"
+    postgres_dump_runner(database_url)(dump)
+    postgres_restore_runner(database_url)(dump)
+
+    assert dump.read_bytes() == b"dump"
+    assert len(calls) == 2
+    assert all("do-not-leak" not in " ".join(command) for command, _environment in calls)
+    assert all(environment["PGPASSWORD"] == "do-not-leak" for _command, environment in calls)
+    assert all(environment["PGSSLMODE"] == "require" for _command, environment in calls)

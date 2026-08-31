@@ -19,6 +19,10 @@ Solomon is the layer that tells a host application whether an internal legal pos
 depends on, and what evidence requires re-verification. It is not a citator, general document-management system,
 legal research database, drafting copilot, agent-memory system, or legal-advice product. **Flag, do not adjudicate.**
 
+For its documented deployment profiles, Solomon durably records the governed multi-stage operations behind that
+answer and can inspect or safely reconcile defined incomplete projections after interruption. This is a bounded
+recovery claim, not a distributed transaction across source SQLite, PostgreSQL, and the audit journal.
+
 ## The wedge: currency, not retrieval
 
 A retrieval result answers “what material might help?” Solomon additionally records the lifecycle of a position:

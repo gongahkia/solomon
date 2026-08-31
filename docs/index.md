@@ -20,6 +20,8 @@ contested. It does not decide the law or replace lawyer review.
   [WebVTT chapter captions](./assets/solomon-five-minute-tour.vtt)
 - [Technical whitepaper](./whitepaper.md)
 - [Known limitations](./known-limitations.md)
+- [Deployment profiles](./deployment.md)
+- [Crash consistency operations guide](./operations/crash-consistency.md)
 
 ## Architecture and evidence
 
@@ -27,6 +29,11 @@ contested. It does not decide the law or replace lawyer review.
 - [Runtime sequence diagrams](./diagrams/README.md)
 - [Boundary audit checklist](./boundary-audit-checklist.md)
 - [Audit evidence and regulatory mapping](./regulatory-evidence.md)
+- [Crash consistency ADR](./adr/0010-crash-consistency-reconciliation.md)
+- [Consistency model](./consistency-model.md)
+- [Cross-boundary operation matrix](./cross-boundary-operation-matrix.md)
+- [Crash consistency proof record](./evaluations/crash-consistency-reconciliation-proof.md)
+- [Interview architecture narrative](./interview/crash-consistency.md)
 
 ## Demonstrations
 

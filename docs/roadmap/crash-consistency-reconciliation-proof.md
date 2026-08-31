@@ -107,11 +107,18 @@ expired assertion to an edge.
 
 Failure injection is test-only, disabled by default, and selected only by in-process test configuration or a
 fixed subprocess environment variable consumed by the proof harness. It is not a REST, CLI, or MCP production
-input. The implementation must name and exercise these points:
+input. The implementation names and exercises these points (the first column is the proof boundary; the second is the
+concrete test-only injector name where a separate authoritative write exists):
 
 1. `before_authoritative_write` — rollback/no operation when the request was not durable.
-2. `after_authoritative_write_before_schedule` — source-event reconciliation or operation resume.
-3. `after_schedule_before_projection` — queued operation survives restart.
+2. `after_authoritative_write_before_schedule` — `after_source_document_authoritative_write_before_candidates`,
+   `after_source_document_authoritative_write_before_schedule`,
+   `after_knowledge_item_authoritative_write_before_schedule`, `after_assertion_authoritative_write_before_schedule`,
+   `after_assertion_transition_authoritative_write_before_schedule`,
+   `after_source_revision_authoritative_write_before_schedule`, and
+   `after_authority_event_authoritative_write_before_schedule`; source-event reconciliation or operation resume.
+3. `after_schedule_before_projection` — the `after_*_operation_durable_before_execution` injectors prove a queued
+   operation survives restart.
 4. `during_graph_edge_projection` — retry without an unreviewed or duplicate edge.
 5. `after_graph_edge_before_ack` — detect existing provenanced edge and harmlessly retry.
 6. `during_currency_propagation` — resume idempotent change-ID propagation.
@@ -124,6 +131,21 @@ Tests distinguish rollback (one real database transaction aborts), safe retry (r
 (continues from a stored checkpoint), reconciliation (detects and creates a missing safe projection), compensation
 (not automatic for historical evidence/edges), and operator-required intervention (ambiguous, provenance-invalid,
 cross-scope, or authorization-invalid state).
+
+## Implementation evidence
+
+The implementation records the bounded operation types `assertion_create`, `assertion_confirm`,
+`assertion_transition`, `source_revision_reverify`, `authority_change_propagation`, `evidence_ingestion`, and
+`suggestion_generation`/`suggestion_confirm`/`candidate_promotion`. Source documents and authority workflow events
+are rescanned for a missing operation after their SQLite authoritative write. Knowledge items and assertions are
+similarly rescanned for their deterministic audit/suggestion records, and source-candidate IDs reschedule a missing
+promotion marker. The optional non-deterministic LLM suggestion flag is refused in this profile because its response
+cannot be safely reconstructed as an operation input.
+
+`tests/test_crash_recovery_subprocess.py` is the unclean-process test: the child worker calls `SIGKILL` at
+`after_graph_edge_before_ack`, without exception cleanup, and a separate process resumes the same real SQLite/
+PostgreSQL state. `tests/test_crash_consistency_proof.py` provides the two-run, two-scope, real pgvector scenario.
+The detailed commands, observed outcomes, and remaining limitations are retained in the proof record.
 
 ## Acceptance gates
 

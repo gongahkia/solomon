@@ -143,9 +143,9 @@ firm-style authority references such as "Regulation R section 12", non-US case s
 Each returned citation includes its parser source and source-text span so reviewers can inspect the exact
 evidence before confirming a dependency edge.
 
-Dependency suggestions are now durable review records. Ingest creates deterministic pending suggestions;
-`/dependencies/suggest` can re-run extraction and optionally use Solomon-sanitized LLM assistance. Curators can
-list, confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
+Dependency suggestions are durable review records. Ingest and `/dependencies/suggest` use the deterministic parser
+through a durable operation record; its non-replayable LLM flag is refused in this profile. Curators can list,
+confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
 `human_confirmed` dependency edges, while rejected suggestions remain review history.
 
 ### Governed dependency assertions

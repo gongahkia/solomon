@@ -15,6 +15,12 @@ worker crash is expected and is safe only for a validly confirmed assertion and 
 owned by the worker until the bounded attempt limit; the operator owns terminal, ambiguous, authorization-invalid,
 or provenance-invalid cases.
 
+An operation has a UUID operation ID; immutable type, scope, actor, authorization summary, correlation, causation,
+idempotency, source, target, and requested-transition fields; and mutable lease, retry, checkpoint, result, safe
+diagnostic, and audit-link fields. Its history is append-only. Credentials, raw evidence, and exception traces are
+not operation diagnostics. The worker uses a persisted 30-second lease and at most three automatic attempts with
+exponential delay. There is no global operation order.
+
 ## SQLite-only/local
 
 Knowledge events/current state, graph/suggestions/edges, retrieval index, and the operation journal share the local
@@ -48,8 +54,11 @@ and audit-journal volume together in its backup/restore plan.
 ## Temporary states, inspection, and repair
 
 Expected temporary states are queued/retrying operations, a valid confirmed assertion awaiting edge/currency/audit
-projection, a source version awaiting a re-verification operation, or an existing edge awaiting operation
-acknowledgement. They converge when an eligible worker retries before the configured maximum. A failed operation is
+projection, a source-backed knowledge item awaiting its SQLite candidate-promotion marker, a source version awaiting
+a re-verification operation, or an existing edge awaiting operation
+acknowledgement. An edge is never intentionally inserted for a pending, rejected, deferred, or withdrawn assertion:
+the authorized confirmation record is persisted before the edge projection. These states converge when an eligible
+worker retries before the configured maximum. A failed operation is
 never silently discarded: it is queued, retrying, terminal failed, or operator required and appears in scoped status
 and metrics.
 
@@ -60,3 +69,18 @@ versions. Dry run changes nothing; apply rechecks every finding version, refuses
 repair audit event, and may only recreate an unambiguous projection of a still-valid confirmed assertion. It never
 deletes evidence, compensates historical state automatically, or upgrades a pending/rejected/deferred/withdrawn
 assertion.
+
+## Operator outcomes and scope boundary
+
+| State or finding | Meaning | Permitted next action |
+| --- | --- | --- |
+| `queued`, `claimed`, `retrying` | Recoverable temporary state; a phase effect may already exist | worker retry or checkpoint resume |
+| `terminal_failed` | Automatic attempt budget exhausted after a safe execution failure | a scoped authenticated operator may requeue it; retry history and audit request remain |
+| `operator_required` | The worker cannot prove current provenance, scope, authorization, or resource lineage | manual retry is refused; investigate and create a new governed action if appropriate |
+| confirmed assertion missing edge with valid lineage | Unambiguous incomplete projection | dry-run then explicit repair may reproject the existing confirmed assertion |
+| source revision without reverification operation | Unambiguous source-lineage gap | dry-run then explicit repair may schedule reverification |
+| invalid provenance, duplicate edge, cross-scope link, unreconstructible source, audit corruption | Ambiguous or integrity-invalid | report only; no automatic compensation or edge creation |
+
+Server routing fixes the tenant before consistency inspection, status, retry, or repair executes; a caller cannot
+select another tenant through these interfaces. Matter/client fields are exact operational selectors within that
+tenant. They do not substitute for deployment-specific matter-level access-control policy.

@@ -178,9 +178,9 @@ The Python client quickstart and the source-installable TypeScript MCP client ar
   matter/client scope, verification metadata, and supersession links.
 - Tracks dependency edges between internal knowledge and external authorities, then propagates
   `StalePendingReverification` through transitive dependents when a dependency changes.
-- Creates a durable dependency-review queue from deterministic cited-reliance extraction, with optional
-  Solomon-sanitized LLM assistance. Extracted references and suggestions are proposals only; curators must confirm
-  before a human-confirmed edge can affect currency.
+- Creates a durable dependency-review queue from deterministic cited-reliance extraction. Extracted references and
+  suggestions are proposals only; curators must confirm before a human-confirmed edge can affect currency. The
+  non-replayable on-demand LLM suggestion mode is intentionally unavailable in the durable-operation profile.
 - Recalls live knowledge by default while preserving stale, superseded, retired, and contested items for
   review and historical reconstruction.
 - Keeps model-bound context behind the Solomon boundary for review, pseudonymization,
@@ -253,6 +253,14 @@ Contestability:
 - `POST /contest/{item_id}`
 - `POST /affirm/{item_id}`
 - `POST /pin/{item_id}`
+
+Consistency administration (tenant-routed and scope-filtered):
+
+- `GET /consistency/check`
+- `GET /consistency/operations`
+- `POST /consistency/operations/{operation_id}/retry`
+- `POST /consistency/repair/plan`
+- `POST /consistency/repair/apply`
 
 Generated API artifact:
 
@@ -665,6 +673,12 @@ deployments. Validate the Compose model without starting services with:
 scripts/check_production_compose.sh
 ```
 
+This is a deliberately mixed SQLite/PostgreSQL/JSONL persistence profile, not a distributed transaction. Preserve
+the PostgreSQL, `solomon-data`, and `solomon-journal` volumes together, run the operation worker after restarts, and
+use the scoped consistency inspector before attempting repair. See
+[`docs/deployment.md`](./docs/deployment.md) and
+[`docs/operations/crash-consistency.md`](./docs/operations/crash-consistency.md).
+
 Run the full local production smoke test (build, pgvector, migrations, API, console, and worker) with:
 
 ```bash
@@ -695,6 +709,11 @@ external Postgres, ingress TLS, and validation.
   assumptions.
 - [`docs/known-limitations.md`](./docs/known-limitations.md): current monitoring, retrieval, boundary,
   and legal-adjudication limits.
+- [`docs/deployment.md`](./docs/deployment.md): supported persistence profiles and upgrade/recovery obligations.
+- [`docs/operations/crash-consistency.md`](./docs/operations/crash-consistency.md): operation inspection, retry,
+  and guarded repair procedure.
+- [`docs/evaluations/crash-consistency-reconciliation-proof.md`](./docs/evaluations/crash-consistency-reconciliation-proof.md):
+  deterministic crash/recovery evidence and its limits.
 - [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.
 - [`docs/one-pager.md`](./docs/one-pager.md): portfolio-review summary, with a rendered PDF in `output/pdf/`.
 - [`docs/benchmarks.md`](./docs/benchmarks.md): currency and retrieval evaluation results.

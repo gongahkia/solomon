@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -330,3 +331,113 @@ def test_postgres_client_callbacks_keep_password_out_of_arguments(
     assert all("do-not-leak" not in " ".join(command) for command, _environment in calls)
     assert all(environment["PGPASSWORD"] == "do-not-leak" for _command, environment in calls)
     assert all(environment["PGSSLMODE"] == "require" for _command, environment in calls)
+
+
+def test_postgres_backup_restore_callbacks_refuse_missing_tools_failures_and_unsafe_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database_url = "postgresql://solomon:secret@db.example/solomon"
+    dump = tmp_path / "knowledge.dump"
+    dump.write_bytes(b"dump")
+
+    monkeypatch.setattr("solomon.backup.shutil.which", lambda _name: None)
+    monkeypatch.setattr("solomon.backup._require_empty_postgres_database", lambda _url: None)
+    with pytest.raises(BackupError, match="pg_dump is required"):
+        postgres_dump_runner(database_url)(tmp_path / "new.dump")
+    with pytest.raises(BackupError, match="pg_restore is required"):
+        postgres_restore_runner(database_url)(dump)
+    with pytest.raises(BackupError, match="input is unsafe"):
+        postgres_restore_runner(database_url)(tmp_path / "missing.dump")
+
+    class Failed:
+        returncode = 1
+
+    monkeypatch.setattr("solomon.backup.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("solomon.backup.subprocess.run", lambda *_args, **_kwargs: Failed())
+    with pytest.raises(BackupError, match="logical dump failed"):
+        postgres_dump_runner(database_url)(tmp_path / "failed.dump")
+    with pytest.raises(BackupError, match="logical restore failed"):
+        postgres_restore_runner(database_url)(dump)
+
+
+def test_postgres_empty_target_guard_closes_connections_and_refuses_application_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[bool] = []
+
+    class Cursor:
+        def __init__(self, row: object) -> None:
+            self.row = row
+
+        def fetchone(self) -> object:
+            return self.row
+
+    class Connection:
+        def __init__(self, row: object) -> None:
+            self.row = row
+
+        def execute(self, _query: str) -> Cursor:
+            return Cursor(self.row)
+
+        def close(self) -> None:
+            closed.append(True)
+
+    connection = Connection(None)
+    monkeypatch.setattr("solomon.store.postgres.connection.default_connect", lambda _url: connection)
+    from solomon.backup import _require_empty_postgres_database
+
+    _require_empty_postgres_database("postgresql://solomon:secret@db.example/solomon")
+    assert closed == [True]
+
+    closed.clear()
+    monkeypatch.setattr(
+        "solomon.store.postgres.connection.default_connect", lambda _url: Connection(("knowledge_items",))
+    )
+    with pytest.raises(BackupError, match="must be empty"):
+        _require_empty_postgres_database("postgresql://solomon:secret@db.example/solomon")
+    assert closed == [True]
+
+
+def test_server_backup_refuses_missing_metadata_empty_dump_and_invalid_local_copy(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    journal = tmp_path / "journal"
+    data.mkdir()
+    journal.mkdir()
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+
+    with pytest.raises(BackupError, match="metadata is required"):
+        create_server_encrypted_backup(
+            data_dir=data,
+            journal_dir=journal,
+            database_url=database_url,
+            destination=tmp_path / "missing-metadata.enc",
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=lambda _target: None,
+        )
+
+    _seed_service(tmp_path)
+    initialize_deployment(data_dir=data, journal_dir=journal, database_url=database_url)
+    with pytest.raises(BackupError, match="dump was not created"):
+        create_server_encrypted_backup(
+            data_dir=data,
+            journal_dir=journal,
+            database_url=database_url,
+            destination=tmp_path / "empty-dump.enc",
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=lambda _target: None,
+        )
+
+    invalid = data / "invalid.sqlite3"
+    invalid.write_bytes(b"not a sqlite database")
+    with pytest.raises(BackupError, match="consistent SQLite backup"):
+        create_server_encrypted_backup(
+            data_dir=data,
+            journal_dir=journal,
+            database_url=database_url,
+            destination=tmp_path / "invalid-sqlite.enc",
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=lambda target: target.write_bytes(b"dump"),
+        )
+    with sqlite3.connect(data / "solomon.sqlite3") as database:
+        assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)

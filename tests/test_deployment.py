@@ -188,3 +188,59 @@ def test_upgrade_preflight_is_read_only_and_requires_initialized_healthy_layout(
     assert ready.ready is True
     assert ready.rollback_strategy == "restore-verified-pre-upgrade-backup"
     assert ready.compatibility.rollback_supported is False
+
+
+def test_deployment_metadata_and_maintenance_path_guards_fail_closed(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    journal = tmp_path / "journal"
+    data.mkdir()
+    journal.mkdir()
+    metadata = data / "deployment.json"
+    outside_metadata = tmp_path / "outside.json"
+    outside_metadata.write_text("{}", encoding="utf-8")
+    metadata.symlink_to(outside_metadata)
+    with pytest.raises(DeploymentError, match="metadata path is unsafe"):
+        read_metadata(data)
+    metadata.unlink()
+
+    with pytest.raises(DeploymentError, match="data directory must exist"):
+        MaintenanceGate(tmp_path / "missing").acquire(reason="backup", owner="operator")
+    initialize_deployment(
+        data_dir=data,
+        journal_dir=journal,
+        database_url=str(data / "solomon.sqlite3"),
+    )
+    with pytest.raises(DeploymentError, match="profile does not match"):
+        initialize_deployment(
+            data_dir=data,
+            journal_dir=journal,
+            database_url="postgresql://solomon:secret@localhost/solomon",
+        )
+
+    (data / ".solomon-maintenance.json").unlink(missing_ok=True)
+    outside_maintenance = tmp_path / "outside-maintenance.json"
+    outside_maintenance.write_text("{}", encoding="utf-8")
+    (data / ".solomon-maintenance.json").symlink_to(outside_maintenance)
+    with pytest.raises(DeploymentError, match="maintenance state path is unsafe"):
+        MaintenanceGate(data).active()
+
+
+def test_preflight_reports_invalid_local_paths_and_invalid_audit_without_creating_state(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    journal = tmp_path / "journal"
+    data.write_text("not-a-directory", encoding="utf-8")
+    journal.mkdir()
+    (journal / "journal.jsonl").write_text("invalid-json\n", encoding="utf-8")
+
+    report = deployment_preflight(
+        data_dir=data,
+        journal_dir=journal,
+        database_url=str(tmp_path / "knowledge.sqlite3"),
+        require_initialized=True,
+    )
+
+    assert report.ready is False
+    checks = {check.component: check.status for check in report.checks}
+    assert checks["local-data"] is CheckStatus.BLOCKED
+    assert checks["audit-chain"] is CheckStatus.BLOCKED
+    assert checks["knowledge-store"] is CheckStatus.NOT_INITIALIZED

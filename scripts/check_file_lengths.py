@@ -14,6 +14,9 @@ ALLOWLIST = {
     Path(
         "src/solomon/audit/journal.py"
     ): "tamper-evident journal persistence and verification stay transactionally cohesive",
+    Path(
+        "src/solomon/backup.py"
+    ): "encrypted local and coordinated mixed-store backup validation share one archive safety boundary",
     Path("src/solomon/cli/main.py"): "CLI command registration remains a stable public entrypoint",
     Path(
         "src/solomon/console/app.py"
@@ -23,6 +26,12 @@ ALLOWLIST = {
     Path(
         "src/solomon/orchestrator/retrieval.py"
     ): "retrieval fusion and context assembly retain shared ranking invariants",
+    Path(
+        "src/solomon/consistency/inspection.py"
+    ): "scoped inspection retains all cross-store finding checks in one read-only traversal",
+    Path(
+        "src/solomon/operations/store.py"
+    ): "SQLite operation claiming and append-only transition history share one transaction boundary",
     Path("src/solomon/sources/store.py"): "source lifecycle persistence remains a single transactional implementation",
     Path("src/solomon/store/sqlite.py"): "SQLite append-only store remains a single transactional implementation",
 }

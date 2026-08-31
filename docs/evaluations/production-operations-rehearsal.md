@@ -18,12 +18,14 @@ prerequisite for this rehearsal.
 | Check | Command | Observed result |
 | --- | --- | --- |
 | Baseline focused tests | `uv run pytest -q tests/test_backup.py tests/test_migrations.py tests/test_helm_chart.py tests/test_production_compose.py` | 17 passed before implementation. |
-| Focused implementation tests | `uv run pytest -q tests/test_backup.py tests/test_cli.py tests/test_production_compose.py` | 33 passed after backup/restore and read-only planning work. |
-| Upgrade/control tests | `uv run pytest -q tests/test_migrations.py tests/test_deployment.py tests/test_cli.py tests/test_production_compose.py` | 35 passed. |
+| Focused implementation tests | `uv run pytest -q tests/test_backup.py tests/test_cli.py tests/test_deployment.py tests/test_migrations.py tests/test_production_compose.py` | Passed after backup/restore, read-only planning, and upgrade work. |
+| Full suite and coverage | `SOLOMON_TEST_POSTGRES_DSN=… uv run pytest --cov=src/solomon` | 540 collected with an isolated live pgvector PostgreSQL; coverage report passed at 90%. A first no-PostgreSQL invocation reached only 88%, so it is not used as release evidence. |
 | Static checks | `uv run ruff check …` and `uv run mypy …` over changed deployment, backup, CLI, migration, and test files | Passed at each implementation phase. |
 | Compose model | `TMPDIR=/home/gongahkia /bin/sh scripts/check_production_compose.sh` | Passed. |
+| Production Compose smoke | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker smoke. |
 | Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL. |
 | N-to-N+1 upgrade | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 900 scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL. |
+| Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py` | Passed. Helm result is static validation only. |
 
 The checkpoint/restore scenario starts from a migrated, initialized source profile, writes one governed knowledge
 record, creates and inspects the encrypted full backup, refuses application tables before restore, restores an empty

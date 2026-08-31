@@ -8,7 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
+import subprocess  # nosec B404
 import tarfile
 import tempfile
 from collections.abc import Callable
@@ -38,6 +38,7 @@ from solomon.deployment import (
 from solomon.store.encryption import EncryptedArtifactManifest, EncryptedArtifactStore
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
+# This module invokes only fixed PostgreSQL client binaries without a shell.
 ARCHIVE_MANIFEST_NAME = "backup-manifest.json"
 SERVER_BACKUP_RECORD_NAME = "server-backup.json"
 
@@ -483,7 +484,8 @@ def postgres_dump_runner(database_url: str) -> Callable[[Path], None]:
         executable = shutil.which("pg_dump")
         if executable is None:
             raise BackupError("pg_dump is required for a PostgreSQL backup")
-        result = subprocess.run(  # noqa: S603 - executable is resolved from a fixed client name
+        # The executable is resolved from the fixed pg_dump client name; arguments are not shell-expanded.
+        result = subprocess.run(  # noqa: S603  # nosec B603
             [
                 executable,
                 "--format=custom",
@@ -514,7 +516,8 @@ def postgres_restore_runner(database_url: str) -> Callable[[Path], None]:
         executable = shutil.which("pg_restore")
         if executable is None:
             raise BackupError("pg_restore is required for a PostgreSQL restore")
-        result = subprocess.run(  # noqa: S603 - executable is resolved from a fixed client name
+        # The executable is resolved from the fixed pg_restore client name; arguments are not shell-expanded.
+        result = subprocess.run(  # noqa: S603  # nosec B603
             [
                 executable,
                 "--no-owner",

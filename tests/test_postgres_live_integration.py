@@ -161,11 +161,11 @@ def test_live_postgres_operation_journal_claims_once_and_preserves_history() -> 
             "completed",
         ]
         with psycopg.connect(dsn) as conn:
-            row = conn.execute(
-                f'SELECT version FROM "{schema}".schema_migrations WHERE scope = %s',  # noqa: S608
+            rows = conn.execute(
+                f'SELECT version FROM "{schema}".schema_migrations WHERE scope = %s ORDER BY version',  # noqa: S608
                 ("operation-store",),
-            ).fetchone()
-        assert row == (1,)
+            ).fetchall()
+        assert rows == [(1,), (2,)]
     finally:
         if first is not None:
             first.close()

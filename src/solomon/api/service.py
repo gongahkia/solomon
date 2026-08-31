@@ -10,7 +10,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -67,6 +67,9 @@ from solomon.authority_sources import (
     SQLiteAuthoritySourceRegistry,
 )
 from solomon.boundary.solomon import SolomonBoundary
+from solomon.consistency.inspection import ConsistencyInspector
+from solomon.consistency.models import ConsistencyReport, ConsistencyScope, RepairPlan, RepairResult
+from solomon.consistency.repair import ConsistencyRepairService
 from solomon.contracts import AdapterHealth, AuthoritySource, AuthoritySourceAdapter, AuthoritySourceKind
 from solomon.credence.policy import CredenceLedger, CredencePolicy
 from solomon.currency.cache import CurrencyEvaluationCache
@@ -182,6 +185,9 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "currency_report": "read",
     "export_currency_report_pack": "read",
     "export_audit_pack": "read",
+    "consistency_check": "read",
+    "consistency_repair_plan": "review",
+    "apply_consistency_repair": "review",
 }
 
 SERVICE_SPAN_NAMES: dict[str, str] = {
@@ -1118,6 +1124,26 @@ class SolomonService:
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         return self._authority.impact_query(authority_id, as_of=as_of)
+
+    def consistency_check(
+        self,
+        *,
+        matter_id: str,
+        client_id: str,
+        stuck_after_seconds: int = 900,
+    ) -> ConsistencyReport:
+        return ConsistencyInspector(self).check(
+            ConsistencyScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id),
+            stuck_after=timedelta(seconds=stuck_after_seconds),
+        )
+
+    def consistency_repair_plan(self, *, matter_id: str, client_id: str) -> RepairPlan:
+        return ConsistencyRepairService(self).plan(
+            ConsistencyScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id)
+        )
+
+    def apply_consistency_repair(self, plan: RepairPlan) -> RepairResult:
+        return ConsistencyRepairService(self).apply(plan)
 
     def dependency_graph(
         self,

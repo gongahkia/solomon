@@ -103,6 +103,8 @@ class AuthorityService(ServiceDelegate):
         self,
         assertion: DependencySuggestion,
         request: DependencyAssertionDecisionRequest,
+        *,
+        idempotency_suffix: str | None = None,
     ) -> DependencyEdge:
         if assertion.decision is SuggestionDecision.CONFIRMED:
             try:
@@ -122,7 +124,11 @@ class AuthorityService(ServiceDelegate):
                 authorization_context={"service_access": "review", "reviewer": request.by},
                 correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
                 causation_id=assertion.id,
-                idempotency_key=f"assertion-confirm:{assertion.id}:{assertion.state_version}",
+                idempotency_key=(
+                    f"assertion-confirm:{assertion.id}:{assertion.state_version}"
+                    if idempotency_suffix is None
+                    else f"assertion-confirm:{assertion.id}:{assertion.state_version}:{idempotency_suffix}"
+                ),
                 source_resource_id=assertion.source_document_id,
                 source_version=assertion.source_document_version,
                 target_resource_id=assertion.suggested_edge.target_id,
@@ -181,6 +187,7 @@ class AuthorityService(ServiceDelegate):
                 matter_id=matter_id,
                 client_id=client_id,
             ),
+            idempotency_suffix=f"repair:{assertion.suggested_edge.id}",
         )
         if result.source_suggestion_id != assertion.id:
             raise BadRequestError("repaired graph edge has invalid assertion provenance")

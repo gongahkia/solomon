@@ -54,7 +54,8 @@ safe rollback refusal and isolated restore rehearsal, not an in-place database d
 Focused tests cover tampered encrypted archives, manifest/archive digest drift, wrong passphrase, existing target
 refusal, unsafe paths and links, active-tree backup-destination refusal, member-count/per-member/total archive
 bounds, invalid audit journal, incomplete backup staging on injected PostgreSQL dump failure, a real `SIGKILL` during
-the PostgreSQL-capture boundary, stale plan refusal, database identity mismatch, password exclusion from PostgreSQL
+the PostgreSQL-capture boundary, deterministic failures after SQLite capture, audit capture, PostgreSQL capture, and
+before manifest finalization, stale plan refusal, database identity mismatch, password exclusion from PostgreSQL
 client arguments, maintenance write/worker blocking, concurrent bootstrap, read-only CLI load/restore planning,
 read-only scoped deployment verification, migration rollback on a failed fresh SQLite batch, and operation-store
 N-to-N+1 migration.

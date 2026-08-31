@@ -36,6 +36,7 @@ from solomon.deployment import (
     read_metadata,
     redact_database_url,
 )
+from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.store.encryption import EncryptedArtifactManifest, EncryptedArtifactStore
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
@@ -286,6 +287,7 @@ def create_server_encrypted_backup(
     passphrase: str,
     dump_postgres: Callable[[Path], None],
     postgres_metadata: Callable[[], PostgresBackupMetadata] | None = None,
+    failure_injector: OperationFailureInjector | None = None,
     owner: str = "cli",
 ) -> ServerBackupResult:
     """Create a coordinated checkpoint for the supported mixed-store profile.
@@ -307,12 +309,15 @@ def create_server_encrypted_backup(
         raise BackupError("backup passphrase is required")
     target.parent.mkdir(parents=True, exist_ok=True)
     gate = MaintenanceGate(source_data)
+    injector = failure_injector or OperationFailureInjector()
+    injector.hit("before_backup_maintenance")
     try:
         maintenance = gate.acquire(reason="coordinated-backup", owner=owner)
     except DeploymentError as exc:
         raise BackupError(str(exc)) from exc
     completed = False
     try:
+        injector.hit("after_backup_maintenance")
         AuditJournal(source_journal / "journal.jsonl").append_idempotent(
             "deployment_backup_started",
             {
@@ -332,13 +337,16 @@ def create_server_encrypted_backup(
                 sqlite_consistent=True,
                 excluded_root_names={".solomon-maintenance.json", ".solomon-maintenance.lock"},
             )
+            injector.hit("after_sqlite_backup")
             _copy_tree(source_journal, staged / "journal", sqlite_consistent=False)
             _verify_staged_journal(staged / "journal")
+            injector.hit("after_audit_capture")
             dump_path = staged / "postgres" / "knowledge.dump"
             dump_path.parent.mkdir(mode=0o700)
             dump_postgres(dump_path)
             if not dump_path.is_file() or dump_path.is_symlink() or dump_path.stat().st_size == 0:
                 raise BackupError("PostgreSQL dump was not created as a non-empty regular file")
+            injector.hit("after_postgres_backup")
             metadata_snapshot = postgres_metadata() if postgres_metadata is not None else PostgresBackupMetadata()
             staged_journal = staged / "journal" / "journal.jsonl"
             audit_verification = AuditJournal(staged_journal).verify()
@@ -367,6 +375,7 @@ def create_server_encrypted_backup(
             (staged / SERVER_BACKUP_RECORD_NAME).write_text(record.model_dump_json(indent=2), encoding="utf-8")
             archive = staging / "backup.tar"
             archive_manifest = _write_archive(staged, archive)
+            injector.hit("before_manifest_finalization")
             encrypted = staging / "backup.enc"
             artifact = (
                 EncryptedArtifactStore(passphrase=passphrase)

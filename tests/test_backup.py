@@ -26,6 +26,7 @@ from solomon.backup import (
 )
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.deployment import MaintenanceGate, initialize_deployment
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.store.sqlite import SQLiteKnowledgeStore
 
 TEST_PASSPHRASE = "unit-test-backup-passphrase"  # noqa: S105
@@ -295,6 +296,44 @@ def test_server_backup_failure_leaves_marker_and_releases_maintenance(tmp_path: 
 
     assert MaintenanceGate(tmp_path / "data").active() is None
     incomplete = list(tmp_path.glob(".server-backup.enc.incomplete-*/INCOMPLETE.json"))
+    assert len(incomplete) == 1
+
+
+@pytest.mark.parametrize(
+    "point",
+    ["after_sqlite_backup", "after_audit_capture", "after_postgres_backup", "before_manifest_finalization"],
+)
+def test_server_backup_failure_injection_never_publishes_a_complete_backup(
+    tmp_path: Path,
+    point: str,
+) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    archive = tmp_path / f"{point}.enc"
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"postgres-dump")
+
+    with pytest.raises(InjectedOperationFailure, match=point):
+        create_server_encrypted_backup(
+            data_dir=tmp_path / "data",
+            journal_dir=tmp_path / "journal",
+            database_url=database_url,
+            destination=archive,
+            passphrase=TEST_PASSPHRASE,
+            dump_postgres=dump_postgres,
+            failure_injector=OperationFailureInjector([point]),
+        )
+
+    assert archive.exists() is False
+    assert archive.with_name(f"{archive.name}.manifest.json").exists() is False
+    assert MaintenanceGate(tmp_path / "data").active() is None
+    incomplete = list(tmp_path.glob(f".{archive.name}.incomplete-*/INCOMPLETE.json"))
     assert len(incomplete) == 1
 
 

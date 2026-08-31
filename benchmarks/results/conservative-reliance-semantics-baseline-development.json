@@ -1,0 +1,963 @@
+{
+  "category_metrics": {
+    "adoption_local": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "alternative_authorities": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "background_table": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "bare_citation": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "client_attribution": {
+      "abstention_accuracy": 0.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 100.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 0.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "comparison_only": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "derives_from": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "direct_depends_on": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "direct_relies_on": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "grounded_in": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "historical_only": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "hypothetical": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "incomplete_proposition": {
+      "abstention_accuracy": 0.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 100.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 0.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "independent_conclusion": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "negated_reliance": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "pursuant_to": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "quotation_without_adoption": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 0.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "reference_only": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 0.0,
+      "reference_recall": 0.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 0.0,
+      "target_resolution_recall": 0.0
+    },
+    "reported_position": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "required_by": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "scope_missing": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 0.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 0.0,
+      "target_resolution_recall": 1.0
+    },
+    "subject_to": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 1.0,
+      "exact_evidence_span_accuracy": 0.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 0.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 0.0,
+      "suggestions_per_100_items": 0.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "under_with_conclusion": {
+      "abstention_accuracy": 1.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 0.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 1.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    },
+    "unresolved_instruction": {
+      "abstention_accuracy": 0.0,
+      "cross_scope_leakage_count": 0.0,
+      "duplicate_suggestion_rate": 0.0,
+      "exact_evidence_span_accuracy": 1.0,
+      "false_positive_suggestions_per_100_items": 100.0,
+      "hard_negative_false_positive_rate": 1.0,
+      "items": 1,
+      "overlap_or_containment_span_accuracy": 1.0,
+      "pre_review_confirmed_edge_count": 0.0,
+      "reference_precision": 1.0,
+      "reference_recall": 1.0,
+      "suggestion_precision": 0.0,
+      "suggestion_recall": 1.0,
+      "suggestions_per_100_items": 100.0,
+      "target_resolution_precision": 1.0,
+      "target_resolution_recall": 1.0
+    }
+  },
+  "corpus_manifest_sha256": "3e2757e6fe7e47e0c5af0629db16fa9c42f596a292079a7f0e33efaebb1d6820",
+  "corpus_size": 24,
+  "corpus_version": "1.0.0",
+  "deterministic_repeated_run": true,
+  "error_analysis": [
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "We rely on Atlas Regulation 12 section 4 to set the filing sequence.",
+        "target_id": "atlas-regulation-12-section-4",
+        "target_span": "Atlas Regulation 12 section 4"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-01",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "direct_relies_on",
+      "target_id": "atlas-regulation-12-section-4"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "This assessment adopts the approach in Fallow Regulation 9 section 1.",
+        "target_id": "fallow-regulation-9-section-1",
+        "target_span": "Fallow Regulation 9 section 1"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-06",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "adoption_local",
+      "target_id": "fallow-regulation-9-section-1"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "Our recommendation is grounded in Garnet Code 4 section 7.",
+        "target_id": "garnet-code-4-section-7",
+        "target_span": "Garnet Code 4 section 7"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-07",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "grounded_in",
+      "target_id": "garnet-code-4-section-7"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "The opinion derives its deadline from Harbor Act 13 section 5.",
+        "target_id": "harbor-act-13-section-5",
+        "target_span": "Harbor Act 13 section 5"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-08",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "derives_from",
+      "target_id": "harbor-act-13-section-5"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "source_span": "This advice is subject to Ibis Rule 6 section 8.",
+        "target_id": "ibis-rule-6-section-8",
+        "target_span": "Ibis Rule 6 section 8"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-09",
+      "pipeline_stage": "reliance_cue_not_recognized",
+      "root_cause_hypothesis": "deterministic cue vocabulary did not cover the labeled adoption construction",
+      "semantic_category": "subject_to",
+      "target_id": "ibis-rule-6-section-8"
+    },
+    {
+      "actual": {
+        "source_span": "The client relies on Jasper Regulation 15 section 2, but this advice records no position.",
+        "target_id": "jasper-regulation-15-section-2",
+        "target_span": "Jasper Regulation 15 section 2"
+      },
+      "deterministic_correction_appears_possible": true,
+      "expected": null,
+      "false_positive_risk": "high",
+      "fixture_id": "sem-dev-10",
+      "pipeline_stage": "mention_mistaken_for_reliance",
+      "root_cause_hypothesis": "reference mention passed a reliance heuristic without a labeled adoption",
+      "semantic_category": "client_attribution",
+      "target_id": "jasper-regulation-15-section-2"
+    },
+    {
+      "actual": null,
+      "deterministic_correction_appears_possible": true,
+      "expected": {
+        "reference_span": "Tern Guidance 4 section 2"
+      },
+      "false_positive_risk": "medium",
+      "fixture_id": "sem-dev-19",
+      "pipeline_stage": "reference_not_detected",
+      "root_cause_hypothesis": "citation grammar or normalization did not recognize the declared span",
+      "semantic_category": "reference_only",
+      "target_id": "tern-guidance-4-section-2"
+    },
+    {
+      "actual": {
+        "source_span": "Our approach under Umber Act 9 section 4 remains under review.",
+        "target_id": "umber-act-9-section-4",
+        "target_span": "Umber Act 9 section 4"
+      },
+      "deterministic_correction_appears_possible": true,
+      "expected": null,
+      "false_positive_risk": "high",
+      "fixture_id": "sem-dev-20",
+      "pipeline_stage": "mention_mistaken_for_reliance",
+      "root_cause_hypothesis": "reference mention passed a reliance heuristic without a labeled adoption",
+      "semantic_category": "incomplete_proposition",
+      "target_id": "umber-act-9-section-4"
+    },
+    {
+      "actual": {
+        "source_span": "Draft a note that relies on Zephyr Guidance 8 section 1 if counsel later approves.",
+        "target_id": "zephyr-guidance-8-section-1",
+        "target_span": "Zephyr Guidance 8 section 1"
+      },
+      "deterministic_correction_appears_possible": true,
+      "expected": null,
+      "false_positive_risk": "high",
+      "fixture_id": "sem-dev-24",
+      "pipeline_stage": "mention_mistaken_for_reliance",
+      "root_cause_hypothesis": "reference mention passed a reliance heuristic without a labeled adoption",
+      "semantic_category": "unresolved_instruction",
+      "target_id": "zephyr-guidance-8-section-1"
+    }
+  ],
+  "error_stage_distribution": {
+    "mention_mistaken_for_reliance": 3,
+    "reference_not_detected": 1,
+    "reliance_cue_not_recognized": 5
+  },
+  "metric_counts": {
+    "abstention_accuracy": {
+      "denominator": 15,
+      "numerator": 12
+    },
+    "cross_scope_leakage_count": {
+      "denominator": 1,
+      "numerator": 0
+    },
+    "duplicate_suggestion_rate": {
+      "denominator": 7,
+      "numerator": 0
+    },
+    "exact_evidence_span_accuracy": {
+      "denominator": 9,
+      "numerator": 4
+    },
+    "false_positive_suggestions_per_100_items": {
+      "denominator": 24,
+      "numerator": 300
+    },
+    "hard_negative_false_positive_rate": {
+      "denominator": 8,
+      "numerator": 1
+    },
+    "overlap_or_containment_span_accuracy": {
+      "denominator": 9,
+      "numerator": 4
+    },
+    "pre_review_confirmed_edge_count": {
+      "denominator": 1,
+      "numerator": 0
+    },
+    "reference_precision": {
+      "denominator": 26,
+      "numerator": 24
+    },
+    "reference_recall": {
+      "denominator": 25,
+      "numerator": 24
+    },
+    "suggestion_precision": {
+      "denominator": 7,
+      "numerator": 4
+    },
+    "suggestion_recall": {
+      "denominator": 9,
+      "numerator": 4
+    },
+    "suggestions_per_100_items": {
+      "denominator": 24,
+      "numerator": 700
+    },
+    "target_resolution_precision": {
+      "denominator": 26,
+      "numerator": 24
+    },
+    "target_resolution_recall": {
+      "denominator": 25,
+      "numerator": 24
+    }
+  },
+  "metrics": {
+    "abstention_accuracy": 0.8,
+    "cross_scope_leakage_count": 0.0,
+    "duplicate_suggestion_rate": 0.0,
+    "exact_evidence_span_accuracy": 0.444444,
+    "false_positive_suggestions_per_100_items": 12.5,
+    "hard_negative_false_positive_rate": 0.125,
+    "overlap_or_containment_span_accuracy": 0.444444,
+    "pre_review_confirmed_edge_count": 0.0,
+    "reference_precision": 0.923077,
+    "reference_recall": 0.96,
+    "suggestion_precision": 0.571429,
+    "suggestion_recall": 0.444444,
+    "suggestions_per_100_items": 29.166667,
+    "target_resolution_precision": 0.923077,
+    "target_resolution_recall": 0.96
+  },
+  "predictions": [
+    {
+      "id": "sem-dev-01",
+      "references": [
+        {
+          "span": "Atlas Regulation 12 section 4",
+          "target_id": "atlas-regulation-12-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-02",
+      "references": [
+        {
+          "span": "Brindle Code 8 section 2",
+          "target_id": "brindle-code-8-section-2"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "This advice depends on Brindle Code 8 section 2 for the notice calculation.",
+          "target_id": "brindle-code-8-section-2",
+          "target_span": "Brindle Code 8 section 2"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-03",
+      "references": [
+        {
+          "span": "Cinder Act 5 section 9",
+          "target_id": "cinder-act-5-section-9"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Our conclusion is required by Cinder Act 5 section 9.",
+          "target_id": "cinder-act-5-section-9",
+          "target_span": "Cinder Act 5 section 9"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-04",
+      "references": [
+        {
+          "span": "Delta Rule 11 section 3",
+          "target_id": "delta-rule-11-section-3"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The firm proceeds pursuant to Delta Rule 11 section 3.",
+          "target_id": "delta-rule-11-section-3",
+          "target_span": "Delta Rule 11 section 3"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-05",
+      "references": [
+        {
+          "span": "Ember Guidance 2 section 6",
+          "target_id": "ember-guidance-2-section-6"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Under Ember Guidance 2 section 6, we approve the release.",
+          "target_id": "ember-guidance-2-section-6",
+          "target_span": "Ember Guidance 2 section 6"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-06",
+      "references": [
+        {
+          "span": "Fallow Regulation 9 section 1",
+          "target_id": "fallow-regulation-9-section-1"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-07",
+      "references": [
+        {
+          "span": "Garnet Code 4 section 7",
+          "target_id": "garnet-code-4-section-7"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-08",
+      "references": [
+        {
+          "span": "Harbor Act 13 section 5",
+          "target_id": "harbor-act-13-section-5"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-09",
+      "references": [
+        {
+          "span": "Ibis Rule 6 section 8",
+          "target_id": "ibis-rule-6-section-8"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-10",
+      "references": [
+        {
+          "span": "Jasper Regulation 15 section 2",
+          "target_id": "jasper-regulation-15-section-2"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "The client relies on Jasper Regulation 15 section 2, but this advice records no position.",
+          "target_id": "jasper-regulation-15-section-2",
+          "target_span": "Jasper Regulation 15 section 2"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-11",
+      "references": [
+        {
+          "span": "Kyan Code 3 section 4",
+          "target_id": "kyan-code-3-section-4"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-12",
+      "references": [
+        {
+          "span": "Lapis Act 7 section 1",
+          "target_id": "lapis-act-7-section-1"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-13",
+      "references": [
+        {
+          "span": "Mica Rule 14 section 6",
+          "target_id": "mica-rule-14-section-6"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-14",
+      "references": [
+        {
+          "span": "Nettle Guidance 1 section 3",
+          "target_id": "nettle-guidance-1-section-3"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-15",
+      "references": [
+        {
+          "span": "Oak Code 10 section 5",
+          "target_id": "oak-code-10-section-5"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-16",
+      "references": [
+        {
+          "span": "Pollen Act 2 section 8",
+          "target_id": "pollen-act-2-section-8"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-17",
+      "references": [
+        {
+          "span": "Quartz Regulation 8 section 9",
+          "target_id": "quartz-regulation-8-section-9"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-18",
+      "references": [
+        {
+          "span": "Rowan Code 6 section 2",
+          "target_id": "rowan-code-6-section-2"
+        },
+        {
+          "span": "Sedge Rule 4 section 1",
+          "target_id": "sedge-rule-4-section-1"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-19",
+      "references": [
+        {
+          "span": "See Tern Guidance 4 section 2",
+          "target_id": "see-tern-guidance-4-section-2"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-20",
+      "references": [
+        {
+          "span": "Umber Act 9 section 4",
+          "target_id": "umber-act-9-section-4"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Our approach under Umber Act 9 section 4 remains under review.",
+          "target_id": "umber-act-9-section-4",
+          "target_span": "Umber Act 9 section 4"
+        }
+      ]
+    },
+    {
+      "id": "sem-dev-21",
+      "references": [
+        {
+          "span": "Regulation 3 section 7",
+          "target_id": "regulation-3-section-7"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-22",
+      "references": [
+        {
+          "span": "Willow Rule 5 section 6",
+          "target_id": "willow-rule-5-section-6"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-23",
+      "references": [
+        {
+          "span": "Xylo Code 1 section 1",
+          "target_id": "xylo-code-1-section-1"
+        },
+        {
+          "span": "Yarrow Act 2 section 2",
+          "target_id": "yarrow-act-2-section-2"
+        }
+      ],
+      "suggestions": []
+    },
+    {
+      "id": "sem-dev-24",
+      "references": [
+        {
+          "span": "Zephyr Guidance 8 section 1",
+          "target_id": "zephyr-guidance-8-section-1"
+        }
+      ],
+      "suggestions": [
+        {
+          "source_span": "Draft a note that relies on Zephyr Guidance 8 section 1 if counsel later approves.",
+          "target_id": "zephyr-guidance-8-section-1",
+          "target_span": "Zephyr Guidance 8 section 1"
+        }
+      ]
+    }
+  ],
+  "runtime_ms": 298.708,
+  "safety_invariants": {
+    "cross_scope_leakage_count": 0,
+    "duplicate_suggestions_from_unchanged_ingestion": 0,
+    "instruction_like_text_caused_privileged_action": 0,
+    "non_confirmed_suggestions_affecting_currency": 0,
+    "non_deterministic_outputs": 0,
+    "pre_review_confirmed_edge_count": 0,
+    "rejected_unchanged_evidence_resurfaced": 0
+  },
+  "schema": "solomon.conservative_reliance_semantics_evaluation.v1",
+  "split": "development"
+}

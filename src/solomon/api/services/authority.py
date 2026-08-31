@@ -63,6 +63,7 @@ from solomon.operations.assertion_projection import AssertionConfirmationProject
 from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
 from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
+from solomon.operations.reverification_projection import SourceRevisionReverificationProjection
 from solomon.orchestrator.models import ModelRouter
 
 
@@ -149,6 +150,12 @@ class AuthorityService(ServiceDelegate):
     def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
         if operation.operation_type is OperationType.ASSERTION_CONFIRM:
             return AssertionConfirmationProjection(
+                lifecycle=self._assertion_lifecycle,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
+        if operation.operation_type is OperationType.SOURCE_REVISION_REVERIFY:
+            return SourceRevisionReverificationProjection(
                 lifecycle=self._assertion_lifecycle,
                 operation_store=self.operation_store,
                 failure_injector=self._failure_injector,
@@ -433,10 +440,54 @@ class AuthorityService(ServiceDelegate):
         previous_document_id: str | None,
         replacement_document_id: str,
     ) -> list[DependencySuggestion]:
-        return self._assertion_lifecycle.mark_reverification_for_source_revision(
-            previous_document_id=previous_document_id,
-            replacement_document_id=replacement_document_id,
-        )
+        if previous_document_id is None:
+            return []
+        updated: list[DependencySuggestion] = []
+        for assertion in self._assertion_lifecycle.list_assertions(limit=10_000):
+            if assertion.source_document_id != previous_document_id or assertion.needs_reverification:
+                continue
+            operation, _ = self.operation_store.create(
+                OperationRecord(
+                    operation_type=OperationType.SOURCE_REVISION_REVERIFY,
+                    scope=OperationScope(
+                        tenant_id=self.tenant_id,
+                        matter_id=assertion.matter_id,
+                        client_id=assertion.client_id,
+                    ),
+                    actor_id="system:source-revision",
+                    authorization_context={"service_access": "curate", "actor_type": "system"},
+                    correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
+                    causation_id=assertion.id,
+                    idempotency_key=f"source-revision:{assertion.id}:{replacement_document_id}",
+                    source_resource_id=previous_document_id,
+                    source_version=assertion.source_document_version,
+                    target_resource_id=replacement_document_id,
+                    assertion_id=assertion.id,
+                    requested_transition="needs_reverification",
+                )
+            )
+            self._failure_injector.hit("after_authoritative_write_before_schedule")
+            for _ in range(100):
+                current = self.operation_store.get(operation.id)
+                if current.status is OperationStatus.COMPLETED:
+                    updated.append(
+                        self._assertion_lifecycle.get(
+                            assertion.id,
+                            matter_id=assertion.matter_id,
+                            client_id=assertion.client_id,
+                        )
+                    )
+                    break
+                if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                    raise BadRequestError("source revision reverification requires operational intervention")
+                processed = self._operation_runner.run_once(worker_id="inline:source-revision")
+                if processed is None:
+                    sleep(0.01)
+                elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                    raise BadRequestError("source revision reverification is durably queued for retry")
+            else:
+                raise BadRequestError("source revision reverification is durably queued for retry")
+        return updated
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()

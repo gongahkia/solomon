@@ -32,7 +32,7 @@ from solomon.graph.suggestions import (
     SuggestionDecision,
 )
 from solomon.mcp.tools import SolomonMCPRuntime
-from solomon.operations.failure_injection import OperationFailureInjector
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.operations.models import OperationStatus
 from solomon.sources.models import DocumentSourceKind
 
@@ -204,6 +204,43 @@ def test_governed_confirmation_crash_after_edge_retries_without_duplicate_edge_o
         "dependency_assertion_confirmed",
         "dependency_assertion_edge_linked",
     ]
+
+
+def test_source_revision_interruption_resumes_from_immutable_document_lineage(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    assertion = service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    service.decide_dependency_assertion(
+        assertion.id,
+        DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+    )
+    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_authoritative_write_before_schedule"]))
+
+    with pytest.raises(InjectedOperationFailure, match="after_authoritative_write_before_schedule"):
+        service.ingest_source_document(
+            "matter-documents",
+            SourceDocumentIngestRequest(
+                external_id="memo-1",
+                filename="memo.txt",
+                mime_type="text/plain",
+                content="We rely on Regulation R section 12 after the authority update.",
+            ),
+        )
+    operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type.value == "source_revision_reverify"
+    )
+    assert operation.status is OperationStatus.QUEUED
+    assert service.get_dependency_assertion(assertion.id).needs_reverification is False
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    recovered = service._authority.run_operation_once(worker_id="worker-restarted")
+    assert recovered is not None
+    assert recovered.status is OperationStatus.COMPLETED
+    reverified = service.get_dependency_assertion(assertion.id)
+    assert reverified.needs_reverification is True
+    assert reverified.reverification_audit_id is not None
 
 
 def test_governed_assertion_rest_and_python_sdk_surface(tmp_path: Path) -> None:

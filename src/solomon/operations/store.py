@@ -72,10 +72,11 @@ class SQLiteOperationStore:
             return operation, True
 
     def get(self, operation_id: str) -> OperationRecord:
-        row = self._conn.execute(
-            "SELECT operation_json FROM knowledge_operations WHERE operation_id = ?",
-            (operation_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT operation_json FROM knowledge_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
         if row is None:
             raise OperationNotFoundError(operation_id)
         return OperationRecord.model_validate_json(str(row["operation_json"]))
@@ -100,26 +101,28 @@ class SQLiteOperationStore:
             clauses.append(f"status IN ({','.join('?' for _ in statuses)})")
             params.extend(sorted(status.value for status in statuses))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._conn.execute(
-            f"""
-            SELECT operation_json FROM knowledge_operations
-            {where}
-            ORDER BY created_at, operation_id
-            LIMIT ?
-            """,  # noqa: S608
-            [*params, limit],
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT operation_json FROM knowledge_operations
+                {where}
+                ORDER BY created_at, operation_id
+                LIMIT ?
+                """,  # noqa: S608
+                [*params, limit],
+            ).fetchall()
         return [OperationRecord.model_validate_json(str(row["operation_json"])) for row in rows]
 
     def history(self, operation_id: str) -> builtins_list[OperationHistoryEntry]:
         self.get(operation_id)
-        rows = self._conn.execute(
-            """
-            SELECT history_json FROM knowledge_operation_history
-            WHERE operation_id = ? ORDER BY state_version
-            """,
-            (operation_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT history_json FROM knowledge_operation_history
+                WHERE operation_id = ? ORDER BY state_version
+                """,
+                (operation_id,),
+            ).fetchall()
         return [OperationHistoryEntry.model_validate_json(str(row["history_json"])) for row in rows]
 
     def claim_next(
@@ -398,20 +401,21 @@ class SQLiteOperationStore:
         actor_id: str,
         detail: str | None = None,
     ) -> None:
-        with self._conn:
-            self._replace(current, updated)
-            self._append_history(
-                OperationHistoryEntry(
-                    operation_id=updated.id,
-                    state_version=updated.state_version,
-                    event=event,
-                    status=updated.status,
-                    phase=updated.phase,
-                    occurred_at=updated.updated_at,
-                    actor_id=actor_id,
-                    detail=detail,
+        with self._lock:
+            with self._conn:
+                self._replace(current, updated)
+                self._append_history(
+                    OperationHistoryEntry(
+                        operation_id=updated.id,
+                        state_version=updated.state_version,
+                        event=event,
+                        status=updated.status,
+                        phase=updated.phase,
+                        occurred_at=updated.updated_at,
+                        actor_id=actor_id,
+                        detail=detail,
+                    )
                 )
-            )
 
     def _append_history(self, entry: OperationHistoryEntry) -> None:
         self._conn.execute(
@@ -492,6 +496,5 @@ def _iso(value: datetime | None) -> str | None:
 
 def _safe_diagnostic(value: str) -> str:
     return " ".join(value.replace("\n", " ").split())[:500]
-
 
 __all__ = ["OperationConflictError", "OperationNotFoundError", "SQLiteOperationStore"]

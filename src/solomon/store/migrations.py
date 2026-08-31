@@ -178,6 +178,114 @@ def sqlite_knowledge_store_migrations() -> tuple[SchemaMigration, ...]:
     )
 
 
+def operation_store_migrations() -> tuple[SchemaMigration, ...]:
+    """Schema migrations for durable cross-boundary operation records."""
+
+    return (
+        SchemaMigration(
+            scope="operation-store",
+            version=1,
+            name="durable-operation-records-and-history",
+            sqlite_statements=(
+                """
+                CREATE TABLE IF NOT EXISTS knowledge_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    operation_type TEXT NOT NULL,
+                    scope_key TEXT NOT NULL,
+                    tenant_id TEXT,
+                    matter_id TEXT,
+                    client_id TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN
+                        ('queued', 'claimed', 'retrying', 'completed', 'terminal_failed', 'operator_required')),
+                    phase TEXT NOT NULL CHECK (phase IN
+                        ('authoritative', 'scheduled', 'graph', 'currency', 'audit', 'completed')),
+                    state_version INTEGER NOT NULL CHECK (state_version >= 1),
+                    attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+                    next_eligible_retry_at TEXT,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    operation_json TEXT NOT NULL,
+                    UNIQUE(operation_type, scope_key, idempotency_key)
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_claimable
+                ON knowledge_operations(status, next_eligible_retry_at, lease_expires_at, created_at, operation_id)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_scope
+                ON knowledge_operations(scope_key, created_at, operation_id)
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS knowledge_operation_history (
+                    operation_id TEXT NOT NULL,
+                    state_version INTEGER NOT NULL,
+                    event TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    actor_id TEXT,
+                    detail TEXT,
+                    history_json TEXT NOT NULL,
+                    PRIMARY KEY(operation_id, state_version)
+                )
+                """,
+            ),
+            postgres_statements=(
+                """
+                CREATE TABLE IF NOT EXISTS knowledge_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    operation_type TEXT NOT NULL,
+                    scope_key TEXT NOT NULL,
+                    tenant_id TEXT,
+                    matter_id TEXT,
+                    client_id TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN
+                        ('queued', 'claimed', 'retrying', 'completed', 'terminal_failed', 'operator_required')),
+                    phase TEXT NOT NULL CHECK (phase IN
+                        ('authoritative', 'scheduled', 'graph', 'currency', 'audit', 'completed')),
+                    state_version BIGINT NOT NULL CHECK (state_version >= 1),
+                    attempt_count BIGINT NOT NULL CHECK (attempt_count >= 0),
+                    next_eligible_retry_at TEXT,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    operation_json TEXT NOT NULL,
+                    UNIQUE(operation_type, scope_key, idempotency_key)
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_claimable
+                ON knowledge_operations(status, next_eligible_retry_at, lease_expires_at, created_at, operation_id)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_operations_scope
+                ON knowledge_operations(scope_key, created_at, operation_id)
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS knowledge_operation_history (
+                    operation_id TEXT NOT NULL,
+                    state_version BIGINT NOT NULL,
+                    event TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    actor_id TEXT,
+                    detail TEXT,
+                    history_json TEXT NOT NULL,
+                    PRIMARY KEY(operation_id, state_version)
+                )
+                """,
+            ),
+        ),
+    )
+
+
 def _validate_migrations(migrations: Sequence[SchemaMigration]) -> tuple[SchemaMigration, ...]:
     ordered = tuple(migrations)
     if not ordered:
@@ -254,5 +362,6 @@ __all__ = [
     "SchemaMigration",
     "apply_postgres_migrations",
     "apply_sqlite_migrations",
+    "operation_store_migrations",
     "sqlite_knowledge_store_migrations",
 ]

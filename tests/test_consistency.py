@@ -208,6 +208,45 @@ def test_terminal_operation_retry_is_scoped_audited_and_refuses_operator_require
         )
 
 
+def test_source_revision_projection_marks_governed_assertion_once_from_durable_record(tmp_path: Path) -> None:
+    service, assertion = _confirmed_assertion_service(tmp_path)
+    assert service._authority.mark_dependency_assertions_for_source_revision(
+        previous_document_id=None,
+        replacement_document_id="not-used",
+    ) == []
+    assert assertion.source_document_id is not None
+    source = service.document_store.get_document(assertion.source_document_id)
+    replacement = service.document_store.write_document(
+        SourceDocument(
+            source_id=source.source_id,
+            external_id=source.external_id,
+            filename=source.filename,
+            mime_type=source.mime_type,
+            content="The source document was revised for reverification.",
+        )
+    )
+
+    updated = service._authority.mark_dependency_assertions_for_source_revision(
+        previous_document_id=source.id,
+        replacement_document_id=replacement.id,
+    )
+
+    assert [current.id for current in updated] == [assertion.id]
+    marked = service.get_dependency_assertion(assertion.id)
+    assert marked.needs_reverification is True
+    assert marked.reverification_audit_id is not None
+    operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type is OperationType.SOURCE_REVISION_REVERIFY
+    )
+    assert operation.status is OperationStatus.COMPLETED
+    assert service._authority.mark_dependency_assertions_for_source_revision(
+        previous_document_id=source.id,
+        replacement_document_id=replacement.id,
+    ) == []
+
+
 def _confirmed_assertion_service(tmp_path: Path) -> tuple[SolomonService, DependencySuggestion]:
     service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
     source = service.register_document_source(

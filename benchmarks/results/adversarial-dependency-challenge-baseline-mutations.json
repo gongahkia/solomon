@@ -1,0 +1,167 @@
+{
+  "corpus_manifest_sha256": "bf391fb28a7a76f595aa6399d578bc699c38c3e0745014fd63053ed6a7bf4256",
+  "corpus_version": "1.0.0",
+  "deterministic_repeated_run": true,
+  "metrics": {
+    "mutation_label_stability": 0.833333,
+    "stable_mutations": 10,
+    "unstable_mutations": 2
+  },
+  "mutation_count": 12,
+  "rows": [
+    {
+      "id": "mut-01",
+      "mutation_suggestion_targets": [],
+      "seed": 101,
+      "source_fixture_id": "adv-dev-01",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": false,
+      "transformation": "whitespace_expand"
+    },
+    {
+      "id": "mut-02",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "seed": 102,
+      "source_fixture_id": "adv-dev-10",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": true,
+      "transformation": "whitespace_collapse"
+    },
+    {
+      "id": "mut-03",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "seed": 103,
+      "source_fixture_id": "adv-dev-08",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": true,
+      "transformation": "line_wrap"
+    },
+    {
+      "id": "mut-04",
+      "mutation_suggestion_targets": [
+        "boreal-rule-2-section-8"
+      ],
+      "seed": 104,
+      "source_fixture_id": "adv-dev-09",
+      "source_suggestion_targets": [
+        "boreal-rule-2-section-8"
+      ],
+      "stable": true,
+      "transformation": "smart_straight_quotes"
+    },
+    {
+      "id": "mut-05",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "seed": 105,
+      "source_fixture_id": "adv-hold-01",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": true,
+      "transformation": "punctuation_variation"
+    },
+    {
+      "id": "mut-06",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4",
+        "cedar-code-9-section-3"
+      ],
+      "seed": 106,
+      "source_fixture_id": "adv-hold-05",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4",
+        "cedar-code-9-section-3"
+      ],
+      "stable": true,
+      "transformation": "heading_insertion"
+    },
+    {
+      "id": "mut-07",
+      "mutation_suggestion_targets": [
+        "dune-act-5-section-11"
+      ],
+      "seed": 107,
+      "source_fixture_id": "adv-hold-40",
+      "source_suggestion_targets": [
+        "dune-act-5-section-11"
+      ],
+      "stable": true,
+      "transformation": "footnote_relocation"
+    },
+    {
+      "id": "mut-08",
+      "mutation_suggestion_targets": [
+        "regulation-7-section-4"
+      ],
+      "seed": 108,
+      "source_fixture_id": "adv-hold-07",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": false,
+      "transformation": "case_variation"
+    },
+    {
+      "id": "mut-09",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "seed": 109,
+      "source_fixture_id": "adv-hold-07",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": true,
+      "transformation": "section_symbol_variation"
+    },
+    {
+      "id": "mut-10",
+      "mutation_suggestion_targets": [
+        "cedar-code-9-section-3"
+      ],
+      "seed": 110,
+      "source_fixture_id": "adv-hold-08",
+      "source_suggestion_targets": [
+        "cedar-code-9-section-3"
+      ],
+      "stable": true,
+      "transformation": "parenthetical_formatting"
+    },
+    {
+      "id": "mut-11",
+      "mutation_suggestion_targets": [],
+      "seed": 111,
+      "source_fixture_id": "adv-hold-02",
+      "source_suggestion_targets": [],
+      "stable": true,
+      "transformation": "paragraph_boundary"
+    },
+    {
+      "id": "mut-12",
+      "mutation_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "seed": 112,
+      "source_fixture_id": "adv-hold-07",
+      "source_suggestion_targets": [
+        "aster-regulation-7-section-4"
+      ],
+      "stable": true,
+      "transformation": "declared_alias_substitution"
+    }
+  ],
+  "runtime_ms": 256.631,
+  "schema": "solomon.adversarial_dependency_mutation_evaluation.v1"
+}

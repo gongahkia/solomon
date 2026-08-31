@@ -15,6 +15,7 @@ from solomon.operations.models import (
 )
 from solomon.operations.postgres import PostgresOperationStore
 from solomon.operations.store import SQLiteOperationStore
+from solomon.operations.suggestion_projection import SuggestionGenerationProjection
 
 __all__ = [
     "OperationHistoryEntry",
@@ -30,4 +31,5 @@ __all__ = [
     "InjectedOperationFailure",
     "PostgresOperationStore",
     "SQLiteOperationStore",
+    "SuggestionGenerationProjection",
 ]

@@ -46,7 +46,9 @@ class GovernedDependencyAssertionLifecycle:
         authority_sources: SQLiteAuthoritySourceRegistry,
         authority_identifiers: SQLiteAuthorityIdentifierStore,
         on_confirmed_edge: Callable[[DependencyEdge], None],
+        schedule_creation: Callable[[DependencySuggestion], DependencySuggestion],
         schedule_confirmation: Callable[[DependencySuggestion, DependencyAssertionDecisionRequest], DependencyEdge],
+        schedule_transition: Callable[[DependencySuggestion], DependencySuggestion],
     ) -> None:
         self._graph = graph
         self._audit = audit
@@ -56,7 +58,9 @@ class GovernedDependencyAssertionLifecycle:
         self._authority_sources = authority_sources
         self._authority_identifiers = authority_identifiers
         self._on_confirmed_edge = on_confirmed_edge
+        self._schedule_creation = schedule_creation
         self._schedule_confirmation = schedule_confirmation
+        self._schedule_transition = schedule_transition
 
     def create(self, request: DependencyAssertionCreateRequest) -> DependencySuggestion:
         source_item = self._get_item(request.item_id)
@@ -67,7 +71,7 @@ class GovernedDependencyAssertionLifecycle:
         if existing is not None:
             if existing.request_sha256 != request_sha256:
                 raise ConflictError("idempotency key was already used for a different dependency assertion")
-            return existing
+            return existing if existing.creation_audit_id is not None else self._schedule_creation(existing)
         self._require_traced_successor(
             request,
             source_item=source_item,
@@ -120,14 +124,7 @@ class GovernedDependencyAssertionLifecycle:
             if existing.request_sha256 != request_sha256:
                 raise ConflictError("idempotency key was already used for a different dependency assertion") from exc
             return existing
-        entry = self._audit.append(
-            "dependency_assertion_created",
-            _assertion_audit_payload(persisted),
-            attribution=AuditAttribution(actor_id=request.created_by, correlation_id=persisted.audit_correlation_id),
-        )
-        persisted = persisted.model_copy(update={"creation_audit_id": entry.entry_hash})
-        self._graph.update_dependency_suggestion(persisted)
-        return persisted
+        return self._schedule_creation(persisted)
 
     def list_assertions(
         self,
@@ -334,14 +331,7 @@ class GovernedDependencyAssertionLifecycle:
             }
         )
         self._graph.update_dependency_suggestion(updated)
-        entry = self._audit.append(
-            f"dependency_assertion_{decision.value}",
-            _assertion_audit_payload(updated),
-            attribution=AuditAttribution(actor_id=by, correlation_id=updated.audit_correlation_id),
-        )
-        updated = updated.model_copy(update={"review_audit_id": entry.entry_hash})
-        self._graph.update_dependency_suggestion(updated)
-        return updated
+        return self._schedule_transition(updated)
 
     def _get_assertion(self, assertion_id: str) -> DependencySuggestion:
         try:

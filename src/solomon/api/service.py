@@ -1272,6 +1272,9 @@ class SolomonService:
     ) -> list[DependencySuggestion]:
         return self._authority._create_dependency_suggestions(item, use_llm=use_llm, router=router)
 
+    def schedule_dependency_suggestions(self, item: KnowledgeItem) -> OperationRecord:
+        return self._authority.record_suggestion_generation(item)
+
     def _store_state_sha256(self) -> str:
         items = []
         for item in sorted(self.store.get_many(), key=lambda current: current.id):

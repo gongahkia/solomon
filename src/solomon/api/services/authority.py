@@ -58,6 +58,7 @@ from solomon.graph.suggestions import (
     suggest_authority_dependencies_with_llm,
 )
 from solomon.graph.visualization import GraphFormat, dependency_graph_view, render_dependency_graph
+from solomon.operations.assertion_audit_projection import AssertionAuditProjection
 from solomon.operations.assertion_projection import AssertionConfirmationProjection
 from solomon.operations.authority_projection import AuthorityChangeProjection
 from solomon.operations.evidence_projection import EvidenceIngestionProjection
@@ -65,6 +66,7 @@ from solomon.operations.execution import OperationRequiresIntervention, Operatio
 from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.operations.reverification_projection import SourceRevisionReverificationProjection
+from solomon.operations.suggestion_projection import SuggestionGenerationProjection
 from solomon.orchestrator.models import ModelRouter
 from solomon.sources.store import SourceDocumentNotFoundError
 
@@ -90,7 +92,9 @@ class AuthorityService(ServiceDelegate):
             authority_sources=self.authority_sources,
             authority_identifiers=self.authority_identifiers,
             on_confirmed_edge=self._detect_for_edge,
+            schedule_creation=self.record_assertion_creation,
             schedule_confirmation=self._schedule_assertion_confirmation,
+            schedule_transition=self.record_assertion_transition,
         )
 
     def set_operation_failure_injector(self, injector: OperationFailureInjector) -> None:
@@ -196,10 +200,22 @@ class AuthorityService(ServiceDelegate):
         return result
 
     def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
+        if operation.operation_type in {OperationType.ASSERTION_CREATE, OperationType.ASSERTION_TRANSITION}:
+            return AssertionAuditProjection(
+                lifecycle=self._assertion_lifecycle,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
         if operation.operation_type is OperationType.EVIDENCE_INGESTION:
             return EvidenceIngestionProjection(
                 document_store=self.document_store,
                 audit=self.audit,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
+        if operation.operation_type is OperationType.SUGGESTION_GENERATION:
+            return SuggestionGenerationProjection(
+                authority_service=self,
                 operation_store=self.operation_store,
                 failure_injector=self._failure_injector,
             ).apply(operation, worker_id)
@@ -521,6 +537,66 @@ class AuthorityService(ServiceDelegate):
                 break
         raise BadRequestError("source document audit projection is durably queued for retry")
 
+    def record_suggestion_generation(self, item: KnowledgeItem) -> OperationRecord:
+        """Durably schedule deterministic, review-only suggestion generation for one knowledge item."""
+
+        operation, _ = self._create_suggestion_generation_operation(item)
+        self._failure_injector.hit("after_suggestion_authoritative_write_before_schedule")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                return cast(OperationRecord, current)
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("dependency suggestion generation requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:suggestion-generation")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("dependency suggestion generation is durably queued for retry")
+
+    def record_assertion_creation(self, assertion: DependencySuggestion) -> DependencySuggestion:
+        self._record_assertion_audit_operation(assertion, operation_type=OperationType.ASSERTION_CREATE)
+        return self._assertion_lifecycle.get(
+            assertion.id,
+            matter_id=assertion.matter_id,
+            client_id=assertion.client_id,
+        )
+
+    def record_assertion_transition(self, assertion: DependencySuggestion) -> DependencySuggestion:
+        self._record_assertion_audit_operation(assertion, operation_type=OperationType.ASSERTION_TRANSITION)
+        return self._assertion_lifecycle.get(
+            assertion.id,
+            matter_id=assertion.matter_id,
+            client_id=assertion.client_id,
+        )
+
+    def _record_assertion_audit_operation(
+        self,
+        assertion: DependencySuggestion,
+        *,
+        operation_type: OperationType,
+    ) -> OperationRecord:
+        operation, _ = cast(
+            tuple[OperationRecord, bool],
+            self.operation_store.create(
+                self._assertion_audit_record(assertion, operation_type=operation_type)
+            ),
+        )
+        self._failure_injector.hit("after_assertion_audit_authoritative_write_before_schedule")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                return cast(OperationRecord, current)
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("dependency assertion audit projection requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:assertion-audit")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("dependency assertion audit projection is durably queued for retry")
+
     def mark_dependency_assertions_for_source_revision(
         self,
         *,
@@ -595,6 +671,43 @@ class AuthorityService(ServiceDelegate):
                 created += int(scheduled)
         return created
 
+    def reconcile_suggestion_generations(self) -> int:
+        """Discover knowledge items written before their review-only suggestion operation was created."""
+
+        known_items = {
+            operation.target_resource_id
+            for operation in self.operation_store.list(limit=10_000)
+            if operation.operation_type is OperationType.SUGGESTION_GENERATION
+        }
+        created = 0
+        for item in self.store.get_many():
+            if item.id in known_items:
+                continue
+            _, scheduled = self._create_suggestion_generation_operation(item)
+            created += int(scheduled)
+        return created
+
+    def reconcile_assertion_audits(self) -> int:
+        """Schedule missing creation or non-confirming assertion audit projections after interruption."""
+
+        created = 0
+        for assertion in self._assertion_lifecycle.list_assertions(limit=10_000):
+            if assertion.creation_audit_id is None:
+                _, scheduled = self.operation_store.create(
+                    self._assertion_audit_record(assertion, operation_type=OperationType.ASSERTION_CREATE)
+                )
+                created += int(scheduled)
+            if assertion.decision in {
+                SuggestionDecision.REJECTED,
+                SuggestionDecision.DEFERRED,
+                SuggestionDecision.WITHDRAWN,
+            }:
+                _, scheduled = self.operation_store.create(
+                    self._assertion_audit_record(assertion, operation_type=OperationType.ASSERTION_TRANSITION)
+                )
+                created += int(scheduled)
+        return created
+
     def _create_evidence_ingestion_operation(
         self,
         document: Any,
@@ -619,6 +732,55 @@ class AuthorityService(ServiceDelegate):
                     payload={"candidate_count": candidate_count},
                 )
             ),
+        )
+
+    def _create_suggestion_generation_operation(self, item: KnowledgeItem) -> tuple[OperationRecord, bool]:
+        return cast(
+            tuple[OperationRecord, bool],
+            self.operation_store.create(
+                OperationRecord(
+                    operation_type=OperationType.SUGGESTION_GENERATION,
+                    scope=OperationScope(
+                        tenant_id=self.tenant_id,
+                        matter_id=item.matter_id,
+                        client_id=item.client_id,
+                    ),
+                    actor_id="system:suggestion-generation",
+                    authorization_context={"service_access": "curate", "actor_type": "system"},
+                    correlation_id=f"knowledge_item:{item.id}",
+                    causation_id=item.id,
+                    idempotency_key=f"suggestion-generation:{item.id}",
+                    target_resource_id=item.id,
+                    requested_transition="suggestions_generated",
+                )
+            ),
+        )
+
+    def _assertion_audit_record(
+        self,
+        assertion: DependencySuggestion,
+        *,
+        operation_type: OperationType,
+    ) -> OperationRecord:
+        transition = "created" if operation_type is OperationType.ASSERTION_CREATE else assertion.decision.value
+        return OperationRecord(
+            operation_type=operation_type,
+            scope=OperationScope(
+                tenant_id=self.tenant_id,
+                matter_id=assertion.matter_id,
+                client_id=assertion.client_id,
+            ),
+            actor_id=assertion.decided_by or assertion.created_by or "system:assertion-audit",
+            authorization_context={"service_access": "review", "actor_type": "assertion"},
+            correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
+            causation_id=assertion.id,
+            idempotency_key=f"{operation_type.value}:{assertion.id}:{assertion.state_version}",
+            source_resource_id=assertion.source_document_id,
+            source_version=assertion.source_document_version,
+            target_resource_id=assertion.suggested_edge.target_id,
+            assertion_id=assertion.id,
+            requested_transition=transition,
+            payload={"expected_state_version": assertion.state_version},
         )
 
     def _create_source_revision_operation(

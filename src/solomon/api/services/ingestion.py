@@ -87,7 +87,7 @@ class IngestionService(ServiceDelegate):
                     correlation_id=f"knowledge_item:{item.id}",
                 ),
             )
-        self._create_dependency_suggestions(item)
+        self._context.schedule_dependency_suggestions(item)
         return item
 
     def contest(self, item_id: str, request: ContestRequest) -> ContestResponse:

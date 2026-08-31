@@ -61,6 +61,8 @@ class ServiceContext(Protocol):
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]: ...
 
+    def schedule_dependency_suggestions(self, item: KnowledgeItem) -> Any: ...
+
     def defer_dependency_suggestion(
         self,
         suggestion_id: str,

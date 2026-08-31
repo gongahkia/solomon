@@ -277,6 +277,57 @@ def test_governed_confirmation_resumes_each_projection_checkpoint_once(tmp_path:
     ]
 
 
+def test_assertion_audit_projections_resume_without_creating_an_unreviewed_edge(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_assertion_audit_authoritative_write_before_schedule"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_assertion_audit_authoritative_write_before_schedule"):
+        service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    assertion = service.dependency_assertions(matter_id="matter-a", client_id="client-a")[0]
+    creation_operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type is OperationType.ASSERTION_CREATE and current.assertion_id == assertion.id
+    )
+    assert creation_operation.status is OperationStatus.QUEUED
+    assert assertion.creation_audit_id is None
+    assert service.graph.get_dependencies(item_id) == []
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    recovered_creation = service._authority.run_operation_once(worker_id="assertion-audit-restarted")
+    assert recovered_creation is not None
+    assert recovered_creation.status is OperationStatus.COMPLETED
+    assert service.get_dependency_assertion(assertion.id).creation_audit_id is not None
+
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_assertion_audit_authoritative_write_before_schedule"])
+    )
+    with pytest.raises(InjectedOperationFailure, match="after_assertion_audit_authoritative_write_before_schedule"):
+        service.decide_dependency_assertion(
+            assertion.id,
+            DependencyAssertionDecisionRequest(by="reviewer-a", decision="rejected", reason="not adopted"),
+        )
+    rejected = service.get_dependency_assertion(assertion.id)
+    transition_operation = next(
+        current
+        for current in service.operation_store.list()
+        if current.operation_type is OperationType.ASSERTION_TRANSITION and current.assertion_id == assertion.id
+    )
+    assert rejected.decision is SuggestionDecision.REJECTED
+    assert transition_operation.status is OperationStatus.QUEUED
+    assert service.graph.get_dependencies(item_id) == []
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    recovered_transition = service._authority.run_operation_once(worker_id="assertion-transition-restarted")
+    assert recovered_transition is not None
+    assert recovered_transition.status is OperationStatus.COMPLETED
+    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.REJECTED
+    assert service.graph.get_dependencies(item_id) == []
+
+
 def test_source_revision_interruption_resumes_from_immutable_document_lineage(tmp_path: Path) -> None:
     service, document_id, item_id = _source_backed_service(tmp_path)
     service.register_authority_source(_authority_source())

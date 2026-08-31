@@ -31,6 +31,7 @@ from solomon.api.service import (
 from solomon.backup import BackupError, create_encrypted_backup, restore_encrypted_backup, run_recovery_drill
 from solomon.boundary.solomon import SolomonBoundary, probe_boundary_client
 from solomon.config import (
+    Settings,
     boundary_policy_from_settings,
     credence_policy_from_settings,
     get_settings,
@@ -68,6 +69,7 @@ consistency_app = typer.Typer(
     help="Inspect and conservatively repair durable operation projections.",
     epilog=_example("uv run solomon consistency check --matter-id matter-a --client-id client-a"),
 )
+DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(console_app, name="console")
 app.add_typer(consistency_app, name="consistency")
@@ -125,7 +127,8 @@ def migrate() -> None:
     """Apply durable storage migrations and exit."""
     settings = get_settings()
     _ = _service()
-    backend = "postgres" if settings.database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
+    database_url = _service_database_url(settings)
+    backend = "postgres" if database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
     _print_json({"status": "applied", "backend": backend}, sort_keys=True)
 
 
@@ -305,7 +308,7 @@ def _service(*, jurisdiction: str | None = None) -> SolomonService:
     return SolomonService(
         data_dir=settings.data_dir,
         journal_dir=settings.journal_dir,
-        database_url=settings.database_url,
+        database_url=_service_database_url(settings),
         attestation_key=settings.verification_attestation_key,
         verification_policy=verification_policy_from_settings(settings),
         verification_policy_version=settings.verification_policy_version,
@@ -320,6 +323,14 @@ def _service(*, jurisdiction: str | None = None) -> SolomonService:
     )
 
 
+def _service_database_url(settings: Settings) -> str:
+    """Keep the implicit SQLite database below the configured data directory."""
+
+    if settings.database_url != DEFAULT_DATABASE_URL:
+        return settings.database_url
+    return str(settings.data_dir / "solomon.sqlite3")
+
+
 def _backup_passphrase() -> str:
     passphrase = os.environ.get("SOLOMON_BACKUP_PASSPHRASE")
     if not passphrase:
@@ -328,7 +339,7 @@ def _backup_passphrase() -> str:
 
 
 def _require_sqlite_backup_target() -> None:
-    database_url = get_settings().database_url
+    database_url = _service_database_url(get_settings())
     if database_url.startswith(("postgres://", "postgresql://")):
         raise typer.BadParameter("backup commands currently support SQLite deployments only")
 

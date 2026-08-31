@@ -64,6 +64,14 @@ def run_pending_operations(
     except Exception:
         failed += 1
     try:
+        service._authority.reconcile_suggestion_generations()
+    except Exception:
+        failed += 1
+    try:
+        service._authority.reconcile_assertion_audits()
+    except Exception:
+        failed += 1
+    try:
         service._authority.reconcile_source_revisions()
     except Exception:
         failed += 1

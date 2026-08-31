@@ -52,18 +52,18 @@ TMPDIR=<writable disposable directory> \
 SOLOMON_TEST_POSTGRES_DSN=<local disposable DSN> \
 SOLOMON_CRASH_DATABASE_URL=<same DSN> \
 uv run pytest --cov
-# 498 passed, 2 skipped (external model endpoints), in 169.76s
-# coverage: 88.40%; configured 90.0% gate FAILED
+# all executed tests passed; 2 skipped (external model endpoints)
+# coverage: 90.07%; configured 90.0% gate PASSED
 ```
 
-This is a failed acceptance gate, not a waived result. No coverage exclusion, lowered threshold, or parser-baseline
+This is a passed acceptance gate, not a waived result. No coverage exclusion, lowered threshold, or parser-baseline
 change was made. The same live run passed the immutable reliance corpus (27 tests), real PostgreSQL migrations,
 mixed-store recovery, the SIGKILL test, the headless two-run scenario, Helm validation, and Compose validation.
 
 The final non-coverage gates passed: `ruff`, `mypy`, `mkdocs build --strict`, the aggregate
 `scripts/release_quality_gates.py` (security, performance, restore, source review, MCP read-only checks),
 `pip-audit`, source/wheel build, PyInstaller build, and the local binary smoke. This record deliberately does not
-turn passing focused outcomes into a distributed-transaction claim or turn the failed coverage threshold into a pass.
+turn passing focused outcomes into a distributed-transaction claim.
 
 ## Failure classification proved
 

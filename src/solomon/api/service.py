@@ -86,6 +86,7 @@ from solomon.currency.report import (
     render_currency_report_pdf,
 )
 from solomon.currency.verification import verification_history
+from solomon.deployment import DeploymentError, MaintenanceGate
 from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, SolomonError
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
@@ -301,10 +302,20 @@ class SolomonService:
                 span_name,
                 attributes={"solomon.service.operation": name, "solomon.service.access": access},
             ):
+                if access != "read":
+                    self._assert_mutation_permitted()
                 self._authorize_service_operation(name, access)
                 return value(*args, **kwargs)
 
         return authorized
+
+    def _assert_mutation_permitted(self) -> None:
+        try:
+            maintenance = MaintenanceGate(self.document_store.path.parent).active()
+        except DeploymentError as exc:
+            raise PolicyRefusalError("deployment maintenance state requires operator intervention") from exc
+        if maintenance is not None:
+            raise PolicyRefusalError("deployment is in maintenance; retry after the operation is released")
 
     @contextmanager
     def authorized_as(self, principal: AuthPrincipal, correlation_id: str) -> Iterator[None]:

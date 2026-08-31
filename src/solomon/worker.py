@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from solomon.api.schemas import SolomonModel
 from solomon.api.service import SolomonService
+from solomon.deployment import DeploymentError, MaintenanceGate
 from solomon.errors import SolomonError
 from solomon.operations.models import OperationStatus
 from solomon.sources.models import DocumentSourceKind
@@ -58,6 +59,11 @@ def run_pending_operations(
 
     if not worker_id or limit < 1:
         raise ValueError("worker ID and positive limit are required")
+    try:
+        if MaintenanceGate(service.document_store.path.parent).active() is not None:
+            return OperationWorkerBatch()
+    except DeploymentError:
+        return OperationWorkerBatch(failed=1)
     attempted = completed = retrying = terminal = failed = 0
     try:
         service._reconcile_authority_events(limit=limit)

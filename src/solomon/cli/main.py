@@ -44,6 +44,13 @@ from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
+from solomon.deployment import (
+    DeploymentError,
+    MaintenanceGate,
+    compatibility_report,
+    deployment_preflight,
+    initialize_deployment,
+)
 from solomon.graph.models import EdgeConfidence, EdgeType
 from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
@@ -70,10 +77,15 @@ consistency_app = typer.Typer(
     help="Inspect and conservatively repair durable operation projections.",
     epilog=_example("uv run solomon consistency check --matter-id matter-a --client-id client-a"),
 )
+deployment_app = typer.Typer(
+    help="Inspect and control the supported deployment layout.",
+    epilog=_example("uv run solomon deployment preflight --require-initialized"),
+)
 DEFAULT_DATABASE_URL = str(Settings.model_fields["database_url"].default)
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(console_app, name="console")
 app.add_typer(consistency_app, name="consistency")
+app.add_typer(deployment_app, name="deployment")
 console = Console()
 
 
@@ -369,6 +381,99 @@ def _service_database_url(settings: Settings) -> str:
     if settings.database_url != DEFAULT_DATABASE_URL:
         return settings.database_url
     return str(settings.data_dir / "solomon.sqlite3")
+
+
+@deployment_app.command("preflight", epilog=_example("uv run solomon deployment preflight --require-initialized"))
+def deployment_preflight_command(
+    require_initialized: Annotated[
+        bool, typer.Option("--require-initialized", help="Fail readiness until deployment init has completed.")
+    ] = False,
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")] = "json",
+) -> None:
+    """Read-only validation of durable local state and the configured database backend."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    settings = get_settings()
+    _print_json(
+        deployment_preflight(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            database_url=_service_database_url(settings),
+            require_initialized=require_initialized,
+        ).model_dump(mode="json"),
+        sort_keys=True,
+    )
+
+
+@deployment_app.command("init", epilog=_example("uv run solomon deployment init --owner release-operator"))
+def deployment_init(
+    owner: Annotated[
+        str,
+        typer.Option("--owner", min=1, help="Operator identity recorded in the audit journal."),
+    ] = "cli",
+) -> None:
+    """Create the immutable local deployment layout marker if it is absent."""
+
+    settings = get_settings()
+    try:
+        metadata, created = initialize_deployment(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            database_url=_service_database_url(settings),
+            owner=owner,
+        )
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json({"created": created, "metadata": metadata.model_dump(mode="json")}, sort_keys=True)
+
+
+@deployment_app.command("compatibility", epilog=_example("uv run solomon deployment compatibility"))
+def deployment_compatibility() -> None:
+    """Report startup/write/rollback compatibility for the recorded local layout."""
+
+    settings = get_settings()
+    try:
+        report = compatibility_report(data_dir=settings.data_dir, database_url=_service_database_url(settings))
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(report.model_dump(mode="json"), sort_keys=True)
+
+
+@deployment_app.command("maintenance", epilog=_example("uv run solomon deployment maintenance --format json"))
+def deployment_maintenance(
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")] = "json",
+) -> None:
+    """Read the fail-closed maintenance state without changing it."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    try:
+        active = MaintenanceGate(get_settings().data_dir).active()
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json(
+        {"active": active is not None, "maintenance": active.model_dump(mode="json") if active else None},
+        sort_keys=True,
+    )
+
+
+@deployment_app.command(
+    "release-maintenance",
+    epilog=_example("uv run solomon deployment release-maintenance --operation-id <persisted-operation-id>"),
+)
+def release_maintenance(
+    operation_id: Annotated[
+        str, typer.Option("--operation-id", min=1, help="Exact persisted maintenance operation identifier.")
+    ],
+) -> None:
+    """Explicitly release abandoned maintenance after the operator has verified no owner remains."""
+
+    try:
+        MaintenanceGate(get_settings().data_dir).release(operation_id)
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_json({"released": True, "operation_id": operation_id}, sort_keys=True)
 
 
 def _backup_passphrase() -> str:

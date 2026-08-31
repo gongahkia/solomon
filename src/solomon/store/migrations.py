@@ -81,6 +81,10 @@ def apply_sqlite_migrations(connection: Any, migrations: Sequence[SchemaMigratio
 
 def apply_postgres_migrations(execute: PostgresExecute, migrations: Sequence[SchemaMigration]) -> list[SchemaMigration]:
     ordered = _validate_migrations(migrations)
+    if ordered:
+        # Callers run this inside a PostgreSQL transaction, making the advisory
+        # lock backend-scoped and automatically released on rollback/commit.
+        execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"solomon:migration:{ordered[0].scope}",))
     execute(
         """
         CREATE TABLE IF NOT EXISTS schema_migrations (

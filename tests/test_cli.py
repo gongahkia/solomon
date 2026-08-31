@@ -199,6 +199,11 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         ["backup"],
         ["restore"],
         ["recovery-drill"],
+        ["deployment", "preflight"],
+        ["deployment", "init"],
+        ["deployment", "compatibility"],
+        ["deployment", "maintenance"],
+        ["deployment", "release-maintenance"],
         ["mcp", "serve"],
         ["console", "serve"],
     ]
@@ -211,6 +216,22 @@ def test_cli_help_includes_examples_for_visible_commands() -> None:
         result = runner.invoke(app, [*command, "--help"])
         assert result.exit_code == 0, command
         assert "Example:" in result.output, command
+
+
+def test_cli_deployment_commands_emit_stable_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+
+    initialized = runner.invoke(app, ["deployment", "init", "--owner", "operator-a"])
+    preflight = runner.invoke(app, ["deployment", "preflight", "--require-initialized", "--format", "json"])
+    compatibility = runner.invoke(app, ["deployment", "compatibility"])
+    maintenance = runner.invoke(app, ["deployment", "maintenance", "--format", "json"])
+
+    assert initialized.exit_code == preflight.exit_code == compatibility.exit_code == maintenance.exit_code == 0
+    assert json.loads(initialized.output)["created"] is True
+    assert json.loads(preflight.output)["ready"] is True
+    assert json.loads(compatibility.output)["writable"] is True
+    assert json.loads(maintenance.output) == {"active": False, "maintenance": None}
 
 
 def test_cli_backup_restore_and_recovery_drill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

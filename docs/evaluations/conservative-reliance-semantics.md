@@ -96,6 +96,17 @@ remains human-only, and the revert leaves no new automatic edge path. Existing e
 adversarial scenarios remain the service-level lifecycle evidence. A new affirmative scenario is intentionally not
 retained because its parser prerequisite failed the locked safety gate.
 
+## Post-revert verification
+
+The retained state was verified after `6164c9e`: the complete suite passed with `442 passed, 3 skipped` and 90.21%
+coverage. The skipped tests are intentionally opt-in local-model, remote ZDR, and PostgreSQL tests; PostgreSQL was
+then enabled separately against a local pgvector container and passed 6/6 migration/live-integration tests. Ruff,
+mypy, strict MkDocs, Bandit, pip-audit, license/file-length checks, Helm lint/template/package, production and server
+Compose configuration, wheel/sdist build, PyInstaller plus local-binary smoke, TypeScript typecheck/build/tests,
+performance/currency/dependency-propagation benchmarks, and release-quality gates all passed. The initial binary and
+benchmark invocation failed only because the host default temporary directory was exhausted; each passed on rerun
+with the dedicated workspace temporary directory.
+
 ## Stop decision and one next milestone
 
 The protocol’s stop condition applies: do not expand this parser again or tune it to either holdout. The retained

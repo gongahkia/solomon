@@ -11,12 +11,13 @@ import sqlite3
 import subprocess  # nosec B404
 import tarfile
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import parse_qs, unquote, urlparse
+from uuid import uuid4
 
 from cryptography.fernet import InvalidToken
 from pydantic import Field, ValidationError
@@ -74,12 +75,27 @@ class ServerBackupRecord(SolomonModel):
 
     schema_id: Literal["solomon.server_backup_record.v1"] = "solomon.server_backup_record.v1"
     deployment_id: str = Field(min_length=1)
+    backup_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
     profile: Literal["mixed-postgresql-sqlite"] = "mixed-postgresql-sqlite"
     created_at: datetime
     app_version: str = Field(min_length=1)
     maintenance_operation_id: str = Field(min_length=1)
     database_url: str = Field(min_length=1)
     components: tuple[str, ...]
+    scope_inclusion: Literal["all-deployment-scopes"] = "all-deployment-scopes"
+    postgres_schema_versions: dict[str, int] = Field(default_factory=dict)
+    operation_high_water_mark: str | None = None
+    sqlite_databases: tuple[BackupFile, ...] = ()
+    audit_entries: int = Field(default=0, ge=0)
+    audit_sha256: str | None = None
+    quiescence_method: Literal["maintenance-gate"] = "maintenance-gate"
+    excluded_components: tuple[str, ...] = (
+        "runtime-credentials",
+        "environment-files",
+        "content-encryption-keys",
+        "private-deployment-configuration",
+    )
+    tool_versions: dict[str, str] = Field(default_factory=dict)
     state: Literal["complete"] = "complete"
 
 
@@ -132,6 +148,14 @@ class ServerRestorePlan(SolomonModel):
 class ServerRestoreResult(RestoreResult):
     deployment_id: str
     maintenance_operation_id: str
+
+
+class PostgresBackupMetadata(SolomonModel):
+    """Read-only PostgreSQL checkpoint metadata captured by the server CLI."""
+
+    schema_versions: dict[str, int] = Field(default_factory=dict)
+    operation_high_water_mark: str | None = None
+    pg_dump_version: str | None = None
 
 
 def backup_manifest_path(archive: Path | str) -> Path:
@@ -261,6 +285,7 @@ def create_server_encrypted_backup(
     destination: Path | str,
     passphrase: str,
     dump_postgres: Callable[[Path], None],
+    postgres_metadata: Callable[[], PostgresBackupMetadata] | None = None,
     owner: str = "cli",
 ) -> ServerBackupResult:
     """Create a coordinated checkpoint for the supported mixed-store profile.
@@ -314,6 +339,14 @@ def create_server_encrypted_backup(
             dump_postgres(dump_path)
             if not dump_path.is_file() or dump_path.is_symlink() or dump_path.stat().st_size == 0:
                 raise BackupError("PostgreSQL dump was not created as a non-empty regular file")
+            metadata_snapshot = postgres_metadata() if postgres_metadata is not None else PostgresBackupMetadata()
+            staged_journal = staged / "journal" / "journal.jsonl"
+            audit_verification = AuditJournal(staged_journal).verify()
+            if not audit_verification.ok:
+                raise BackupError("staged audit journal failed verification")
+            sqlite_databases = tuple(
+                _backup_file(staged, path) for path in sorted((staged / "data").rglob("*.sqlite3"))
+            )
             record = ServerBackupRecord(
                 deployment_id=metadata.deployment_id,
                 created_at=now_utc(),
@@ -321,6 +354,15 @@ def create_server_encrypted_backup(
                 maintenance_operation_id=maintenance.operation_id,
                 database_url=redact_database_url(database_url),
                 components=metadata.components,
+                postgres_schema_versions=metadata_snapshot.schema_versions,
+                operation_high_water_mark=metadata_snapshot.operation_high_water_mark,
+                sqlite_databases=sqlite_databases,
+                audit_entries=audit_verification.entries,
+                audit_sha256=_sha256_file(staged_journal),
+                tool_versions={
+                    "solomon": __version__,
+                    **({"pg_dump": metadata_snapshot.pg_dump_version} if metadata_snapshot.pg_dump_version else {}),
+                },
             )
             (staged / SERVER_BACKUP_RECORD_NAME).write_text(record.model_dump_json(indent=2), encoding="utf-8")
             archive = staging / "backup.tar"
@@ -541,6 +583,54 @@ def postgres_restore_runner(database_url: str) -> Callable[[Path], None]:
             raise BackupError("PostgreSQL logical restore failed")
 
     return restore
+
+
+def postgres_backup_metadata(database_url: str) -> Callable[[], PostgresBackupMetadata]:
+    """Read schema and operation checkpoint metadata without changing PostgreSQL state."""
+
+    def snapshot() -> PostgresBackupMetadata:
+        try:
+            from solomon.store.postgres.connection import default_connect
+
+            connection = default_connect(database_url)
+            try:
+                schema_rows = connection.execute(
+                    "SELECT scope, MAX(version) AS version FROM schema_migrations GROUP BY scope ORDER BY scope"
+                ).fetchall()
+                operation_row = connection.execute(
+                    "SELECT operation_id FROM knowledge_operations ORDER BY created_at DESC, operation_id DESC LIMIT 1"
+                ).fetchone()
+            finally:
+                connection.close()
+        except Exception as exc:
+            raise BackupError("PostgreSQL schema checkpoint cannot be inspected") from exc
+        executable = shutil.which("pg_dump")
+        if executable is None:
+            raise BackupError("pg_dump is required for a PostgreSQL backup")
+        result = subprocess.run(  # noqa: S603  # nosec B603
+            [executable, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            raise BackupError("pg_dump version cannot be inspected")
+        return PostgresBackupMetadata(
+            schema_versions={
+                str(_postgres_row_value(row, "scope", 0)): int(_postgres_row_value(row, "version", 1))
+                for row in schema_rows
+            },
+            operation_high_water_mark=(
+                str(_postgres_row_value(operation_row, "operation_id", 0)) if operation_row is not None else None
+            ),
+            pg_dump_version=result.stdout.strip(),
+        )
+
+    return snapshot
+
+
+def _postgres_row_value(row: Any, name: str, index: int) -> Any:
+    return row[name] if isinstance(row, Mapping) else row[index]
 
 
 @dataclass(frozen=True)

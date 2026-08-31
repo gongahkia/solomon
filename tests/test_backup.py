@@ -18,6 +18,7 @@ from solomon.backup import (
     create_server_encrypted_backup,
     inspect_server_encrypted_backup,
     plan_server_restore,
+    postgres_backup_metadata,
     postgres_dump_runner,
     postgres_restore_runner,
     restore_encrypted_backup,
@@ -259,6 +260,11 @@ def test_server_backup_and_guarded_restore_cover_postgres_and_local_state(tmp_pa
 
     assert created.deployment_id == inspected.deployment_id == restored.deployment_id == metadata.deployment_id
     assert created.postgres_dump_bytes == len(b"deterministic-postgres-dump")
+    assert inspected.scope_inclusion == "all-deployment-scopes"
+    assert inspected.sqlite_databases
+    assert inspected.audit_entries >= 1
+    assert inspected.audit_sha256 is not None
+    assert inspected.quiescence_method == "maintenance-gate"
     assert restored_dumps == [b"deterministic-postgres-dump"]
     assert (tmp_path / "server-restored" / "data" / "solomon.sqlite3").is_file()
     assert (tmp_path / "server-restored" / "data" / ".solomon-maintenance.json").exists() is False
@@ -362,6 +368,48 @@ def test_postgres_client_callbacks_keep_password_out_of_arguments(
     assert all("do-not-leak" not in " ".join(command) for command, _environment in calls)
     assert all(environment["PGPASSWORD"] == "do-not-leak" for _command, environment in calls)
     assert all(environment["PGSSLMODE"] == "require" for _command, environment in calls)
+
+
+def test_postgres_backup_metadata_records_schema_operation_checkpoint_and_tool_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Cursor:
+        def __init__(self, rows: list[object]) -> None:
+            self.rows = rows
+
+        def fetchall(self) -> list[object]:
+            return self.rows
+
+        def fetchone(self) -> object | None:
+            return self.rows[0] if self.rows else None
+
+    class Connection:
+        def execute(self, query: str) -> Cursor:
+            if "schema_migrations" in query:
+                return Cursor(
+                    [
+                        {"scope": "operation-store", "version": 2},
+                        {"scope": "knowledge-store", "version": 1},
+                    ]
+                )
+            return Cursor([{"operation_id": "operation-high-water"}])
+
+        def close(self) -> None:
+            return None
+
+    class Completed:
+        returncode = 0
+        stdout = "pg_dump (PostgreSQL) 16.2\n"
+
+    monkeypatch.setattr("solomon.store.postgres.connection.default_connect", lambda _url: Connection())
+    monkeypatch.setattr("solomon.backup.shutil.which", lambda _name: "/usr/bin/pg_dump")
+    monkeypatch.setattr("solomon.backup.subprocess.run", lambda *_args, **_kwargs: Completed())
+
+    metadata = postgres_backup_metadata("postgresql://solomon:secret@db.example/solomon")()
+
+    assert metadata.schema_versions == {"knowledge-store": 1, "operation-store": 2}
+    assert metadata.operation_high_water_mark == "operation-high-water"
+    assert metadata.pg_dump_version == "pg_dump (PostgreSQL) 16.2"
 
 
 def test_postgres_backup_restore_callbacks_refuse_missing_tools_failures_and_unsafe_input(

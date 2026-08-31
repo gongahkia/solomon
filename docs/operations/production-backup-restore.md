@@ -50,7 +50,10 @@ digests, deployment identity, maintenance operation ID, and archive metadata. Th
 are not written to arguments, plan JSON, or the manifest. The backup is only complete after both archive and sidecar
 are published and `deployment_backup_completed` is appended to the live audit journal. The copied audit snapshot
 contains the start event; the live journal then records completion. This intentional ordering is not a missing audit
-record in the archive.
+record in the archive. The encrypted archive record separately names a backup ID, included deployment scopes,
+PostgreSQL schema versions and operation high-water mark, SQLite snapshot identities, audit entry count and digest,
+quiescence method, excluded runtime-secret categories, and the `pg_dump`/Solomon tool versions. `backup-inspect`
+validates the archive before presenting that record.
 
 There is no incremental backup, remote-object-store copy, retention scheduler, external RPO, external RTO, or
 managed PostgreSQL physical-backup claim. Copy the archive and sidecar off the host using the organisation's approved

@@ -36,6 +36,7 @@ from solomon.backup import (
     create_server_encrypted_backup,
     inspect_server_encrypted_backup,
     plan_server_restore,
+    postgres_backup_metadata,
     postgres_dump_runner,
     postgres_restore_runner,
     restore_encrypted_backup,
@@ -693,6 +694,7 @@ def deployment_backup(destination: Annotated[Path, typer.Argument(help="New encr
             destination=destination,
             passphrase=_backup_passphrase(),
             dump_postgres=postgres_dump_runner(database_url),
+            postgres_metadata=postgres_backup_metadata(database_url),
         )
     except (BackupError, DeploymentError) as exc:
         raise typer.BadParameter(str(exc)) from exc

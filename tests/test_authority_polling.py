@@ -5,11 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from solomon.api.service import DependencyRequest, IngestRequest, SolomonService
 from solomon.authority_polling import AuthorityPollRetryPolicy
 from solomon.contracts import AdapterHealth, AuthorityPollSchedule, AuthoritySource, AuthoritySourceKind, SyncCheckpoint
 from solomon.currency.models import CurrencyState, KnowledgeKind, SourceKind, VerifiedState
 from solomon.graph.models import EdgeType
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
+from solomon.operations.models import OperationStatus, OperationType
+from solomon.worker import run_pending_operations
 from solomon.workflow.models import AuthorityChangeEvent
 
 POLL_AT = datetime(2026, 7, 13, 8, 30, tzinfo=timezone.utc)
@@ -169,3 +174,41 @@ def test_authority_polling_dead_letters_bounded_transient_failures_and_allows_ma
 
     assert recovered.results[0].state == "succeeded"
     assert service.authority_poll_dead_letters() == []
+
+
+def test_worker_reconciles_authority_event_written_before_propagation_operation(tmp_path: Path) -> None:
+    service, item_id = _service_with_dependent_position(tmp_path)
+    event = AuthorityChangeEvent(
+        source_id="official-gazette",
+        idempotency_key="regulation-r-12:v2",
+        authority_id="regulation-r-12",
+        previous_version="v1",
+        new_version="v2",
+        changed_at=POLL_AT,
+    )
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_authority_event_authoritative_write_before_schedule"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_authority_event_authoritative_write_before_schedule"):
+        service._register_polled_authority_event(event)
+
+    persisted = service.workflow_store.get_authority_event(event.id)
+    assert persisted.id == event.id
+    assert service.workflow_store.authority_event_processed(event.id) is False
+    assert not any(
+        operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION and operation.causation_id == event.id
+        for operation in service.operation_store.list()
+    )
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    run_pending_operations(service, worker_id="authority-event-reconciler")
+
+    operation = next(
+        operation
+        for operation in service.operation_store.list()
+        if operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION and operation.causation_id == event.id
+    )
+    assert operation.status is OperationStatus.COMPLETED
+    assert service.workflow_store.authority_event_processed(event.id) is True
+    assert service.store.get_item(item_id).currency_state is CurrencyState.STALE_PENDING_REVERIFICATION

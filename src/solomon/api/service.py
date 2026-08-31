@@ -702,7 +702,9 @@ class SolomonService:
             document_id=document.id,
             candidate_count=len(candidates),
         )
+        self._authority._failure_injector.hit("after_source_document_authoritative_write_before_schedule")
         self._authority.record_source_document_ingestion(document, candidate_count=len(candidates))
+        self._authority._failure_injector.hit("after_source_revision_authoritative_write_before_schedule")
         self._authority.mark_dependency_assertions_for_source_revision(
             previous_document_id=document.previous_version_id,
             replacement_document_id=document.id,
@@ -926,6 +928,7 @@ class SolomonService:
                 "review_tasks": existing_tasks,
             }
         try:
+            self._authority._failure_injector.hit("after_authority_event_authoritative_write_before_schedule")
             impact = self._authority.register_authority_change(
                 event.authority_id,
                 AuthorityChangeRequest(new_version=event.new_version, changed_at=event.changed_at.isoformat()),
@@ -976,6 +979,15 @@ class SolomonService:
             "impact": impact,
             "review_tasks": [task.model_dump(mode="json") for task in review_tasks],
         }
+
+    def _reconcile_authority_events(self, *, limit: int = 100) -> int:
+        """Resume SQLite workflow events interrupted before their propagation operation was scheduled."""
+
+        resumed = 0
+        for event in self.workflow_store.unprocessed_authority_events(limit=limit):
+            self._register_polled_authority_event(event)
+            resumed += 1
+        return resumed
 
     def review_tasks(
         self,
@@ -1273,6 +1285,7 @@ class SolomonService:
         return self._authority._create_dependency_suggestions(item, use_llm=use_llm, router=router)
 
     def schedule_dependency_suggestions(self, item: KnowledgeItem) -> OperationRecord:
+        self._authority._failure_injector.hit("after_knowledge_item_authoritative_write_before_schedule")
         return self._authority.record_suggestion_generation(item)
 
     def _store_state_sha256(self) -> str:

@@ -143,7 +143,7 @@ class AuthorityService(ServiceDelegate):
                 payload={"expected_state_version": assertion.state_version},
             )
         )
-        self._failure_injector.hit("after_authoritative_write_before_schedule")
+        self._failure_injector.hit("after_confirmation_operation_durable_before_execution")
         for _ in range(100):
             current = self.operation_store.get(operation.id)
             if current.status is OperationStatus.COMPLETED:
@@ -400,7 +400,7 @@ class AuthorityService(ServiceDelegate):
                 },
             )
         )
-        self._failure_injector.hit("after_authoritative_write_before_schedule")
+        self._failure_injector.hit("after_authority_change_operation_durable_before_execution")
         for _ in range(100):
             current = self.operation_store.get(operation.id)
             if current.status is OperationStatus.COMPLETED:
@@ -523,7 +523,7 @@ class AuthorityService(ServiceDelegate):
         """Durably schedule the audit projection for a SQLite-authoritative source document."""
 
         operation, _ = self._create_evidence_ingestion_operation(document, candidate_count=candidate_count)
-        self._failure_injector.hit("after_evidence_authoritative_write_before_schedule")
+        self._failure_injector.hit("after_evidence_operation_durable_before_execution")
         for _ in range(100):
             current = self.operation_store.get(operation.id)
             if current.status is OperationStatus.COMPLETED:
@@ -541,7 +541,7 @@ class AuthorityService(ServiceDelegate):
         """Durably schedule deterministic, review-only suggestion generation for one knowledge item."""
 
         operation, _ = self._create_suggestion_generation_operation(item)
-        self._failure_injector.hit("after_suggestion_authoritative_write_before_schedule")
+        self._failure_injector.hit("after_suggestion_operation_durable_before_execution")
         for _ in range(100):
             current = self.operation_store.get(operation.id)
             if current.status is OperationStatus.COMPLETED:
@@ -577,13 +577,19 @@ class AuthorityService(ServiceDelegate):
         *,
         operation_type: OperationType,
     ) -> OperationRecord:
+        boundary = (
+            "after_assertion_authoritative_write_before_schedule"
+            if operation_type is OperationType.ASSERTION_CREATE
+            else "after_assertion_transition_authoritative_write_before_schedule"
+        )
+        self._failure_injector.hit(boundary)
         operation, _ = cast(
             tuple[OperationRecord, bool],
             self.operation_store.create(
                 self._assertion_audit_record(assertion, operation_type=operation_type)
             ),
         )
-        self._failure_injector.hit("after_assertion_audit_authoritative_write_before_schedule")
+        self._failure_injector.hit("after_assertion_audit_operation_durable_before_execution")
         for _ in range(100):
             current = self.operation_store.get(operation.id)
             if current.status is OperationStatus.COMPLETED:
@@ -610,7 +616,7 @@ class AuthorityService(ServiceDelegate):
             if assertion.source_document_id != previous_document_id or assertion.needs_reverification:
                 continue
             operation, _ = self._create_source_revision_operation(assertion, replacement_document_id)
-            self._failure_injector.hit("after_authoritative_write_before_schedule")
+            self._failure_injector.hit("after_source_revision_operation_durable_before_execution")
             for _ in range(100):
                 current = self.operation_store.get(operation.id)
                 if current.status is OperationStatus.COMPLETED:

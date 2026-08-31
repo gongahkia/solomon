@@ -281,31 +281,28 @@ def test_assertion_audit_projections_resume_without_creating_an_unreviewed_edge(
     service, document_id, item_id = _source_backed_service(tmp_path)
     service.register_authority_source(_authority_source())
     service._authority.set_operation_failure_injector(
-        OperationFailureInjector(["after_assertion_audit_authoritative_write_before_schedule"])
+        OperationFailureInjector(["after_assertion_authoritative_write_before_schedule"])
     )
 
-    with pytest.raises(InjectedOperationFailure, match="after_assertion_audit_authoritative_write_before_schedule"):
+    with pytest.raises(InjectedOperationFailure, match="after_assertion_authoritative_write_before_schedule"):
         service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
     assertion = service.dependency_assertions(matter_id="matter-a", client_id="client-a")[0]
-    creation_operation = next(
-        current
+    assert not any(
+        current.operation_type is OperationType.ASSERTION_CREATE and current.assertion_id == assertion.id
         for current in service.operation_store.list()
-        if current.operation_type is OperationType.ASSERTION_CREATE and current.assertion_id == assertion.id
     )
-    assert creation_operation.status is OperationStatus.QUEUED
     assert assertion.creation_audit_id is None
     assert service.graph.get_dependencies(item_id) == []
 
     service._authority.set_operation_failure_injector(OperationFailureInjector())
-    recovered_creation = service._authority.run_operation_once(worker_id="assertion-audit-restarted")
-    assert recovered_creation is not None
-    assert recovered_creation.status is OperationStatus.COMPLETED
+    recovered_creation = run_pending_operations(service, worker_id="assertion-audit-restarted")
+    assert recovered_creation.completed == 1
     assert service.get_dependency_assertion(assertion.id).creation_audit_id is not None
 
     service._authority.set_operation_failure_injector(
-        OperationFailureInjector(["after_assertion_audit_authoritative_write_before_schedule"])
+        OperationFailureInjector(["after_assertion_audit_operation_durable_before_execution"])
     )
-    with pytest.raises(InjectedOperationFailure, match="after_assertion_audit_authoritative_write_before_schedule"):
+    with pytest.raises(InjectedOperationFailure, match="after_assertion_audit_operation_durable_before_execution"):
         service.decide_dependency_assertion(
             assertion.id,
             DependencyAssertionDecisionRequest(by="reviewer-a", decision="rejected", reason="not adopted"),
@@ -337,10 +334,10 @@ def test_source_revision_interruption_resumes_from_immutable_document_lineage(tm
         DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
     )
     service._authority.set_operation_failure_injector(
-        OperationFailureInjector(["after_authoritative_write_before_schedule"])
+        OperationFailureInjector(["after_source_revision_authoritative_write_before_schedule"])
     )
 
-    with pytest.raises(InjectedOperationFailure, match="after_authoritative_write_before_schedule"):
+    with pytest.raises(InjectedOperationFailure, match="after_source_revision_authoritative_write_before_schedule"):
         service.ingest_source_document(
             "matter-documents",
             SourceDocumentIngestRequest(
@@ -350,21 +347,61 @@ def test_source_revision_interruption_resumes_from_immutable_document_lineage(tm
                 content="We rely on Regulation R section 12 after the authority update.",
             ),
         )
-    operation = next(
-        current
-        for current in service.operation_store.list()
-        if current.operation_type.value == "source_revision_reverify"
+    assert not any(
+        current.operation_type.value == "source_revision_reverify" for current in service.operation_store.list()
     )
-    assert operation.status is OperationStatus.QUEUED
     assert service.get_dependency_assertion(assertion.id).needs_reverification is False
 
     service._authority.set_operation_failure_injector(OperationFailureInjector())
-    recovered = service._authority.run_operation_once(worker_id="worker-restarted")
-    assert recovered is not None
-    assert recovered.status is OperationStatus.COMPLETED
+    recovered = run_pending_operations(service, worker_id="worker-restarted")
+    assert recovered.completed == 1
     reverified = service.get_dependency_assertion(assertion.id)
     assert reverified.needs_reverification is True
     assert reverified.reverification_audit_id is not None
+
+
+def test_worker_reconciles_source_evidence_written_before_its_operation_record(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    source = service.register_document_source(
+        DocumentSourceRequest(
+            source_id="evidence-source",
+            name="Evidence source",
+            kind=DocumentSourceKind.FILESYSTEM,
+            root_ref="/evidence-source",
+        )
+    )
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_source_document_authoritative_write_before_schedule"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_source_document_authoritative_write_before_schedule"):
+        service.ingest_source_document(
+            source.id,
+            SourceDocumentIngestRequest(
+                external_id="memo-1",
+                filename="memo.txt",
+                mime_type="text/plain",
+                content="source evidence written before operation scheduling",
+            ),
+        )
+
+    document = service.document_store.list_documents(source.id)[0]
+    assert not any(
+        operation.operation_type is OperationType.EVIDENCE_INGESTION and operation.target_resource_id == document.id
+        for operation in service.operation_store.list()
+    )
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    batch = run_pending_operations(service, worker_id="evidence-gap-reconciler")
+
+    operation = next(
+        operation
+        for operation in service.operation_store.list()
+        if operation.operation_type is OperationType.EVIDENCE_INGESTION and operation.target_resource_id == document.id
+    )
+    assert batch.completed == 1
+    assert operation.status is OperationStatus.COMPLETED
+    assert [entry.event_type for entry in service.audit.list_entries()].count("source_document_ingested") == 1
 
 
 def test_worker_reconciles_source_revision_written_before_its_operation_record(tmp_path: Path) -> None:

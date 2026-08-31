@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from solomon.api.service import SolomonService
+from solomon.api.service import IngestRequest, SolomonService
 from solomon.api.service_models import DocumentSourceRequest
+from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind
 from solomon.worker import run_pending_operations, sync_enabled_filesystem_sources
@@ -89,3 +91,41 @@ def test_worker_claims_unknown_projection_once_and_retains_operator_required_rec
     assert batch.attempted == 1
     assert batch.terminal == 1
     assert service.operation_store.get(operation.id).status is OperationStatus.OPERATOR_REQUIRED
+
+
+def test_worker_reconciles_suggestions_written_before_their_operation_record(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_knowledge_item_authoritative_write_before_schedule"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_knowledge_item_authoritative_write_before_schedule"):
+        service.ingest(
+            IngestRequest(
+                kind=KnowledgeKind.POSITION,
+                content="The operating rule relies on Regulation R section 12.",
+                source_kind=SourceKind.PARTNER,
+                source_ref="memo-1",
+                matter_id="matter-a",
+                client_id="client-a",
+            )
+        )
+
+    item = service.store.get_many(matter_id="matter-a", client_id="client-a")[0]
+    assert not any(
+        operation.operation_type is OperationType.SUGGESTION_GENERATION and operation.target_resource_id == item.id
+        for operation in service.operation_store.list()
+    )
+    assert service.graph.get_dependencies(item.id) == []
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    batch = run_pending_operations(service, worker_id="suggestion-gap-reconciler")
+
+    operation = next(
+        operation
+        for operation in service.operation_store.list()
+        if operation.operation_type is OperationType.SUGGESTION_GENERATION and operation.target_resource_id == item.id
+    )
+    assert batch.completed == 1
+    assert operation.status is OperationStatus.COMPLETED
+    assert service.graph.get_dependencies(item.id) == []

@@ -129,6 +129,22 @@ class SQLiteWorkflowStore:
             raise AuthorityEventNotFoundError(event_id)
         return str(row["processing_error"]) if row["processing_error"] is not None else None
 
+    def unprocessed_authority_events(self, *, limit: int = 100) -> list[AuthorityChangeEvent]:
+        """Return a bounded, stable replay set for events not durably marked complete."""
+
+        if limit < 1 or limit > 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+        rows = self._conn.execute(
+            """
+            SELECT event_json FROM authority_change_events
+            WHERE processed_at IS NULL
+            ORDER BY received_at, event_id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [AuthorityChangeEvent.model_validate_json(str(row["event_json"])) for row in rows]
+
     def mark_authority_event_processed(self, event_id: str, *, processed_at: datetime | None = None) -> None:
         timestamp = processed_at or now_utc()
         with self._conn:

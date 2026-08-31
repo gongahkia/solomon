@@ -82,6 +82,8 @@ class AuthoritySource(ContractModel):
     kind: AuthoritySourceKind
     root_ref: str = Field(min_length=1)
     canonical_namespace: str = Field(default="default", pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    matter_id: str | None = None
+    client_id: str | None = None
     enabled: bool = True
     config: ConnectorConfiguration = Field(default_factory=ConnectorConfiguration)
     poll_schedule: AuthorityPollSchedule = Field(default_factory=AuthorityPollSchedule)

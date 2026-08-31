@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from solomon.api.schemas import SolomonModel
 from solomon.boundary.solomon import SolomonBoundary
@@ -66,6 +66,22 @@ class SuggestionDecision(str, Enum):
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
     DEFERRED = "deferred"
+    WITHDRAWN = "withdrawn"
+
+
+class DependencyAssertionType(str, Enum):
+    """Directional semantics for a governed assertion: source item -> target."""
+
+    NORMATIVE_POLICY = "normative_policy"
+    FACTUAL_EVIDENCE = "factual_evidence"
+    PROCEDURAL = "procedural"
+    DERIVED_FROM = "derived_from"
+    CONFIGURATION_IMPLEMENTATION = "configuration_implementation"
+
+
+class AssertionEvidenceKind(str, Enum):
+    QUOTE = "quote"
+    COMMENTARY = "commentary"
 
 
 class DependencySuggestion(SolomonModel):
@@ -74,7 +90,7 @@ class DependencySuggestion(SolomonModel):
     authority_ref: str
     suggested_edge: DependencyEdge
     decision: SuggestionDecision = SuggestionDecision.PENDING
-    source: Literal["deterministic", "llm"] = "deterministic"
+    source: Literal["deterministic", "llm", "human", "trusted_upstream"] = "deterministic"
     fingerprint: str | None = None
     normalized_reference: str | None = None
     source_document_id: str | None = None
@@ -94,6 +110,68 @@ class DependencySuggestion(SolomonModel):
     decided_at: datetime | None = None
     decided_by: str | None = None
     decision_reason: str | None = None
+    assertion_type: DependencyAssertionType | None = None
+    evidence_kind: AssertionEvidenceKind | None = None
+    evidence_raw: str | None = None
+    source_resource_id: str | None = None
+    source_document_sha256: str | None = None
+    rationale: str | None = None
+    created_by: str | None = None
+    idempotency_key: str | None = None
+    request_sha256: str | None = None
+    revision_of: str | None = None
+    needs_reverification: bool = False
+    reverified_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    withdrawn_by: str | None = None
+    state_version: int = Field(default=1, ge=1)
+    trusted_upstream_ref: str | None = None
+    creation_audit_id: str | None = None
+    review_audit_id: str | None = None
+    edge_audit_id: str | None = None
+    reverification_audit_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_governed_assertion(self) -> DependencySuggestion:
+        if self.source not in {"human", "trusted_upstream"}:
+            return self
+        required = {
+            "assertion_type": self.assertion_type,
+            "evidence_kind": self.evidence_kind,
+            "evidence_raw": self.evidence_raw,
+            "source_resource_id": self.source_resource_id,
+            "source_document_id": self.source_document_id,
+            "source_document_version": self.source_document_version,
+            "source_document_sha256": self.source_document_sha256,
+            "rationale": self.rationale,
+            "created_by": self.created_by,
+            "idempotency_key": self.idempotency_key,
+            "request_sha256": self.request_sha256,
+        }
+        missing = sorted(key for key, value in required.items() if value is None or value == "")
+        if missing:
+            raise ValueError(f"governed dependency assertion requires: {', '.join(missing)}")
+        if self.source == "trusted_upstream" and not self.trusted_upstream_ref:
+            raise ValueError("trusted upstream assertions require trusted_upstream_ref")
+        if self.evidence_kind is AssertionEvidenceKind.QUOTE:
+            if self.source_span_start is None or self.source_span_end is None:
+                raise ValueError("quote evidence requires source offsets")
+            if self.source_span_end <= self.source_span_start:
+                raise ValueError("quote evidence offsets must be increasing")
+            if self.source_span != self.evidence_raw:
+                raise ValueError("quote evidence must equal its reconstructible source span")
+            if (
+                self.authority_span is not None
+                or self.authority_span_start is not None
+                or self.authority_span_end is not None
+            ):
+                raise ValueError("governed quote evidence does not use parser authority spans")
+        elif self.evidence_kind is AssertionEvidenceKind.COMMENTARY:
+            if self.source_span_start is not None or self.source_span_end is not None or self.source_span is not None:
+                raise ValueError("commentary evidence must not claim source offsets or a quote")
+        if self.decision is SuggestionDecision.WITHDRAWN and self.withdrawn_at is None:
+            raise ValueError("withdrawn assertions require withdrawn_at")
+        return self
 
 
 class DefinedTerm(SolomonModel):

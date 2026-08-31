@@ -38,6 +38,9 @@ from solomon.api.service import (
     CandidateClaimPromotionRequest,
     CandidateClaimRejectionRequest,
     ContestRequest,
+    DependencyAssertionCreateRequest,
+    DependencyAssertionDecisionRequest,
+    DependencyAssertionWithdrawRequest,
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
@@ -728,6 +731,90 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             suggestion.model_dump(mode="json")
             for suggestion in active_service(request).suggest_dependencies(payload, router=active_router())
         ]
+
+    @app.post("/dependencies/assertions")
+    def create_dependency_assertion(request: Request, payload: DependencyAssertionCreateRequest) -> dict[str, Any]:
+        return active_service(request).create_dependency_assertion(payload).model_dump(mode="json")
+
+    @app.get("/dependencies/assertions")
+    def dependency_assertions(
+        request: Request,
+        item_id: str | None = None,
+        origin: str | None = None,
+        state: SuggestionDecision | None = None,
+        target_id: str | None = None,
+        creator: str | None = None,
+        needs_reverification: bool | None = None,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        assertions = active_service(request).dependency_assertions(
+            item_id=item_id,
+            origin=origin,
+            state=state,
+            target_id=target_id,
+            creator=creator,
+            needs_reverification=needs_reverification,
+            matter_id=matter_id,
+            client_id=client_id,
+            limit=limit + 1,
+        )
+        if cursor is not None:
+            assertions = [assertion for assertion in assertions if assertion.id > cursor]
+        page = assertions[:limit]
+        return {
+            "items": [assertion.model_dump(mode="json") for assertion in page],
+            "next_cursor": page[-1].id if len(assertions) > limit and page else None,
+        }
+
+    @app.post("/dependencies/assertions/{assertion_id}/decision")
+    def decide_dependency_assertion(
+        request: Request,
+        assertion_id: str,
+        payload: DependencyAssertionDecisionRequest,
+    ) -> dict[str, Any]:
+        outcome = active_service(request).decide_dependency_assertion(assertion_id, payload)
+        return outcome.model_dump(mode="json")
+
+    @app.post("/dependencies/assertions/{assertion_id}/withdraw")
+    def withdraw_dependency_assertion(
+        request: Request,
+        assertion_id: str,
+        payload: DependencyAssertionWithdrawRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).withdraw_dependency_assertion(assertion_id, payload).model_dump(mode="json")
+
+    @app.get("/dependencies/assertions/{assertion_id}/history")
+    def dependency_assertion_history(
+        request: Request,
+        assertion_id: str,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        return active_service(request).dependency_assertion_history(
+            assertion_id,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
+
+    @app.get("/dependencies/assertions/{assertion_id}")
+    def get_dependency_assertion(
+        request: Request,
+        assertion_id: str,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        return (
+            active_service(request)
+            .get_dependency_assertion(
+                assertion_id,
+                matter_id=matter_id,
+                client_id=client_id,
+            )
+            .model_dump(mode="json")
+        )
 
     @app.get("/dependencies/suggestions")
     def dependency_suggestions(

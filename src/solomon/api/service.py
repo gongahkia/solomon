@@ -27,6 +27,9 @@ from solomon.api.service_models import (
     CandidateClaimRejectionRequest,
     ContestRequest,
     ContestResponse,
+    DependencyAssertionCreateRequest,
+    DependencyAssertionDecisionRequest,
+    DependencyAssertionWithdrawRequest,
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
@@ -55,6 +58,7 @@ from solomon.api.services.common import digest
 from solomon.api.services.ingestion import IngestionService
 from solomon.api.services.recall import RecallService
 from solomon.audit.journal import AuditAttribution, AuditJournal
+from solomon.authority_identifiers import SQLiteAuthorityIdentifierStore
 from solomon.authority_polling import AuthorityPollBatch, AuthorityPollOutbox, AuthorityPollRetryPolicy
 from solomon.authority_sources import (
     AuthorityPollDeadLetter,
@@ -159,6 +163,12 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "confirm_dependency_suggestion": "curate",
     "reject_dependency_suggestion": "curate",
     "defer_dependency_suggestion": "curate",
+    "create_dependency_assertion": "curate",
+    "dependency_assertions": "read",
+    "get_dependency_assertion": "read",
+    "dependency_assertion_history": "read",
+    "decide_dependency_assertion": "review",
+    "withdraw_dependency_assertion": "curate",
     "impact_query": "read",
     "dependency_graph": "read",
     "extract_references": "read",
@@ -245,6 +255,7 @@ class SolomonService:
         self.retention_registry = RetentionRegistry(data_dir / "retention" / "registry.json")
         self.retention_default_days = retention_default_days
         self.authority_sources = SQLiteAuthoritySourceRegistry(data_dir / "authority-sources.sqlite3")
+        self.authority_identifiers = SQLiteAuthorityIdentifierStore(data_dir / "authority-identifiers.sqlite3")
         self.workflow_store = SQLiteWorkflowStore(data_dir / "workflow.sqlite3")
         self.attestation_key = attestation_key
         self.boundary = boundary or SolomonBoundary(telemetry=self.telemetry)
@@ -681,6 +692,10 @@ class SolomonService:
                 "candidate_count": len(candidates),
             },
         )
+        self._authority.mark_dependency_assertions_for_source_revision(
+            previous_document_id=document.previous_version_id,
+            replacement_document_id=document.id,
+        )
         return document, candidates
 
     def candidate_claims(self, document_id: str) -> list[CandidateClaim]:
@@ -1051,6 +1066,44 @@ class SolomonService:
     ) -> DependencySuggestion:
         return self._authority.defer_dependency_suggestion(suggestion_id, request)
 
+    def create_dependency_assertion(self, request: DependencyAssertionCreateRequest) -> DependencySuggestion:
+        return self._authority.create_dependency_assertion(request)
+
+    def dependency_assertions(self, **filters: Any) -> list[DependencySuggestion]:
+        return self._authority.dependency_assertions(**filters)
+
+    def get_dependency_assertion(
+        self,
+        assertion_id: str,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> DependencySuggestion:
+        return self._authority.get_dependency_assertion(assertion_id, matter_id=matter_id, client_id=client_id)
+
+    def decide_dependency_assertion(
+        self,
+        assertion_id: str,
+        request: DependencyAssertionDecisionRequest,
+    ) -> DependencySuggestion | DependencyEdge:
+        return self._authority.decide_dependency_assertion(assertion_id, request)
+
+    def withdraw_dependency_assertion(
+        self,
+        assertion_id: str,
+        request: DependencyAssertionWithdrawRequest,
+    ) -> DependencySuggestion:
+        return self._authority.withdraw_dependency_assertion(assertion_id, request)
+
+    def dependency_assertion_history(
+        self,
+        assertion_id: str,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._authority.dependency_assertion_history(assertion_id, matter_id=matter_id, client_id=client_id)
+
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         return self._authority.impact_query(authority_id, as_of=as_of)
 
@@ -1140,12 +1193,24 @@ class SolomonService:
         contradictions_path = pack.directory / "contradictions.json"
         contradictions_bytes = json.dumps(contradictions, sort_keys=True, indent=2).encode("utf-8")
         contradictions_path.write_bytes(contradictions_bytes)
+        assertions = {
+            assertion.id: {
+                "assertion": assertion.model_dump(mode="json"),
+                "events": self.graph.list_dependency_suggestion_events(assertion.id),
+            }
+            for assertion in self._authority.dependency_assertions(limit=10_000)
+        }
+        assertions_path = pack.directory / "dependency-assertions.json"
+        assertions_bytes = json.dumps(assertions, sort_keys=True, indent=2).encode("utf-8")
+        assertions_path.write_bytes(assertions_bytes)
         manifest = json.loads(pack.manifest_path.read_text(encoding="utf-8"))
         manifest.pop("manifest_sha256", None)
         manifest["verification_history_file"] = history_path.name
         manifest["verification_history_sha256"] = hashlib.sha256(history_bytes).hexdigest()
         manifest["contradictions_file"] = contradictions_path.name
         manifest["contradictions_sha256"] = hashlib.sha256(contradictions_bytes).hexdigest()
+        manifest["dependency_assertions_file"] = assertions_path.name
+        manifest["dependency_assertions_sha256"] = hashlib.sha256(assertions_bytes).hexdigest()
         manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8")
         manifest["manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
         pack.manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8")
@@ -1271,6 +1336,9 @@ __all__ = [
     "DependencyRequest",
     "DependencySuggestionRequest",
     "DependencySuggestionDecisionRequest",
+    "DependencyAssertionCreateRequest",
+    "DependencyAssertionDecisionRequest",
+    "DependencyAssertionWithdrawRequest",
     "AnswerRequest",
     "AnswerResponse",
     "WhyTrace",

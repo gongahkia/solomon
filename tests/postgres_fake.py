@@ -26,9 +26,28 @@ class FakePostgresConnection:
             return self._conn.execute("SELECT 1")
         if "FROM pg_extension WHERE extname" in sql:
             return self._conn.execute("SELECT 1")
+        add_column = re.fullmatch(
+            r'\s*ALTER TABLE\s+((?:"[A-Za-z_][A-Za-z0-9_]*"\.)?"[A-Za-z_][A-Za-z0-9_]*")\s+'
+            r"ADD COLUMN IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s+.+",
+            sql,
+            flags=re.DOTALL,
+        )
+        if add_column is not None:
+            table = _translate(add_column.group(1))
+            column = add_column.group(2)
+            columns = {str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column in columns:
+                return self._conn.execute("SELECT 1")
+            return self._conn.execute(_translate(sql), params)
+        if re.fullmatch(
+            r'\s*ALTER TABLE\s+(?:"[A-Za-z_][A-Za-z0-9_]*"\.)?"[A-Za-z_][A-Za-z0-9_]*"\s+'
+            r"DROP CONSTRAINT IF EXISTS\s+[A-Za-z_][A-Za-z0-9_]*\s*",
+            sql,
+        ):
+            return self._conn.execute("SELECT 1")
         match = re.fullmatch(
             r'\s*ALTER TABLE\s+((?:"[A-Za-z_][A-Za-z0-9_]*"\.)?"[A-Za-z_][A-Za-z0-9_]*")\s+'
-            r'ALTER COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\s+SET NOT NULL\s*',
+            r"ALTER COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\s+SET NOT NULL\s*",
             sql,
         )
         if match is not None:

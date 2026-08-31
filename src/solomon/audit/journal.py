@@ -30,6 +30,7 @@ GENESIS_HASH = "GENESIS"
 OPTIONAL_ARTIFACT_HASH_KEYS = (
     ("verification_history_file", "verification_history_sha256"),
     ("contradictions_file", "contradictions_sha256"),
+    ("dependency_assertions_file", "dependency_assertions_sha256"),
     ("currency_report_file", "currency_report_sha256"),
     ("currency_report_pdf_file", "currency_report_pdf_sha256"),
 )

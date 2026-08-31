@@ -37,6 +37,9 @@ class ServiceContext(Protocol):
     audit: AuditJournal
     attestation_key: str | None
     boundary: SolomonBoundary
+    document_store: Any
+    authority_sources: Any
+    authority_identifiers: Any
     verification_policy_version: str
     credence_policy_version: str
 
@@ -128,6 +131,18 @@ class ServiceDelegate:
     @property
     def boundary(self) -> SolomonBoundary:
         return self._context.boundary
+
+    @property
+    def document_store(self) -> Any:
+        return self._context.document_store
+
+    @property
+    def authority_sources(self) -> Any:
+        return self._context.authority_sources
+
+    @property
+    def authority_identifiers(self) -> Any:
+        return self._context.authority_identifiers
 
     @property
     def verification_policy_version(self) -> str:

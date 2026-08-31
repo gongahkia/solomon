@@ -15,6 +15,9 @@ from solomon import __version__
 from solomon.api.app import _model_router_from_settings
 from solomon.api.service import (
     AuthorityChangeRequest,
+    DependencyAssertionCreateRequest,
+    DependencyAssertionDecisionRequest,
+    DependencyAssertionWithdrawRequest,
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
@@ -39,7 +42,7 @@ from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
 from solomon.graph.models import EdgeConfidence, EdgeType
-from solomon.graph.suggestions import SuggestionDecision
+from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
@@ -595,6 +598,188 @@ def defer_dependency_suggestion(
         DependencySuggestionDecisionRequest(by=by, reason=reason),
     )
     _print_json(suggestion.model_dump(mode="json"))
+
+
+@app.command(
+    "assert-dependency",
+    help="Create a governed dependency assertion; it remains pending until review.",
+    epilog=_example("uv run solomon assert-dependency --json assertion.json"),
+)
+def assert_dependency(
+    json_file: Annotated[Path | None, typer.Option("--json", help="JSON dependency assertion request file.")] = None,
+    item_id: Annotated[str | None, typer.Option("--item-id")] = None,
+    source_document_id: Annotated[str | None, typer.Option("--source-document-id")] = None,
+    source_document_version: Annotated[int | None, typer.Option("--source-document-version", min=1)] = None,
+    target_kind: Annotated[str, typer.Option("--target-kind")] = "external_authority",
+    target_item_id: Annotated[str | None, typer.Option("--target-item-id")] = None,
+    authority_source_id: Annotated[str | None, typer.Option("--authority-source-id")] = None,
+    authority_identifier: Annotated[str | None, typer.Option("--authority-identifier")] = None,
+    assertion_type: Annotated[
+        DependencyAssertionType, typer.Option("--assertion-type")
+    ] = DependencyAssertionType.NORMATIVE_POLICY,
+    evidence_kind: Annotated[AssertionEvidenceKind, typer.Option("--evidence-kind")] = AssertionEvidenceKind.QUOTE,
+    quote: Annotated[str | None, typer.Option("--quote")] = None,
+    quote_start: Annotated[int | None, typer.Option("--quote-start", min=0)] = None,
+    quote_end: Annotated[int | None, typer.Option("--quote-end", min=1)] = None,
+    commentary: Annotated[str | None, typer.Option("--commentary")] = None,
+    rationale: Annotated[str | None, typer.Option("--rationale")] = None,
+    created_by: Annotated[str | None, typer.Option("--created-by")] = None,
+    idempotency_key: Annotated[str | None, typer.Option("--idempotency-key")] = None,
+    origin: Annotated[str, typer.Option("--origin")] = "human",
+    trusted_upstream_ref: Annotated[str | None, typer.Option("--trusted-upstream-ref")] = None,
+    revision_of: Annotated[str | None, typer.Option("--revision-of")] = None,
+) -> None:
+    """Create from flags or exactly one JSON request file."""
+    if json_file is not None:
+        if any(
+            value is not None
+            for value in (
+                item_id,
+                source_document_id,
+                source_document_version,
+                target_item_id,
+                authority_source_id,
+                authority_identifier,
+                quote,
+                quote_start,
+                quote_end,
+                commentary,
+                rationale,
+                created_by,
+                idempotency_key,
+                trusted_upstream_ref,
+                revision_of,
+            )
+        ):
+            raise typer.BadParameter("--json cannot be combined with assertion payload flags")
+        request = DependencyAssertionCreateRequest.model_validate_json(json_file.read_text(encoding="utf-8"))
+    else:
+        request = DependencyAssertionCreateRequest.model_validate(
+            {
+                "item_id": item_id,
+                "source_document_id": source_document_id,
+                "source_document_version": source_document_version,
+                "target_kind": target_kind,
+                "target_item_id": target_item_id,
+                "authority_source_id": authority_source_id,
+                "authority_identifier": authority_identifier,
+                "assertion_type": assertion_type,
+                "evidence_kind": evidence_kind,
+                "quote": quote,
+                "quote_start": quote_start,
+                "quote_end": quote_end,
+                "commentary": commentary,
+                "rationale": rationale,
+                "created_by": created_by,
+                "idempotency_key": idempotency_key,
+                "origin": origin,
+                "trusted_upstream_ref": trusted_upstream_ref,
+                "revision_of": revision_of,
+            }
+        )
+    _print_json(_service().create_dependency_assertion(request).model_dump(mode="json"), sort_keys=True)
+
+
+@app.command(
+    "dependency-assertion",
+    help="Inspect one governed dependency assertion.",
+    epilog=_example("uv run solomon dependency-assertion assertion-1 --matter-id matter-a"),
+)
+def dependency_assertion(
+    assertion_id: Annotated[str, typer.Argument(help="Dependency assertion id.")],
+    matter_id: Annotated[str | None, typer.Option("--matter-id")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id")] = None,
+) -> None:
+    _print_json(
+        _service()
+        .get_dependency_assertion(assertion_id, matter_id=matter_id, client_id=client_id)
+        .model_dump(mode="json"),
+        sort_keys=True,
+    )
+
+
+@app.command(
+    "dependency-assertions",
+    help="List governed dependency assertions as stable JSON.",
+    epilog=_example("uv run solomon dependency-assertions --state pending --limit 20"),
+)
+def dependency_assertions(
+    item_id: Annotated[str | None, typer.Option("--item-id")] = None,
+    origin: Annotated[str | None, typer.Option("--origin")] = None,
+    state: Annotated[SuggestionDecision | None, typer.Option("--state")] = None,
+    target_id: Annotated[str | None, typer.Option("--target-id")] = None,
+    creator: Annotated[str | None, typer.Option("--creator")] = None,
+    needs_reverification: Annotated[bool | None, typer.Option("--needs-reverification")] = None,
+    matter_id: Annotated[str | None, typer.Option("--matter-id")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 100,
+) -> None:
+    assertions = _service().dependency_assertions(
+        item_id=item_id,
+        origin=origin,
+        state=state,
+        target_id=target_id,
+        creator=creator,
+        needs_reverification=needs_reverification,
+        matter_id=matter_id,
+        client_id=client_id,
+        limit=limit,
+    )
+    _print_json([assertion.model_dump(mode="json") for assertion in assertions], sort_keys=True)
+
+
+@app.command(
+    "decide-dependency-assertion",
+    help="Confirm, reject, or defer a governed dependency assertion.",
+    epilog=_example("uv run solomon decide-dependency-assertion assertion-1 --by reviewer-a --decision confirmed"),
+)
+def decide_dependency_assertion(
+    assertion_id: Annotated[str, typer.Argument(help="Dependency assertion id.")],
+    by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
+    decision: Annotated[str, typer.Option("--decision")],
+    reason: Annotated[str | None, typer.Option("--reason")] = None,
+    expected_state_version: Annotated[int | None, typer.Option("--expected-state-version", min=1)] = None,
+    matter_id: Annotated[str | None, typer.Option("--matter-id")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id")] = None,
+) -> None:
+    outcome = _service().decide_dependency_assertion(
+        assertion_id,
+        DependencyAssertionDecisionRequest(
+            by=by,
+            decision=decision,  # type: ignore[arg-type]
+            reason=reason,
+            expected_state_version=expected_state_version,
+            matter_id=matter_id,
+            client_id=client_id,
+        ),
+    )
+    _print_json(outcome.model_dump(mode="json"), sort_keys=True)
+
+
+@app.command(
+    "withdraw-dependency-assertion",
+    help="Withdraw a pending or deferred governed dependency assertion.",
+    epilog=_example("uv run solomon withdraw-dependency-assertion assertion-1 --by curator-a --reason superseded"),
+)
+def withdraw_dependency_assertion(
+    assertion_id: Annotated[str, typer.Argument(help="Dependency assertion id.")],
+    by: Annotated[str, typer.Option("--by")],
+    reason: Annotated[str, typer.Option("--reason")],
+    expected_state_version: Annotated[int | None, typer.Option("--expected-state-version", min=1)] = None,
+    matter_id: Annotated[str | None, typer.Option("--matter-id")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id")] = None,
+) -> None:
+    assertion = _service().withdraw_dependency_assertion(
+        assertion_id,
+        DependencyAssertionWithdrawRequest(
+            by=by,
+            reason=reason,
+            expected_state_version=expected_state_version,
+            matter_id=matter_id,
+            client_id=client_id,
+        ),
+    )
+    _print_json(assertion.model_dump(mode="json"), sort_keys=True)
 
 
 @app.command(

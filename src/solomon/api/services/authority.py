@@ -7,6 +7,9 @@ from typing import Any
 
 from solomon.api.service_models import (
     AuthorityChangeRequest,
+    DependencyAssertionCreateRequest,
+    DependencyAssertionDecisionRequest,
+    DependencyAssertionWithdrawRequest,
     DependencyRequest,
     DependencySuggestionDecisionRequest,
     DependencySuggestionRequest,
@@ -18,6 +21,7 @@ from solomon.api.service_models import (
 )
 from solomon.api.services.base import ServiceContext, ServiceDelegate
 from solomon.api.services.common import digest, parse_iso_datetime
+from solomon.api.services.dependency_assertions import GovernedDependencyAssertionLifecycle
 from solomon.api.services.dependency_suggestions import (
     DependencySuggestionLifecycle,
     source_document_offset,
@@ -65,6 +69,16 @@ class AuthorityService(ServiceDelegate):
             audit=self.audit,
             currency_cache=self.currency_cache,
             get_item=self._get_item,
+            on_confirmed_edge=self._detect_for_edge,
+        )
+        self._assertion_lifecycle = GovernedDependencyAssertionLifecycle(
+            graph=self.graph,
+            audit=self.audit,
+            currency_cache=self.currency_cache,
+            get_item=self._get_item,
+            document_store=self.document_store,
+            authority_sources=self.authority_sources,
+            authority_identifiers=self.authority_identifiers,
             on_confirmed_edge=self._detect_for_edge,
         )
 
@@ -301,6 +315,55 @@ class AuthorityService(ServiceDelegate):
         request: DependencySuggestionDecisionRequest,
     ) -> DependencySuggestion:
         return self._dependency_lifecycle.defer(suggestion_id, request)
+
+    def create_dependency_assertion(self, request: DependencyAssertionCreateRequest) -> DependencySuggestion:
+        return self._assertion_lifecycle.create(request)
+
+    def dependency_assertions(self, **filters: Any) -> list[DependencySuggestion]:
+        return self._assertion_lifecycle.list_assertions(**filters)
+
+    def get_dependency_assertion(
+        self,
+        assertion_id: str,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> DependencySuggestion:
+        return self._assertion_lifecycle.get(assertion_id, matter_id=matter_id, client_id=client_id)
+
+    def decide_dependency_assertion(
+        self,
+        assertion_id: str,
+        request: DependencyAssertionDecisionRequest,
+    ) -> DependencySuggestion | DependencyEdge:
+        return self._assertion_lifecycle.decide(assertion_id, request)
+
+    def withdraw_dependency_assertion(
+        self,
+        assertion_id: str,
+        request: DependencyAssertionWithdrawRequest,
+    ) -> DependencySuggestion:
+        return self._assertion_lifecycle.withdraw(assertion_id, request)
+
+    def dependency_assertion_history(
+        self,
+        assertion_id: str,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._assertion_lifecycle.history(assertion_id, matter_id=matter_id, client_id=client_id)
+
+    def mark_dependency_assertions_for_source_revision(
+        self,
+        *,
+        previous_document_id: str | None,
+        replacement_document_id: str,
+    ) -> list[DependencySuggestion]:
+        return self._assertion_lifecycle.mark_reverification_for_source_revision(
+            previous_document_id=previous_document_id,
+            replacement_document_id=replacement_document_id,
+        )
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()

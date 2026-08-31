@@ -76,6 +76,38 @@ class SolomonClient:
         _raise_for_error(response)
         return dict(response.json())
 
+    def create_dependency_assertion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post("/dependencies/assertions", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def dependency_assertion(self, assertion_id: str, *, params: dict[str, str] | None = None) -> dict[str, Any]:
+        response = self._client.get(f"/dependencies/assertions/{assertion_id}", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def dependency_assertions(self, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = self._client.get("/dependencies/assertions", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def decide_dependency_assertion(self, assertion_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(f"/dependencies/assertions/{assertion_id}/decision", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def withdraw_dependency_assertion(self, assertion_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(f"/dependencies/assertions/{assertion_id}/withdraw", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def dependency_assertion_history(
+        self, assertion_id: str, *, params: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        response = self._client.get(f"/dependencies/assertions/{assertion_id}/history", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
 
 class AsyncSolomonClient:
     def __init__(
@@ -108,5 +140,37 @@ class AsyncSolomonClient:
 
     async def why(self, item_id: str) -> dict[str, Any]:
         response = await self._client.get(f"/why/{item_id}")
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def create_dependency_assertion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await self._client.post("/dependencies/assertions", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def dependency_assertion(self, assertion_id: str, *, params: dict[str, str] | None = None) -> dict[str, Any]:
+        response = await self._client.get(f"/dependencies/assertions/{assertion_id}", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def dependency_assertions(self, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = await self._client.get("/dependencies/assertions", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def decide_dependency_assertion(self, assertion_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await self._client.post(f"/dependencies/assertions/{assertion_id}/decision", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def withdraw_dependency_assertion(self, assertion_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await self._client.post(f"/dependencies/assertions/{assertion_id}/withdraw", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def dependency_assertion_history(
+        self, assertion_id: str, *, params: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        response = await self._client.get(f"/dependencies/assertions/{assertion_id}/history", params=params)
         _raise_for_error(response)
         return dict(response.json())

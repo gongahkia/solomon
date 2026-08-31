@@ -20,6 +20,7 @@ from solomon.currency.models import (
 )
 from solomon.currency.prediction import PendingAuthorityAmendment
 from solomon.graph.models import EdgeConfidence, EdgeType
+from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType
 from solomon.sources.models import DocumentSourceKind
 
 
@@ -219,6 +220,80 @@ class DependencySuggestionDecisionRequest(SolomonModel):
     client_id: str | None = None
 
 
+class DependencyAssertionCreateRequest(SolomonModel):
+    """Create a governed assertion; its direction is source knowledge item -> target."""
+
+    item_id: str = Field(min_length=1)
+    source_document_id: str = Field(min_length=1)
+    source_document_version: int = Field(ge=1)
+    target_kind: Literal["knowledge_item", "external_authority"]
+    target_item_id: str | None = None
+    authority_source_id: str | None = None
+    authority_identifier: str | None = None
+    assertion_type: DependencyAssertionType
+    evidence_kind: AssertionEvidenceKind
+    quote: str | None = None
+    quote_start: int | None = Field(default=None, ge=0)
+    quote_end: int | None = Field(default=None, ge=1)
+    commentary: str | None = None
+    rationale: str = Field(min_length=1, max_length=4_000)
+    created_by: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    origin: Literal["human", "trusted_upstream"] = "human"
+    trusted_upstream_ref: str | None = Field(default=None, min_length=1)
+    revision_of: str | None = Field(default=None, min_length=1)
+    correlation_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_target_and_evidence(self) -> DependencyAssertionCreateRequest:
+        if self.target_kind == "knowledge_item":
+            if not self.target_item_id or self.authority_source_id or self.authority_identifier:
+                raise ValueError("knowledge-item target requires target_item_id only")
+        elif not self.authority_source_id or not self.authority_identifier or self.target_item_id:
+            raise ValueError(
+                "external authority target requires registered authority_source_id and authority_identifier"
+            )
+        if self.evidence_kind is AssertionEvidenceKind.QUOTE:
+            if not self.quote or self.quote_start is None or self.quote_end is None:
+                raise ValueError("quote evidence requires quote, quote_start, and quote_end")
+            if self.quote_end <= self.quote_start:
+                raise ValueError("quote_end must be after quote_start")
+            if self.commentary is not None:
+                raise ValueError("quote evidence cannot include commentary")
+        elif (
+            not self.commentary or self.quote is not None or self.quote_start is not None or self.quote_end is not None
+        ):
+            raise ValueError("commentary evidence requires commentary only")
+        if self.origin == "trusted_upstream" and self.trusted_upstream_ref is None:
+            raise ValueError("trusted upstream assertions require trusted_upstream_ref")
+        if self.origin == "human" and self.trusted_upstream_ref is not None:
+            raise ValueError("human assertions cannot claim trusted_upstream_ref")
+        return self
+
+
+class DependencyAssertionDecisionRequest(SolomonModel):
+    by: str = Field(min_length=1)
+    decision: Literal["confirmed", "rejected", "deferred"]
+    reason: str | None = Field(default=None, min_length=1, max_length=4_000)
+    expected_state_version: int | None = Field(default=None, ge=1)
+    matter_id: str | None = None
+    client_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> DependencyAssertionDecisionRequest:
+        if self.decision == "deferred" and self.reason is None:
+            raise ValueError("a reason is required when deferring a dependency assertion")
+        return self
+
+
+class DependencyAssertionWithdrawRequest(SolomonModel):
+    by: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=4_000)
+    expected_state_version: int | None = Field(default=None, ge=1)
+    matter_id: str | None = None
+    client_id: str | None = None
+
+
 class AnswerRequest(SolomonModel):
     query: str
     matter_id: str | None = None
@@ -304,6 +379,9 @@ __all__ = [
     "DependencyRequest",
     "DependencySuggestionRequest",
     "DependencySuggestionDecisionRequest",
+    "DependencyAssertionCreateRequest",
+    "DependencyAssertionDecisionRequest",
+    "DependencyAssertionWithdrawRequest",
     "AnswerRequest",
     "AnswerResponse",
     "WhyTrace",

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from threading import RLock
 from typing import Any
 
 from solomon.graph.models import DependencyEdge
@@ -33,6 +35,7 @@ class PostgresGraphStore:
     ) -> None:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
+        self._lock = RLock()
         self._conn = (connect or default_connect)(dsn)
         self.initialize()
 
@@ -93,6 +96,10 @@ class PostgresGraphStore:
         *,
         item_id: str | None = None,
         decision: SuggestionDecision | None = None,
+        source: str | None = None,
+        target_id: str | None = None,
+        created_by: str | None = None,
+        needs_reverification: bool | None = None,
         limit: int = 100,
     ) -> list[DependencySuggestion]:
         clauses: list[str] = []
@@ -103,6 +110,18 @@ class PostgresGraphStore:
         if decision is not None:
             clauses.append("decision = %s")
             params.append(decision.value)
+        if source is not None:
+            clauses.append("source = %s")
+            params.append(source)
+        if target_id is not None:
+            clauses.append("target_id = %s")
+            params.append(target_id)
+        if created_by is not None:
+            clauses.append("created_by = %s")
+            params.append(created_by)
+        if needs_reverification is not None:
+            clauses.append("needs_reverification = %s")
+            params.append(needs_reverification)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._execute(
             f"""
@@ -115,6 +134,26 @@ class PostgresGraphStore:
             tuple([*params, limit]),
         ).fetchall()
         return [suggestion_from_json(row_value(row, "suggestion_json")) for row in rows]
+
+    def list_dependency_suggestion_events(self, suggestion_id: str) -> list[dict[str, object]]:
+        rows = self._execute(
+            f"""
+            SELECT event_id, event_type, occurred_at, payload_json
+            FROM {self._table("dependency_suggestion_events")}
+            WHERE suggestion_id = %s
+            ORDER BY seq
+            """,
+            (suggestion_id,),
+        ).fetchall()
+        return [
+            {
+                "event_id": str(row_value(row, "event_id")),
+                "event_type": str(row_value(row, "event_type")),
+                "occurred_at": str(row_value(row, "occurred_at")),
+                "payload": json.loads(str(row_value(row, "payload_json"))),
+            }
+            for row in rows
+        ]
 
     def close_dependency(self, edge_id: str, *, valid_to: datetime) -> DependencyEdge:
         edge = self.get_edge(edge_id)
@@ -220,19 +259,23 @@ class PostgresGraphStore:
         occurred_at: datetime,
         payload: dict[str, Any],
     ) -> None:
-        event_id = f"{edge_id}:{event_type}:{occurred_at.isoformat()}:{len(json.dumps(payload, sort_keys=True))}"
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        event_id = (
+            f"{edge_id}:{event_type}:{occurred_at.isoformat()}:{hashlib.sha256(payload_json.encode()).hexdigest()}"
+        )
         self._execute(
             f"""
             INSERT INTO {self._table("dependency_edge_events")}
             (event_id, event_type, edge_id, occurred_at, payload_json)
             VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (event_id) DO NOTHING
             """,
             (
                 event_id,
                 event_type,
                 edge_id,
                 occurred_at.isoformat(),
-                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                payload_json,
             ),
         )
 
@@ -244,19 +287,24 @@ class PostgresGraphStore:
         occurred_at: datetime,
     ) -> None:
         payload = {"suggestion": suggestion.model_dump(mode="json")}
-        event_id = f"{suggestion.id}:{event_type}:{occurred_at.isoformat()}:{len(json.dumps(payload, sort_keys=True))}"
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        event_id = (
+            f"{suggestion.id}:{event_type}:{occurred_at.isoformat()}:"
+            f"{hashlib.sha256(payload_json.encode()).hexdigest()}"
+        )
         self._execute(
             f"""
             INSERT INTO {self._table("dependency_suggestion_events")}
             (event_id, event_type, suggestion_id, occurred_at, payload_json)
             VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (event_id) DO NOTHING
             """,
             (
                 event_id,
                 event_type,
                 suggestion.id,
                 occurred_at.isoformat(),
-                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                payload_json,
             ),
         )
 
@@ -265,8 +313,8 @@ class PostgresGraphStore:
             f"""
             INSERT INTO {self._table("dependency_edges")}
             (edge_id, edge_json, source_id, target_id, edge_type, target_kind,
-             valid_from, valid_to, confidence)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             valid_from, valid_to, confidence, source_suggestion_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT(edge_id) DO UPDATE SET
                 edge_json = EXCLUDED.edge_json,
                 source_id = EXCLUDED.source_id,
@@ -275,7 +323,8 @@ class PostgresGraphStore:
                 target_kind = EXCLUDED.target_kind,
                 valid_from = EXCLUDED.valid_from,
                 valid_to = EXCLUDED.valid_to,
-                confidence = EXCLUDED.confidence
+                confidence = EXCLUDED.confidence,
+                source_suggestion_id = EXCLUDED.source_suggestion_id
             """,
             (
                 edge.id,
@@ -287,6 +336,7 @@ class PostgresGraphStore:
                 edge.valid_from.isoformat(),
                 edge.valid_to.isoformat() if edge.valid_to else None,
                 edge.confidence.value,
+                edge.source_suggestion_id,
             ),
         )
 
@@ -294,13 +344,16 @@ class PostgresGraphStore:
         self._execute(
             f"""
             INSERT INTO {self._table("dependency_suggestions")}
-            (suggestion_id, suggestion_json, item_id, target_id, edge_type, decision, created_at, decided_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT(item_id, target_id, edge_type) DO UPDATE SET
-                suggestion_id = EXCLUDED.suggestion_id,
+            (suggestion_id, suggestion_json, item_id, target_id, edge_type, decision, created_at, decided_at,
+             source, assertion_type, created_by, idempotency_key, request_sha256, source_document_id,
+             source_document_version, needs_reverification, state_version)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT(suggestion_id) DO UPDATE SET
                 suggestion_json = EXCLUDED.suggestion_json,
                 decision = EXCLUDED.decision,
-                decided_at = EXCLUDED.decided_at
+                decided_at = EXCLUDED.decided_at,
+                needs_reverification = EXCLUDED.needs_reverification,
+                state_version = EXCLUDED.state_version
             """,
             (
                 suggestion.id,
@@ -311,6 +364,15 @@ class PostgresGraphStore:
                 suggestion.decision.value,
                 suggestion.created_at.isoformat(),
                 suggestion.decided_at.isoformat() if suggestion.decided_at else None,
+                suggestion.source,
+                suggestion.assertion_type.value if suggestion.assertion_type is not None else None,
+                suggestion.created_by,
+                suggestion.idempotency_key,
+                suggestion.request_sha256,
+                suggestion.source_document_id,
+                suggestion.source_document_version,
+                suggestion.needs_reverification,
+                suggestion.state_version,
             ),
         )
 
@@ -319,13 +381,14 @@ class PostgresGraphStore:
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
-        try:
-            yield
-        except Exception:
-            self._conn.rollback()
-            raise
-        else:
-            self._conn.commit()
+        with self._lock:
+            try:
+                yield
+            except Exception:
+                self._conn.rollback()
+                raise
+            else:
+                self._conn.commit()
 
     def _table(self, name: str) -> str:
         return qualified(self.schema, name)

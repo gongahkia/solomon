@@ -27,8 +27,14 @@ class DependencyGraphProtocol(Protocol):
         *,
         item_id: str | None = None,
         decision: SuggestionDecision | None = None,
+        source: str | None = None,
+        target_id: str | None = None,
+        created_by: str | None = None,
+        needs_reverification: bool | None = None,
         limit: int = 100,
     ) -> list[DependencySuggestion]: ...
+
+    def list_dependency_suggestion_events(self, suggestion_id: str) -> list[dict[str, object]]: ...
 
     def close_dependency(self, edge_id: str, *, valid_to: datetime) -> DependencyEdge: ...
 

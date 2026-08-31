@@ -88,15 +88,21 @@ def create_graph_store_schema(execute: ExecuteSQL, table: NameResolver, index: N
             target_kind TEXT NOT NULL,
             valid_from TEXT NOT NULL,
             valid_to TEXT,
-            confidence TEXT NOT NULL
+            confidence TEXT NOT NULL,
+            source_suggestion_id TEXT
         )
         """
     )
+    execute(f"ALTER TABLE {table('dependency_edges')} ADD COLUMN IF NOT EXISTS source_suggestion_id TEXT")
     execute(f"CREATE INDEX IF NOT EXISTS {index('idx_edges_source')} ON {table('dependency_edges')}(source_id)")
     execute(f"CREATE INDEX IF NOT EXISTS {index('idx_edges_target')} ON {table('dependency_edges')}(target_id)")
     execute(
         f"CREATE INDEX IF NOT EXISTS {index('idx_edges_current_target')} "
         f"ON {table('dependency_edges')}(target_id, valid_to)"
+    )
+    execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {index('idx_edges_assertion')} "
+        f"ON {table('dependency_edges')}(source_suggestion_id) WHERE source_suggestion_id IS NOT NULL"
     )
     execute(
         f"""
@@ -121,13 +127,51 @@ def create_graph_store_schema(execute: ExecuteSQL, table: NameResolver, index: N
             decision TEXT NOT NULL,
             created_at TEXT NOT NULL,
             decided_at TEXT,
-            UNIQUE(item_id, target_id, edge_type)
+            source TEXT NOT NULL DEFAULT 'deterministic',
+            assertion_type TEXT,
+            created_by TEXT,
+            idempotency_key TEXT,
+            request_sha256 TEXT,
+            source_document_id TEXT,
+            source_document_version INTEGER,
+            needs_reverification BOOLEAN NOT NULL DEFAULT FALSE,
+            state_version INTEGER NOT NULL DEFAULT 1
         )
         """
     )
+    execute(
+        f"ALTER TABLE {table('dependency_suggestions')} "
+        "DROP CONSTRAINT IF EXISTS dependency_suggestions_item_id_target_id_edge_type_key"
+    )
+    for column, definition in (
+        ("source", "TEXT NOT NULL DEFAULT 'deterministic'"),
+        ("assertion_type", "TEXT"),
+        ("created_by", "TEXT"),
+        ("idempotency_key", "TEXT"),
+        ("request_sha256", "TEXT"),
+        ("source_document_id", "TEXT"),
+        ("source_document_version", "INTEGER"),
+        ("needs_reverification", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("state_version", "INTEGER NOT NULL DEFAULT 1"),
+    ):
+        execute(f"ALTER TABLE {table('dependency_suggestions')} ADD COLUMN IF NOT EXISTS {column} {definition}")
     execute(f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_item')} ON {table('dependency_suggestions')}(item_id)")
     execute(
         f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_decision')} ON {table('dependency_suggestions')}(decision)"
+    )
+    execute(
+        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_target')} ON {table('dependency_suggestions')}(target_id)"
+    )
+    execute(
+        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_source')} ON {table('dependency_suggestions')}(source)"
+    )
+    execute(
+        f"CREATE INDEX IF NOT EXISTS {index('idx_suggestions_reverification')} "
+        f"ON {table('dependency_suggestions')}(needs_reverification, created_at)"
+    )
+    execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {index('idx_suggestions_idempotency')} "
+        f"ON {table('dependency_suggestions')}(source, idempotency_key) WHERE idempotency_key IS NOT NULL"
     )
 
 

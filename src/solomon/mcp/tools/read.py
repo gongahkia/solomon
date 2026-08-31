@@ -280,6 +280,13 @@ def dependency_suggestions(
         decision=SuggestionDecision(decision),
         limit=limit,
     )
+    assertions = runtime.service.dependency_assertions(
+        item_id=knowledge_item_id,
+        state=SuggestionDecision(decision),
+        matter_id=matter_id,
+        client_id=client_id,
+        limit=limit,
+    )
     _log_mcp_call(
         runtime.service,
         "solomon.dependency_suggestions",
@@ -289,7 +296,10 @@ def dependency_suggestions(
         input_payload={"knowledge_item_id": knowledge_item_id, "decision": decision, "limit": limit},
     )
     return {
-        "suggestions": [suggestion.model_dump(mode="json") for suggestion in suggestions],
+        "suggestions": [
+            *[suggestion.model_dump(mode="json") for suggestion in suggestions],
+            *[assertion.model_dump(mode="json") for assertion in assertions],
+        ],
         "scope": {"matter_id": item.matter_id, "client_id": item.client_id, "caller_id": caller_id},
     }
 

@@ -24,7 +24,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "solomon.ingest": "Boundary-check and ingest new firm knowledge.",
     "solomon.audit_pack": "Export provenance, dependency, verification, boundary, and hash-chain evidence.",
     "solomon.currency_report": "Return partner-facing currency movements for a scope and period.",
-    "solomon.dependency_suggestions": "Return proposed dependency edges for human confirmation.",
+    "solomon.dependency_suggestions": "Return scoped dependency proposals and governed assertion provenance.",
     "solomon.impact": "Return internal items affected by a changed external authority.",
 }
 

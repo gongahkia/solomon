@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 from collections.abc import Iterable
 
 
@@ -21,4 +23,14 @@ class OperationFailureInjector:
             raise InjectedOperationFailure(point)
 
 
-__all__ = ["InjectedOperationFailure", "OperationFailureInjector"]
+class SubprocessKillOperationFailureInjector(OperationFailureInjector):
+    """Test-only hard process termination used exclusively by bounded subprocess crash proofs."""
+
+    def hit(self, point: str) -> None:
+        if point in self._remaining:
+            self._remaining.remove(point)
+            os.kill(os.getpid(), signal.SIGKILL)
+        super().hit(point)
+
+
+__all__ = ["InjectedOperationFailure", "OperationFailureInjector", "SubprocessKillOperationFailureInjector"]

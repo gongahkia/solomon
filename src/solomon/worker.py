@@ -59,6 +59,10 @@ def run_pending_operations(
     if not worker_id or limit < 1:
         raise ValueError("worker ID and positive limit are required")
     attempted = completed = retrying = terminal = failed = 0
+    try:
+        service._authority.reconcile_source_revisions()
+    except Exception:
+        failed += 1
     for _ in range(limit):
         try:
             operation = service._authority.run_operation_once(worker_id=worker_id)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from time import sleep
-from typing import Any
+from typing import Any, cast
 
 from solomon.api.service_models import (
     AuthorityChangeRequest,
@@ -65,6 +65,7 @@ from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.operations.reverification_projection import SourceRevisionReverificationProjection
 from solomon.orchestrator.models import ModelRouter
+from solomon.sources.store import SourceDocumentNotFoundError
 
 
 class AuthorityService(ServiceDelegate):
@@ -506,26 +507,7 @@ class AuthorityService(ServiceDelegate):
         for assertion in self._assertion_lifecycle.list_assertions(limit=10_000):
             if assertion.source_document_id != previous_document_id or assertion.needs_reverification:
                 continue
-            operation, _ = self.operation_store.create(
-                OperationRecord(
-                    operation_type=OperationType.SOURCE_REVISION_REVERIFY,
-                    scope=OperationScope(
-                        tenant_id=self.tenant_id,
-                        matter_id=assertion.matter_id,
-                        client_id=assertion.client_id,
-                    ),
-                    actor_id="system:source-revision",
-                    authorization_context={"service_access": "curate", "actor_type": "system"},
-                    correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
-                    causation_id=assertion.id,
-                    idempotency_key=f"source-revision:{assertion.id}:{replacement_document_id}",
-                    source_resource_id=previous_document_id,
-                    source_version=assertion.source_document_version,
-                    target_resource_id=replacement_document_id,
-                    assertion_id=assertion.id,
-                    requested_transition="needs_reverification",
-                )
-            )
+            operation, _ = self._create_source_revision_operation(assertion, replacement_document_id)
             self._failure_injector.hit("after_authoritative_write_before_schedule")
             for _ in range(100):
                 current = self.operation_store.get(operation.id)
@@ -548,6 +530,55 @@ class AuthorityService(ServiceDelegate):
             else:
                 raise BadRequestError("source revision reverification is durably queued for retry")
         return updated
+
+    def reconcile_source_revisions(self) -> int:
+        """Schedule missing source-version projections found after an interruption before journal creation."""
+
+        created = 0
+        for assertion in self._assertion_lifecycle.list_assertions(limit=10_000):
+            if assertion.needs_reverification or assertion.source_document_id is None:
+                continue
+            try:
+                source = self.document_store.get_document(assertion.source_document_id)
+            except SourceDocumentNotFoundError:
+                continue
+            for replacement in self.document_store.list_documents(source.source_id):
+                if replacement.previous_version_id != source.id:
+                    continue
+                _, scheduled = self._create_source_revision_operation(assertion, replacement.id)
+                created += int(scheduled)
+        return created
+
+    def _create_source_revision_operation(
+        self,
+        assertion: DependencySuggestion,
+        replacement_document_id: str,
+    ) -> tuple[OperationRecord, bool]:
+        if assertion.source_document_id is None:
+            raise BadRequestError("source revision operation requires an assertion source document")
+        return cast(
+            tuple[OperationRecord, bool],
+            self.operation_store.create(
+                OperationRecord(
+                    operation_type=OperationType.SOURCE_REVISION_REVERIFY,
+                    scope=OperationScope(
+                        tenant_id=self.tenant_id,
+                        matter_id=assertion.matter_id,
+                        client_id=assertion.client_id,
+                    ),
+                    actor_id="system:source-revision",
+                    authorization_context={"service_access": "curate", "actor_type": "system"},
+                    correlation_id=assertion.audit_correlation_id or f"dependency_assertion:{assertion.id}",
+                    causation_id=assertion.id,
+                    idempotency_key=f"source-revision:{assertion.id}:{replacement_document_id}",
+                    source_resource_id=assertion.source_document_id,
+                    source_version=assertion.source_document_version,
+                    target_resource_id=replacement_document_id,
+                    assertion_id=assertion.id,
+                    requested_transition="needs_reverification",
+                )
+            ),
+        )
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()

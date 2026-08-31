@@ -34,7 +34,8 @@ from solomon.graph.suggestions import (
 from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.operations.models import OperationStatus
-from solomon.sources.models import DocumentSourceKind
+from solomon.sources.models import DocumentSourceKind, SourceDocument
+from solomon.worker import run_pending_operations
 
 
 def test_governed_assertion_requires_reconstructible_registered_evidence_and_confirmed_edge(tmp_path: Path) -> None:
@@ -214,7 +215,9 @@ def test_source_revision_interruption_resumes_from_immutable_document_lineage(tm
         assertion.id,
         DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
     )
-    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_authoritative_write_before_schedule"]))
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_authoritative_write_before_schedule"])
+    )
 
     with pytest.raises(InjectedOperationFailure, match="after_authoritative_write_before_schedule"):
         service.ingest_source_document(
@@ -241,6 +244,32 @@ def test_source_revision_interruption_resumes_from_immutable_document_lineage(tm
     reverified = service.get_dependency_assertion(assertion.id)
     assert reverified.needs_reverification is True
     assert reverified.reverification_audit_id is not None
+
+
+def test_worker_reconciles_source_revision_written_before_its_operation_record(tmp_path: Path) -> None:
+    service, document_id, item_id = _source_backed_service(tmp_path)
+    service.register_authority_source(_authority_source())
+    assertion = service.create_dependency_assertion(_quote_request(item_id=item_id, document_id=document_id))
+    service.decide_dependency_assertion(
+        assertion.id,
+        DependencyAssertionDecisionRequest(by="reviewer-a", decision="confirmed"),
+    )
+    source = service.document_store.get_document(document_id)
+    replacement = service.document_store.write_document(
+        SourceDocument(
+            source_id=source.source_id,
+            external_id=source.external_id,
+            filename=source.filename,
+            mime_type=source.mime_type,
+            content="revised source written before durable operation scheduling",
+        )
+    )
+    assert not any(current.target_resource_id == replacement.id for current in service.operation_store.list())
+
+    batch = run_pending_operations(service, worker_id="source-gap-reconciler")
+
+    assert batch.completed == 1
+    assert service.get_dependency_assertion(assertion.id).needs_reverification is True
 
 
 def test_governed_assertion_rest_and_python_sdk_surface(tmp_path: Path) -> None:
@@ -308,6 +337,7 @@ def test_governed_assertion_rejects_conflicts_terminal_transitions_and_invalid_r
         assertion.id,
         DependencyAssertionDecisionRequest(by="reviewer-a", decision="rejected", reason="not adopted"),
     )
+    assert not isinstance(rejected, DependencyEdge)
     assert rejected.decision is SuggestionDecision.REJECTED
     assert (
         service.decide_dependency_assertion(

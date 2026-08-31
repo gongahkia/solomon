@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
@@ -11,6 +12,8 @@ import pytest
 from solomon.currency.models import CredenceTier, CurrencyState, KnowledgeItem, KnowledgeKind, Provenance, SourceKind
 from solomon.graph.models import DependencyEdge, EdgeType
 from solomon.graph.propagation import CurrencyPropagator
+from solomon.operations.models import OperationPhase, OperationRecord, OperationScope, OperationStatus, OperationType
+from solomon.operations.postgres import PostgresOperationStore
 from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
 from solomon.store.factory import create_storage_bundle
 from solomon.store.postgres import PostgresDependencyError
@@ -95,5 +98,78 @@ def test_live_postgres_storage_bundle_matches_core_sqlite_workflow() -> None:
             bundle.store.close()
             bundle.graph.close()
             bundle.index.close()
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
+def test_live_postgres_operation_journal_claims_once_and_preserves_history() -> None:
+    dsn = os.environ.get("SOLOMON_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("set SOLOMON_TEST_POSTGRES_DSN to run live Postgres integration coverage")
+
+    psycopg = pytest.importorskip("psycopg")
+    schema = f"test_operations_{uuid.uuid4().hex}"
+    first = second = None
+    try:
+        first = PostgresOperationStore(dsn, schema=schema)
+        second = PostgresOperationStore(dsn, schema=schema)
+        operation, created = first.create(
+            OperationRecord(
+                operation_type=OperationType.ASSERTION_CONFIRM,
+                scope=OperationScope(tenant_id="tenant-a", matter_id="matter-a", client_id="client-a"),
+                actor_id="reviewer-a",
+                authorization_context={"service_access": "review"},
+                correlation_id="postgres-operation-test",
+                idempotency_key="assertion-confirm:postgres-test",
+                assertion_id="assertion-a",
+                requested_transition="confirmed",
+            )
+        )
+        assert created is True
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            claimed = list(
+                executor.map(
+                    lambda store: store.claim_next(worker_id=f"worker-{id(store)}"),
+                    (first, second),
+                )
+            )
+        claimed_once = [current for current in claimed if current is not None]
+        assert len(claimed_once) == 1
+        active = claimed_once[0]
+        assert active.id == operation.id
+        assert active.lease_owner is not None
+
+        checkpointed = first.checkpoint(
+            active.id,
+            worker_id=active.lease_owner,
+            phase=OperationPhase.GRAPH,
+            result_entity_id="assertion-a",
+            result_edge_id="edge-a",
+        )
+        completed = first.complete(
+            checkpointed.id,
+            worker_id=active.lease_owner,
+            result_entity_id="assertion-a",
+            result_edge_id="edge-a",
+        )
+        assert completed.status is OperationStatus.COMPLETED
+        assert [entry.event for entry in second.history(operation.id)] == [
+            "created",
+            "claimed",
+            "checkpoint",
+            "completed",
+        ]
+        with psycopg.connect(dsn) as conn:
+            row = conn.execute(
+                f'SELECT version FROM "{schema}".schema_migrations WHERE scope = %s',  # noqa: S608
+                ("operation-store",),
+            ).fetchone()
+        assert row == (1,)
+    finally:
+        if first is not None:
+            first.close()
+        if second is not None:
+            second.close()
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')

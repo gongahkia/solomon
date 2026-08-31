@@ -6,7 +6,6 @@ import hashlib
 import importlib
 import json
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -19,11 +18,6 @@ from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import new_uuid7, now_utc
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.orchestrator.models import ModelRequest, ModelRouter
-from solomon.reliance_semantics import (
-    analyze_reliance,
-    normalize_analysis,
-    normalized_authority_references,
-)
 
 TOKEN_RE = re.compile(
     r"\[[0-9]{4}\]|(?:reg|s)\.|v\.?|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|§|[.,;:()\"]",
@@ -32,7 +26,39 @@ TOKEN_RE = re.compile(
 AUTHORITY_NOUNS = {"act", "code", "guidance", "reg", "regulation", "regulations", "rule", "rules"}
 SECTION_MARKERS = {"section", "s.", "§"}
 CASE_CONNECTORS = {"of", "the", "and", "&", "pte", "ltd", "llc", "inc", "corp", "co"}
+TITLE_PREFIX_STOP_WORDS = {"under"}
 QUOTE_DEFINITION_MARKERS = ("shall mean", "has the meaning", "means")
+POSITIVE_RELIANCE_CUES = ("relies on", "depends on", "pursuant to", "required by", "under ", "controls.", "matters.")
+ADOPTION_PATTERNS = (
+    re.compile(
+        r"\b(?:supplies|provides|sets|establishes)\s+(?:the\s+)?(?:operative\s+)?(?:deadline|formula|sequence)\b"
+    ),
+    re.compile(r"\buses\b.+\bas\s+(?:its|the)\s+(?:rule|approval condition)\b"),
+    re.compile(r"\btreats\b.+\bas\s+the\s+controlling\s+(?:approval\s+)?condition\b"),
+    re.compile(r"\bfollows\b.+\bfor\b"),
+    re.compile(r"\bis\s+the\s+source\s+of\b"),
+)
+ATTRIBUTED_RELIANCE_MARKERS = (
+    "counterparty",
+    "opposing submission",
+    "regulator says",
+    "witness notes",
+    "training extract",
+)
+CROSS_SENTENCE_ANCHORS = re.compile(r"\b(?:that|the)\s+(?:deadline|formula|calculation)\b|\bfor\s+that\s+calculation\b")
+NEGATIVE_RELIANCE_CUES = (
+    "does not rely",
+    "do not rely",
+    "not rely",
+    "not on ",
+    "rather than ",
+    "background only",
+    "adopts no authority",
+    "distinguishes ",
+    "rejects ",
+    "inapplicable",
+    "contrary argument",
+)
 
 
 class SuggestionDecision(str, Enum):
@@ -131,32 +157,28 @@ def suggest_authority_dependencies(
     previous_source_document_id: str | None = None,
     source_offset: int = 0,
     audit_correlation_id: str | None = None,
-    registered_authority_ids: Sequence[str] | None = None,
 ) -> list[DependencySuggestion]:
     _ = boundary.sanitize_context(content, matter_id=matter_id)
     suggestions: list[DependencySuggestion] = []
     references = extract_defined_terms_and_citations(content=content)
-    fallback_references = [
-        (citation.normalized_id, citation.text, citation.kind, citation.span_start, citation.span_end)
-        for citation in references.citations
-    ]
-    _, _, candidates = analyze_reliance(
-        content,
-        fallback_references=fallback_references,
-        registered_authority_ids=registered_authority_ids,
-    )
-    for candidate in candidates:
-        authority_ref = candidate.authority_text
-        authority_id = candidate.target_id
+    for citation in references.citations:
+        if citation.kind not in {"authority", "section", "case"}:
+            continue
+        evidence = _reliance_evidence(content, citation)
+        if evidence is None:
+            continue
+        source_start, source_end, source_span = evidence
+        authority_ref = citation.text
+        authority_id = citation.normalized_id
         fingerprint = _suggestion_fingerprint(
             item_id=item_id,
             target_id=authority_id,
             source_document_id=source_document_id,
             source_document_version=source_document_version,
-            source_span_start=source_offset + candidate.source_start,
-            source_span_end=source_offset + candidate.source_end,
-            authority_span_start=source_offset + candidate.authority_start,
-            authority_span_end=source_offset + candidate.authority_end,
+            source_span_start=source_offset + source_start,
+            source_span_end=source_offset + source_end,
+            authority_span_start=source_offset + (citation.span_start or 0),
+            authority_span_end=source_offset + (citation.span_end or 0),
             extraction_method="deterministic",
         )
         suggestions.append(
@@ -180,15 +202,15 @@ def suggest_authority_dependencies(
                 source_document_id=source_document_id,
                 source_document_version=source_document_version,
                 previous_source_document_id=previous_source_document_id,
-                source_span_start=source_offset + candidate.source_start,
-                source_span_end=source_offset + candidate.source_end,
-                source_span=candidate.source_text,
-                authority_span_start=source_offset + candidate.authority_start,
-                authority_span_end=source_offset + candidate.authority_end,
+                source_span_start=source_offset + source_start,
+                source_span_end=source_offset + source_end,
+                source_span=source_span,
+                authority_span_start=source_offset + (citation.span_start or 0),
+                authority_span_end=source_offset + (citation.span_end or 0),
                 authority_span=authority_ref,
                 matter_id=matter_id,
                 client_id=client_id,
-                explanation=candidate.explanation,
+                explanation="deterministic reliance cue and cited authority co-occur in the reviewed source span",
                 audit_correlation_id=audit_correlation_id,
             )
         )
@@ -286,6 +308,60 @@ def _citation_id(value: str) -> str:
     normalized = re.sub(r"\breg\.?(?=\s|$)", "regulation", normalized)
     normalized = re.sub(r"(?<![a-z.])s\.?(?=\s|$)", "section", normalized)
     return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _reliance_evidence(text: str, citation: CitationReference) -> tuple[int, int, str] | None:
+    if citation.span_start is None or citation.span_end is None:
+        return None
+    start = max(text.rfind(".", 0, citation.span_start), text.rfind("\n", 0, citation.span_start)) + 1
+    end_candidates = [
+        position
+        for position in (text.find(".", citation.span_end), text.find("\n", citation.span_end))
+        if position != -1
+    ]
+    end = min(end_candidates) + 1 if end_candidates else len(text)
+    source_span = text[start:end].strip()
+    if not source_span:
+        return None
+    normalized_sentence = source_span.lower()
+    prefix = text[max(start, citation.span_start - 56) : citation.span_start].lower()
+    if any(cue in prefix for cue in NEGATIVE_RELIANCE_CUES):
+        return None
+    if re.search(r"(?:^|[,;])\s*(?:not|rather than)\s*$", prefix):
+        return None
+    if any(marker in normalized_sentence for marker in ATTRIBUTED_RELIANCE_MARKERS):
+        return None
+    source_start = start + len(text[start:end]) - len(text[start:end].lstrip())
+    if _has_reliance_cue(normalized_sentence):
+        return source_start, source_start + len(source_span), source_span
+    previous = _previous_sentence(text, start)
+    if previous is None:
+        return None
+    previous_start, previous_span = previous
+    if CROSS_SENTENCE_ANCHORS.search(normalized_sentence) and "adopt" in previous_span.lower():
+        combined = text[previous_start:end].strip()
+        combined_start = previous_start + len(text[previous_start:end]) - len(text[previous_start:end].lstrip())
+        return combined_start, combined_start + len(combined), combined
+    return None
+
+
+def _has_reliance_cue(sentence: str) -> bool:
+    return any(cue in sentence for cue in POSITIVE_RELIANCE_CUES) or any(
+        pattern.search(sentence) for pattern in ADOPTION_PATTERNS
+    )
+
+
+def _previous_sentence(text: str, current_start: int) -> tuple[int, str] | None:
+    before = text[:current_start].rstrip()
+    if not before.endswith("."):
+        return None
+    previous_end = len(before)
+    previous_start = max(before.rfind(".", 0, previous_end - 1), before.rfind("\n", 0, previous_end - 1)) + 1
+    span = text[previous_start:previous_end].strip()
+    if not span:
+        return None
+    offset = previous_start + len(text[previous_start:previous_end]) - len(text[previous_start:previous_end].lstrip())
+    return offset, span
 
 
 def _suggestion_fingerprint(
@@ -395,37 +471,18 @@ def _extract_citations(text: str) -> dict[str, CitationReference]:
     citations: dict[str, CitationReference] = {}
     occupied_spans: list[tuple[int, int]] = []
 
-    normalized = normalized_authority_references(normalize_analysis(text))
-    for reference in normalized:
-        citation = CitationReference(
-            text=reference.text,
-            kind="authority",
-            normalized_id=reference.normalized_id,
-            parser="solomon-grammar",
-            span_start=reference.raw_start,
-            span_end=reference.raw_end,
-            metadata={"grammar": "normalized-authority-section"},
-        )
-        citations[f"{citation.kind}:{citation.normalized_id}"] = citation
-        occupied_spans.append((reference.raw_start, reference.raw_end))
-
     for citation in _eyecite_citations(text):
         key = f"{citation.kind}:{citation.normalized_id}"
-        if citation.span_start is not None and citation.span_end is not None:
-            if _overlaps_any((citation.span_start, citation.span_end), occupied_spans):
-                continue
-            occupied_spans.append((citation.span_start, citation.span_end))
         citations.setdefault(key, citation)
+        if citation.span_start is not None and citation.span_end is not None:
+            occupied_spans.append((citation.span_start, citation.span_end))
 
     for citation in _grammar_citations(text):
         if citation.span_start is not None and citation.span_end is not None:
             if _overlaps_any((citation.span_start, citation.span_end), occupied_spans):
                 continue
         key = f"{citation.kind}:{citation.normalized_id}"
-        if citation.metadata.get("grammar") == "declared-alias":
-            citations[key] = citation
-        else:
-            citations.setdefault(key, citation)
+        citations.setdefault(key, citation)
 
     return citations
 
@@ -669,7 +726,7 @@ def _authority_title_start(tokens: list[Token], noun_index: int) -> int:
             break
         if previous.lower == "and":
             break
-        if previous.lower in {"under", "the"}:
+        if previous.lower in TITLE_PREFIX_STOP_WORDS:
             break
         if not (previous.text[:1].isupper() or previous.text.isdigit() or previous.lower in CASE_CONNECTORS):
             break

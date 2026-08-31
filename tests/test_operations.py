@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from solomon.currency.models import now_utc
+from solomon.operations.execution import OperationRunner
 from solomon.operations.models import (
     OperationPhase,
     OperationRecord,
@@ -248,3 +249,23 @@ def test_operation_store_operator_resolution_and_model_transition_guards(tmp_pat
         OperationRecord.model_validate(invalid_phase)
     assert is_terminal(OperationStatus.COMPLETED) is True
     assert is_terminal(OperationStatus.QUEUED) is False
+
+
+def test_operation_store_optimistic_compare_and_swap_rejects_a_stale_writer(tmp_path: Path) -> None:
+    store = SQLiteOperationStore(tmp_path / "operations.sqlite3")
+    operation, _ = store.create(_operation())
+    stale = store.get(operation.id)
+    claimed = store.claim_next(worker_id="worker-a")
+    assert claimed is not None
+    stale_claim = stale.with_transition(
+        status=OperationStatus.CLAIMED,
+        lease_owner="worker-stale",
+        lease_expires_at=now_utc() + timedelta(seconds=30),
+    )
+
+    with pytest.raises(OperationConflictError, match="changed before"):
+        store._replace(stale, stale_claim)
+    store.close()
+
+    with pytest.raises(ValueError, match="maximum attempts"):
+        OperationRunner(store=object(), dispatch=lambda operation, worker: operation, maximum_attempts=0)

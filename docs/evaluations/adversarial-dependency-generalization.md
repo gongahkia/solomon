@@ -101,3 +101,10 @@ coverage, user understanding, confidentiality compliance, or a law-firm’s oper
 the existing owner-operated pilot status: pilot execution and observations remain pending. The holdout corpus must not
 be edited to fit the implementation; an objectively malformed fixture requires a recorded version/hash change and a
 comparability note.
+
+## Later conservative-reliance addendum
+
+The later reversible normalized-analysis/declarative-grammar experiment is recorded separately in
+[Conservative Reliance Semantics Proof](conservative-reliance-semantics.md). Its new corpus performed safely, but the
+experiment violated this locked corpus’s immutable precision, abstention, and hard-negative false-positive conditions;
+the production source was reverted rather than retuned.

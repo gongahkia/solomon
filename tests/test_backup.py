@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from solomon.api.service import IngestRequest, SolomonService
+from solomon.audit.journal import AuditJournal
 from solomon.backup import (
     BackupError,
     apply_server_restore,
@@ -235,13 +236,16 @@ def test_server_backup_and_guarded_restore_cover_postgres_and_local_state(tmp_pa
     )
     archive = tmp_path / "server-backup.enc"
 
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"deterministic-postgres-dump")
+
     created = create_server_encrypted_backup(
         data_dir=tmp_path / "data",
         journal_dir=tmp_path / "journal",
         database_url=database_url,
         destination=archive,
         passphrase=TEST_PASSPHRASE,
-        dump_postgres=lambda target: target.write_bytes(b"deterministic-postgres-dump"),
+        dump_postgres=dump_postgres,
         owner="backup-test",
     )
     inspected = inspect_server_encrypted_backup(archive, passphrase=TEST_PASSPHRASE)
@@ -346,13 +350,17 @@ def test_server_restore_refuses_stale_plan_and_database_identity_mismatch(tmp_pa
         database_url=database_url,
     )
     archive = tmp_path / "server-backup.enc"
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"postgres-dump")
+
     create_server_encrypted_backup(
         data_dir=tmp_path / "data",
         journal_dir=tmp_path / "journal",
         database_url=database_url,
         destination=archive,
         passphrase=TEST_PASSPHRASE,
-        dump_postgres=lambda target: target.write_bytes(b"postgres-dump"),
+        dump_postgres=dump_postgres,
     )
     plan = plan_server_restore(
         archive,
@@ -378,6 +386,90 @@ def test_server_restore_refuses_stale_plan_and_database_identity_mismatch(tmp_pa
         )
 
 
+@pytest.mark.parametrize("point", ["after_restore_staging", "after_postgres_restore"])
+def test_server_restore_failure_injection_preserves_unactivated_local_target(
+    tmp_path: Path,
+    point: str,
+) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    archive = tmp_path / "server-backup.enc"
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"postgres-dump")
+
+    create_server_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+        dump_postgres=dump_postgres,
+    )
+    target = tmp_path / point
+    plan = plan_server_restore(archive, target, database_url=database_url, passphrase=TEST_PASSPHRASE)
+    restored_dumps: list[bytes] = []
+
+    def restore_postgres(dump: Path) -> None:
+        restored_dumps.append(dump.read_bytes())
+
+    with pytest.raises(InjectedOperationFailure, match=point):
+        apply_server_restore(
+            plan,
+            database_url=database_url,
+            passphrase=TEST_PASSPHRASE,
+            restore_postgres=restore_postgres,
+            failure_injector=OperationFailureInjector([point]),
+        )
+
+    assert target.exists() is False
+    assert restored_dumps == ([] if point == "after_restore_staging" else [b"postgres-dump"])
+
+
+def test_server_restore_failure_after_activation_leaves_durable_started_audit_marker(tmp_path: Path) -> None:
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    archive = tmp_path / "server-backup.enc"
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"postgres-dump")
+
+    create_server_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+        dump_postgres=dump_postgres,
+    )
+    target = tmp_path / "activated-target"
+    plan = plan_server_restore(archive, target, database_url=database_url, passphrase=TEST_PASSPHRASE)
+
+    with pytest.raises(InjectedOperationFailure, match="after_local_activation"):
+        apply_server_restore(
+            plan,
+            database_url=database_url,
+            passphrase=TEST_PASSPHRASE,
+            restore_postgres=lambda _dump: None,
+            failure_injector=OperationFailureInjector(["after_local_activation"]),
+        )
+
+    assert target.is_dir()
+    events = [entry.event_type for entry in AuditJournal(target / "journal" / "journal.jsonl").list_entries()]
+    assert "deployment_restore_started" in events
+    assert "deployment_restore_completed" not in events
+
+
 def test_postgres_client_callbacks_keep_password_out_of_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -388,7 +480,9 @@ def test_postgres_client_callbacks_keep_password_out_of_arguments(
         returncode = 0
 
     def fake_run(command: list[str], **kwargs: object) -> Completed:
-        calls.append((command, kwargs["env"]))  # type: ignore[arg-type,index]
+        environment = kwargs.get("env")
+        assert isinstance(environment, dict)
+        calls.append((command, {str(key): str(value) for key, value in environment.items()}))
         if command[0].endswith("pg_dump"):
             Path(command[command.index("--file") + 1]).write_bytes(b"dump")
         return Completed()
@@ -548,6 +642,10 @@ def test_server_backup_refuses_missing_metadata_empty_dump_and_invalid_local_cop
 
     invalid = data / "invalid.sqlite3"
     invalid.write_bytes(b"not a sqlite database")
+
+    def dump_postgres(target: Path) -> None:
+        target.write_bytes(b"dump")
+
     with pytest.raises(BackupError, match="consistent SQLite backup"):
         create_server_encrypted_backup(
             data_dir=data,
@@ -555,7 +653,7 @@ def test_server_backup_refuses_missing_metadata_empty_dump_and_invalid_local_cop
             database_url=database_url,
             destination=tmp_path / "invalid-sqlite.enc",
             passphrase=TEST_PASSPHRASE,
-            dump_postgres=lambda target: target.write_bytes(b"dump"),
+            dump_postgres=dump_postgres,
         )
     with sqlite3.connect(data / "solomon.sqlite3") as database:
         assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)

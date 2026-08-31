@@ -39,7 +39,12 @@ def semantic_inventory(service: SolomonService) -> dict[str, Any]:
         entry.model_dump(mode="json")
         for entry in service.audit.list_entries()
         if entry.event_type
-        not in {"deployment_backup_started", "deployment_backup_completed", "deployment_restore_completed"}
+        not in {
+            "deployment_backup_started",
+            "deployment_backup_completed",
+            "deployment_restore_started",
+            "deployment_restore_completed",
+        }
     ]
     components = {
         "knowledge_items": _summary(items),

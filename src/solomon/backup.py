@@ -490,6 +490,7 @@ def apply_server_restore(
     database_url: str,
     passphrase: str,
     restore_postgres: Callable[[Path], None],
+    failure_injector: OperationFailureInjector | None = None,
 ) -> ServerRestoreResult:
     """Apply one unchanged plan to an absent local target and an empty database target."""
 
@@ -504,12 +505,16 @@ def apply_server_restore(
     destination = Path(plan.destination)
     encrypted_path = Path(plan.archive_path)
     manifest = _read_server_manifest(backup_manifest_path(encrypted_path))
+    injector = failure_injector or OperationFailureInjector()
+    injector.hit("before_restore_staging")
     with tempfile.TemporaryDirectory(prefix="solomon-server-restore-", dir=destination.parent) as temporary:
         staged = _decrypt_and_extract_server_archive(encrypted_path, manifest, passphrase, Path(temporary))
         record = _read_server_record(staged)
         _validate_server_record(record, manifest, database_url)
         dump_path = staged / "postgres" / "knowledge.dump"
+        injector.hit("after_restore_staging")
         restore_postgres(dump_path)
+        injector.hit("after_postgres_restore")
         _verify_staged_journal(staged / "journal")
         for database in sorted((staged / "data").rglob("*.sqlite3")):
             _verify_sqlite_database(database)
@@ -517,7 +522,13 @@ def apply_server_restore(
         local_root.mkdir()
         os.replace(staged / "data", local_root / "data")
         os.replace(staged / "journal", local_root / "journal")
+        AuditJournal(local_root / "journal" / "journal.jsonl").append_idempotent(
+            "deployment_restore_started",
+            {"deployment_id": record.deployment_id, "archive_sha256": manifest.encrypted_sha256},
+            operation_id=record.maintenance_operation_id,
+        )
         os.replace(local_root, destination)
+    injector.hit("after_local_activation")
     AuditJournal(destination / "journal" / "journal.jsonl").append_idempotent(
         "deployment_restore_completed",
         {"deployment_id": record.deployment_id, "archive_sha256": manifest.encrypted_sha256},

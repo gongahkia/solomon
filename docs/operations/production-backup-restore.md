@@ -93,6 +93,13 @@ across both stores. Keep the target isolated, do not start Solomon against it, r
 operator either rerun from a fresh empty target or restore a verified checkpoint. No automatic destructive
 compensation is attempted.
 
+Before activating the local root, Solomon appends a durable `deployment_restore_started` event to the staged audit
+journal. A successful activation appends `deployment_restore_completed`. If interruption occurs after local activation
+but before that acknowledgement, the target's hash-verified journal exposes the started-without-completed state. Do
+not retry against that target: keep it isolated, inspect its PostgreSQL and local components, preserve its journal,
+and use a fresh empty target or a verified checkpoint under operator control. This is deliberate operator-required
+recovery, not a cross-store rollback claim.
+
 After a successful restore, point a fresh deployment at the restored local paths and database. Run preflight,
 health, the scoped consistency inspector, the worker, and audit-pack verification before accepting user traffic:
 

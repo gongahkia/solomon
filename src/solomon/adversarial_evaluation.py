@@ -178,6 +178,7 @@ def _evaluate_once(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             client_id=cast(dict[str, str], item["scope"]).get("client_id"),
             source_document_id=cast(dict[str, Any], item.get("document", {})).get("external_id"),
             source_document_version=cast(dict[str, Any], item.get("document", {})).get("version"),
+            registered_authority_ids=cast(list[str] | None, item.get("registered_authority_candidates")),
         )
         rows.append(
             {

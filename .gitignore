@@ -1,20 +1,20 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
-/target/
-/.direnv/
-/.venv/
-/.shibahama/
-/dist/
-/node_modules/
-bindings/node/node_modules/
-bindings/node/*.node
-bindings/node/index.js
-tideline/dist/
-tideline/node_modules/
-tideline/*.tsbuildinfo
-tideline/vite.config.d.ts
-tideline/vite.config.js
+.DS_Store
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
 __pycache__/
-*.so
-
-*.log
+*.egg-info/
+build/
+dist/
+htmlcov/
+solomon-data/
+solomon-journal/
+site/
+*.db
+*.sqlite
+*.sqlite3
+.playwright-cli/

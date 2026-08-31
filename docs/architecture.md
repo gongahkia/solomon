@@ -1,206 +1,153 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Architecture
 
-Shibahama is an in-process-first memory engine for long-running LLM agents. The
-current implementation is centered on a Rust core crate, with Python, Node,
-CLI, optional HTTP server, benchmark, and Tideline debugger surfaces built
-around the same core behavior.
+Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durable currency evidence:
 
-The core design is intentionally event-sourced: durable history is append-only,
-while the current memory state is a materialized view optimized for normal
-recall.
+- `currency`: data models, currency evaluation, feeds, reports, and supersession proposals.
+- `store`: SQLite event store, backend factory, encrypted artifacts.
+- `graph`: bi-temporal dependency edges, propagation, and suggestions.
+- `credence`: source-tier policy, load-bearing guardrails, prompt-context separation.
+- `boundary`: Solomon review, pseudonymize, reidentify, scrub, and fail-closed policy.
+- `orchestrator`: retrieval and model routing.
+- `audit`: hash-chained metadata-only journal and audit-pack export.
+- `api` and `cli`: public verbs.
 
-## Component Map
+## Request Lifecycle
 
-| Component | Path | Responsibility |
-| --- | --- | --- |
-| Core API facade | `core/src/api.rs` | Stable high-level API: `write`, `recall`, `reinforce`, `why`, and `timeline`. |
-| Data model | `core/src/model.rs` | Memory ids, provenance, bi-temporal bounds, credence, tiers, graph entities, graph relations, and access events. |
-| Storage | `core/src/storage.rs` | Append-only event log, materialized state, snapshots, graph storage, compaction, auditing, and redb-backed persistence. |
-| Vector retrieval | `core/src/vector.rs` | Pluggable vector-index trait plus in-process HNSW and an injected remote-transport adapter boundary. |
-| Retrieval orchestration | `core/src/retrieval.rs` | Vector recall, valid-time filtering, ranking, graph expansion, read safety, and surfaced-access recording. |
-| Significance | `core/src/significance.rs` | Transparent scoring from decay, access reinforcement, outcomes, contradiction penalties, and graph centrality input. |
-| Reconstruction | `core/src/reconstruction.rs` | Staleness triggers, explicit reconstruction gate, quarantine, corroboration, and re-validation planning. |
-| Read safety | `core/src/read_safety.rs` | Read-time neutralization of stored content that looks like role/directive text. |
-| Consolidation | `core/src/consolidation.rs` | Bounded consolidation planning and resummarization-depth controls. |
-| Anomaly detection | `core/src/anomaly.rs` | Suspicious provenance and contradiction-burst detection. |
-| CLI and server | `shibahama-cli/src/main.rs` | Command-line commands and the optional HTTP server over the core API. |
-| Python binding | `bindings/python/` | PyO3/maturin package exposing the core API to Python. |
-| Node binding | `bindings/node/` | napi-rs package exposing the core API to ESM/CJS users. |
-| Tideline debugger | `tideline/` | React/Vite UI for replaying event/state streams. |
-| Benchmarks | `benchmarks/` | Harnesses and local result artifacts for Shibahama, feature ablations, and baselines. |
+1. Ingest creates a `KnowledgeItem` with provenance and source-derived credence.
+2. The Solomon boundary review engine gates storage before the item is written.
+3. Dependency edges are manually tagged or suggested from boundary-sanitized text and parsed legal references.
+4. Authority changes propagate staleness through graph dependents.
+5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
+6. Model context is pseudonymized by the vendored boundary before any remote endpoint.
+7. The audit journal records metadata-only evidence.
 
-## Durable State Model
+## Store
 
-Every memory item has a stable UUIDv7 id, content, semantic kind, provenance,
-bi-temporal bounds, tier, credence tier, significance score, credence floor, and
-access-event history.
+SQLite is the local default. Server deployments can set `SOLOMON_DATABASE_URL` to a `postgres://` or
+`postgresql://` DSN and install the optional `solomon[server]` dependency for the psycopg driver. Both
+backends preserve the same event-log contract: knowledge is written through append-only events and projected
+into current state, dependency edges are bi-temporal, and the retrieval index stores deterministic hashed
+vectors. Postgres stores these as `pgvector` `vector(256)` values, with a transactional backfill migration and
+HNSW cosine index; deployments must install the self-hosted extension and grant the startup role `CREATE EXTENSION`.
+Postgres retrieval joins the tenant knowledge projection before full-text and vector candidate ranking, then fuses
+those scoped candidates with the same currency and credence controls used locally.
+Supersession closes `valid_to`, links the successor, and leaves the predecessor queryable in review or historical modes.
 
-Two time axes are modeled separately:
+In server mode, tenants are tracked in a durable registry at `data_dir/tenants/registry.json`. Admin requests
+can create, list, suspend, and reactivate tenants through `/tenants`, `/tenants/{tenant_id}/suspend`, and
+`/tenants/{tenant_id}/reactivate`. Tenant records include lifecycle state and optional tenant-specific API
+key hashes; raw tenant keys are not stored. `SOLOMON_SERVER_AUTO_PROVISION_TENANTS=false` disables implicit
+first-request tenant creation and requires pre-registration.
 
-- `valid_from` and `valid_to` describe when a fact is claimed to be true in the
-  represented domain.
-- `ingested_at` records when Shibahama accepted the observation.
+Tenant storage stays isolated after registry admission. SQLite deployments use per-tenant data and journal
+directories. When Postgres is configured, each tenant is mapped to a sanitized Postgres schema so tenant data
+does not share tables.
 
-Invalidation closes `valid_to`. It does not remove the memory row or erase the
-event that introduced it. Corrections and reconstructions are represented as new
-events and, when needed, new memory rows linked to superseded state.
+Server admins create, list, rotate, and revoke tenant-bound integration service principals through
+`/service-principals`. Creation and rotation return a generated credential exactly once; the durable registry stores
+only its PBKDF2-SHA256 hash. A service principal presents the credential with `x-api-key` and its bound tenant with
+`x-tenant-id`; it cannot authenticate for another tenant. Its explicit scopes are enforced before dispatch, and
+authentication plus lifecycle decisions are metadata-only, hash-chained audit entries with actor and correlation ID.
 
-The default embedded store is `RedbMemoryStore`. It maintains:
+Source-document and candidate-claim content can use envelope encryption when both
+`SOLOMON_CONTENT_ENCRYPTION_KEY_REF` and `SOLOMON_CONTENT_ENCRYPTION_KEY` are configured. Solomon generates a
+unique AES-256-GCM data-encryption key per content field and wraps it with the configured AES-256 key-encryption key
+using AES Key Wrap; the envelope stores the non-secret key reference, wrapped data key, nonce, and ciphertext. The
+key value is a Base64-encoded 32-byte secret supplied by the deployment's secret injector and is never written to
+diagnostics, audit entries, or the database. Existing plaintext source-document and candidate-claim rows are migrated
+when encryption is enabled; unavailable references or authentication failures fail closed. Encryption decisions are
+metadata-only audit entries with actor and correlation ID.
 
-- an append-only `event_log` table for source-of-truth history;
-- a `memory_items` materialized table for current item state;
-- an `embeddings` table used to hydrate local vector indexes on startup;
-- a `cold_content` table for compressed cold-tier payloads;
-- graph entity and relation tables for retrieval expansion and contradiction
-  handling.
+Retention is an explicit operator workflow, not an automatic deletion timer. `SOLOMON_RETENTION_DEFAULT_DAYS`
+enables `POST /retention/run`; administrators may also create item-, matter-, or client-scoped erasure requests.
+An active legal hold matching any target blocks the complete request and records a held state. A completed request
+retires each current item and replaces its queryable content with a retention marker, while the append-only event
+history remains intact for audit-chain verification. Legal-hold reasons, scope IDs, and subject references are hashed
+in audit entries; the durable registry keeps a subject-reference hash, request state, and affected item IDs. Server
+retention endpoints require an administrator and an explicit registered `tenant_id`.
 
-Writes that touch the event log and materialized memory state use immediate
-redb durability. The vector index is outside redb, so write paths that include
-embeddings explicitly update both the durable embedding record and the active
-`VectorIndex`.
+Optional OpenTelemetry tracing uses a process-local provider and OTLP/HTTP only when
+`SOLOMON_TELEMETRY_ENABLED=true` with `SOLOMON_TELEMETRY_OTLP_ENDPOINT`. The provider is not bound to a managed
+vendor. It traces ingestion, source connectors, retrieval, review, boundary review, MCP tools, and webhooks with
+operation-level attributes only; raw knowledge, query text, identifiers, credentials, and scope IDs are excluded.
 
-## Write Lifecycle
+Optional server OIDC authentication requires `SOLOMON_OIDC_ISSUER` and `SOLOMON_OIDC_AUDIENCE`. The issuer must
+be HTTPS; Solomon obtains signing keys from its discovery document, caches JWKS entries, refreshes once for an
+unknown `kid`, and accepts only RS256 or ES256 JWTs with matching issuer, audience, expiry, and clock-skew checks.
+`SOLOMON_OIDC_ROLE_CLAIM` defaults to `roles`, and `SOLOMON_OIDC_ROLE_MAPPINGS` is a required JSON object mapping
+exact claim values to `admin`, `curator`, `reviewer`, `lawyer`, or `integration`; unmapped or malformed claims are
+denied. Roles resolve in a fixed admin-to-integration precedence and their scopes are combined. OIDC authentication
+decisions are hash-chained audit entries with actor ID (when validated), canonical roles, decision, and request
+correlation ID; bearer tokens and claim bodies are not recorded.
 
-The normal embedded write path is:
+Authenticated server requests bind their principal and correlation ID to the selected tenant service. Each
+content-returning or mutating service operation applies a centralized `read`, `write`, `curate`, or `review` policy
+before invoking domain logic, then writes a metadata-only allow/deny audit entry. Curators manage sources and
+dependencies; reviewers and lawyers perform verification/contestability actions; integrations remain read-only.
 
-1. A caller creates a `MemoryWriteEvent` with mandatory provenance and valid
-   time.
-2. Ingestion assigns default credence from `SourceKind` unless the caller
-   supplies an explicit credence.
-3. The store assigns a UUIDv7 `MemoryId`, appends `MemoryWritten`, and updates
-   materialized state.
-4. If an embedding is supplied, the embedding metadata is persisted and the
-   active vector index receives the vector.
+The console uses the same OIDC claim mapping in server mode; its legacy bearer path has an explicitly configured
+console identity and role. Sources, claims, and dependencies are curator screens, verification and review actions
+are reviewer/lawyer screens, and every console decision records actor, roles, decision, and correlation ID. Local
+development retains an in-process admin identity when no console bearer or OIDC configuration is present.
 
-Default ingest behavior is conservative:
+## Server Auth
 
-- user memories start as `FirmAuthoritative`;
-- file memories start as `VerifiedSource`;
-- agent and tool memories start as `ModelInferred`;
-- web memories start as `Unverified`;
-- agent and web memories start cold by default.
+`solomon-server` requires OIDC issuer/audience/role mapping or the legacy `SOLOMON_SERVER_API_KEY` path. OIDC
+servers reject static credentials and map validated bearer tokens to principals. Legacy deployments may present
+credentials through `Authorization: Bearer <token>` or `x-api-key`; the server maps those credentials to a principal:
 
-Instruction memories are represented separately from fact memories through
-`MemoryKind::Instruction`. Default recall excludes instructions unless the
-caller opts in.
+- the server admin key gets `admin:*`, `tenant:manage`, `tenant:read`, `tenant:write`, and `diagnostics:read`;
+- tenant keys are stored only as PBKDF2-SHA256 hashes and default to `tenant:read` plus `tenant:write`;
+- tenant creation can restrict a key to narrower scopes such as `tenant:read`.
+- service-principal credentials are returned only by create or rotate, stored as PBKDF2-SHA256 hashes, and can be
+  restricted to explicit tenant scopes; revoked credentials are denied.
 
-## Recall Lifecycle
+Middleware classifies routes before invoking handlers. Tenant management and diagnostics require admin scopes;
+tenant read routes such as recall/answer require `tenant:read`; mutating tenant routes such as ingest,
+verification, dependency add, and authority changes require `tenant:write`.
 
-The current recall hot path is id-bounded:
+## Deterministic Primitive Plans
 
-1. Search the active vector index for `top_k` candidate ids.
-2. Fetch only those ids from storage with `get_many`.
-3. Filter to facts believed at the request time: `ingested_at <= now` and
-   `valid_from <= now < valid_to` when `valid_to` is present.
-4. Exclude cold-tier memories and instruction memories unless requested.
-5. Optionally expand through stored graph relations and caller-provided related ids.
-6. Build candidates with provenance, tier, currency, staleness flags, scoring
-   components, and read-safety findings.
-7. Rank by credence first, then weighted score, then id.
-8. Diversify near-duplicate content.
-9. Record a `Surfaced` access event for returned candidates.
+The core service verbs are also exposed as deterministic primitives through `/plans/execute`. A plan is an
+ordered list of sanctioned calls: `recall`, `evaluate_currency`, `impact_query`, `timeline`,
+`record_verification`, and `why`. The executor rejects unknown primitive names and validates every step's
+arguments with Solomon's typed request models before any side effect occurs.
 
-Ranking combines vector similarity, materialized significance, recency, and
-graph-expansion weight by default. Low-credence memories cannot outrank higher
-credence memories on otherwise comparable retrieval because credence is the
-first sort key.
+Plan execution returns the exact validated plan, store-state hash, per-step result hashes, and result summaries.
+The audit journal records a metadata-only `primitive_plan` event containing the plan hash, store-state hash,
+argument hashes, result hashes, and identifiers surfaced by each step. Answer responses carry the primitive
+plan summary used to gather their context, so reviewers can re-run the same plan against the same store state.
+LLM output may propose a plan, but currency, impact, timeline, verification, and explanation are resolved by
+these deterministic primitives.
 
-`timeline` uses the same retrieval machinery but is read-only: it does not
-record surfaced-access events. It answers what Shibahama had ingested and
-believed at the requested instant.
+## Contestability
 
-## Significance And Tiers
+Contestability is a first-class service path, not a side note on verification. `contest(item_id, ...)` records
+a challenge, demotes the item to `Unverified`, marks it `StalePendingReverification`, preserves contest history
+in item metadata, and propagates re-verification to dependents. Proposed corrections are stored as quarantined
+low-credence items until a `FirmAuthoritative` actor affirms them.
 
-Significance is intentionally explainable rather than learned. The default
-function combines:
+`affirm(item_id, ...)` lets a FirmAuthoritative actor either reaffirm the contested item or affirm a proposed
+correction. Affirming a correction supersedes the contested predecessor without deleting it. `pin(item_id, ...)`
+sets a FirmAuthoritative credence floor for positions the firm has deliberately stabilized. Model-inferred or
+lower-tier actors can flag contests but cannot override human-affirmed knowledge.
 
-- time decay since last access or ingestion;
-- diminishing-returns reinforcement from access count;
-- outcome weights for surfaced, led-somewhere, cited, ignored, and contradicted
-  events;
-- contradiction penalties;
-- optional graph centrality input.
+## Reference Extraction
 
-Tier transitions are threshold based and lazy. Access can promote an item from
-cold to warm or warm to hot. Decay can demote hot to warm or warm to cold, but
-the proposed tier is clamped by the item's credence floor.
+`/references/extract` runs after optional Solomon boundary sanitization. Citation parsing uses `eyecite` for full,
+short, statutory, `supra`, and `id.` citation forms, then Solomon's deterministic grammar fills gaps for
+firm-style authority references such as "Regulation R section 12", non-US case strings, and defined terms.
+Each returned citation includes its parser source and source-text span so reviewers can inspect the exact
+evidence before confirming a dependency edge.
 
-`why(memory_id)` exposes the current item, deterministic significance
-breakdown, provenance, tier/credence state, currency state, and audit trail.
+Dependency suggestions are now durable review records. Ingest creates deterministic pending suggestions;
+`/dependencies/suggest` can re-run extraction and optionally use Solomon-sanitized LLM assistance. Curators can
+list, confirm, or reject suggestions through `/dependencies/suggestions`; confirmed suggestions create
+`human_confirmed` dependency edges, while rejected suggestions remain review history.
 
-## Graph And Reconstruction
+## Boundary
 
-The graph substrate stores typed entities and typed directed relations using the
-same bi-temporal model as memory items. Relations can carry a supporting
-`memory_id`, a `supersedes` relation id, attributes, and valid-time bounds.
-
-Graph features currently include:
-
-- entity upsert and resolution through type plus stable key;
-- relation insertion and traversal;
-- contradiction detection for conflicting active relations on the same entity
-  attribute pattern;
-- supersession links when a new relation invalidates an old relation;
-- scoped subgraph extraction;
-- graph centrality as a significance input.
-
-Reconstruction is not an automatic side effect of ordinary reads. Recall can
-flag a significant, old, not-recently-validated memory as load-bearing and
-possibly stale. Reconstruction work runs only when a caller enters explicit
-re-validation mode.
-
-The reconstruction path is designed around quarantine:
-
-- proposed updates enter as low-credence, cold memories tagged for quarantine;
-- promotion requires human confirmation, a high-credence source, or enough
-  independent consistent observations;
-- accepted replacements invalidate the superseded version instead of
-  overwriting it;
-- reconstruction events are emitted for replay and debugger consumers.
-
-## Deployment Surfaces
-
-The Rust core is the semantic source of truth. Other surfaces are adapters:
-
-- The CLI supports store initialization, writing, recall, reinforcement,
-  consolidation, human signals, `why`, event/audit inspection, export, and
-  optional server mode.
-- The HTTP server is a thin wrapper over the same core API. It currently exposes
-  `/healthz`, `/readyz`, `/inspect`, `/events`, `/audit/{memory_id}`, `/write`, `/invalidate`,
-  `/recall`, `/timeline`, `/reinforce`, `/consolidate`, `/challenge`,
-  `/affirm`, `/correct`, `/pin`, `/unpin`, `/why/{memory_id}`, graph snapshot,
-  entity CRUD, relation CRUD, graph traversal, and Tideline
-  snapshot/recording/live endpoints.
-- Server mode uses API-key authorization when configured, validates namespaces,
-  prefixes namespace ownership into source refs, enforces a per-namespace memory
-  quota, and emits metadata-only request logs.
-- The Python and Node bindings call into the Rust core rather than reimplementing
-  memory semantics.
-- Benchmarks and examples exercise the same API surface used by the bindings and
-  server.
-
-## Performance Boundaries
-
-Default recall must not scan the full materialized store or event log. The
-regression test in `core/src/retrieval.rs` guards the production recall helper
-against known whole-store APIs.
-
-Whole-store reads are still valid in administrative paths such as inspection,
-snapshot/export, readiness, Tideline snapshots, and tier-capacity enforcement.
-
-The local latency budget is documented in `docs/performance.md` and measured by
-`benchmarks/recall-latency.py --check-budget`.
-
-## Current Limits
-
-Some architecture pieces are represented as extension points rather than final
-production implementations:
-
-- `RedbMemoryStore` is the only concrete durable store backend.
-- Remote vector support is an injected transport boundary, not a bundled network client.
-- Multi-reader/single-writer or MVCC behavior is inherited from redb but has not
-  yet been documented as a tested Shibahama concurrency contract.
-- LoCoMo and LongMemEval benchmarks still require caller-supplied official
-  dataset exports; checked-in Phase C artifacts record the dataset hashes used.
-- Publishing to crates.io, PyPI, and npm is intentionally outside the local
-  architecture and requires registry credentials or trusted publishing setup.
+The boundary engine lives under `src/solomon/boundary/engine/`. If that in-process boundary errors, ingestion
+and model egress fail closed.

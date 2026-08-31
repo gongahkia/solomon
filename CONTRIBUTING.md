@@ -1,32 +1,26 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Contributing
 
-Shibahama is not accepting broad feature contributions until the core architecture settles, but
-bug reports, focused fixes, documentation improvements, and benchmark feedback are welcome.
+Solomon is legal infrastructure, so changes should be conservative, auditable, and backed by tests.
+
+## Ground Rules
+
+- Keep boundary logic fail-closed: if Solomon cannot review or pseudonymize, Solomon must not store unsafe
+  material or send model context out.
+- Never delete knowledge records to express currency. Supersede, retire, quarantine, or append events.
+- Add or update tests for any changed invariant, route, storage behavior, or audit record.
 
 ## Local Checks
 
-Before opening a pull request, run:
-
-```sh
-scripts/ci/rust.sh
-scripts/ci/python-binding-smoke.sh
-scripts/ci/node-binding-smoke.sh
+```bash
+uv sync --extra dev
+uv run ruff check .
+uv run mypy src tests scripts
+uv run pytest
 ```
 
-Optional pre-commit hooks are provided through `pre-commit`:
+## Commit Shape
 
-```sh
-pre-commit install
-pre-commit run --all-files
-```
-
-## Commit Scope
-
-Keep changes focused. Architecture, storage format, public API, and benchmark changes should
-include tests or documentation that explain the behavioral contract they introduce.
-
-## Security
-
-Do not commit secrets, credentials, benchmark API keys, private datasets, or user memory dumps.
-Treat stored memories as untrusted input and avoid examples that encourage executing retrieved
-instructions blindly.
+Prefer focused commits tied to a TODO item or a coherent implementation slice. Each commit should leave
+the repo in a runnable state.

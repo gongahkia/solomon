@@ -1,22 +1,8 @@
-.PHONY: all build server run run-server test clean tidy
+# SPDX-License-Identifier: Apache-2.0
 
-all: build
+SOLOMON_TEST_LOCAL_MODEL_URL ?= http://127.0.0.1:11434/api/generate
+SOLOMON_TEST_LOCAL_MODEL_NAME ?= qwen2.5-coder:1.5b
 
-build:
-	@go build -o bin/monke ./cmd/monke
-	@go build -o bin/monke-server ./cmd/monke-server
-
-run:
-	@go run ./cmd/monke
-
-run-server:
-	@go run ./cmd/monke-server
-
-test:
-	@go test ./internal/...
-
-clean:
-	@rm -rf bin/
-
-tidy:
-	@go mod tidy
+.PHONY: demo-local
+demo-local:
+	SOLOMON_TEST_LOCAL_MODEL_URL="$(SOLOMON_TEST_LOCAL_MODEL_URL)" SOLOMON_TEST_LOCAL_MODEL_NAME="$(SOLOMON_TEST_LOCAL_MODEL_NAME)" scripts/demo_local_model.sh

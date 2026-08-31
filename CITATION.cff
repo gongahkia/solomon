@@ -1,23 +1,16 @@
 cff-version: 1.2.0
-message: "If you use Shibahama or ContinuityBench, cite this repository release."
-title: "Shibahama: Usage-Aware Reconstructive Memory for Long-Lived Agents"
+message: "If you use Solomon, cite this repository and version."
+title: "Solomon"
 version: "0.1.0"
-date-released: "2026-06-12"
-repository-code: "https://github.com/gongahkia/shibahama"
-license: MIT
+date-released: "2026-06-11"
+url: "https://github.com/gongahkia/solomon"
 authors:
-  - name: "Shibahama contributors"
-keywords:
-  - agent memory
-  - retrieval
-  - benchmark
-  - temporal knowledge
-  - stale answer detection
+  - name: "Solomon contributors"
 preferred-citation:
   type: software
-  title: "ContinuityBench v0: Mutable Long-Lived Memory Benchmark"
+  title: "Solomon"
   version: "0.1.0"
-  date-released: "2026-06-12"
-  repository-code: "https://github.com/gongahkia/shibahama/tree/main/benchmarks/continuity"
+  date-released: "2026-06-11"
+  url: "https://github.com/gongahkia/solomon"
   authors:
-    - name: "Shibahama contributors"
+    - name: "Solomon contributors"

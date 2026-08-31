@@ -1,497 +1,726 @@
-# Shibahama
+# Solomon
+<!-- mcp-name: io.github.gongahkia/solomon -->
 
 <p align="center">
-  <img src="./docs/assets/tideline-demo.gif" width="80%" alt="Shibahama Tideline debugger">
+  <img src="./docs/assets/stale-house-view-demo.gif" width="75%" alt="Solomon stale house-view demo">
 </p>
 
 <p align="center">
-  <a href="https://github.com/gongahkia/shibahama/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/gongahkia/shibahama/ci.yml?branch=main&style=flat-square"></a>
-  <img alt="rust" src="https://img.shields.io/badge/rust-1.89%2B-orange?style=flat-square">
-  <img alt="python" src="https://img.shields.io/badge/python-3.14%2B-blue?style=flat-square">
-  <img alt="node" src="https://img.shields.io/badge/node-22%2B-339933?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
+  <a href="https://github.com/gongahkia/solomon/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/gongahkia/solomon/ci.yml?branch=main&style=flat-square"></a>
+  <img alt="mcp compatible" src="https://img.shields.io/badge/MCP-compatible-7C3AED?style=flat-square">
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square">
+  <img alt="coverage gate" src="https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25-brightgreen?style=flat-square">
+  <img alt="sbom" src="https://img.shields.io/badge/SBOM-CycloneDX-blue?style=flat-square">
+  <img alt="api" src="https://img.shields.io/badge/API-FastAPI-009688?style=flat-square">
+  <img alt="runtime" src="https://img.shields.io/badge/runtime-offline--default-lightgrey?style=flat-square">
+  <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">
 </p>
 
-Auditable, non-destructive memory for long-running LLM agents.
+**MCP-native currency infrastructure for verified legal knowledge.**
 
-Shibahama is built for the failure mode where an agent can retrieve old context
-but cannot tell whether that context is still current, trusted, load-bearing, or
-safe to use. It keeps memory as durable state with history: every item carries
-provenance, valid time, ingestion time, credence, tier, significance, and an
-audit trail. Recall returns contextual candidates, not bare text.
-
-The defensible center is narrow: never-delete source/event history with credence
-floors, append-only human signals, and Tideline-visible
-reconstruction/consolidation. Usage signals matter, but they are not the whole
-claim.
-
-The repository is pre-release. The Rust core, CLI, Python binding, Node binding,
-benchmark harness, examples, Tideline debugger, consolidation pass, human signal
-verbs, and read-only learned-policy gates are implemented locally. PyPI, npm,
-and final registry publication are still pending release credentials.
+Solomon tracks whether internal positions, clauses, house views, notes, and prior advice are still live,
+what they depend on, and why re-verification is due. It keeps firm knowledge behind a vendored
+Solomon zero-retention boundary and records a metadata-only audit trail for provenance, currency,
+credence, verification, deterministic primitive plans, and contestability.
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-- [What Shibahama Does](#what-shibahama-does)
+- [MCP Quick Start](#mcp-quick-start)
+- [Curator Console](#curator-console)
+- [CLI And SDK](#cli-and-sdk)
+- [Boundary And Memory](#boundary-and-memory)
+- [Audit Evidence](#audit-evidence)
+- [Development & Evaluation](#development--evaluation)
+- [What Solomon Does](#what-solomon-does)
 - [API Surface](#api-surface)
 - [Examples](#examples)
 - [How It Works](#how-it-works)
+- [Regulator-ready by construction](#regulator-ready-by-construction)
 - [Runtime Modes](#runtime-modes)
-- [Benchmark Snapshot](#benchmark-snapshot)
-- [Security Posture](#security-posture)
-- [Container Image](./docs/container.md)
-- [Kubernetes deployment](./docs/kubernetes.md)
 - [Documentation](#documentation)
-- [Development & Evaluation](#development--evaluation)
-- [Repository Layout](#repository-layout)
-- [Release State](#release-state)
+- [Packaging & Deployment](#packaging--deployment)
+- [Screenshots](#screenshots)
 - [License](#license)
 
-## Quick Start
+## MCP Quick Start
 
-Published packages are not available yet, so use the repository directly.
-
-Run the Rust example:
+Install dependencies:
 
 ```bash
-cargo run --manifest-path examples/rust/quickstart/Cargo.toml
+uv sync --extra dev
 ```
 
-Build the Python binding and run the Python example:
+Check the stdio server:
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip maturin
-(
-  cd bindings/python
-  python -m maturin develop
-)
-python examples/python/basic_memory.py
+uv run solomon mcp serve --help
 ```
 
-Build the Node binding and run the Node example:
+For Claude Desktop, add the following server after replacing `/absolute/path/to/solomon`:
+
+```json
+{
+  "mcpServers": {
+    "solomon": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/solomon",
+        "run",
+        "solomon",
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
+
+Detailed host setup, seed data, and a smoke prompt: [`docs/mcp/install.md`](./docs/mcp/install.md).
+
+## Curator Console
+
+Run the curator console for dependency review, verification, and audit-pack inspection:
 
 ```bash
-(
-  cd bindings/node
-  npm install
-  npm run build
-)
-node examples/node/basic-memory.mjs
+uv run solomon console serve --host 127.0.0.1 --port 8150
 ```
 
-Try the CLI:
+See [`docs/console/`](./docs/console/) for supported workflows and screenshots.
+
+Watch the [narrated five-minute tour](./docs/assets/solomon-five-minute-tour.mp4) with
+[WebVTT chapter captions](./docs/assets/solomon-five-minute-tour.vtt).
+
+## CLI And SDK
+
+### Power users / dev loop
+
+Use the CLI to seed data, inspect state, or run the local verification loop:
 
 ```bash
-cargo run -p shibahama-cli -- init --path shibahama.redb --dimensions 2
-cargo run -p shibahama-cli -- write \
-  --path shibahama.redb \
-  --content "Project prefers boring, durable storage." \
-  --vector "0,1" \
-  --source-kind user
-cargo run -p shibahama-cli -- recall \
-  --path shibahama.redb \
-  --query-vector "0,1" \
-  --top-k 1
+uv run solomon diagnostics
+uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1
+uv run solomon dependency-suggestions
+uv run solomon recall "structure X regulation"
 ```
 
-## What Shibahama Does
+The Python client quickstart and the source-installable TypeScript MCP client are in [`docs/sdk/`](./docs/sdk/).
 
-- Stores memories with mandatory provenance and bi-temporal validity:
-  `valid_from`, `valid_to`, and `ingested_at`.
-- Invalidates superseded memories without deleting them; credence floors protect
-  pinned or explicit rejection memories from decaying below a caller-set floor.
-- Separates credence from retrieval score so authoritative memories cannot be
-  buried by low-trust but similar snippets.
-- Computes usage-driven significance from access history, outcomes, decay,
-  contradictions, and optional graph centrality.
-- Moves memories through hot, warm, and cold tiers to control default retrieval
-  cost without deleting history.
-- Recalls by vector similarity, valid-time filtering, credence ordering,
-  significance weighting, recency, and graph expansion.
-- Flags stale but load-bearing memories for explicit revalidation.
-- Reconstructs memory through a gated flow: re-read source, quarantine proposal,
-  require corroboration, then invalidate old versions without overwriting them.
-- Consolidates offline by merging duplicate memories with provenance, promoting
-  or demoting tiers, and flagging stale important memories.
-- Records human signals through `challenge`, `affirm`, `correct`, `pin`, and
-  `unpin`, all as append-only audit events.
-- Exposes read-only learned-policy gates that can evaluate candidate decisions,
-  plan a disabled Stage 2 shadow experiment, and assess Stage 3 research
-  readiness without training or mutating runtime state.
+## What Solomon Does
 
-Shibahama is not a replacement for plain RAG on stateless one-shot QA. If the
-whole useful corpus fits cheaply in context, if answers do not depend on
-supersession or current validity, or if nearest-neighbor snippets are enough,
-Shibahama's event log, credence, tiering, and reconstruction machinery may be
-unnecessary. The benchmark boundary is documented in
-[`docs/null-hypothesis.md`](./docs/null-hypothesis.md).
+- Stores firm knowledge as bi-temporal `KnowledgeItem` records with provenance, source-derived credence,
+  matter/client scope, verification metadata, and supersession links.
+- Tracks dependency edges between internal knowledge and external authorities, then propagates
+  `StalePendingReverification` through transitive dependents when a dependency changes.
+- Creates a durable dependency-review queue from deterministic citation/reference extraction, with optional
+  Solomon-sanitized LLM assistance for curator confirmation.
+- Recalls live knowledge by default while preserving stale, superseded, retired, and contested items for
+  review and historical reconstruction.
+- Keeps model-bound context behind the Solomon boundary for review, pseudonymization,
+  reidentification, document scrubbing, and fail-closed policy.
+- Routes strict and zero-egress matters to local-only model execution, with remote ZDR endpoints available
+  only when deployment policy explicitly permits them.
+- Exposes deterministic primitive plans so an LLM may propose a plan, but Solomon validates and executes
+  currency, impact, timeline, verification, and explanation steps deterministically.
+- Records metadata-only audit evidence with hash chaining, tamper verification, audit-pack export,
+  prompt hashes, endpoint decisions, verification events, primitive-plan hashes, and boundary metadata.
+- Provides first-class contestability: `contest`, `affirm`, and `pin` preserve challenges, quarantined
+  corrections, partner affirmations, and firm-authoritative credence floors.
+
+Solomon is not a legal-advice product, a general DMS, or a live Shepard's-scale authority monitor. It flags
+moved dependencies and overdue verification. It does not decide whether a legal position is wrong.
 
 ## API Surface
 
-Core memory operations:
+Runtime and diagnostics:
 
-- `write`
-- `write_with_embedding`
-- `recall`
-- `stream_recall`
-- `timeline`
-- `stream_timeline`
-- `reinforce`
-- `why`
-- `why_at`
-- `invalidate`
+- `GET /health`
+- `GET /diagnostics`
+- `GET /tenants`
+- `POST /tenants`
+- `POST /tenants/{tenant_id}/suspend`
+- `POST /tenants/{tenant_id}/reactivate`
+- `GET /service-principals`
+- `POST /service-principals`
+- `POST /service-principals/{principal_id}/rotate`
+- `POST /service-principals/{principal_id}/revoke`
+- `GET|POST /retention/legal-holds`
+- `POST /retention/legal-holds/{hold_id}/release`
+- `GET|POST /retention/erasures`
+- `POST /retention/run`
 
-Offline and human-in-the-loop operations:
+Knowledge, recall, and answers:
 
-- `consolidate`
-- `challenge`
-- `affirm`
-- `correct`
-- `pin`
-- `unpin`
-- `evaluate_offline_policy`
-- `plan_contextual_bandit_experiment`
-- `assess_stage3_training_readiness`
-
-Inspection and maintenance:
-
-- `memory_items`
-- `event_records`
-- `audit_trail`
-- `snapshot`
-- `restore`
-- `verify_never_delete_invariant`
-
-Optional server mode:
-
-- `GET /healthz`
-- `GET /capabilities`
-- `GET /readyz`
-- `GET /inspect`
-- `GET /events`
-- `GET /audit/{id}`
-- `POST /write`
-- `POST /invalidate`
+- `POST /ingest`
 - `POST /recall`
+- `POST /answer`
+- `GET /why/{item_id}`
 - `POST /timeline`
-- `POST /reinforce`
-- `POST /consolidate`
-- `POST /challenge`
-- `POST /affirm`
-- `POST /correct`
-- `POST /pin`
-- `POST /unpin`
-- `GET /why/{id}`
-- `GET /graph`
-- `POST /graph/entities`
-- `GET /graph/entities/{id}`
-- `DELETE /graph/entities/{id}`
-- `POST /graph/relations`
-- `GET /graph/relations/{id}`
-- `DELETE /graph/relations/{id}`
-- `POST /graph/traverse`
-- `GET /tideline/snapshot`
-- `GET /tideline/recording`
-- `GET /tideline/live`
+- `POST /plans/execute`
 
-Generated API notes live in [`docs/api/`](./docs/api/).
+Currency, dependency, and references:
+
+- `GET /currency/{item_id}`
+- `POST /verification/{item_id}`
+- `POST /authorities/{authority_id}/changes`
+- `POST /dependencies`
+- `POST /dependencies/suggest`
+- `GET /dependencies/suggestions`
+- `POST /dependencies/suggestions/{suggestion_id}/confirm`
+- `POST /dependencies/suggestions/{suggestion_id}/reject`
+- `GET /impact/{authority_id}`
+- `GET /graph`
+- `POST /references/extract`
+- `POST /staleness/predict`
+
+Contestability:
+
+- `POST /contest/{item_id}`
+- `POST /affirm/{item_id}`
+- `POST /pin/{item_id}`
+
+Generated API artifact:
+
+- [`docs/api/openapi.json`](./docs/api/openapi.json)
+
+Regenerate it from the live application:
+
+```bash
+uv run python scripts/export_openapi.py
+```
 
 ## Examples
 
-Use the Rust core directly:
-
-```rust
-use shibahama_core::api::{Shibahama, WriteEmbedding};
-use shibahama_core::model::{AccessOutcome, Provenance, SourceKind};
-use shibahama_core::storage::MemoryWriteEvent;
-use shibahama_core::vector::HnswVectorIndex;
-use time::OffsetDateTime;
-
-let mut engine = Shibahama::open("memory.redb", HnswVectorIndex::new(2))?;
-let now = OffsetDateTime::now_utc();
-
-let item = engine.write_with_embedding(
-    MemoryWriteEvent::new(
-        "Do not suggest the legacy queue migration again.",
-        Provenance::new(SourceKind::User, Some("retro-notes".to_owned()), "agent"),
-        now,
-        now,
-    ),
-    WriteEmbedding {
-        vector: &[0.0, 1.0],
-        index_name: "default",
-        model: "caller-embedding-model",
-        model_version: "v1",
-    },
-)?;
-
-let request = engine
-    .recall_request(&[0.0, 1.0], 5, now)
-    .with_raw_query_context("queue migration options");
-let recalled = engine.recall(&request)?;
-
-engine.reinforce(item.id, AccessOutcome::Cited)?;
-let why = engine.why(item.id)?;
-```
-
-Run a local CurrencyBench comparison after building the Python binding:
+Ingest and recall through HTTP:
 
 ```bash
-python benchmarks/run.py \
-  --suite currencybench \
-  --systems shibahama,warehouse \
-  --output benchmarks/results/currencybench-local.json \
-  --markdown benchmarks/results/currencybench-local.md
+curl -X POST http://127.0.0.1:8140/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Structure X relies on Regulation R section 12.",
+    "kind": "house-view",
+    "source_kind": "partner",
+    "source_ref": "memo-1",
+    "author": "Partner A"
+  }'
+
+curl -X POST http://127.0.0.1:8140/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "structure X regulation"}'
 ```
 
-Start the optional server and Tideline debugger:
+Execute a deterministic primitive plan:
 
 ```bash
-cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
-(
-  cd tideline
-  npm install
-  npm run dev
-)
+curl -X POST http://127.0.0.1:8140/plans/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"name": "recall", "arguments": {"query": "structure X regulation"}},
+      {"name": "impact_query", "arguments": {"authority_id": "Regulation R section 12"}}
+    ]
+  }'
 ```
 
-Open the Vite URL and point it at `http://127.0.0.1:8765` with API key `dev`.
-For a seeded local session, run:
+Contest a knowledge item:
 
 ```bash
-scripts/dev/tideline-demo.sh
+curl -X POST http://127.0.0.1:8140/contest/item-1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lawyer_id": "Associate A",
+    "actor_tier": "Verified",
+    "reason": "Authority treatment needs partner review",
+    "proposed_correction": "Updated view after Regulation R section 12 amendment."
+  }'
 ```
 
-For complete runnable snippets, see [`examples/`](./examples/).
+Use the Python client:
+
+```python
+from solomon.client import SolomonClient
+
+with SolomonClient("http://127.0.0.1:8140") as client:
+    item = client.ingest(
+        {
+            "content": "Structure X relies on Regulation R section 12.",
+            "kind": "house-view",
+            "source_kind": "partner",
+            "source_ref": "memo-1",
+            "author": "Partner A",
+        }
+    )
+    results = client.recall({"query": "structure X regulation"})
+    why = client.why(item["id"])
+    print(results)
+    print(why)
+```
+
+Included scenarios:
+
+- [`examples/scenarios/01-vendor-integration/`](./examples/scenarios/01-vendor-integration/): a fictional MCP host
+  compares stale-text reuse against deterministic preflight and currency checks.
+- [`examples/scenarios/stale-house-view/`](./examples/scenarios/stale-house-view/): a 2023 memo becomes stale after a 2025
+  authority change; the warehouse baseline misses it.
+- [`examples/scenarios/currency-report/`](./examples/scenarios/currency-report/): the same currency signal rendered as a
+  partner-facing period report.
+- [`examples/scenarios/internal-supersession/`](./examples/scenarios/internal-supersession/): a 2024 position supersedes a
+  2022 position while the older item remains available for review and audit.
 
 ## How It Works
 
-Shibahama has six main runtime pieces:
+Solomon has seven main runtime pieces:
 
-1. The Rust core in [`core/`](./core/) owns memory semantics, significance,
-   reconstruction, consolidation, human signals, storage, graph, and vector
-   integration.
-2. The redb-backed storage layer keeps an append-only event log plus current
-   materialized memory state.
-3. The retrieval orchestrator combines vector search, temporal filtering,
-   credence ordering, significance, recency, graph expansion, diversification,
-   and token budgets.
-4. The reconstruction layer gates stale-memory revalidation, quarantines
-   proposals, requires corroboration, and preserves superseded history.
-5. The bindings and CLI expose the same core through Rust, Python, Node, and an
-   optional HTTP server.
-6. Tideline in [`tideline/`](./tideline/) replays events visually so users can
-   inspect why memory changed.
+1. The FastAPI service in [`src/solomon/api/`](./src/solomon/api/) exposes ingest, recall, answer,
+   currency, verification, dependency, timeline, primitive-plan, tenant, and contestability endpoints.
+2. The append-only store in [`src/solomon/store/`](./src/solomon/store/) supports SQLite by default and
+   Postgres for server deployments, with current-state projection and historical `as_of` reads.
+3. The dependency graph in [`src/solomon/graph/`](./src/solomon/graph/) records external, internal, and
+   supersession edges, then propagates stale flags through dependents.
+4. The currency engine in [`src/solomon/currency/`](./src/solomon/currency/) evaluates live, stale,
+   superseded, retired, and verification-aged states without using age-based decay as a proxy for truth.
+5. The credence layer in [`src/solomon/credence/`](./src/solomon/credence/) keeps model-inferred content
+   below firm-authoritative content for load-bearing answers.
+6. The boundary in [`src/solomon/boundary/`](./src/solomon/boundary/) runs Solomon review,
+   pseudonymization, reidentification, document scrub, jurisdiction packs, and fail-closed model-egress
+   checks.
+7. The audit layer in [`src/solomon/audit/`](./src/solomon/audit/) writes a metadata-only hash-chained
+   journal and exports verifiable audit packs.
 
 Core flow:
 
 ```mermaid
 flowchart TD
-    Client[Agent or app] --> Write[Write memory with provenance]
-    Write --> Log[Append-only event log]
-    Log --> State[Materialized memory state]
-    State --> Recall[Vector, temporal, graph recall]
-    Recall --> Rank[Credence, significance, recency ranking]
-    Rank --> Use[Caller uses or ignores result]
-    Use --> Signal[Reinforce outcome]
-    Signal --> Score[Lazy significance recompute]
-    Score --> Tier[Promote or demote tier]
-    Tier --> State
-    Rank --> Stale{Load-bearing and stale?}
-    Stale -->|plain recall| Flag[Flag only]
-    Stale -->|explicit revalidation| Recheck[Re-read source or ask caller]
-    Recheck --> Quarantine[Quarantine proposal]
-    Quarantine --> Corroborate[Require corroboration]
-    Corroborate --> Replace[Invalidate old version, keep history]
-    Replace --> Log
+    Host[MCP host] --> MCP[Solomon MCP server]
+    Lawyer[Curator] --> Console[Curator console]
+    Operator[Power user] --> CLI[CLI]
+    MCP --> Service[Solomon service]
+    Console --> Service
+    CLI --> Service
+    Service --> Boundary[Solomon boundary]
+    Boundary --> Store[Bi-temporal event store]
+    Store --> Graph[Dependency graph]
+    Graph --> Engine[Currency engine]
+    Engine --> Context[Current context / why / impact]
+    Context --> Plan[Deterministic primitive plan]
+    Plan --> Model{Model needed}
+    Model -->|local or approved ZDR| Answer[Host answer with evidence]
+    Service --> Audit[Metadata-only audit journal]
+    Plan --> Audit
 ```
 
-Ordinary recall is read-only except for surfaced access recording.
-Reconstruction does not run as an invisible side effect of a plain read.
+Core invariants:
+
+- Supersede, never delete, knowledge items.
+- Old is not stale; dependency movement, supersession, retirement, verification age, or contest signals
+  drive currency.
+- Live items are returned by default; stale and superseded items require review mode or explicit queries.
+- The LLM never decides currency, supersession, verification, impact, timeline, or contest promotion.
+- `ModelInferred` content cannot outrank `FirmAuthoritative` content as a settled answer.
+- Boundary mappings are volatile and flushed after reidentification.
+- Audit logs store metadata and hashes, not privileged prompt content.
+
+## Audit Evidence
+
+Solomon records a metadata-only, hash-chained audit journal. An audit pack binds the primitive plan,
+provenance, currency state, verification events, boundary decision metadata, and tamper-verification result
+needed to reconstruct what Solomon did without retaining privileged prompt content. See
+[`docs/release-artifacts.md`](./docs/release-artifacts.md) and [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md).
+
+## Backup And Recovery
+
+SQLite deployments can create an encrypted archive of every local durable database and the audit journal. The
+passphrase is read only from `SOLOMON_BACKUP_PASSPHRASE`; retain both the archive and its adjacent manifest.
+
+```bash
+export SOLOMON_BACKUP_PASSPHRASE='store-this-outside-the-deployment'
+uv run solomon backup ./solomon-backup.enc
+uv run solomon recovery-drill ./solomon-backup.enc
+uv run solomon restore ./solomon-backup.enc ./restored-deployment
+```
+
+`restore` rejects an existing target and writes `data/` and `journal/` below the supplied deployment root. Point a
+fresh deployment at those paths with `SOLOMON_DATA_DIR` and `SOLOMON_JOURNAL_DIR`. `recovery-drill` restores to a
+temporary fresh deployment, checks every SQLite database, initializes the local service, and verifies the audit
+journal. Run backups during a brief writer quiescence when cross-database point-in-time consistency is required.
+The commands intentionally reject Postgres deployments; use a database-native Postgres backup until a
+coordinated server-storage backup contract is available.
+
+## Prometheus Metrics
+
+Every FastAPI deployment exposes unauthenticated Prometheus text metrics at `GET /metrics` for its scrape target.
+The endpoint exports health, durable queue/dead-letter depth, review-task state, latest source-sync state, HTTP and
+scrape latency histograms, retrieval volume, and currency-state context withholding. It intentionally excludes
+tenant IDs, client IDs, matter IDs, source references, query text, and document content from metric labels.
+
+```bash
+curl -fsS http://127.0.0.1:8140/metrics
+```
+
+The exporter is process-local and uses the open-source `prometheus-client` library; it needs no managed observability
+vendor. Scrapes use SQL aggregate gauges, and audit-journal verification is cached for 30 seconds.
+
+## OpenTelemetry Tracing
+
+Tracing is opt-in and exports only to a configured OTLP/HTTP endpoint, so deployments can use a self-hosted OpenTelemetry
+Collector and backend. Set an endpoint only with explicit enablement:
+
+```bash
+export SOLOMON_TELEMETRY_ENABLED=true
+export SOLOMON_TELEMETRY_SERVICE_NAME=solomon-prod
+export SOLOMON_TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+```
+
+Solomon emits low-cardinality spans for ingestion, document-source connector operations, retrieval, review, boundary
+review, MCP tools, and inbound/outbound webhooks. Span attributes exclude query text, document content, source
+references, credentials, tenant IDs, matter IDs, and client IDs. FastAPI requests honor an inbound W3C `traceparent`.
+
+## End-to-End Evaluation
+
+[`docs/evaluation-corpus.e2e.synthetic.json`](./docs/evaluation-corpus.e2e.synthetic.json) is a public, versioned,
+synthetic corpus for source ingestion, candidate promotion, authority impact, human review, and MCP-preflight
+outcomes. The harness reports extraction precision/recall, graph-impact recall, stale-context leakage, review
+completion, and post-review MCP context recall.
+
+```bash
+uv run python scripts/evaluate_end_to_end.py --output ./artifacts/end-to-end-evaluation.json
+```
+
+## Pilot-Readiness Gates
+
+Release verification runs security, local recall-performance, encrypted-restore, source/review workflow, and
+MCP unsafe-reuse gates. It emits a self-hosted JSON report and exits nonzero when any selected gate fails.
+
+```bash
+uv run python scripts/release_quality_gates.py --output ./artifacts/release-quality-gates.json
+```
+
+## Regulator-ready by construction
+
+Every model-backed answer carries a reproducible primitive plan, source provenance, currency state,
+verification status, dependency context, boundary metadata, and visible contest history. The `why` and
+audit-pack paths turn those fields into evidence about what Solomon did, why it did it, on what basis, and
+which human or system actor was accountable.
+
+Solomon produces evidence about its own reasoning and currency. It does not certify legal compliance,
+decide the law, or replace the firm's instructions-for-use, human oversight, or regulator-facing review
+process. See [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md).
+
+## Boundary And Memory
+
+Solomon owns both the zero-retention boundary and the currency engine. The boundary answers what can be
+reviewed, pseudonymized, reidentified, scrubbed, or sent to a model. The currency engine answers whether
+internal knowledge is live, stale-pending-reverification, superseded, or retired.
+
+Solomon is self-contained. The local boundary engine under [`src/solomon/boundary/engine/`](./src/solomon/boundary/engine/)
+requires no sibling checkout.
+
+Select the supported boundary profile (`sg`, `my`, `uk`, or `eu`) through `SOLOMON_JURISDICTION`, or for a single
+operation with `--jurisdiction`:
+
+```bash
+uv run solomon ingest "memo text" --source-ref memo-1 --jurisdiction uk
+uv run solomon mcp serve --http --jurisdiction uk
+uv run solomon console serve --jurisdiction uk
+```
+
+The profile sets both default source and destination jurisdictions. It is a detector-routing setting, not a legal
+classification or compliance switch.
 
 ## Runtime Modes
 
-### Embedded Core
+### Local SKU
 
-Use the Rust crate directly with an in-process vector index:
+`solomon-local` is offline-default. It uses SQLite, the in-process Solomon boundary, deterministic
+hashed retrieval embeddings, and local-only model routing unless deployment policy explicitly enables
+remote egress.
 
-```bash
-cargo test -p shibahama-core
+It must not require:
+
+```text
+postgres, redis, external HTTP, remote model credentials
 ```
 
-The embedded mode is the source of truth for memory semantics. It is suitable
-for local agents, test harnesses, and applications that want direct control of
-their embedding model and storage path.
-
-### Bindings
-
-Python and Node bindings expose the core API from local builds:
+Build the local binary:
 
 ```bash
-scripts/ci/python-binding-smoke.sh
-scripts/ci/node-binding-smoke.sh
+uv sync --extra packaging
+uv run pyinstaller packaging/solomon-local.spec --noconfirm --clean
+./dist/solomon-local --version
 ```
 
-Registry publication is not complete yet, so `pip install shibahama` and
-`npm install shibahama` are release blockers rather than current install paths.
+### Server SKU
 
-### Server
+`solomon-server` enables API-key auth, tenant isolation, optional Postgres storage, and optional remote
+ZDR model routing.
 
-The optional server wraps the same core API for process boundaries, namespaces,
-API-key auth, metadata-only logs, and Tideline streams:
+Server deployments should configure OIDC. A server with only `SOLOMON_SERVER_API_KEY` uses the retained
+legacy API-key compatibility path; set `SOLOMON_SERVER_AUTH_MODE=legacy-api-key` explicitly during migration.
+
+Run a local server:
 
 ```bash
-cargo run -p shibahama-cli -- serve --path shibahama.redb --dimensions 2 --api-key dev
-curl -H "x-api-key: dev" http://127.0.0.1:8765/readyz
+SOLOMON_SKU=server \
+SOLOMON_SERVER_API_KEY=change-me \
+uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
 ```
 
-## Benchmark Snapshot
+Enable Postgres storage:
 
-Checked-in local benchmark artifacts are under
-[`benchmarks/results/`](./benchmarks/results/). These are deterministic local
-smoke results, not hosted all-systems claims.
+```bash
+uv sync --extra server
 
-CurrencyBench injects fact changes mid-stream and measures whether the memory
-system returns the current fact rather than the stale one:
+SOLOMON_SKU=server \
+SOLOMON_SERVER_API_KEY=change-me \
+SOLOMON_DATABASE_URL=postgresql://solomon:solomon@localhost:5432/solomon \
+uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
+```
 
-| Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
-|---|---|---:|---:|---:|---:|---:|---|
-| currencybench | shibahama | 12 | 1.000 | 0.000 | 5.917 | 5.427 | ok |
-| currencybench | warehouse | 12 | 0.000 | 1.000 | 11.833 | 0.038 | ok |
+OIDC is server-only and requires an HTTPS issuer, audience, and explicit JSON claim mapping. This example maps
+the IdP's `roles` values to Solomon roles; unmatched or malformed values are denied.
 
-The checked-in `coding-agent-local` artifact is a compact continuity smoke for
-rejected approaches and moved files:
+```bash
+SOLOMON_OIDC_ISSUER=https://idp.example \
+SOLOMON_OIDC_AUDIENCE=solomon-api \
+SOLOMON_OIDC_ROLE_CLAIM=roles \
+SOLOMON_OIDC_ROLE_MAPPINGS='{"firm-admin":"admin","firm-lawyer":"lawyer","connector":"integration"}'
+```
 
-| Suite | System | Queries | Accuracy | Stale Answer Rate | Mean Token Cost | p95 ms | Status |
-|---|---|---:|---:|---:|---:|---:|---|
-| coding-agent | shibahama | 2 | 1.000 | 0.000 | 36.000 | 123.357 | ok |
-| coding-agent | warehouse | 2 | 0.000 | 1.000 | 29.000 | 0.062 | ok |
+Envelope-encrypt source-document and candidate-claim content at rest by supplying a non-secret key reference and a
+Base64-encoded 32-byte AES-256 key through the deployment secret manager. The key value is not included in diagnostics
+or audit records.
 
-The checked-in `ablation-local` artifact isolates significance,
-reconstruction/supersession, and graph expansion toggles. Full Shibahama scores
-`1.000` accuracy; each single-feature ablation scores `0.667` and fails the case
-tied to the removed behavior.
+```bash
+SOLOMON_CONTENT_ENCRYPTION_KEY_REF='kms://firm-keyring/solomon-content/v1' \
+SOLOMON_CONTENT_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+uv run uvicorn solomon.api.app:create_app --factory --host 0.0.0.0 --port 8140
+```
 
-Benchmark methodology and current scope are documented in
-[`docs/benchmarks.md`](./docs/benchmarks.md).
+Changing the reference or key prevents startup from reading existing encrypted content; restore the matching key
+before rotating data through an approved migration.
 
-## Security Posture
+Retention is opt-in. `SOLOMON_RETENTION_DEFAULT_DAYS` selects the age threshold; an administrator invokes
+`POST /retention/run` to process due items. Retention and erasure operate on an `item`, `matter`, or `client` scope.
+An active legal hold blocks the full request. Completed logical erasure replaces current queryable content with a
+retention marker and retires the item; the append-only historical evidence remains intact. Server requests require
+the target `tenant_id` query parameter.
 
-Shibahama treats memory as untrusted input.
+```bash
+curl -X POST 'http://localhost:8140/retention/legal-holds?tenant_id=tenant-a' \
+  -H 'x-api-key: change-me' \
+  -H 'content-type: application/json' \
+  -d '{"scope":"matter","scope_id":"matter-123","reason":"litigation preservation"}'
+```
 
-- Writes require provenance.
-- Web and model-authored memories default to lower credence.
-- Recall sorts by credence before weighted score.
-- Instruction memories are separated from fact memories and excluded by default.
-- Stored role/directive-looking text is neutralized at read time.
-- Server logs are metadata-only and avoid memory content, raw query text, and
-  embeddings.
-- The default redb store is plaintext at rest. Rust callers can opt into
-  payload encryption with `Aes256GcmEncryption`; key management remains the
-  caller's responsibility.
+Create tenant-bound integration credentials with an admin principal. The generated credential is shown only on
+creation or rotation; keep it in a secret manager. Solomon stores only a PBKDF2-SHA256 hash, requires the bound
+`x-tenant-id` on each request, enforces its configured scopes, and denies it after revocation.
 
-Read [`docs/security.md`](./docs/security.md) before using Shibahama with
-sensitive stores.
+```bash
+curl -X POST http://localhost:8140/service-principals \
+  -H 'x-api-key: change-me' \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"document-connector","tenant_id":"tenant-a","scopes":["tenant:read"]}'
+
+curl -X POST http://localhost:8140/recall \
+  -H 'x-api-key: <generated-credential>' \
+  -H 'x-tenant-id: tenant-a' \
+  -H 'content-type: application/json' \
+  -d '{"query":"contract renewal"}'
+```
+
+Postgres retrieval requires the self-hosted `pgvector` extension. Startup runs `CREATE EXTENSION IF NOT EXISTS vector`,
+validates it, and applies the transactional `vector(256)`/HNSW migration; the database role therefore needs that
+extension installed and creation privilege.
+
+Remote model egress requires explicit configuration:
+
+```bash
+SOLOMON_ZERO_EGRESS_MODE=false \
+SOLOMON_ALLOW_REMOTE_EGRESS=true \
+SOLOMON_REMOTE_MODEL_URL=https://example.invalid/v1/responses
+```
+
+Retrieval remains on the pinned local hashed embedding provider by default. Remote OpenAI-compatible embeddings are a
+separate server-only opt-in; `SOLOMON_ALLOW_REMOTE_EMBEDDING_EGRESS=true` requires zero-egress mode disabled plus an
+embeddings endpoint and API key. The key is not emitted in diagnostics.
+
+### Docker
+
+`docker-compose.server.yml` is the canonical development deployment for the server SKU. It mounts the checkout and
+keeps SQLite data and audit journals in named volumes; use it for the documented local server loop rather than
+maintaining a parallel Compose file.
+
+```bash
+SOLOMON_SERVER_API_KEY=change-me docker compose -f docker-compose.server.yml up --build
+curl -H 'Authorization: Bearer change-me' http://localhost:8140/health
+```
+
+### Production Compose
+
+`docker-compose.production.yml` is the self-hosted production profile: Postgres with pgvector, one-shot migrations,
+the API, curator console, and a single filesystem-source worker. It keeps Postgres, durable Solomon state, and journals
+in named volumes; bind mounts are deliberately absent. The worker synchronizes enabled filesystem sources only; scale it
+only after introducing a source-level distributed lease.
+
+Create four files outside the checkout, each mode `0600`: `server_api_key`, `console_bearer_token`, `postgres_password`,
+and a Base64-encoded 32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.
+
+```bash
+install -d -m 0700 /opt/solomon/secrets
+printf '%s\n' 'replace-with-a-long-random-api-key' > /opt/solomon/secrets/server_api_key
+openssl rand -base64 32 > /opt/solomon/secrets/console_bearer_token
+printf '%s\n' 'replace-with-a-long-random-postgres-password' > /opt/solomon/secrets/postgres_password
+openssl rand -base64 32 > /opt/solomon/secrets/content_encryption_key
+chmod 0600 /opt/solomon/secrets/*
+
+export SOLOMON_SECRETS_DIR=/opt/solomon/secrets
+export SOLOMON_CONTENT_ENCRYPTION_KEY_REF='kms://firm-keyring/solomon-content/v1'
+docker compose -f docker-compose.production.yml --profile production up --build -d
+```
+
+The API and console default to loopback binds (`127.0.0.1:8140` and `127.0.0.1:8150`); put TLS termination in front
+of them before exposing either port. In legacy API-key mode, the dedicated console token has the `admin` console role;
+place it behind an identity-aware proxy that sends the token as an `Authorization` header. Use OIDC for browser-facing
+deployments. Validate the Compose model without starting services with:
+
+```bash
+scripts/check_production_compose.sh
+```
+
+Run the full local production smoke test (build, pgvector, migrations, API, console, and worker) with:
+
+```bash
+scripts/production_compose_smoke.sh
+```
+
+### Kubernetes Helm
+
+[`charts/solomon`](./charts/solomon/) deploys the server services with OIDC, a migration hook, API, console, worker,
+optional self-hosted pgvector, ingress, and Prometheus/OTLP configuration. It accepts existing Secret references only;
+it does not render secret values. The shared durable-state PVC defaults to `ReadWriteMany` because metadata and the
+audit journal remain local files. See the [chart README](./charts/solomon/README.md) for required secrets, OIDC values,
+external Postgres, ingress TLS, and validation.
 
 ## Documentation
 
-- [`docs/architecture.md`](./docs/architecture.md): component map, data model,
-  request lifecycle, and deployment surfaces.
-- [`docs/concepts.md`](./docs/concepts.md): plain-language explanation of
-  memories, significance, tiers, credence, reconstruction, and graph concepts.
-- [`docs/benchmarks.md`](./docs/benchmarks.md): benchmark methodology,
-  reproduction commands, local results, and open gaps.
-- [`docs/competitive-positioning.md`](./docs/competitive-positioning.md):
-  comparison against Mem0, Zep, Letta, and Engram.
-- [`docs/security.md`](./docs/security.md): poisoning posture, logging behavior,
-  encryption limits, and operational guidance.
-- [`docs/null-hypothesis.md`](./docs/null-hypothesis.md): when flat retrieval or
-  long context may beat Shibahama.
-- [`docs/learned-memory-policy.md`](./docs/learned-memory-policy.md): gated
-  offline evaluation plan for future learned memory policies.
-- [`docs/performance.md`](./docs/performance.md): recall latency budget and
-  hot-path scan boundaries.
-- [`docs/releases.md`](./docs/releases.md): release sequence and registry
-  blockers.
-- [`docs/adr/`](./docs/adr/): accepted architecture decision records.
-- [`docs/api/`](./docs/api/): generated API notes.
-- [`docs/why-shibahama.md`](./docs/why-shibahama.md): naming rationale and
-  design philosophy.
+- [`docs/architecture.md`](./docs/architecture.md): service architecture, deterministic primitive plans,
+  contestability, storage, tenancy, auth, boundary, and reference extraction.
+- [`docs/console/`](./docs/console/): curator console screens, screenshots, GIFs, and stack decision.
+- [`docs/concepts.md`](./docs/concepts.md): currency, bi-temporality, dependency graph, credence, and
+  verification concepts.
+- [`docs/boundary-integration.md`](./docs/boundary-integration.md): Solomon boundary behavior.
+- [`docs/trust-boundary.md`](./docs/trust-boundary.md): model egress, pseudonymization, contestability,
+  and fail-closed trust-boundary rules.
+- [`docs/regulatory-evidence.md`](./docs/regulatory-evidence.md): evidence mapping for EU AI Act,
+  NIST AI RMF, ISO/IEC 42001, and multi-jurisdiction review needs.
+- [`docs/threat-model.md`](./docs/threat-model.md): threats, controls, residual risks, and deployment
+  assumptions.
+- [`docs/known-limitations.md`](./docs/known-limitations.md): current monitoring, retrieval, boundary,
+  and legal-adjudication limits.
+- [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.
+- [`docs/one-pager.md`](./docs/one-pager.md): portfolio-review summary, with a rendered PDF in `output/pdf/`.
+- [`docs/benchmarks.md`](./docs/benchmarks.md): currency and retrieval evaluation results.
+- [`docs/release-artifacts.md`](./docs/release-artifacts.md): v0.1.0 artifact hashes and release evidence.
+- [`docs/api/openapi.json`](./docs/api/openapi.json): generated OpenAPI contract.
+- [`docs/cli-mcp-verb-audit.md`](./docs/cli-mcp-verb-audit.md): CLI names aligned to MCP tool names.
+- [`docs/sdk/`](./docs/sdk/): Python and TypeScript SDK quickstarts.
+- [`docs/adr/README.md`](./docs/adr/README.md): architecture decision records.
 
 ## Development & Evaluation
 
-Run the Rust gate:
+Install development dependencies:
 
 ```bash
-scripts/ci/rust.sh
+uv sync --extra dev
 ```
 
-Run the full local preflight:
+Run lint and type checks:
 
 ```bash
-scripts/ci/all.sh
+uv run ruff check .
+uv run mypy src/solomon
 ```
 
-Run binding parity and smoke checks:
+Run the full test suite:
 
 ```bash
-scripts/ci/binding-parity.sh
-scripts/ci/python-binding-smoke.sh
-scripts/ci/node-binding-smoke.sh
+uv run pytest
 ```
 
-Run the local correctness smoke:
+Run production-confidence checks:
 
 ```bash
-python3 scripts/ci/correctness-smoke.py
+uv run pytest tests/test_boundary_accuracy.py
+SOLOMON_TEST_POSTGRES_DSN=postgresql://solomon:solomon@localhost:5432/solomon \
+  uv run pytest -m integration tests/test_postgres_live_integration.py
 ```
 
-Run frontend build checks:
+Run the performance gate:
 
 ```bash
-(
-  cd tideline
-  npm install
-  npm run build
-)
+uv run python benchmarks/performance_budget.py
 ```
 
-Or enter the pinned Nix shell:
+Run the headline demo:
 
 ```bash
-nix develop
+uv run python examples/scenarios/stale-house-view/run.py
 ```
 
-## Repository Layout
+Regenerate README media and API artifacts:
 
-| Path | Purpose |
-|---|---|
-| [`core/`](./core/) | Rust core library and memory semantics. |
-| [`shibahama-cli/`](./shibahama-cli/) | CLI and optional HTTP server mode. |
-| [`bindings/python/`](./bindings/python/) | PyO3/maturin Python package. |
-| [`bindings/node/`](./bindings/node/) | napi-rs ESM/CJS Node package. |
-| [`tideline/`](./tideline/) | React/Vite visual debugger. |
-| [`benchmarks/`](./benchmarks/) | Benchmark harnesses, adapters, datasets, and checked-in local results. |
-| [`examples/`](./examples/) | Runnable Rust, Python, Node, and coding-agent examples. |
-| [`docs/`](./docs/) | Architecture, concepts, security, performance, ADRs, API reference, and launch notes. |
+```bash
+uv run python scripts/render_stale_house_view_gif.py
+uv run python scripts/render_console_gifs.py
+uv run python scripts/render_vendor_integration_gif.py
+uv run python scripts/export_openapi.py
+```
 
-## Release State
+## Packaging & Deployment
 
-The workspace version is `0.1.0`, but the release is not published yet.
+Build pip-installable artifacts:
 
-Still pending:
+```bash
+uv build
+```
 
-- TestPyPI/PyPI publish for `pip install shibahama`.
-- npm publish for `npm install shibahama`.
-- final `v0.1.0` tag and registry publication.
-- citable ContinuityBench archive/DOI submission.
+Build the local binary:
 
-Remaining tracked work lives in GitHub issues. `NEXT-TODO.md` and `TODO.md`
-have been removed because they had no remaining unique implementation work.
+```bash
+uv sync --extra packaging
+uv run pyinstaller packaging/solomon-local.spec --noconfirm --clean
+```
+
+Expected outputs:
+
+- `dist/solomon-0.1.0.tar.gz`
+- `dist/solomon-0.1.0-py3-none-any.whl`
+- `dist/solomon-local`
+
+Package surfaces:
+
+- [`packaging/solomon-local.spec`](./packaging/solomon-local.spec): PyInstaller entry for the offline
+  local SKU.
+- [`docker-compose.server.yml`](./docker-compose.server.yml): server SKU Compose entry.
+- [`packaging/README.md`](./packaging/README.md): release artifact build notes.
+
+## Screenshots
+
+### Verification Desk
+
+![Verification Desk](./docs/assets/console/verification-desk.png)
+
+### Dependency Review
+
+![Dependency Review](./docs/assets/console/dependency-review.png)
+
+### Audit Pack
+
+![Audit Pack](./docs/assets/console/audit-pack.png)
+
+Animated walkthroughs live beside the PNGs in [`docs/assets/console/`](./docs/assets/console/).
 
 ## License
 
-Shibahama is licensed under the [MIT License](./LICENSE).
+Apache-2.0. See [`LICENSE`](./LICENSE).

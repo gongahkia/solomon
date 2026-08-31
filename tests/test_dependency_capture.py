@@ -223,3 +223,44 @@ def test_reference_parser_ignores_bare_v_token() -> None:
     extraction = extract_defined_terms_and_citations(content="FuzzContent::V")
 
     assert extraction.citations == []
+
+
+def test_reference_parser_preserves_original_provision_spans_and_resolves_declared_aliases() -> None:
+    extraction = extract_defined_terms_and_citations(
+        content=(
+            "The note depends on Dune Act 5 section 11(a) and Eider Guidance 1 section 2. "
+            "The Nova memo treats AR7 section 4 as controlling; AR7 denotes Aster Regulation 7. "
+            "The Wren conclusion relies on Aster Reg. 7 s. 4."
+        )
+    )
+
+    citations = {citation.normalized_id: citation for citation in extraction.citations}
+    assert citations["dune-act-5-section-11-a"].text == "Dune Act 5 section 11(a)"
+    assert citations["eider-guidance-1-section-2"].text == "Eider Guidance 1 section 2"
+    assert citations["aster-regulation-7-section-4"].text == "AR7 section 4"
+    assert citations["aster-regulation-7-section-4"].metadata["grammar"] == "declared-alias"
+
+
+def test_dependency_suggestions_support_bounded_adoption_and_cross_sentence_evidence() -> None:
+    boundary = SolomonBoundary(SuggestionBoundaryClient())
+    direct = suggest_authority_dependencies(
+        item_id="direct",
+        content="Boreal Rule 2 section 8 supplies the operative deadline for the filing.",
+        boundary=boundary,
+    )
+    cross_sentence = suggest_authority_dependencies(
+        item_id="cross-sentence",
+        content="The team adopts the notice formula. Cedar Code 9 section 3 provides that formula.",
+        boundary=boundary,
+    )
+    attributed = suggest_authority_dependencies(
+        item_id="attributed",
+        content="The counterparty relies on Aster Regulation 7 section 4, but our position rejects that premise.",
+        boundary=boundary,
+    )
+
+    assert direct[0].suggested_edge.target_id == "boreal-rule-2-section-8"
+    assert cross_sentence[0].source_span == (
+        "The team adopts the notice formula. Cedar Code 9 section 3 provides that formula."
+    )
+    assert attributed == []

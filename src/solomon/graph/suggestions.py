@@ -23,11 +23,29 @@ TOKEN_RE = re.compile(
     r"\[[0-9]{4}\]|(?:reg|s)\.|v\.?|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|§|[.,;:()\"]",
     re.IGNORECASE,
 )
-AUTHORITY_NOUNS = {"act", "code", "reg", "regulation", "regulations", "rule", "rules"}
+AUTHORITY_NOUNS = {"act", "code", "guidance", "reg", "regulation", "regulations", "rule", "rules"}
 SECTION_MARKERS = {"section", "s.", "§"}
 CASE_CONNECTORS = {"of", "the", "and", "&", "pte", "ltd", "llc", "inc", "corp", "co"}
+TITLE_PREFIX_STOP_WORDS = {"under"}
 QUOTE_DEFINITION_MARKERS = ("shall mean", "has the meaning", "means")
 POSITIVE_RELIANCE_CUES = ("relies on", "depends on", "pursuant to", "required by", "under ", "controls.", "matters.")
+ADOPTION_PATTERNS = (
+    re.compile(
+        r"\b(?:supplies|provides|sets|establishes)\s+(?:the\s+)?(?:operative\s+)?(?:deadline|formula|sequence)\b"
+    ),
+    re.compile(r"\buses\b.+\bas\s+(?:its|the)\s+(?:rule|approval condition)\b"),
+    re.compile(r"\btreats\b.+\bas\s+the\s+controlling\s+(?:approval\s+)?condition\b"),
+    re.compile(r"\bfollows\b.+\bfor\b"),
+    re.compile(r"\bis\s+the\s+source\s+of\b"),
+)
+ATTRIBUTED_RELIANCE_MARKERS = (
+    "counterparty",
+    "opposing submission",
+    "regulator says",
+    "witness notes",
+    "training extract",
+)
+CROSS_SENTENCE_ANCHORS = re.compile(r"\b(?:that|the)\s+(?:deadline|formula|calculation)\b|\bfor\s+that\s+calculation\b")
 NEGATIVE_RELIANCE_CUES = (
     "does not rely",
     "do not rely",
@@ -311,10 +329,39 @@ def _reliance_evidence(text: str, citation: CitationReference) -> tuple[int, int
         return None
     if re.search(r"(?:^|[,;])\s*(?:not|rather than)\s*$", prefix):
         return None
-    if not any(cue in normalized_sentence for cue in POSITIVE_RELIANCE_CUES):
+    if any(marker in normalized_sentence for marker in ATTRIBUTED_RELIANCE_MARKERS):
         return None
     source_start = start + len(text[start:end]) - len(text[start:end].lstrip())
-    return source_start, source_start + len(source_span), source_span
+    if _has_reliance_cue(normalized_sentence):
+        return source_start, source_start + len(source_span), source_span
+    previous = _previous_sentence(text, start)
+    if previous is None:
+        return None
+    previous_start, previous_span = previous
+    if CROSS_SENTENCE_ANCHORS.search(normalized_sentence) and "adopt" in previous_span.lower():
+        combined = text[previous_start:end].strip()
+        combined_start = previous_start + len(text[previous_start:end]) - len(text[previous_start:end].lstrip())
+        return combined_start, combined_start + len(combined), combined
+    return None
+
+
+def _has_reliance_cue(sentence: str) -> bool:
+    return any(cue in sentence for cue in POSITIVE_RELIANCE_CUES) or any(
+        pattern.search(sentence) for pattern in ADOPTION_PATTERNS
+    )
+
+
+def _previous_sentence(text: str, current_start: int) -> tuple[int, str] | None:
+    before = text[:current_start].rstrip()
+    if not before.endswith("."):
+        return None
+    previous_end = len(before)
+    previous_start = max(before.rfind(".", 0, previous_end - 1), before.rfind("\n", 0, previous_end - 1)) + 1
+    span = text[previous_start:previous_end].strip()
+    if not span:
+        return None
+    offset = previous_start + len(text[previous_start:previous_end]) - len(text[previous_start:previous_end].lstrip())
+    return offset, span
 
 
 def _suggestion_fingerprint(
@@ -468,6 +515,7 @@ def _grammar_citations(text: str) -> list[CitationReference]:
     citations: list[CitationReference] = []
     occupied_spans: list[tuple[int, int]] = []
     for candidate in [
+        *_parse_declared_alias_references(text),
         *_parse_regulation_references(tokens, text),
         *_parse_section_references(tokens, text),
         *_parse_case_references(tokens, text),
@@ -494,8 +542,8 @@ def _parse_regulation_references(tokens: list[Token], text: str) -> list[Citatio
         if not _is_section_number(tokens[marker_index + 1].text):
             continue
         start_index = _authority_title_start(tokens, index)
-        start, end = tokens[start_index].start, tokens[marker_index + 1].end
-        raw = _clean(text[start:end])
+        start, end = tokens[start_index].start, _provision_end(tokens, marker_index).end
+        raw = text[start:end].strip()
         citations.append(
             CitationReference(
                 text=raw,
@@ -521,8 +569,8 @@ def _parse_section_references(tokens: list[Token], text: str) -> list[CitationRe
         if not _is_section_number(tokens[marker_index + 1].text):
             continue
         start_index = _authority_title_start(tokens, index)
-        start, end = tokens[start_index].start, tokens[marker_index + 1].end
-        raw = _clean(text[start:end])
+        start, end = tokens[start_index].start, _provision_end(tokens, marker_index).end
+        raw = text[start:end].strip()
         citations.append(
             CitationReference(
                 text=raw,
@@ -629,6 +677,45 @@ def _next_section_marker(tokens: list[Token], start: int) -> int | None:
     return None
 
 
+def _provision_end(tokens: list[Token], marker_index: int) -> Token:
+    end_index = marker_index + 1
+    if (
+        end_index + 3 < len(tokens)
+        and tokens[end_index + 1].text == "("
+        and tokens[end_index + 2].text[:1].isalnum()
+        and tokens[end_index + 3].text == ")"
+    ):
+        end_index += 3
+    return tokens[end_index]
+
+
+def _parse_declared_alias_references(text: str) -> list[CitationReference]:
+    declarations = re.finditer(
+        r"\b(?P<alias>[A-Z][A-Z0-9]{1,15})\s+denotes\s+"
+        r"(?P<title>(?:[A-Z][A-Za-z0-9'-]*\s+){0,5}(?:Regulation|Reg\.?|Rule|Code|Act|Guidance)\s+\d+)\b",
+        text,
+    )
+    aliases = {match.group("alias"): match.group("title") for match in declarations}
+    citations: list[CitationReference] = []
+    for alias, title in aliases.items():
+        pattern = re.compile(rf"\b{re.escape(alias)}\s+(?:section|s\.|§)\s+(?P<section>\d+(?:\([A-Za-z0-9]+\))?)\b")
+        for match in pattern.finditer(text):
+            raw = match.group(0)
+            normalized = _citation_id(f"{title} section {match.group('section')}")
+            citations.append(
+                CitationReference(
+                    text=raw,
+                    kind="authority",
+                    normalized_id=normalized,
+                    parser="solomon-grammar",
+                    span_start=match.start(),
+                    span_end=match.end(),
+                    metadata={"grammar": "declared-alias"},
+                )
+            )
+    return citations
+
+
 def _authority_title_start(tokens: list[Token], noun_index: int) -> int:
     start = noun_index
     while start > 0:
@@ -638,6 +725,8 @@ def _authority_title_start(tokens: list[Token], noun_index: int) -> int:
         if previous.text == ",":
             break
         if previous.lower == "and":
+            break
+        if previous.lower in TITLE_PREFIX_STOP_WORDS:
             break
         if not (previous.text[:1].isupper() or previous.text.isdigit() or previous.lower in CASE_CONNECTORS):
             break

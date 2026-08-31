@@ -154,6 +154,46 @@ def test_cli_consistency_operations_and_manual_retry_emit_stable_json(
     assert json.loads(retried.output)["status"] == "queued"
 
 
+def test_cli_deployment_verify_is_scoped_stable_json_and_does_not_append_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+    initialized = runner.invoke(app, ["deployment", "init", "--owner", "verify-test"])
+    assert initialized.exit_code == 0, initialized.output
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    audit_path = tmp_path / "journal" / "journal.jsonl"
+    audit_before = audit_path.read_bytes()
+
+    verified = runner.invoke(
+        app,
+        [
+            "deployment",
+            "verify",
+            "--matter-id",
+            "matter-a",
+            "--client-id",
+            "client-a",
+            "--format",
+            "json",
+        ],
+    )
+    incomplete_scope = runner.invoke(app, ["deployment", "verify", "--matter-id", "matter-a"])
+
+    assert verified.exit_code == 0, verified.output
+    payload = json.loads(verified.output)
+    assert payload["schema_id"] == "solomon.deployment_verification.v1"
+    assert payload["state"] == payload["readiness"] == "ready"
+    assert payload["scope"] == {"matter_id": "matter-a", "client_id": "client-a"}
+    assert audit_path.read_bytes() == audit_before
+    assert incomplete_scope.exit_code == 2
+    assert "must be supplied together" in incomplete_scope.output
+    service.store.close()
+    service.graph.close()
+    service.index.close()
+    service.operation_store.close()
+
+
 def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda: calls.append("stdio"))

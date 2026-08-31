@@ -26,6 +26,11 @@ state="$work/state"
 mkdir "$state"
 chmod 0777 "$state"
 umask 077
+report_path="${SOLOMON_OPERATIONS_REPORT_PATH:-}"
+if [ -n "$report_path" ] && [ -e "$report_path" ]; then
+    echo "rehearsal report path must not already exist" >&2
+    exit 2
+fi
 
 cleanup() {
     status=$?
@@ -71,6 +76,7 @@ restore_url="postgresql://solomon:disposable-postgres-password@${restore_pg}:543
 source_run() {
     timeout 120 docker run --rm --network "$network" \
         -v "$state:/state" \
+        -v "$root/examples:/app/examples:ro" \
         -e SOLOMON_SKU=server \
         -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
         -e SOLOMON_SERVER_API_KEY=disposable-server-key \
@@ -98,6 +104,7 @@ restore_run() {
 restored_run() {
     timeout 120 docker run --rm --network "$network" \
         -v "$state:/state" \
+        -v "$root/examples:/app/examples:ro" \
         -e SOLOMON_SKU=server \
         -e SOLOMON_SERVER_AUTH_MODE=legacy-api-key \
         -e SOLOMON_SERVER_API_KEY=disposable-server-key \
@@ -110,7 +117,14 @@ restored_run() {
 source_run solomon migrate >/dev/null
 source_run solomon deployment init --owner rehearsal >/dev/null
 source_run solomon deployment preflight --require-initialized --format json >/dev/null
-source_run solomon ingest "rehearsal source position under Regulation R section 12" --source-ref rehearsal-source >/dev/null
+source_run python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
+    --workspace /state/source-proof \
+    --data-dir /state/source-data \
+    --journal-dir /state/source-journal \
+    --database-url "$source_url" \
+    --audit-pack-dir /state/source-data/pre-backup-audit-pack > "$work/source-fixture.json"
+source_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/source-consistency.json"
+source_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/source-verify.json"
 source_run solomon deployment backup /state/checkpoint.enc >/dev/null
 source_run solomon deployment backup-inspect /state/checkpoint.enc >/dev/null
 source_run solomon health > "$work/source-health.json"
@@ -127,32 +141,82 @@ fi
 restore_run solomon deployment restore --plan /state/restore-plan.json --apply >/dev/null
 restored_run solomon deployment preflight --require-initialized --format json >/dev/null
 restored_run solomon health > "$work/restored-health.json"
+restored_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/restored-consistency.json"
+restored_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/restored-verify.json"
+restored_run python -c 'import json; from solomon.audit.journal import AuditJournal; print(json.dumps(AuditJournal.verify_pack("/state/restored/data/pre-backup-audit-pack").model_dump(mode="json"), sort_keys=True))' > "$work/restored-audit-pack.json"
 restored_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.semantic_inventory import semantic_inventory; s=get_settings(); print(json.dumps(semantic_inventory(SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url)), sort_keys=True))' > "$work/restored-inventory.json"
-restored_run solomon ingest "post-restore write under Regulation R section 13" --source-ref rehearsal-restored >/dev/null
+restored_run python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
+    --workspace /state/restored-proof \
+    --data-dir /state/restored/data \
+    --journal-dir /state/restored/journal \
+    --database-url "$restore_url" \
+    --post-restore-write > "$work/post-restore-write.json"
 
-python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" <<'PY'
+python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" "$work/source-fixture.json" "$work/source-consistency.json" "$work/restored-consistency.json" "$work/source-verify.json" "$work/restored-verify.json" "$work/restored-audit-pack.json" "$work/post-restore-write.json" "$report_path" <<'PY'
 import json
 import sys
+from pathlib import Path
 
 source = json.load(open(sys.argv[1], encoding="utf-8"))
 restored = json.load(open(sys.argv[2], encoding="utf-8"))
 source_inventory = json.load(open(sys.argv[3], encoding="utf-8"))
 restored_inventory = json.load(open(sys.argv[4], encoding="utf-8"))
+source_fixture = json.load(open(sys.argv[5], encoding="utf-8"))
+source_consistency = json.load(open(sys.argv[6], encoding="utf-8"))
+restored_consistency = json.load(open(sys.argv[7], encoding="utf-8"))
+source_verify = json.load(open(sys.argv[8], encoding="utf-8"))
+restored_verify = json.load(open(sys.argv[9], encoding="utf-8"))
+restored_audit_pack = json.load(open(sys.argv[10], encoding="utf-8"))
+post_restore_write = json.load(open(sys.argv[11], encoding="utf-8"))
 if source["store"]["item_count"] != restored["store"]["item_count"]:
     raise SystemExit("restored knowledge inventory differs from checkpoint")
 if not source["journal"]["ok"] or not restored["journal"]["ok"]:
     raise SystemExit("source or restored audit journal failed verification")
 if source_inventory != restored_inventory:
-    raise SystemExit("restored semantic inventory differs from checkpoint")
-print(json.dumps({
-    "schema_id": "solomon.production_operations_rehearsal.v1",
+    differences = {
+        component: {
+            "source": source_inventory["components"].get(component),
+            "restored": restored_inventory["components"].get(component),
+        }
+        for component in sorted(set(source_inventory["components"]) | set(restored_inventory["components"]))
+        if source_inventory["components"].get(component) != restored_inventory["components"].get(component)
+    }
+    raise SystemExit(f"restored semantic inventory differs from checkpoint: {json.dumps(differences, sort_keys=True)}")
+if source_consistency["findings"] or restored_consistency["findings"]:
+    raise SystemExit("fixture deployment has consistency findings")
+if source_verify["state"] != "ready" or restored_verify["state"] != "ready":
+    raise SystemExit("source or restored deployment verification is not ready")
+if not source_fixture["audit"]["audit_pack_verified"]:
+    raise SystemExit("fixture audit pack failed verification before backup")
+if not restored_audit_pack["ok"]:
+    raise SystemExit("restored audit pack failed verification")
+if post_restore_write["result"] != "passed" or not post_restore_write["edge_provenance_matches"]:
+    raise SystemExit("post-restore governed write did not retain edge provenance")
+result = {
+    "schema_id": "solomon.production_operations_rehearsal.v2",
     "profile": "mixed-postgresql-sqlite",
     "source_item_count": source["store"]["item_count"],
     "restored_item_count": restored["store"]["item_count"],
     "source_audit_entries": source["journal"]["entries"],
     "restored_audit_entries": restored["journal"]["entries"],
-    "semantic_inventory": source_inventory["components"],
-    "post_restore_write": "succeeded",
+    "semantic_inventory": {
+        component: summary["count"] for component, summary in source_inventory["components"].items()
+    },
+    "semantic_inventory_equal": True,
+    "fixture": source_fixture,
+    "source_verification": source_verify["state"],
+    "restored_verification": restored_verify["state"],
+    "restored_audit_pack": restored_audit_pack,
+    "post_restore_write": post_restore_write,
     "result": "passed",
-}, sort_keys=True))
+}
+serialized = json.dumps(result, sort_keys=True)
+report_path = sys.argv[12]
+if report_path:
+    target = Path(report_path)
+    if not target.parent.is_dir():
+        raise SystemExit("rehearsal report parent directory does not exist")
+    with target.open("x", encoding="utf-8") as report:
+        report.write(serialized + "\n")
+print(serialized)
 PY

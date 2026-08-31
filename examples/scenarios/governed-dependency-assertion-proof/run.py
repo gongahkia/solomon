@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -34,12 +35,35 @@ def main() -> None:
     parser.add_argument(
         "--workspace", type=Path, required=True, help="empty directory for scenario state and artifacts"
     )
+    parser.add_argument("--data-dir", type=Path, help="optional Solomon local data directory")
+    parser.add_argument("--journal-dir", type=Path, help="optional Solomon audit journal directory")
+    parser.add_argument("--database-url", help="optional SQLite or PostgreSQL knowledge-store URL")
+    parser.add_argument("--audit-pack-dir", type=Path, help="optional audit-pack output directory")
+    parser.add_argument(
+        "--post-restore-write",
+        action="store_true",
+        help="perform one valid governed write against an existing fixture deployment",
+    )
     arguments = parser.parse_args()
     workspace = arguments.workspace.resolve()
     if workspace.exists() and any(workspace.iterdir()):
         raise SystemExit(f"workspace must be empty: {workspace}")
     workspace.mkdir(parents=True, exist_ok=True)
-    result, snapshot = run(workspace)
+    if arguments.post_restore_write:
+        result = post_restore_write(
+            data_dir=arguments.data_dir or workspace / "data",
+            journal_dir=arguments.journal_dir or workspace / "journal",
+            database_url=arguments.database_url or os.environ.get("SOLOMON_DATABASE_URL"),
+        )
+        print(json.dumps(result, sort_keys=True))
+        return
+    result, snapshot = run(
+        workspace,
+        data_dir=arguments.data_dir,
+        journal_dir=arguments.journal_dir,
+        database_url=arguments.database_url,
+        audit_pack_dir=arguments.audit_pack_dir,
+    )
     (workspace / "governed-dependency-assertion-proof-result.json").write_text(
         json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
@@ -49,9 +73,20 @@ def main() -> None:
     print(json.dumps(snapshot, sort_keys=True, indent=2))
 
 
-def run(workspace: Path) -> tuple[dict[str, object], dict[str, object]]:
+def run(
+    workspace: Path,
+    *,
+    data_dir: Path | None = None,
+    journal_dir: Path | None = None,
+    database_url: str | None = None,
+    audit_pack_dir: Path | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
     started = time.perf_counter()
-    service = SolomonService(data_dir=workspace / "data", journal_dir=workspace / "journal")
+    service = SolomonService(
+        data_dir=data_dir or workspace / "data",
+        journal_dir=journal_dir or workspace / "journal",
+        database_url=database_url or os.environ.get("SOLOMON_DATABASE_URL"),
+    )
     alpha_source = service.register_document_source(
         DocumentSourceRequest(
             source_id="alpha-documents",
@@ -307,7 +342,7 @@ def run(workspace: Path) -> tuple[dict[str, object], dict[str, object]]:
         AuthorityChangeRequest(new_version="2026-09", changed_at="2026-09-01T00:00:00+00:00"),
     )
     confirmed_currency = service.store.get_item(alpha_item).currency_state
-    audit_pack = service.export_audit_pack(workspace / "audit-pack")
+    audit_pack = service.export_audit_pack(audit_pack_dir or workspace / "audit-pack")
     audit_verified = service.audit.verify().ok and AuditJournal.verify_pack(audit_pack).ok
     history = service.dependency_assertion_history(human.id, matter_id="matter-alpha", client_id="client-alpha")
     audit_types = {entry["event_type"] for entry in history["audit_entries"]}
@@ -395,6 +430,63 @@ def run(workspace: Path) -> tuple[dict[str, object], dict[str, object]]:
     }
     result = {**snapshot, "latency_ms": round((time.perf_counter() - started) * 1000, 3), "latency_budget_ms": 2_000}
     return result, snapshot
+
+
+def post_restore_write(
+    *,
+    data_dir: Path,
+    journal_dir: Path,
+    database_url: str | None,
+) -> dict[str, object]:
+    """Make one independently governed write after a restored fixture is active."""
+
+    service = SolomonService(data_dir=data_dir, journal_dir=journal_dir, database_url=database_url)
+    content = "The restored Alpha position relies on Regulation R section 13."
+    document, candidates = service.ingest_source_document(
+        "alpha-documents",
+        SourceDocumentIngestRequest(
+            external_id="alpha-post-restore",
+            filename="alpha-post-restore.txt",
+            mime_type="text/plain",
+            content=content,
+        ),
+    )
+    item = service.promote_candidate_claim(
+        candidates[0].id,
+        CandidateClaimPromotionRequest(
+            by="curator-alpha",
+            kind=KnowledgeKind.POSITION,
+            source_kind=SourceKind.MATTER_DOC,
+            matter_id="matter-alpha",
+            client_id="client-alpha",
+        ),
+    )
+    quote = content
+    assertion = service.create_dependency_assertion(
+        _assertion_request(
+            item_id=item.id,
+            document_id=document.id,
+            assertion_type=DependencyAssertionType.NORMATIVE_POLICY,
+            evidence_kind=AssertionEvidenceKind.QUOTE,
+            quote=quote,
+            quote_start=0,
+            quote_end=len(quote),
+            authority_identifier="SG-R-13",
+            idempotency_key="post-restore-governed-write",
+        )
+    )
+    edge = service.decide_dependency_assertion(
+        assertion.id,
+        DependencyAssertionDecisionRequest(by="reviewer-alpha", decision="confirmed"),
+    )
+    if not isinstance(edge, DependencyEdge):
+        raise RuntimeError("post-restore confirmation did not create a graph edge")
+    return {
+        "schema_id": "solomon.governed_dependency_assertion_post_restore_write.v1",
+        "edge_provenance_matches": edge.source_suggestion_id == assertion.id,
+        "currency_state": service.store.get_item(item.id).currency_state.value,
+        "result": "passed",
+    }
 
 
 def _promote_source_item(

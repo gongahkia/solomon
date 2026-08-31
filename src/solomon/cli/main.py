@@ -56,7 +56,10 @@ from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
 from solomon.currency.prediction import load_pending_amendments
 from solomon.deployment import (
+    CheckStatus,
+    DeploymentCheck,
     DeploymentError,
+    DeploymentPreflightReport,
     MaintenanceGate,
     compatibility_report,
     deployment_preflight,
@@ -68,6 +71,7 @@ from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertion
 from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
+from solomon.operations.models import OperationStatus
 from solomon.orchestrator.models import ModelRouter
 from solomon.telemetry import telemetry_from_settings
 from solomon.worker import run_pending_operations, sync_enabled_filesystem_sources
@@ -485,6 +489,155 @@ def deployment_upgrade_preflight(
     except DeploymentError as exc:
         raise typer.BadParameter(str(exc)) from exc
     _print_json(report.model_dump(mode="json"), sort_keys=True)
+
+
+@deployment_app.command(
+    "verify",
+    epilog=_example("uv run solomon deployment verify --matter-id matter-a --client-id client-a --format json"),
+)
+def deployment_verify(
+    matter_id: Annotated[
+        str | None, typer.Option("--matter-id", min=1, help="Exact scope for a read-only check.")
+    ] = None,
+    client_id: Annotated[
+        str | None, typer.Option("--client-id", min=1, help="Exact scope for a read-only check.")
+    ] = None,
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")]= "json",
+) -> None:
+    """Check readiness, durable state, and one scoped read without writing application records."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    if (matter_id is None) != (client_id is None):
+        raise typer.BadParameter("--matter-id and --client-id must be supplied together")
+    settings = get_settings()
+    database_url = _service_database_url(settings)
+    try:
+        preflight = deployment_preflight(
+            data_dir=settings.data_dir,
+            journal_dir=settings.journal_dir,
+            database_url=database_url,
+            require_initialized=True,
+        )
+    except DeploymentError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    checks = list(preflight.checks)
+    if not preflight.ready:
+        _emit_deployment_verification(
+            preflight=preflight,
+            checks=checks,
+            matter_id=matter_id,
+            client_id=client_id,
+            auth_mode=settings.server_auth_mode,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        service = _service()
+        journal = service.audit.verify()
+        checks.append(
+            DeploymentCheck(
+                component="audit-chain-runtime",
+                status=CheckStatus.READY if journal.ok else CheckStatus.BLOCKED,
+                detail="audit hash chain verifies" if journal.ok else "audit hash chain is invalid",
+            )
+        )
+        active_maintenance = MaintenanceGate(settings.data_dir).active()
+        checks.append(
+            DeploymentCheck(
+                component="maintenance-state",
+                status=CheckStatus.WARNING if active_maintenance is not None else CheckStatus.READY,
+                detail="maintenance is active; writes and worker claims are intentionally paused"
+                if active_maintenance is not None
+                else "no maintenance interval is active",
+            )
+        )
+        operations = service.operation_status(matter_id=matter_id, client_id=client_id)
+        unresolved = [
+            operation
+            for operation in operations
+            if operation.status
+            in {OperationStatus.QUEUED, OperationStatus.CLAIMED, OperationStatus.RETRYING,
+                OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}
+        ]
+        checks.append(
+            DeploymentCheck(
+                component="operation-worker",
+                status=CheckStatus.WARNING if unresolved else CheckStatus.READY,
+                detail=(
+                    f"{len(unresolved)} queued, retrying, claimed, or terminal operation records require observation"
+                    if unresolved
+                    else "no unresolved operation records in the selected scope"
+                ),
+            )
+        )
+        if matter_id is None:
+            checks.append(
+                DeploymentCheck(
+                    component="scoped-read-and-consistency",
+                    status=CheckStatus.WARNING,
+                    detail="supply --matter-id and --client-id to check one exact scoped read and consistency report",
+                )
+            )
+        else:
+            if client_id is None:
+                raise typer.BadParameter("--matter-id and --client-id must be supplied together")
+            item_count = len(service.store.get_many(matter_id=matter_id, client_id=client_id))
+            consistency = service.consistency_check(matter_id=matter_id, client_id=client_id)
+            checks.append(
+                DeploymentCheck(
+                    component="scoped-read-and-consistency",
+                    status=CheckStatus.WARNING if consistency.findings else CheckStatus.READY,
+                    detail=(
+                        f"scoped read returned {item_count} items; consistency reported "
+                        f"{len(consistency.findings)} finding(s)"
+                    ),
+                )
+            )
+    except Exception:
+        checks.append(
+            DeploymentCheck(
+                component="runtime-verification",
+                status=CheckStatus.BLOCKED,
+                detail="runtime verification could not inspect a configured persistence component",
+            )
+        )
+    _emit_deployment_verification(
+        preflight=preflight,
+        checks=checks,
+        matter_id=matter_id,
+        client_id=client_id,
+        auth_mode=settings.server_auth_mode,
+    )
+    if any(check.status is CheckStatus.BLOCKED for check in checks):
+        raise typer.Exit(code=2)
+
+
+def _emit_deployment_verification(
+    *,
+    preflight: DeploymentPreflightReport,
+    checks: list[DeploymentCheck],
+    matter_id: str | None,
+    client_id: str | None,
+    auth_mode: str,
+) -> None:
+    """Emit a stable redacted deployment readiness report for automation."""
+
+    blocked = any(check.status is CheckStatus.BLOCKED for check in checks)
+    warning = any(check.status in {CheckStatus.WARNING, CheckStatus.NOT_INITIALIZED} for check in checks)
+    _print_json(
+        {
+            "schema_id": "solomon.deployment_verification.v1",
+            "state": "failed" if blocked else "degraded" if warning else "ready",
+            "liveness": "ready" if not blocked else "failed",
+            "readiness": "ready" if not blocked and not warning else "degraded" if not blocked else "failed",
+            "authentication_mode": auth_mode,
+            "scope": {"matter_id": matter_id, "client_id": client_id},
+            "preflight": preflight.model_dump(mode="json"),
+            "checks": [check.model_dump(mode="json") for check in checks],
+        },
+        sort_keys=True,
+    )
 
 
 @deployment_app.command("maintenance", epilog=_example("uv run solomon deployment maintenance --format json"))

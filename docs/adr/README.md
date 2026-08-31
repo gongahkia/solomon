@@ -11,3 +11,4 @@
 - [0007: Dual Endpoint Routing](0007-dual-endpoint-routing.md)
 - [0008: Audit Journal Design](0008-audit-journal.md)
 - [0009: Governed Explicit Dependency Assertions](0009-governed-dependency-assertions.md)
+- [0010: Durable Operations And Reconciliation Across Persistence Boundaries](0010-crash-consistency-reconciliation.md)

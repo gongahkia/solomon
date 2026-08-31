@@ -50,6 +50,24 @@ def test_cli_version_and_diagnostics(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert payload["boundary"]["importable"] is True
 
 
+def test_cli_consistency_check_and_dry_run_repair_are_stable_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_cli_store(monkeypatch, tmp_path)
+
+    checked = runner.invoke(
+        app,
+        ["consistency", "check", "--matter-id", "matter-a", "--client-id", "client-a", "--format", "json"],
+    )
+    planned = runner.invoke(app, ["consistency", "repair", "--matter-id", "matter-a", "--client-id", "client-a"])
+
+    assert checked.exit_code == 0, checked.output
+    assert planned.exit_code == 0, planned.output
+    assert json.loads(checked.output)["scope"] == {"client_id": "client-a", "matter_id": "matter-a", "tenant_id": None}
+    assert json.loads(planned.output)["actions"] == []
+
+
 def test_cli_mcp_serve_dispatches_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr("solomon.cli.main.run_stdio_server", lambda: calls.append("stdio"))
@@ -177,7 +195,10 @@ def test_cli_migrate_and_worker_once(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert migrated.exit_code == 0, migrated.output
     assert json.loads(migrated.output) == {"backend": "sqlite", "status": "applied"}
     assert worker.exit_code == 0, worker.output
-    assert json.loads(worker.output) == {"attempted": 0, "failed": 0, "skipped": 0, "succeeded": 0}
+    assert json.loads(worker.output) == {
+        "operations": {"attempted": 0, "completed": 0, "failed": 0, "retrying": 0, "terminal": 0},
+        "source_sync": {"attempted": 0, "failed": 0, "skipped": 0, "succeeded": 0},
+    }
 
 
 def test_cli_console_serve_dispatches_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:

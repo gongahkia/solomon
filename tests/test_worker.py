@@ -8,8 +8,9 @@ import pytest
 
 from solomon.api.service import SolomonService
 from solomon.api.service_models import DocumentSourceRequest
+from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind
-from solomon.worker import sync_enabled_filesystem_sources
+from solomon.worker import run_pending_operations, sync_enabled_filesystem_sources
 
 
 def test_worker_syncs_enabled_filesystem_sources_and_skips_unsupported(tmp_path: Path) -> None:
@@ -67,3 +68,24 @@ def test_worker_counts_sync_failures_and_limit_skips(monkeypatch: pytest.MonkeyP
     assert batch.succeeded == 0
     assert batch.failed == 1
     assert batch.skipped == 1
+
+
+def test_worker_claims_unknown_projection_once_and_retains_operator_required_record(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    operation, created = service.operation_store.create(
+        OperationRecord(
+            operation_type=OperationType.SUGGESTION_GENERATION,
+            scope=OperationScope(matter_id="matter-a", client_id="client-a"),
+            actor_id="worker-test",
+            authorization_context={"service_access": "curate"},
+            correlation_id="worker-test",
+            idempotency_key="worker-test-operation",
+        )
+    )
+    assert created is True
+
+    batch = run_pending_operations(service, worker_id="worker-a")
+
+    assert batch.attempted == 1
+    assert batch.terminal == 1
+    assert service.operation_store.get(operation.id).status is OperationStatus.OPERATOR_REQUIRED

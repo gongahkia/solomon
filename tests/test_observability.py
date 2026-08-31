@@ -74,6 +74,9 @@ def test_metrics_exposes_health_queue_sync_delivery_retrieval_and_withholding(tm
     assert "solomon_retrieval_candidates_total 1.0" in metrics
     assert "solomon_retrieval_results_total 0.0" in metrics
     assert 'solomon_retrieval_context_withheld_total{currency_state="StalePendingReverification"} 1.0' in metrics
+    assert 'solomon_operation_state{state="completed"}' in metrics
+    assert "solomon_operation_oldest_pending_seconds" in metrics
+    assert 'solomon_consistency_signal{signal="repairs_refused"} 0.0' in metrics
 
 
 def test_metrics_is_public_in_server_sku(tmp_path: Path) -> None:

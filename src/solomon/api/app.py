@@ -82,6 +82,7 @@ from solomon.config import (
     get_settings,
     verification_policy_from_settings,
 )
+from solomon.consistency.models import RepairPlan
 from solomon.errors import SolomonError
 from solomon.graph.suggestions import SuggestionDecision
 from solomon.graph.visualization import GraphFormat
@@ -868,6 +869,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/impact/{authority_id}")
     def impact(request: Request, authority_id: str) -> dict[str, Any]:
         return active_service(request).impact_query(authority_id)
+
+    @app.get("/consistency/check")
+    def consistency_check(
+        request: Request,
+        matter_id: str,
+        client_id: str,
+        stuck_after_seconds: int = 900,
+    ) -> dict[str, Any]:
+        return active_service(request).consistency_check(
+            matter_id=matter_id,
+            client_id=client_id,
+            stuck_after_seconds=stuck_after_seconds,
+        ).model_dump(mode="json")
+
+    @app.post("/consistency/repair/plan")
+    def consistency_repair_plan(request: Request, matter_id: str, client_id: str) -> dict[str, Any]:
+        return active_service(request).consistency_repair_plan(
+            matter_id=matter_id,
+            client_id=client_id,
+        ).model_dump(mode="json")
+
+    @app.post("/consistency/repair/apply")
+    def apply_consistency_repair(request: Request, payload: RepairPlan) -> dict[str, Any]:
+        return active_service(request).apply_consistency_repair(payload).model_dump(mode="json")
+
+    @app.get("/consistency/operations")
+    def consistency_operations(request: Request, matter_id: str, client_id: str) -> list[dict[str, Any]]:
+        return [
+            operation.model_dump(mode="json")
+            for operation in active_service(request).operation_status(matter_id=matter_id, client_id=client_id)
+        ]
 
     @app.get("/graph", response_class=PlainTextResponse)
     def dependency_graph(

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import cast
 
+import httpx
+
+from solomon.api.app import create_app
 from solomon.api.service import (
     CandidateClaimPromotionRequest,
     DependencyAssertionCreateRequest,
@@ -13,6 +17,7 @@ from solomon.api.service import (
     SolomonService,
     SourceDocumentIngestRequest,
 )
+from solomon.config import Settings
 from solomon.consistency.models import ConsistencyFindingCode, ConsistencyScope, RepairPlan
 from solomon.contracts import AuthoritySource, AuthoritySourceKind
 from solomon.currency.models import KnowledgeKind, SourceKind
@@ -97,6 +102,28 @@ def test_consistency_reports_ambiguous_provenance_and_revision_gap_without_unsaf
     assert all(action.assertion_id != deferred.id for action in plan.actions)
     assert any(action.replacement_document_id == replacement.id for action in plan.actions)
     assert service.graph.get_edge(deferred.suggested_edge.id).source_suggestion_id == deferred.id
+
+
+def test_consistency_rest_contract_is_scoped_and_requires_explicit_apply(tmp_path: Path) -> None:
+    app = create_app(Settings(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal"))
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            scope = {"matter_id": "matter-a", "client_id": "client-a"}
+            checked = await client.get("/consistency/check", params=scope)
+            planned = await client.post("/consistency/repair/plan", params=scope)
+            applied = await client.post("/consistency/repair/apply", json=planned.json())
+            operations = await client.get("/consistency/operations", params=scope)
+            return checked, planned, applied, operations
+
+    checked, planned, applied, operations = asyncio.run(exercise())
+
+    assert checked.status_code == planned.status_code == applied.status_code == operations.status_code == 200
+    assert checked.json()["scope"] == {"tenant_id": None, "matter_id": "matter-a", "client_id": "client-a"}
+    assert planned.json()["actions"] == []
+    assert applied.json()["applied"] is True
+    assert operations.json() == []
 
 
 def _confirmed_assertion_service(tmp_path: Path) -> tuple[SolomonService, DependencySuggestion]:

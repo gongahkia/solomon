@@ -108,6 +108,26 @@ class SolomonClient:
         _raise_for_error(response)
         return dict(response.json())
 
+    def consistency_check(self, *, params: dict[str, str]) -> dict[str, Any]:
+        response = self._client.get("/consistency/check", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def consistency_repair_plan(self, *, params: dict[str, str]) -> dict[str, Any]:
+        response = self._client.post("/consistency/repair/plan", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def apply_consistency_repair(self, plan: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post("/consistency/repair/apply", json=plan)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    def consistency_operations(self, *, params: dict[str, str]) -> list[dict[str, Any]]:
+        response = self._client.get("/consistency/operations", params=params)
+        _raise_for_error(response)
+        return list(response.json())
+
 
 class AsyncSolomonClient:
     def __init__(
@@ -174,3 +194,23 @@ class AsyncSolomonClient:
         response = await self._client.get(f"/dependencies/assertions/{assertion_id}/history", params=params)
         _raise_for_error(response)
         return dict(response.json())
+
+    async def consistency_check(self, *, params: dict[str, str]) -> dict[str, Any]:
+        response = await self._client.get("/consistency/check", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def consistency_repair_plan(self, *, params: dict[str, str]) -> dict[str, Any]:
+        response = await self._client.post("/consistency/repair/plan", params=params)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def apply_consistency_repair(self, plan: dict[str, Any]) -> dict[str, Any]:
+        response = await self._client.post("/consistency/repair/apply", json=plan)
+        _raise_for_error(response)
+        return dict(response.json())
+
+    async def consistency_operations(self, *, params: dict[str, str]) -> list[dict[str, Any]]:
+        response = await self._client.get("/consistency/operations", params=params)
+        _raise_for_error(response)
+        return list(response.json())

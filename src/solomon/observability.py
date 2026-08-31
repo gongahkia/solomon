@@ -18,7 +18,8 @@ from prometheus_client import (
     Counter as PrometheusCounter,
 )
 
-from solomon.currency.models import CurrencyState
+from solomon.currency.models import CurrencyState, now_utc
+from solomon.operations.models import OperationStatus
 from solomon.sources.models import SourceSyncRunState
 from solomon.store.sqlite import SQLiteKnowledgeStore
 from solomon.workflow.models import ReviewTaskState
@@ -90,6 +91,23 @@ class SolomonMetrics:
             ("state",),
             registry=self.registry,
         )
+        self.operation_states = Gauge(
+            "solomon_operation_state",
+            "Current durable operations by lifecycle state.",
+            ("state",),
+            registry=self.registry,
+        )
+        self.operation_oldest_pending_seconds = Gauge(
+            "solomon_operation_oldest_pending_seconds",
+            "Age of the oldest queued, claimed, or retrying durable operation.",
+            registry=self.registry,
+        )
+        self.consistency_signals = Gauge(
+            "solomon_consistency_signal",
+            "Bounded consistency inspection and repair signals since service startup.",
+            ("signal",),
+            registry=self.registry,
+        )
         self.scrape_duration = Histogram(
             "solomon_metrics_scrape_duration_seconds",
             "Time spent refreshing Solomon Prometheus metrics.",
@@ -128,6 +146,9 @@ class SolomonMetrics:
         queue_counts: Counter[str] = Counter()
         review_counts: Counter[str] = Counter()
         sync_counts: Counter[str] = Counter()
+        operation_counts: Counter[str] = Counter()
+        consistency_counts: Counter[str] = Counter()
+        oldest_pending_at = None
         for service in services:
             audit_healthy = self._audit_is_healthy(service) and audit_healthy
             if isinstance(service.store, SQLiteKnowledgeStore):
@@ -137,6 +158,12 @@ class SolomonMetrics:
             queue_counts["authority_poll_dead_letter"] += poll_counts["dead_letter"]
             review_counts.update(service.workflow_store.review_task_state_counts())
             sync_counts.update(service.document_store.sync_source_state_counts())
+            consistency_counts.update(service.consistency_signals)
+            for operation in service.operation_store.list(limit=10_000):
+                operation_counts[operation.status.value] += 1
+                if operation.status in {OperationStatus.QUEUED, OperationStatus.CLAIMED, OperationStatus.RETRYING}:
+                    if oldest_pending_at is None or operation.created_at < oldest_pending_at:
+                        oldest_pending_at = operation.created_at
         self.health.labels(component="audit_journal").set(float(audit_healthy))
         for queue in ("knowledge_outbox", "authority_poll", "authority_poll_dead_letter"):
             self.queue_depth.labels(queue=queue).set(queue_counts[queue])
@@ -145,6 +172,12 @@ class SolomonMetrics:
         for state in (*SourceSyncRunState, "never"):
             label = state.value if isinstance(state, SourceSyncRunState) else state
             self.source_sync.labels(state=label).set(sync_counts[label])
+        for operation_state in OperationStatus:
+            self.operation_states.labels(state=operation_state.value).set(operation_counts[operation_state.value])
+        oldest_age = 0.0 if oldest_pending_at is None else max(0.0, (now_utc() - oldest_pending_at).total_seconds())
+        self.operation_oldest_pending_seconds.set(oldest_age)
+        for signal in ("checks", "findings", "repairs_planned", "repairs_applied", "repairs_refused"):
+            self.consistency_signals.labels(signal=signal).set(consistency_counts[signal])
 
     def _audit_is_healthy(self, service: SolomonService) -> bool:
         key = str(service.audit.path)

@@ -6,13 +6,14 @@ import hashlib
 import json
 import uuid
 from base64 import b64decode
+from collections import Counter
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from solomon.api.auth import SOURCE_MANAGE_SCOPE, TENANT_READ_SCOPE, TENANT_WRITE_SCOPE, AuthPrincipal, AuthRole
@@ -88,6 +89,7 @@ from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, S
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
+from solomon.operations.models import OperationRecord, OperationScope
 from solomon.operations.postgres import PostgresOperationStore
 from solomon.operations.store import SQLiteOperationStore
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
@@ -188,6 +190,7 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "consistency_check": "read",
     "consistency_repair_plan": "review",
     "apply_consistency_repair": "review",
+    "operation_status": "read",
 }
 
 SERVICE_SPAN_NAMES: dict[str, str] = {
@@ -256,6 +259,7 @@ class SolomonService:
         else:
             operation_path = getattr(self.store, "path", data_dir / "solomon.sqlite3")
             self.operation_store = SQLiteOperationStore(operation_path)
+        self.consistency_signals: Counter[str] = Counter()
         self.telemetry = telemetry or SolomonTelemetry()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.verification_policy_version = verification_policy_version
@@ -1132,18 +1136,34 @@ class SolomonService:
         client_id: str,
         stuck_after_seconds: int = 900,
     ) -> ConsistencyReport:
-        return ConsistencyInspector(self).check(
+        report = ConsistencyInspector(self).check(
             ConsistencyScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id),
             stuck_after=timedelta(seconds=stuck_after_seconds),
         )
+        self.consistency_signals["checks"] += 1
+        self.consistency_signals["findings"] += len(report.findings)
+        return report
 
     def consistency_repair_plan(self, *, matter_id: str, client_id: str) -> RepairPlan:
-        return ConsistencyRepairService(self).plan(
+        plan = ConsistencyRepairService(self).plan(
             ConsistencyScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id)
         )
+        self.consistency_signals["repairs_planned"] += len(plan.actions)
+        return plan
 
     def apply_consistency_repair(self, plan: RepairPlan) -> RepairResult:
-        return ConsistencyRepairService(self).apply(plan)
+        result = ConsistencyRepairService(self).apply(plan)
+        self.consistency_signals["repairs_applied" if result.applied else "repairs_refused"] += 1
+        return result
+
+    def operation_status(self, *, matter_id: str, client_id: str) -> list[OperationRecord]:
+        return cast(
+            list[OperationRecord],
+            self.operation_store.list(
+                scope=OperationScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id),
+                limit=10_000,
+            ),
+        )
 
     def dependency_graph(
         self,

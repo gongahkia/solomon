@@ -37,6 +37,7 @@ from solomon.config import (
     settings_with_jurisdiction,
     verification_policy_from_settings,
 )
+from solomon.consistency.models import RepairPlan
 from solomon.currency.contradiction import ConclusionPolarity
 from solomon.currency.engine import VerificationOutcome
 from solomon.currency.models import KnowledgeKind, SourceKind
@@ -47,7 +48,7 @@ from solomon.graph.visualization import GraphFormat
 from solomon.mcp.server import run_sse_server, run_stdio_server, run_streamable_http_server
 from solomon.mcp.tools import SolomonMCPRuntime
 from solomon.telemetry import telemetry_from_settings
-from solomon.worker import sync_enabled_filesystem_sources
+from solomon.worker import run_pending_operations, sync_enabled_filesystem_sources
 
 
 def _example(command: str) -> str:
@@ -63,8 +64,13 @@ console_app = typer.Typer(
     help="Run Solomon curator console.",
     epilog=_example("uv run solomon console serve --host 127.0.0.1 --port 8150"),
 )
+consistency_app = typer.Typer(
+    help="Inspect and conservatively repair durable operation projections.",
+    epilog=_example("uv run solomon consistency check --matter-id matter-a --client-id client-a"),
+)
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(console_app, name="console")
+app.add_typer(consistency_app, name="consistency")
 console = Console()
 
 
@@ -139,10 +145,89 @@ def worker(
     interval = interval_seconds or settings.worker_source_sync_interval_seconds
     limit = source_limit or settings.worker_source_sync_limit
     while True:
-        _print_json(sync_enabled_filesystem_sources(service, limit=limit).model_dump(), sort_keys=True)
+        _print_json(
+            {
+                "source_sync": sync_enabled_filesystem_sources(service, limit=limit).model_dump(),
+                "operations": run_pending_operations(
+                    service,
+                    worker_id=f"cli-worker:{os.getpid()}",
+                    limit=limit,
+                ).model_dump(),
+            },
+            sort_keys=True,
+        )
         if once:
             return
         time.sleep(interval)
+
+
+@consistency_app.command(
+    "check",
+    epilog=_example("uv run solomon consistency check --matter-id matter-a --client-id client-a"),
+)
+def consistency_check(
+    matter_id: Annotated[str, typer.Option("--matter-id", min=1, help="Exact matter scope.")],
+    client_id: Annotated[str, typer.Option("--client-id", min=1, help="Exact client scope.")],
+    stuck_after_seconds: Annotated[
+        int, typer.Option("--stuck-after-seconds", min=1, help="Pending age at which an operation is reported stuck.")
+    ] = 900,
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")]= "json",
+) -> None:
+    """Print a read-only deterministic consistency report for one exact scope."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    _print_json(
+        _service()
+        .consistency_check(
+            matter_id=matter_id,
+            client_id=client_id,
+            stuck_after_seconds=stuck_after_seconds,
+        )
+        .model_dump(mode="json"),
+        sort_keys=True,
+    )
+
+
+@consistency_app.command("repair", epilog=_example("uv run solomon consistency repair --plan repair-plan.json --apply"))
+def consistency_repair(
+    plan_path: Annotated[
+        Path | None, typer.Option("--plan", help="JSON repair plan from a prior dry run.")
+    ] = None,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Apply a verified plan; omitted is a non-mutating dry run.")
+    ] = False,
+    matter_id: Annotated[
+        str | None, typer.Option("--matter-id", min=1, help="Exact matter scope for a dry run.")
+    ] = None,
+    client_id: Annotated[
+        str | None, typer.Option("--client-id", min=1, help="Exact client scope for a dry run.")
+    ] = None,
+) -> None:
+    """Print a deterministic dry-run plan or explicitly apply an unchanged plan."""
+
+    service = _service()
+    if plan_path is None:
+        if apply:
+            raise typer.BadParameter("--apply requires a prior --plan file", param_hint="--apply")
+        if matter_id is None or client_id is None:
+            raise typer.BadParameter("--matter-id and --client-id are required for a dry run")
+        _print_json(
+            service.consistency_repair_plan(matter_id=matter_id, client_id=client_id).model_dump(mode="json"),
+            sort_keys=True,
+        )
+        return
+    try:
+        plan = RepairPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter("--plan must contain a valid Solomon repair-plan JSON document") from exc
+    if not apply:
+        _print_json(plan.model_dump(mode="json"), sort_keys=True)
+        return
+    result = service.apply_consistency_repair(plan)
+    _print_json(result.model_dump(mode="json"), sort_keys=True)
+    if not result.applied:
+        raise typer.Exit(code=2)
 
 
 @mcp_app.command("serve", epilog=_example("uv run solomon mcp serve --http --host 127.0.0.1 --port 8141"))

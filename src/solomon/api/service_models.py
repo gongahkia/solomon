@@ -42,6 +42,7 @@ class IngestRequest(SolomonModel):
     previous_source_document_id: str | None = None
     source_document_span_start: int | None = Field(default=None, ge=0)
     source_document_span_end: int | None = Field(default=None, ge=1)
+    source_candidate_id: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 class DocumentSourceRequest(SolomonModel):
@@ -224,7 +225,12 @@ class DependencyRequest(SolomonModel):
 
 class DependencySuggestionRequest(SolomonModel):
     item_id: str
-    use_llm: bool = False
+    use_llm: bool = Field(
+        default=False,
+        description=(
+            "Reserved for a future immutable-result workflow; the durable operation profile rejects true values."
+        ),
+    )
 
 
 class DependencySuggestionDecisionRequest(SolomonModel):

@@ -36,6 +36,7 @@ class ConsistencyInspector:
         items = self._service.store.get_many(matter_id=scope.matter_id, client_id=scope.client_id)
         item_ids = {item.id for item in items}
         assertions = self._assertions(scope)
+        suggestions = self._suggestions(item_ids, assertion_ids={assertion.id for assertion in assertions})
         source_documents = self._source_documents(assertions)
         edges = self._service.graph.subgraph_for_scope(
             store=self._service.store,
@@ -51,15 +52,16 @@ class ConsistencyInspector:
         audit_entries = self._audit_entries(
             item_ids=item_ids,
             assertions=assertions,
+            suggestions=suggestions,
             edges=edges,
             source_documents=source_documents,
             operations=operations,
         )
         findings: list[ConsistencyFinding] = []
         findings.extend(self._assertion_findings(assertions, edges))
-        findings.extend(self._edge_findings(assertions, edges, item_ids))
+        findings.extend(self._edge_findings(assertions, suggestions, edges, item_ids))
         findings.extend(self._source_findings(assertions, operations))
-        findings.extend(self._operation_findings(assertions, edges, operations, timestamp, stuck_after))
+        findings.extend(self._operation_findings(assertions, suggestions, edges, operations, timestamp, stuck_after))
         findings.extend(self._currency_findings(scope, items, operations))
         findings.extend(self._audit_findings(assertions, edges, operations, audit_entries))
         return ConsistencyReport.create(
@@ -68,6 +70,7 @@ class ConsistencyInspector:
             observed_state={
                 "items": [item.model_dump(mode="json") for item in items],
                 "assertions": [assertion.model_dump(mode="json") for assertion in assertions],
+                "suggestions": [suggestion.model_dump(mode="json") for suggestion in suggestions],
                 "edges": [edge.model_dump(mode="json") for edge in edges],
                 "operations": [operation.model_dump(mode="json") for operation in operations],
                 "source_documents": [document.model_dump(mode="json") for document in source_documents],
@@ -84,6 +87,14 @@ class ConsistencyInspector:
                 limit=10_000,
             ),
         )
+
+    def _suggestions(self, item_ids: set[str], *, assertion_ids: set[str]) -> list[DependencySuggestion]:
+        """Return non-governed suggestions whose source item is already exactly scope-filtered."""
+
+        suggestions: list[DependencySuggestion] = []
+        for item_id in sorted(item_ids):
+            suggestions.extend(self._service.graph.list_dependency_suggestions(item_id=item_id, limit=10_000))
+        return [suggestion for suggestion in suggestions if suggestion.id not in assertion_ids]
 
     def _source_documents(self, assertions: list[DependencySuggestion]) -> list[Any]:
         documents: dict[str, Any] = {}
@@ -162,11 +173,13 @@ class ConsistencyInspector:
         *,
         item_ids: set[str],
         assertions: list[DependencySuggestion],
+        suggestions: list[DependencySuggestion],
         edges: list[Any],
         source_documents: list[Any],
         operations: list[OperationRecord],
     ) -> list[Any]:
         assertion_ids = {assertion.id for assertion in assertions}
+        suggestion_ids = {suggestion.id for suggestion in suggestions}
         edge_ids = {edge.id for edge in edges}
         document_ids = {document.id for document in source_documents}
         operation_ids = {operation.id for operation in operations}
@@ -190,6 +203,7 @@ class ConsistencyInspector:
             if (
                 entry.entry_hash in audit_hashes
                 or payload.get("assertion_id") in assertion_ids
+                or payload.get("suggestion_id") in suggestion_ids
                 or payload.get("item_id") in item_ids
                 or payload.get("edge_id") in edge_ids
                 or payload.get("document_id") in document_ids
@@ -220,10 +234,11 @@ class ConsistencyInspector:
     def _edge_findings(
         self,
         assertions: list[DependencySuggestion],
+        suggestions: list[DependencySuggestion],
         edges: list[Any],
         item_ids: set[str],
     ) -> list[ConsistencyFinding]:
-        indexed = {assertion.id: assertion for assertion in assertions}
+        indexed = {origin.id: origin for origin in [*assertions, *suggestions]}
         by_assertion: dict[str, list[Any]] = {}
         findings: list[ConsistencyFinding] = []
         for edge in edges:
@@ -235,7 +250,7 @@ class ConsistencyInspector:
                         code=ConsistencyFindingCode.EDGE_INVALID_PROVENANCE,
                         resource_type="dependency_edge",
                         resource_id=edge.id,
-                        detail="graph edge has no originating assertion provenance",
+                        detail="graph edge has no originating reviewed provenance",
                     )
                 )
                 continue
@@ -258,7 +273,7 @@ class ConsistencyInspector:
                         resource_type="dependency_edge",
                         resource_id=edge.id,
                         related_ids=[assertion.id],
-                        detail="graph edge does not match a valid confirmed assertion",
+                        detail="graph edge does not match a valid confirmed reviewed origin",
                     )
                 )
         for assertion_id, linked_edges in by_assertion.items():
@@ -337,6 +352,7 @@ class ConsistencyInspector:
     def _operation_findings(
         self,
         assertions: list[DependencySuggestion],
+        suggestions: list[DependencySuggestion],
         edges: list[Any],
         operations: list[OperationRecord],
         now: datetime,
@@ -344,6 +360,7 @@ class ConsistencyInspector:
     ) -> list[ConsistencyFinding]:
         findings: list[ConsistencyFinding] = []
         assertion_by_id = {assertion.id: assertion for assertion in assertions}
+        suggestion_by_id = {suggestion.id: suggestion for suggestion in suggestions}
         edge_ids = {edge.id for edge in edges}
         for operation in operations:
             if operation.status in {OperationStatus.QUEUED, OperationStatus.CLAIMED, OperationStatus.RETRYING}:
@@ -383,6 +400,37 @@ class ConsistencyInspector:
                         detail="completed assertion creation has no linked audit provenance",
                     )
                 )
+            if operation.operation_type is OperationType.SUGGESTION_CONFIRM:
+                suggestion = suggestion_by_id.get(operation.suggestion_id or "")
+                if suggestion is None or suggestion.decision is not SuggestionDecision.CONFIRMED or (
+                    suggestion.suggested_edge.id not in edge_ids
+                ):
+                    findings.append(
+                        ConsistencyFinding(
+                            code=ConsistencyFindingCode.COMPLETED_PROJECTION_MISSING,
+                            resource_type="dependency_suggestion",
+                            resource_id=operation.suggestion_id or operation.id,
+                            related_ids=[operation.id],
+                            detail="completed suggestion confirmation has no expected graph projection",
+                        )
+                    )
+            if operation.operation_type is OperationType.CANDIDATE_PROMOTION:
+                candidate = None
+                if operation.source_resource_id is not None:
+                    try:
+                        candidate = self._service.document_store.get_candidate(operation.source_resource_id)
+                    except Exception:
+                        candidate = None
+                if candidate is None or candidate.promotion_item_id != operation.target_resource_id:
+                    findings.append(
+                        ConsistencyFinding(
+                            code=ConsistencyFindingCode.COMPLETED_PROJECTION_MISSING,
+                            resource_type="candidate_claim",
+                            resource_id=operation.source_resource_id or operation.id,
+                            related_ids=[operation.id],
+                            detail="completed candidate promotion has no expected SQLite source marker",
+                        )
+                    )
             if operation.operation_type is OperationType.SOURCE_REVISION_REVERIFY and (
                 assertion is None or not assertion.needs_reverification
             ):

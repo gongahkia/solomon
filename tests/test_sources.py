@@ -16,6 +16,7 @@ from solomon.api.service_models import (
     SourceDocumentIngestRequest,
 )
 from solomon.errors import BadRequestError
+from solomon.operations.failure_injection import InjectedOperationFailure, OperationFailureInjector
 from solomon.sources.extract import MAX_DOCUMENT_BYTES, extract_document_bytes
 from solomon.sources.models import (
     CandidateClaim,
@@ -30,6 +31,7 @@ from solomon.sources.store import (
     SourceNotFoundError,
     SQLiteDocumentStore,
 )
+from solomon.worker import run_pending_operations
 
 
 def test_document_store_versions_documents_and_candidates(tmp_path):
@@ -148,6 +150,76 @@ def test_source_document_claim_requires_human_promotion(tmp_path):
     assert rejected.status is CandidateClaimStatus.REJECTED
     with pytest.raises(ValueError, match="exactly one"):
         SourceDocumentIngestRequest(external_id="memo-2", filename="memo.txt")
+
+
+def test_candidate_promotion_reconciles_after_knowledge_write_before_schedule(tmp_path):
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    source = service.register_document_source(
+        DocumentSourceRequest(name="internal", kind=DocumentSourceKind.FILESYSTEM, root_ref="/knowledge")
+    )
+    _document, candidates = service.ingest_source_document(
+        source.id,
+        SourceDocumentIngestRequest(
+            external_id="memo-1",
+            filename="memo.txt",
+            content="Structure X relies on Regulation R section 12.",
+        ),
+    )
+    candidate = candidates[0]
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_knowledge_item_authoritative_write_before_schedule"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_knowledge_item_authoritative_write_before_schedule"):
+        service.promote_candidate_claim(candidate.id, CandidateClaimPromotionRequest(by="curator-a"))
+
+    assert service.document_store.get_candidate(candidate.id).status is CandidateClaimStatus.PENDING
+    persisted = [
+        item for item in service.store.get_many() if item.metadata.get("source_candidate_id") == candidate.id
+    ]
+    assert len(persisted) == 1
+
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    run_pending_operations(service, worker_id="candidate-promotion-reconciler")
+
+    promoted = service.document_store.get_candidate(candidate.id)
+    assert promoted.status is CandidateClaimStatus.PROMOTED
+    assert promoted.promotion_item_id == persisted[0].id
+    promoted_item_ids = [
+        item.id for item in service.store.get_many() if item.metadata.get("source_candidate_id") == candidate.id
+    ]
+    assert promoted_item_ids == [persisted[0].id]
+
+
+def test_document_candidates_reconcile_after_source_write_before_candidate_projection(tmp_path):
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    source = service.register_document_source(
+        DocumentSourceRequest(name="internal", kind=DocumentSourceKind.FILESYSTEM, root_ref="/knowledge")
+    )
+    service._authority.set_operation_failure_injector(
+        OperationFailureInjector(["after_source_document_authoritative_write_before_candidates"])
+    )
+
+    with pytest.raises(InjectedOperationFailure, match="after_source_document_authoritative_write_before_candidates"):
+        service.ingest_source_document(
+            source.id,
+            SourceDocumentIngestRequest(
+                external_id="memo-candidate-recovery",
+                filename="memo.txt",
+                content="Structure X relies on Regulation R section 12.",
+            ),
+        )
+
+    document = service.source_documents(source.id)[0]
+    assert service.document_store.list_candidates(document.id) == []
+    service._authority.set_operation_failure_injector(OperationFailureInjector())
+    run_pending_operations(service, worker_id="candidate-recovery-worker")
+
+    assert service.document_store.list_candidates(document.id)
+    assert any(
+        operation.target_resource_id == document.id
+        for operation in service.operation_store.list(limit=100)
+    )
 
 
 def test_document_store_lists_versions_tombstones_and_missing_records(tmp_path):

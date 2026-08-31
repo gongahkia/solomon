@@ -691,6 +691,7 @@ class SolomonService:
                 metadata={**request.metadata, "extraction": extracted.metadata},
             )
         )
+        self._authority._failure_injector.hit("after_source_document_authoritative_write_before_candidates")
         candidates = self.document_store.list_candidates(document.id)
         if document.extraction_state.value == "ready" and not candidates:
             candidates = [
@@ -722,6 +723,19 @@ class SolomonService:
             candidate = self.document_store.get_candidate(candidate_id)
         except CandidateClaimNotFoundError as exc:
             raise NotFoundError(f"candidate claim not found: {candidate_id}") from exc
+        existing = next(
+            (
+                item
+                for item in self.store.get_many()
+                if item.metadata.get("source_candidate_id") == candidate.id
+            ),
+            None,
+        )
+        if existing is not None:
+            if candidate.status is not CandidateClaimStatus.PENDING:
+                raise BadRequestError("only pending candidate claims can be promoted")
+            self._authority.record_candidate_promotion(candidate, existing, by=request.by)
+            return existing
         if candidate.status is not CandidateClaimStatus.PENDING:
             raise BadRequestError("only pending candidate claims can be promoted")
         try:
@@ -746,22 +760,10 @@ class SolomonService:
                 previous_source_document_id=document.previous_version_id,
                 source_document_span_start=candidate.start_offset,
                 source_document_span_end=candidate.end_offset,
+                source_candidate_id=candidate.id,
             )
         )
-        self.document_store.update_candidate(
-            candidate.model_copy(
-                update={
-                    "status": CandidateClaimStatus.PROMOTED,
-                    "promotion_item_id": item.id,
-                    "decision_by": request.by,
-                    "decided_at": now_utc(),
-                }
-            )
-        )
-        self.audit.append(
-            "candidate_claim_promoted",
-            {"candidate_id": candidate_id, "document_id": document.id, "item_id": item.id, "by": request.by},
-        )
+        self._authority.record_candidate_promotion(candidate, item, by=request.by)
         return item
 
     def reject_candidate_claim(self, candidate_id: str, request: CandidateClaimRejectionRequest) -> CandidateClaim:

@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from solomon.api.service import (
     DependencyRequest,
     DependencySuggestionDecisionRequest,
@@ -15,6 +17,7 @@ from solomon.api.service import (
 )
 from solomon.boundary.solomon import SolomonBoundary
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.errors import BadRequestError
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.graph.store import GraphStore
 from solomon.graph.suggestions import (
@@ -26,6 +29,8 @@ from solomon.graph.suggestions import (
     suggest_authority_dependencies,
     suggest_authority_dependencies_with_llm,
 )
+from solomon.operations.failure_injection import OperationFailureInjector
+from solomon.operations.models import OperationStatus, OperationType
 from solomon.orchestrator.models import EndpointKind, ModelRequest, ModelResponse, ModelRouter
 
 
@@ -132,6 +137,8 @@ def test_ingest_creates_pending_dependency_suggestions_and_dedupes_reruns(tmp_pa
             content="This position relies on Regulation R section 12.",
             source_kind=SourceKind.PARTNER,
             source_ref="memo-deps",
+            matter_id="matter-a",
+            client_id="client-a",
         )
     )
 
@@ -143,6 +150,86 @@ def test_ingest_creates_pending_dependency_suggestions_and_dedupes_reruns(tmp_pa
     assert suggestions[0].suggested_edge.target_id == "regulation-r-section-12"
     assert suggestions[0].source == "deterministic"
     assert rerun == []
+
+
+def test_on_demand_deterministic_suggestions_use_durable_operation(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="This position relies on Regulation R section 12.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-deps",
+        )
+    )
+
+    assert service.suggest_dependencies(DependencySuggestionRequest(item_id=item.id)) == []
+    operation = next(
+        operation
+        for operation in service.operation_store.list(limit=100)
+        if operation.target_resource_id == item.id and operation.operation_type.value == "suggestion_generation"
+    )
+    assert operation.status.value == "completed"
+
+
+def test_on_demand_llm_suggestion_is_refused_without_a_replayable_operation(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="This position relies on Regulation R section 12.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-deps",
+        )
+    )
+
+    with pytest.raises(BadRequestError, match="durable operation profile"):
+        service.suggest_dependencies(DependencySuggestionRequest(item_id=item.id, use_llm=True))
+
+
+def test_suggestion_confirmation_crash_keeps_confirmed_provenance_and_retries_once(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    item = service.ingest(
+        IngestRequest(
+            kind=KnowledgeKind.POSITION,
+            content="This position relies on Regulation R section 12.",
+            source_kind=SourceKind.PARTNER,
+            source_ref="memo-deps",
+            matter_id="matter-a",
+            client_id="client-a",
+        )
+    )
+    suggestion = service.dependency_suggestions(item_id=item.id)[0]
+    service._authority.set_operation_failure_injector(OperationFailureInjector(["after_graph_edge_before_ack"]))
+
+    with pytest.raises(BadRequestError, match="durably queued"):
+        service.confirm_dependency_suggestion(
+            suggestion.id,
+            DependencySuggestionDecisionRequest(by="curator-a"),
+        )
+
+    operation = next(
+        operation
+        for operation in service.operation_store.list(limit=100)
+        if operation.operation_type is OperationType.SUGGESTION_CONFIRM
+    )
+    assert operation.status is OperationStatus.RETRYING
+    assert service.dependency_suggestions(item_id=item.id)[0].decision is SuggestionDecision.CONFIRMED
+    assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item.id)] == [suggestion.id]
+
+    assert operation.next_eligible_retry_at is not None
+    recovered = service._authority.run_operation_once(
+        worker_id="suggestion-confirmation-retry",
+        now=operation.next_eligible_retry_at,
+    )
+    assert recovered is not None and recovered.status is OperationStatus.COMPLETED
+    assert [edge.source_suggestion_id for edge in service.graph.get_dependencies(item.id)] == [suggestion.id]
+    assert [
+        entry.event_type
+        for entry in service.audit.list_entries()
+        if str(entry.payload.get("operation_id", "")).startswith(f"{operation.id}:")
+    ] == ["dependency_suggestion_confirmed"]
+    assert service.consistency_check(matter_id="matter-a", client_id="client-a").findings == []
 
 
 def test_confirm_and_reject_dependency_suggestions_update_queue_and_edges(tmp_path: Path) -> None:

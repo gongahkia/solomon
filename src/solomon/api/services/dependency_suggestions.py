@@ -34,12 +34,15 @@ class DependencySuggestionLifecycle:
         currency_cache: CurrencyEvaluationCache,
         get_item: Callable[[str], KnowledgeItem],
         on_confirmed_edge: Callable[[DependencyEdge], None],
+        schedule_confirmation: Callable[[DependencySuggestion, DependencySuggestionDecisionRequest], DependencyEdge]
+        | None = None,
     ) -> None:
         self._graph = graph
         self._audit = audit
         self._currency_cache = currency_cache
         self._get_item = get_item
         self._on_confirmed_edge = on_confirmed_edge
+        self._schedule_confirmation = schedule_confirmation
 
     def list(
         self,
@@ -69,6 +72,8 @@ class DependencySuggestionLifecycle:
             return suggestion.suggested_edge
         if suggestion.decision is SuggestionDecision.REJECTED:
             raise BadRequestError("rejected dependency suggestions cannot be confirmed")
+        if self._schedule_confirmation is not None:
+            return self._schedule_confirmation(suggestion, request)
         edge = self._graph.add_dependency(confirm_suggestion(suggestion, by=request.by))
         self._on_confirmed_edge(edge)
         confirmed = suggestion.model_copy(

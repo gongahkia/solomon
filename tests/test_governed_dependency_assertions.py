@@ -194,7 +194,7 @@ def test_governed_confirmation_crash_after_edge_retries_without_duplicate_edge_o
     )
     assert operation.status is OperationStatus.RETRYING
     assert service.graph.get_dependencies(item_id)[0].source_suggestion_id == assertion.id
-    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.PENDING
+    assert service.get_dependency_assertion(assertion.id).decision is SuggestionDecision.CONFIRMED
 
     assert operation.next_eligible_retry_at is not None
     recovered = service._authority.run_operation_once(

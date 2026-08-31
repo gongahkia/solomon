@@ -72,6 +72,10 @@ def run_pending_operations(
     except Exception:
         failed += 1
     try:
+        service._authority.reconcile_candidate_promotions()
+    except Exception:
+        failed += 1
+    try:
         service._authority.reconcile_assertion_audits()
     except Exception:
         failed += 1

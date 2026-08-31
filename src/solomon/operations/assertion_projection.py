@@ -47,6 +47,11 @@ class AssertionConfirmationProjection:
             OperationPhase.AUDIT,
         }:
             self._failure_injector.hit("during_graph_edge_projection")
+            # Persist the authorized review decision before exposing its edge. A crash
+            # can then leave a confirmed assertion awaiting projection, but never an
+            # edge attached to an assertion that remains pending/rejected/deferred.
+            edge = confirm_suggestion(assertion, by=operation.actor_id)
+            assertion = self._confirm_assertion(assertion, edge)
             edge = self._edge_for(assertion, by=operation.actor_id)
             self._failure_injector.hit("after_graph_edge_before_ack")
             current = self._operation_store.checkpoint(
@@ -58,7 +63,7 @@ class AssertionConfirmationProjection:
             )
 
         if current.last_successful_checkpoint not in {OperationPhase.CURRENCY, OperationPhase.AUDIT}:
-            assertion = self._confirm_assertion(assertion, edge)
+            assertion = self._lifecycle._get_assertion(assertion.id)
             self._failure_injector.hit("during_currency_propagation")
             self._lifecycle._currency_cache.invalidate({edge.source_id})
             self._lifecycle._on_confirmed_edge(edge)

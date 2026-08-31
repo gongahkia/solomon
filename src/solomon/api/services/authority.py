@@ -61,14 +61,18 @@ from solomon.graph.visualization import GraphFormat, dependency_graph_view, rend
 from solomon.operations.assertion_audit_projection import AssertionAuditProjection
 from solomon.operations.assertion_projection import AssertionConfirmationProjection
 from solomon.operations.authority_projection import AuthorityChangeProjection
+from solomon.operations.candidate_promotion_projection import CandidatePromotionProjection
 from solomon.operations.evidence_projection import EvidenceIngestionProjection
 from solomon.operations.execution import OperationRequiresIntervention, OperationRunner
 from solomon.operations.failure_injection import OperationFailureInjector
 from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.operations.reverification_projection import SourceRevisionReverificationProjection
+from solomon.operations.suggestion_confirmation_projection import SuggestionConfirmationProjection
 from solomon.operations.suggestion_projection import SuggestionGenerationProjection
 from solomon.orchestrator.models import ModelRouter
-from solomon.sources.store import SourceDocumentNotFoundError
+from solomon.sources.extract import candidate_claims_from_text
+from solomon.sources.models import CandidateClaim, DocumentExtractionState
+from solomon.sources.store import CandidateClaimNotFoundError, SourceDocumentNotFoundError
 
 
 class AuthorityService(ServiceDelegate):
@@ -82,6 +86,7 @@ class AuthorityService(ServiceDelegate):
             currency_cache=self.currency_cache,
             get_item=self._get_item,
             on_confirmed_edge=self._detect_for_edge,
+            schedule_confirmation=self._schedule_dependency_suggestion_confirmation,
         )
         self._assertion_lifecycle = GovernedDependencyAssertionLifecycle(
             graph=self.graph,
@@ -162,6 +167,50 @@ class AuthorityService(ServiceDelegate):
                 break
         raise BadRequestError("dependency assertion confirmation is durably queued for retry")
 
+    def _schedule_dependency_suggestion_confirmation(
+        self,
+        suggestion: DependencySuggestion,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencyEdge:
+        """Durably project a reviewed parser suggestion without upgrading it to a governed assertion."""
+
+        item = self._get_item(suggestion.item_id)
+        self._failure_injector.hit("before_authoritative_write")
+        operation, _ = self.operation_store.create(
+            OperationRecord(
+                operation_type=OperationType.SUGGESTION_CONFIRM,
+                scope=OperationScope(
+                    tenant_id=self.tenant_id,
+                    matter_id=item.matter_id,
+                    client_id=item.client_id,
+                ),
+                actor_id=request.by,
+                authorization_context={"service_access": "review", "reviewer": request.by},
+                correlation_id=suggestion.audit_correlation_id or f"dependency_suggestion:{suggestion.id}",
+                causation_id=suggestion.id,
+                idempotency_key=f"suggestion-confirm:{suggestion.id}:{suggestion.state_version}",
+                source_resource_id=suggestion.source_document_id,
+                source_version=suggestion.source_document_version,
+                target_resource_id=suggestion.suggested_edge.target_id,
+                suggestion_id=suggestion.id,
+                requested_transition="confirmed",
+                payload={"expected_state_version": suggestion.state_version},
+            )
+        )
+        self._failure_injector.hit("after_suggestion_confirmation_operation_durable_before_execution")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                return self.graph.get_edge(current.result_edge_id or suggestion.suggested_edge.id)
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("dependency suggestion confirmation requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:suggestion-confirmation")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("dependency suggestion confirmation is durably queued for retry")
+
     def repair_confirmed_assertion_edge(
         self,
         assertion_id: str,
@@ -215,6 +264,18 @@ class AuthorityService(ServiceDelegate):
             ).apply(operation, worker_id)
         if operation.operation_type is OperationType.SUGGESTION_GENERATION:
             return SuggestionGenerationProjection(
+                authority_service=self,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
+        if operation.operation_type is OperationType.SUGGESTION_CONFIRM:
+            return SuggestionConfirmationProjection(
+                lifecycle=self._dependency_lifecycle,
+                operation_store=self.operation_store,
+                failure_injector=self._failure_injector,
+            ).apply(operation, worker_id)
+        if operation.operation_type is OperationType.CANDIDATE_PROMOTION:
+            return CandidatePromotionProjection(
                 authority_service=self,
                 operation_store=self.operation_store,
                 failure_injector=self._failure_injector,
@@ -437,11 +498,20 @@ class AuthorityService(ServiceDelegate):
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]:
         item = self._get_item(request.item_id)
-        return self._create_dependency_suggestions(
-            item,
-            use_llm=request.use_llm,
-            router=router,
-        )
+        if request.use_llm:
+            # An LLM response is not a deterministic replay input. Accepting it here would
+            # let a crash split the pending-suggestion write from its audit projection.
+            # Keep the governed recovery surface bounded to the existing deterministic
+            # parser until an immutable reviewed LLM result can be journaled separately.
+            raise BadRequestError("LLM dependency suggestion is unavailable in the durable operation profile")
+        _ = router
+        existing_ids = {suggestion.id for suggestion in self._dependency_lifecycle.list(item_id=item.id, limit=10_000)}
+        self.record_suggestion_generation(item)
+        return [
+            suggestion
+            for suggestion in self._dependency_lifecycle.list(item_id=item.id, limit=10_000)
+            if suggestion.id not in existing_ids
+        ]
 
     def dependency_suggestions(
         self,
@@ -536,6 +606,24 @@ class AuthorityService(ServiceDelegate):
             elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
                 break
         raise BadRequestError("source document audit projection is durably queued for retry")
+
+    def record_candidate_promotion(self, candidate: CandidateClaim, item: KnowledgeItem, *, by: str) -> OperationRecord:
+        """Durably mark a SQLite candidate promoted after its immutable knowledge item exists."""
+
+        operation, _ = self._create_candidate_promotion_operation(candidate, item, by=by)
+        self._failure_injector.hit("after_candidate_promotion_operation_durable_before_execution")
+        for _ in range(100):
+            current = self.operation_store.get(operation.id)
+            if current.status is OperationStatus.COMPLETED:
+                return cast(OperationRecord, current)
+            if current.status in {OperationStatus.TERMINAL_FAILED, OperationStatus.OPERATOR_REQUIRED}:
+                raise BadRequestError("candidate promotion requires operational intervention")
+            processed = self._operation_runner.run_once(worker_id="inline:candidate-promotion")
+            if processed is None:
+                sleep(0.01)
+            elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
+                break
+        raise BadRequestError("candidate promotion is durably queued for retry")
 
     def record_suggestion_generation(self, item: KnowledgeItem) -> OperationRecord:
         """Durably schedule deterministic, review-only suggestion generation for one knowledge item."""
@@ -668,11 +756,19 @@ class AuthorityService(ServiceDelegate):
         created = 0
         for source in self.document_store.list_sources():
             for document in self.document_store.list_documents(source.id):
+                candidates = self.document_store.list_candidates(document.id)
+                if document.extraction_state is DocumentExtractionState.READY and not candidates:
+                    candidates = [
+                        self.document_store.add_candidate(
+                            CandidateClaim(document_id=document.id, content=content, start_offset=start, end_offset=end)
+                        )
+                        for content, start, end in candidate_claims_from_text(document.content)
+                    ]
                 if document.id in known_documents:
                     continue
                 _, scheduled = self._create_evidence_ingestion_operation(
                     document,
-                    candidate_count=len(self.document_store.list_candidates(document.id)),
+                    candidate_count=len(candidates),
                 )
                 created += int(scheduled)
         return created
@@ -690,6 +786,26 @@ class AuthorityService(ServiceDelegate):
             if item.id in known_items:
                 continue
             _, scheduled = self._create_suggestion_generation_operation(item)
+            created += int(scheduled)
+        return created
+
+    def reconcile_candidate_promotions(self) -> int:
+        """Schedule SQLite candidate markers that were interrupted after knowledge persistence."""
+
+        created = 0
+        for item in self.store.get_many():
+            candidate_id = item.metadata.get("source_candidate_id")
+            if not isinstance(candidate_id, str):
+                continue
+            try:
+                candidate = self.document_store.get_candidate(candidate_id)
+            except CandidateClaimNotFoundError:
+                continue
+            _, scheduled = self._create_candidate_promotion_operation(
+                candidate,
+                item,
+                by=candidate.decision_by or "system:candidate-reconciliation",
+            )
             created += int(scheduled)
         return created
 
@@ -758,6 +874,35 @@ class AuthorityService(ServiceDelegate):
                     idempotency_key=f"suggestion-generation:{item.id}",
                     target_resource_id=item.id,
                     requested_transition="suggestions_generated",
+                )
+            ),
+        )
+
+    def _create_candidate_promotion_operation(
+        self,
+        candidate: CandidateClaim,
+        item: KnowledgeItem,
+        *,
+        by: str,
+    ) -> tuple[OperationRecord, bool]:
+        return cast(
+            tuple[OperationRecord, bool],
+            self.operation_store.create(
+                OperationRecord(
+                    operation_type=OperationType.CANDIDATE_PROMOTION,
+                    scope=OperationScope(
+                        tenant_id=self.tenant_id,
+                        matter_id=item.matter_id,
+                        client_id=item.client_id,
+                    ),
+                    actor_id=by,
+                    authorization_context={"service_access": "curate", "actor_type": "curator"},
+                    correlation_id=f"candidate_claim:{candidate.id}",
+                    causation_id=candidate.id,
+                    idempotency_key=f"candidate-promotion:{candidate.id}",
+                    source_resource_id=candidate.id,
+                    target_resource_id=item.id,
+                    requested_transition="promoted",
                 )
             ),
         )

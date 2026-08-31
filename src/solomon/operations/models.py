@@ -21,6 +21,8 @@ class OperationType(str, Enum):
     AUTHORITY_CHANGE_PROPAGATION = "authority_change_propagation"
     EVIDENCE_INGESTION = "evidence_ingestion"
     SUGGESTION_GENERATION = "suggestion_generation"
+    SUGGESTION_CONFIRM = "suggestion_confirm"
+    CANDIDATE_PROMOTION = "candidate_promotion"
 
 
 class OperationStatus(str, Enum):

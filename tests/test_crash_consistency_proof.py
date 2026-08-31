@@ -74,6 +74,47 @@ def _run_scenario(*, dsn: str, schema: str, root: Path) -> dict[str, object]:
         services.append(first)
         source_a, document_a, item_a = _source_backed_item(first, scope="a")
         source_b, document_b, item_b = _source_backed_item(first, scope="b")
+        candidate_source = first.register_document_source(
+            DocumentSourceRequest(
+                source_id="source-candidate-recovery",
+                name="source candidate recovery",
+                kind=DocumentSourceKind.FILESYSTEM,
+                root_ref="/source-candidate-recovery",
+            )
+        )
+        _candidate_document, recovery_candidates = first.ingest_source_document(
+            candidate_source.id,
+            SourceDocumentIngestRequest(
+                external_id="candidate-recovery",
+                filename="candidate-recovery.txt",
+                mime_type="text/plain",
+                content="The operating position relies on Regulation R section 12.",
+            ),
+        )
+        recovery_candidate = recovery_candidates[0]
+        first._authority.set_operation_failure_injector(
+            OperationFailureInjector(["after_knowledge_item_authoritative_write_before_schedule"])
+        )
+        with pytest.raises(InjectedOperationFailure, match="after_knowledge_item_authoritative_write_before_schedule"):
+            first.promote_candidate_claim(
+                recovery_candidate.id,
+                CandidateClaimPromotionRequest(
+                    by="curator-candidate",
+                    kind=KnowledgeKind.POSITION,
+                    source_kind=SourceKind.MATTER_DOC,
+                    matter_id="matter-a",
+                    client_id="client-a",
+                ),
+            )
+        first._authority.set_operation_failure_injector(OperationFailureInjector())
+        run_pending_operations(first, worker_id="candidate-promotion-reconciler")
+        candidate_items = [
+            item
+            for item in first.store.get_many(matter_id="matter-a", client_id="client-a")
+            if item.metadata.get("source_candidate_id") == recovery_candidate.id
+        ]
+        assert len(candidate_items) == 1
+        assert first.document_store.get_candidate(recovery_candidate.id).promotion_item_id == candidate_items[0].id
         first.register_authority_source(
             AuthoritySource(
                 id="official-gazette",
@@ -102,7 +143,7 @@ def _run_scenario(*, dsn: str, schema: str, root: Path) -> dict[str, object]:
         edge_operation = _operation(first, OperationType.ASSERTION_CONFIRM, assertion_b.id)
         assert edge_operation.status is OperationStatus.RETRYING
         assert _edges_for_assertion(first, item_b, assertion_b.id) == [assertion_b.suggested_edge.id]
-        assert first.get_dependency_assertion(assertion_b.id).decision is SuggestionDecision.PENDING
+        assert first.get_dependency_assertion(assertion_b.id).decision is SuggestionDecision.CONFIRMED
 
         _close(first)
         services.remove(first)

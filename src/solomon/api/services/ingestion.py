@@ -47,6 +47,8 @@ class IngestionService(ServiceDelegate):
                 "span_start": request.source_document_span_start,
                 "span_end": request.source_document_span_end,
             }
+        if request.source_candidate_id is not None:
+            metadata["source_candidate_id"] = request.source_candidate_id
         item = KnowledgeItem(
             kind=request.kind,
             content=hardened.content,

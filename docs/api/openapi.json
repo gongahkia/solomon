@@ -400,6 +400,60 @@
         "title": "ConnectorConfiguration",
         "type": "object"
       },
+      "ConsistencyFindingCode": {
+        "enum": [
+          "confirmed_assertion_missing_edge",
+          "edge_invalid_provenance",
+          "duplicate_assertion_edge",
+          "operation_stuck",
+          "completed_projection_missing",
+          "unknown_operation_projection",
+          "currency_projection_stale",
+          "scope_mismatch",
+          "source_version_unreconstructible",
+          "audit_reference_missing",
+          "source_revision_operation_missing"
+        ],
+        "title": "ConsistencyFindingCode",
+        "type": "string"
+      },
+      "ConsistencyScope": {
+        "additionalProperties": false,
+        "description": "An explicit, exact knowledge scope; broad scans are intentionally unsupported.",
+        "properties": {
+          "client_id": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "matter_id": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Matter Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "matter_id",
+          "client_id"
+        ],
+        "title": "ConsistencyScope",
+        "type": "object"
+      },
       "ContestRequest": {
         "additionalProperties": false,
         "properties": {
@@ -899,6 +953,7 @@
           },
           "use_llm": {
             "default": false,
+            "description": "Reserved for a future immutable-result workflow; the durable operation profile rejects true values.",
             "title": "Use Llm",
             "type": "boolean"
           }
@@ -1262,6 +1317,19 @@
             ],
             "title": "Previous Source Document Id"
           },
+          "source_candidate_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Candidate Id"
+          },
           "source_document_id": {
             "anyOf": [
               {
@@ -1449,6 +1517,49 @@
           "reason"
         ],
         "title": "LegalHoldRequest",
+        "type": "object"
+      },
+      "OperationManualRetryRequest": {
+        "additionalProperties": false,
+        "description": "An authenticated operator's request to requeue a recoverable terminal projection.",
+        "properties": {
+          "actor_id": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          }
+        },
+        "required": [
+          "actor_id"
+        ],
+        "title": "OperationManualRetryRequest",
         "type": "object"
       },
       "PendingAuthorityAmendment": {
@@ -1671,6 +1782,104 @@
           "content"
         ],
         "title": "ReferenceExtractionRequest",
+        "type": "object"
+      },
+      "RepairAction": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "maxLength": 120,
+            "pattern": "^[a-z_]+$",
+            "title": "Action",
+            "type": "string"
+          },
+          "assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assertion Id"
+          },
+          "finding_code": {
+            "$ref": "#/components/schemas/ConsistencyFindingCode"
+          },
+          "previous_document_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Document Id"
+          },
+          "replacement_document_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement Document Id"
+          }
+        },
+        "required": [
+          "action",
+          "finding_code"
+        ],
+        "title": "RepairAction",
+        "type": "object"
+      },
+      "RepairPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/RepairAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "report_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Report Fingerprint",
+            "type": "string"
+          },
+          "schema_id": {
+            "default": "solomon.consistency_repair_plan.v1",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ConsistencyScope"
+          }
+        },
+        "required": [
+          "scope",
+          "report_fingerprint",
+          "fingerprint"
+        ],
+        "title": "RepairPlan",
         "type": "object"
       },
       "RetentionRunRequest": {
@@ -2670,6 +2879,274 @@
           }
         },
         "summary": "Reject Candidate Claim"
+      }
+    },
+    "/consistency/check": {
+      "get": {
+        "operationId": "consistency_check_consistency_check_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "matter_id",
+            "required": true,
+            "schema": {
+              "title": "Matter Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stuck_after_seconds",
+            "required": false,
+            "schema": {
+              "default": 900,
+              "title": "Stuck After Seconds",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Consistency Check Consistency Check Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consistency Check"
+      }
+    },
+    "/consistency/operations": {
+      "get": {
+        "operationId": "consistency_operations_consistency_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "matter_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Matter Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Consistency Operations Consistency Operations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consistency Operations"
+      }
+    },
+    "/consistency/operations/{operation_id}/retry": {
+      "post": {
+        "operationId": "retry_operation_consistency_operations__operation_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationManualRetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retry Operation Consistency Operations  Operation Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Operation"
+      }
+    },
+    "/consistency/repair/apply": {
+      "post": {
+        "operationId": "apply_consistency_repair_consistency_repair_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Apply Consistency Repair Consistency Repair Apply Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Consistency Repair"
+      }
+    },
+    "/consistency/repair/plan": {
+      "post": {
+        "operationId": "consistency_repair_plan_consistency_repair_plan_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "matter_id",
+            "required": true,
+            "schema": {
+              "title": "Matter Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Consistency Repair Plan Consistency Repair Plan Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consistency Repair Plan"
       }
     },
     "/contest/{item_id}": {

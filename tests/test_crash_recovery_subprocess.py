@@ -110,6 +110,7 @@ def test_sigkill_after_edge_projection_recovers_once_with_real_mixed_stores(tmp_
         )
         assert operation.status is OperationStatus.CLAIMED
         assert restarted.graph.get_dependencies(item_id)[0].source_suggestion_id == assertion.id
+        assert restarted.get_dependency_assertion(assertion.id).decision is SuggestionDecision.CONFIRMED
         assert operation.lease_expires_at is not None
         recovered = restarted._authority.run_operation_once(
             worker_id="subprocess-restarted",

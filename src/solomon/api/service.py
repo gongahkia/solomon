@@ -37,6 +37,7 @@ from solomon.api.service_models import (
     DependencySuggestionRequest,
     DocumentSourceRequest,
     IngestRequest,
+    OperationManualRetryRequest,
     PinRequest,
     PrimitivePlanExecution,
     PrimitivePlanRequest,
@@ -89,9 +90,9 @@ from solomon.errors import BadRequestError, NotFoundError, PolicyRefusalError, S
 from solomon.graph.models import DependencyEdge
 from solomon.graph.suggestions import DependencySuggestion, ReferenceExtraction, SuggestionDecision
 from solomon.graph.visualization import GraphFormat
-from solomon.operations.models import OperationRecord, OperationScope
+from solomon.operations.models import OperationRecord, OperationStatus
 from solomon.operations.postgres import PostgresOperationStore
-from solomon.operations.store import SQLiteOperationStore
+from solomon.operations.store import OperationConflictError, OperationNotFoundError, SQLiteOperationStore
 from solomon.orchestrator.models import ModelRequest, ModelRouter, RoutedModelResult
 from solomon.orchestrator.retrieval import RetrievalEmbeddingProvider, RetrievalOrchestrator
 from solomon.retention import ErasureRecord, LegalHoldNotFoundError, LegalHoldRecord, RetentionRegistry, RetentionScope
@@ -191,6 +192,7 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "consistency_repair_plan": "review",
     "apply_consistency_repair": "review",
     "operation_status": "read",
+    "retry_operation": "review",
 }
 
 SERVICE_SPAN_NAMES: dict[str, str] = {
@@ -1157,14 +1159,57 @@ class SolomonService:
         self.consistency_signals["repairs_applied" if result.applied else "repairs_refused"] += 1
         return result
 
-    def operation_status(self, *, matter_id: str, client_id: str) -> list[OperationRecord]:
-        return cast(
-            list[OperationRecord],
-            self.operation_store.list(
-                scope=OperationScope(tenant_id=self.tenant_id, matter_id=matter_id, client_id=client_id),
-                limit=10_000,
-            ),
+    def operation_status(
+        self,
+        *,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[OperationRecord]:
+        if (matter_id is None) != (client_id is None):
+            raise BadRequestError("matter_id and client_id must be supplied together")
+        operations = cast(list[OperationRecord], self.operation_store.list(limit=10_000))
+        return [
+            operation
+            for operation in operations
+            if operation.scope.tenant_id == self.tenant_id
+            and (
+                matter_id is None
+                or (operation.scope.matter_id == matter_id and operation.scope.client_id == client_id)
+            )
+        ]
+
+    def retry_operation(self, operation_id: str, request: OperationManualRetryRequest) -> OperationRecord:
+        authorization = _service_authorization.get()
+        if authorization is not None and request.actor_id != authorization.principal.subject:
+            raise PolicyRefusalError("operation retry actor must match the authenticated principal")
+        try:
+            operation = self.operation_store.get(operation_id)
+        except OperationNotFoundError as exc:
+            raise NotFoundError("knowledge operation was not found") from exc
+        if operation.scope.tenant_id != self.tenant_id or (
+            request.matter_id is not None
+            and (operation.scope.matter_id != request.matter_id or operation.scope.client_id != request.client_id)
+        ):
+            raise NotFoundError("knowledge operation was not found")
+        if operation.status is OperationStatus.OPERATOR_REQUIRED:
+            raise BadRequestError("operation requires operator investigation and is not safe to retry automatically")
+        if operation.status is not OperationStatus.TERMINAL_FAILED:
+            raise BadRequestError("only terminal failed operations can be manually retried")
+        self.audit.append_idempotent(
+            "operation_manual_retry_requested",
+            {
+                "operation_id": operation.id,
+                "operation_type": operation.operation_type.value,
+                "scope_key": operation.scope.key,
+                "state_version": operation.state_version,
+            },
+            operation_id=f"{operation.id}:manual_retry:{operation.state_version}",
+            attribution=AuditAttribution(actor_id=request.actor_id, correlation_id=operation.correlation_id),
         )
+        try:
+            return cast(OperationRecord, self.operation_store.manual_retry(operation.id, actor_id=request.actor_id))
+        except OperationConflictError as exc:
+            raise BadRequestError("operation changed before the manual retry could be applied") from exc
 
     def dependency_graph(
         self,

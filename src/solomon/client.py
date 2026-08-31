@@ -123,10 +123,15 @@ class SolomonClient:
         _raise_for_error(response)
         return dict(response.json())
 
-    def consistency_operations(self, *, params: dict[str, str]) -> list[dict[str, Any]]:
+    def consistency_operations(self, *, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
         response = self._client.get("/consistency/operations", params=params)
         _raise_for_error(response)
         return list(response.json())
+
+    def retry_consistency_operation(self, operation_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(f"/consistency/operations/{operation_id}/retry", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())
 
 
 class AsyncSolomonClient:
@@ -210,7 +215,12 @@ class AsyncSolomonClient:
         _raise_for_error(response)
         return dict(response.json())
 
-    async def consistency_operations(self, *, params: dict[str, str]) -> list[dict[str, Any]]:
+    async def consistency_operations(self, *, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
         response = await self._client.get("/consistency/operations", params=params)
         _raise_for_error(response)
         return list(response.json())
+
+    async def retry_consistency_operation(self, operation_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await self._client.post(f"/consistency/operations/{operation_id}/retry", json=payload)
+        _raise_for_error(response)
+        return dict(response.json())

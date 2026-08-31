@@ -58,6 +58,7 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
+from solomon.api.service_models import OperationManualRetryRequest
 from solomon.api.service_principals import (
     ServicePrincipalAlreadyExistsError,
     ServicePrincipalNotFoundError,
@@ -895,11 +896,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return active_service(request).apply_consistency_repair(payload).model_dump(mode="json")
 
     @app.get("/consistency/operations")
-    def consistency_operations(request: Request, matter_id: str, client_id: str) -> list[dict[str, Any]]:
+    def consistency_operations(
+        request: Request,
+        matter_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         return [
             operation.model_dump(mode="json")
             for operation in active_service(request).operation_status(matter_id=matter_id, client_id=client_id)
         ]
+
+    @app.post("/consistency/operations/{operation_id}/retry")
+    def retry_operation(
+        request: Request,
+        operation_id: str,
+        payload: OperationManualRetryRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).retry_operation(operation_id, payload).model_dump(mode="json")
 
     @app.get("/graph", response_class=PlainTextResponse)
     def dependency_graph(

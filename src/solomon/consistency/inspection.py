@@ -36,19 +36,32 @@ class ConsistencyInspector:
         items = self._service.store.get_many(matter_id=scope.matter_id, client_id=scope.client_id)
         item_ids = {item.id for item in items}
         assertions = self._assertions(scope)
+        source_documents = self._source_documents(assertions)
         edges = self._service.graph.subgraph_for_scope(
             store=self._service.store,
             matter_id=scope.matter_id,
             client_id=scope.client_id,
         )
-        operations = self._operations(scope)
+        operations = self._operations(
+            scope,
+            item_ids=item_ids,
+            assertions=assertions,
+            source_documents=source_documents,
+        )
+        audit_entries = self._audit_entries(
+            item_ids=item_ids,
+            assertions=assertions,
+            edges=edges,
+            source_documents=source_documents,
+            operations=operations,
+        )
         findings: list[ConsistencyFinding] = []
         findings.extend(self._assertion_findings(assertions, edges))
         findings.extend(self._edge_findings(assertions, edges, item_ids))
         findings.extend(self._source_findings(assertions, operations))
         findings.extend(self._operation_findings(assertions, edges, operations, timestamp, stuck_after))
-        findings.extend(self._currency_findings(scope, items))
-        findings.extend(self._audit_findings(assertions, edges, operations))
+        findings.extend(self._currency_findings(scope, items, operations))
+        findings.extend(self._audit_findings(assertions, edges, operations, audit_entries))
         return ConsistencyReport.create(
             scope=scope,
             findings=_deduplicate(findings),
@@ -57,6 +70,8 @@ class ConsistencyInspector:
                 "assertions": [assertion.model_dump(mode="json") for assertion in assertions],
                 "edges": [edge.model_dump(mode="json") for edge in edges],
                 "operations": [operation.model_dump(mode="json") for operation in operations],
+                "source_documents": [document.model_dump(mode="json") for document in source_documents],
+                "audit_entries": [entry.model_dump(mode="json") for entry in audit_entries],
             },
         )
 
@@ -70,14 +85,118 @@ class ConsistencyInspector:
             ),
         )
 
-    def _operations(self, scope: ConsistencyScope) -> list[OperationRecord]:
-        return cast(
-            list[OperationRecord],
-            self._service.operation_store.list(
-                scope=OperationScope(tenant_id=scope.tenant_id, matter_id=scope.matter_id, client_id=scope.client_id),
-                limit=10_000,
-            ),
+    def _source_documents(self, assertions: list[DependencySuggestion]) -> list[Any]:
+        documents: dict[str, Any] = {}
+        for assertion in assertions:
+            if assertion.source_document_id is None:
+                continue
+            document = self._source_document_or_none(assertion.source_document_id)
+            if document is None:
+                continue
+            documents[document.id] = document
+            for candidate in self._service.document_store.list_documents(document.source_id):
+                if candidate.previous_version_id == document.id:
+                    documents[candidate.id] = candidate
+        return [documents[document_id] for document_id in sorted(documents)]
+
+    def _operations(
+        self,
+        scope: ConsistencyScope,
+        *,
+        item_ids: set[str],
+        assertions: list[DependencySuggestion],
+        source_documents: list[Any],
+    ) -> list[OperationRecord]:
+        assertion_ids = {assertion.id for assertion in assertions}
+        document_ids = {document.id for document in source_documents}
+        relevant: list[OperationRecord] = []
+        for operation in self._service.operation_store.list(limit=10_000):
+            if operation.scope.tenant_id != scope.tenant_id:
+                continue
+            if operation.scope == OperationScope(
+                tenant_id=scope.tenant_id,
+                matter_id=scope.matter_id,
+                client_id=scope.client_id,
+            ):
+                relevant.append(operation)
+                continue
+            if (
+                operation.operation_type is OperationType.EVIDENCE_INGESTION
+                and operation.target_resource_id in document_ids
+            ):
+                relevant.append(operation)
+                continue
+            if (
+                operation.operation_type is OperationType.SUGGESTION_GENERATION
+                and operation.target_resource_id in item_ids
+            ):
+                relevant.append(operation)
+                continue
+            if (
+                operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION
+                and operation.target_resource_id is not None
+                and self._authority_change_affects_items(operation, item_ids)
+            ):
+                relevant.append(operation)
+                continue
+            if operation.assertion_id in assertion_ids:
+                relevant.append(operation)
+        return relevant
+
+    def _source_document_or_none(self, document_id: str) -> Any | None:
+        try:
+            return self._service.document_store.get_document(document_id)
+        except Exception:
+            return None
+
+    def _authority_change_affects_items(self, operation: OperationRecord, item_ids: set[str]) -> bool:
+        if operation.target_resource_id is None:
+            return False
+        impact = CurrencyPropagator(graph=self._service.graph, store=self._service.store).impact_query(
+            operation.target_resource_id
         )
+        return bool(item_ids.intersection(impact.stale_item_ids))
+
+    def _audit_entries(
+        self,
+        *,
+        item_ids: set[str],
+        assertions: list[DependencySuggestion],
+        edges: list[Any],
+        source_documents: list[Any],
+        operations: list[OperationRecord],
+    ) -> list[Any]:
+        assertion_ids = {assertion.id for assertion in assertions}
+        edge_ids = {edge.id for edge in edges}
+        document_ids = {document.id for document in source_documents}
+        operation_ids = {operation.id for operation in operations}
+        audit_hashes = {
+            audit_hash
+            for assertion in assertions
+            for audit_hash in (
+                assertion.creation_audit_id,
+                assertion.review_audit_id,
+                assertion.edge_audit_id,
+                assertion.reverification_audit_id,
+            )
+            if audit_hash is not None
+        }
+        audit_hashes.update(audit_hash for operation in operations for audit_hash in operation.audit_entry_hashes)
+        selected: list[Any] = []
+        for entry in self._service.audit.list_entries():
+            payload = entry.payload
+            operation_id = payload.get("operation_id")
+            operation_base = operation_id.split(":", 1)[0] if isinstance(operation_id, str) else None
+            if (
+                entry.entry_hash in audit_hashes
+                or payload.get("assertion_id") in assertion_ids
+                or payload.get("item_id") in item_ids
+                or payload.get("edge_id") in edge_ids
+                or payload.get("document_id") in document_ids
+                or operation_base in operation_ids
+            ):
+                selected.append(entry)
+        return selected
 
     def _assertion_findings(self, assertions: list[DependencySuggestion], edges: list[Any]) -> list[ConsistencyFinding]:
         edge_ids = {edge.id for edge in edges}
@@ -252,6 +371,18 @@ class ConsistencyInspector:
                         detail="completed assertion confirmation has no expected graph projection",
                     )
                 )
+            if operation.operation_type is OperationType.ASSERTION_CREATE and (
+                assertion is None or assertion.creation_audit_id is None
+            ):
+                findings.append(
+                    ConsistencyFinding(
+                        code=ConsistencyFindingCode.COMPLETED_PROJECTION_MISSING,
+                        resource_type="knowledge_operation",
+                        resource_id=operation.id,
+                        related_ids=[operation.assertion_id] if operation.assertion_id else [],
+                        detail="completed assertion creation has no linked audit provenance",
+                    )
+                )
             if operation.operation_type is OperationType.SOURCE_REVISION_REVERIFY and (
                 assertion is None or not assertion.needs_reverification
             ):
@@ -266,9 +397,13 @@ class ConsistencyInspector:
                 )
         return findings
 
-    def _currency_findings(self, scope: ConsistencyScope, items: list[Any]) -> list[ConsistencyFinding]:
+    def _currency_findings(
+        self,
+        scope: ConsistencyScope,
+        items: list[Any],
+        operations: list[OperationRecord],
+    ) -> list[ConsistencyFinding]:
         item_ids = {item.id for item in items}
-        operations = self._service.operation_store.list(limit=10_000)
         findings: list[ConsistencyFinding] = []
         for operation in operations:
             if operation.operation_type is not OperationType.AUTHORITY_CHANGE_PROPAGATION:
@@ -304,8 +439,8 @@ class ConsistencyInspector:
         assertions: list[DependencySuggestion],
         edges: list[Any],
         operations: list[OperationRecord],
+        entries: list[Any],
     ) -> list[ConsistencyFinding]:
-        entries = self._service.audit.list_entries()
         by_hash = {entry.entry_hash for entry in entries}
         assertion_ids = {assertion.id for assertion in assertions}
         edge_ids = {edge.id for edge in edges}

@@ -28,6 +28,7 @@ from solomon.api.service import (
     StalenessPredictionRequest,
     VerificationRequest,
 )
+from solomon.api.service_models import OperationManualRetryRequest
 from solomon.backup import BackupError, create_encrypted_backup, restore_encrypted_backup, run_recovery_drill
 from solomon.boundary.solomon import SolomonBoundary, probe_boundary_client
 from solomon.config import (
@@ -231,6 +232,45 @@ def consistency_repair(
     _print_json(result.model_dump(mode="json"), sort_keys=True)
     if not result.applied:
         raise typer.Exit(code=2)
+
+
+@consistency_app.command("operations", epilog=_example("uv run solomon consistency operations --format json"))
+def consistency_operations(
+    matter_id: Annotated[str | None, typer.Option("--matter-id", min=1, help="Optional exact matter scope.")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id", min=1, help="Optional exact client scope.")] = None,
+    output_format: Annotated[str, typer.Option("--format", help="Machine output format (json only).")]= "json",
+) -> None:
+    """Print terminal and pending operation status within the active tenant deployment."""
+
+    if output_format != "json":
+        raise typer.BadParameter("only json output is supported", param_hint="--format")
+    _print_json(
+        [
+            operation.model_dump(mode="json")
+            for operation in _service().operation_status(matter_id=matter_id, client_id=client_id)
+        ],
+        sort_keys=True,
+    )
+
+
+@consistency_app.command("retry", epilog=_example("uv run solomon consistency retry OPERATION_ID --by operator-a"))
+def consistency_retry(
+    operation_id: Annotated[str, typer.Argument(help="Terminal operation ID to requeue.")],
+    actor_id: Annotated[str, typer.Option("--by", min=1, help="Authenticated operator identifier.")],
+    matter_id: Annotated[str | None, typer.Option("--matter-id", min=1, help="Optional exact matter scope.")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id", min=1, help="Optional exact client scope.")] = None,
+) -> None:
+    """Requeue a safe terminal failure; provenance-invalid operations are intentionally refused."""
+
+    _print_json(
+        _service()
+        .retry_operation(
+            operation_id,
+            OperationManualRetryRequest(actor_id=actor_id, matter_id=matter_id, client_id=client_id),
+        )
+        .model_dump(mode="json"),
+        sort_keys=True,
+    )
 
 
 @mcp_app.command("serve", epilog=_example("uv run solomon mcp serve --http --host 127.0.0.1 --port 8141"))

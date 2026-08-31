@@ -154,6 +154,20 @@ class AuthorityEventRequest(SolomonModel):
     diff: dict[str, Any] = Field(default_factory=dict)
 
 
+class OperationManualRetryRequest(SolomonModel):
+    """An authenticated operator's request to requeue a recoverable terminal projection."""
+
+    actor_id: str = Field(min_length=1, max_length=500)
+    matter_id: str | None = Field(default=None, min_length=1, max_length=500)
+    client_id: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def require_complete_optional_scope(self) -> OperationManualRetryRequest:
+        if (self.matter_id is None) != (self.client_id is None):
+            raise ValueError("matter_id and client_id must be supplied together")
+        return self
+
+
 class ContestRequest(SolomonModel):
     lawyer_id: str = Field(min_length=1)
     reason: str = Field(min_length=1)

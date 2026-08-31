@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 import httpx
+import pytest
 
 from solomon.api.app import create_app
 from solomon.api.service import (
@@ -17,12 +18,15 @@ from solomon.api.service import (
     SolomonService,
     SourceDocumentIngestRequest,
 )
+from solomon.api.service_models import OperationManualRetryRequest
 from solomon.config import Settings
 from solomon.consistency.models import ConsistencyFindingCode, ConsistencyScope, RepairPlan
 from solomon.contracts import AuthoritySource, AuthoritySourceKind
 from solomon.currency.models import KnowledgeKind, SourceKind
+from solomon.errors import BadRequestError
 from solomon.graph.store import GraphStore
 from solomon.graph.suggestions import AssertionEvidenceKind, DependencyAssertionType, DependencySuggestion
+from solomon.operations.models import OperationRecord, OperationScope, OperationStatus, OperationType
 from solomon.sources.models import DocumentSourceKind, SourceDocument
 
 
@@ -66,6 +70,30 @@ def test_consistency_repair_refuses_stale_and_cross_scope_plans(tmp_path: Path) 
     denied = service.apply_consistency_repair(cross_scope)
     assert denied.applied is False
     assert denied.refusal == "repair plan tenant does not match the active service scope"
+
+
+def test_consistency_repair_refuses_plan_when_source_lineage_changes_after_inspection(tmp_path: Path) -> None:
+    service, assertion = _confirmed_assertion_service(tmp_path)
+    graph = cast(GraphStore, service.graph)
+    with graph._conn:
+        graph._conn.execute("DELETE FROM dependency_edges WHERE edge_id = ?", (assertion.suggested_edge.id,))
+    plan = service.consistency_repair_plan(matter_id="matter-a", client_id="client-a")
+    assert assertion.source_document_id is not None
+    source = service.document_store.get_document(assertion.source_document_id)
+    service.document_store.write_document(
+        SourceDocument(
+            source_id=source.source_id,
+            external_id=source.external_id,
+            filename=source.filename,
+            mime_type=source.mime_type,
+            content="changed after repair plan inspection",
+        )
+    )
+
+    stale = service.apply_consistency_repair(plan)
+
+    assert stale.applied is False
+    assert stale.refusal == "repair plan is stale because scoped consistency state changed"
 
 
 def test_consistency_reports_ambiguous_provenance_and_revision_gap_without_unsafe_edge_repair(tmp_path: Path) -> None:
@@ -124,6 +152,60 @@ def test_consistency_rest_contract_is_scoped_and_requires_explicit_apply(tmp_pat
     assert planned.json()["actions"] == []
     assert applied.json()["applied"] is True
     assert operations.json() == []
+
+
+def test_terminal_operation_retry_is_scoped_audited_and_refuses_operator_required(tmp_path: Path) -> None:
+    service = SolomonService(data_dir=tmp_path / "data", journal_dir=tmp_path / "journal")
+    failed, _ = service.operation_store.create(
+        OperationRecord(
+            operation_type=OperationType.SUGGESTION_GENERATION,
+            scope=OperationScope(matter_id="matter-a", client_id="client-a"),
+            actor_id="system:test",
+            authorization_context={"service_access": "curate"},
+            correlation_id="operation-retry-test",
+            idempotency_key="failed-suggestion",
+            target_resource_id="missing-item",
+            requested_transition="suggestions_generated",
+        )
+    )
+    claimed = service.operation_store.claim_next(worker_id="worker-a")
+    assert claimed is not None
+    terminal = service.operation_store.retry(
+        failed.id,
+        worker_id="worker-a",
+        retry_at=failed.created_at,
+        failure_category="injectedoperationfailure",
+        diagnostic="InjectedOperationFailure",
+        maximum_attempts=1,
+    )
+    assert terminal.status is OperationStatus.TERMINAL_FAILED
+
+    retried = service.retry_operation(
+        failed.id,
+        OperationManualRetryRequest(actor_id="operator-a", matter_id="matter-a", client_id="client-a"),
+    )
+    assert retried.status is OperationStatus.QUEUED
+    assert [entry.event for entry in service.operation_store.history(failed.id)][-1] == "manual_retry"
+    assert any(entry.event_type == "operation_manual_retry_requested" for entry in service.audit.list_entries())
+    assert [operation.id for operation in service.operation_status(matter_id="matter-a", client_id="client-a")] == [
+        failed.id
+    ]
+    assert [operation.id for operation in service.operation_status()] == [failed.id]
+
+    claimed_again = service.operation_store.claim_next(worker_id="worker-b")
+    assert claimed_again is not None
+    blocked = service.operation_store.require_operator(
+        failed.id,
+        worker_id="worker-b",
+        failure_category="operator_required",
+        diagnostic="missing provenance",
+    )
+    assert blocked.status is OperationStatus.OPERATOR_REQUIRED
+    with pytest.raises(BadRequestError, match="not safe to retry"):
+        service.retry_operation(
+            failed.id,
+            OperationManualRetryRequest(actor_id="operator-a", matter_id="matter-a", client_id="client-a"),
+        )
 
 
 def _confirmed_assertion_service(tmp_path: Path) -> tuple[SolomonService, DependencySuggestion]:

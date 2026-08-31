@@ -220,6 +220,7 @@ def _service(*, jurisdiction: str | None = None) -> SolomonService:
     return SolomonService(
         data_dir=settings.data_dir,
         journal_dir=settings.journal_dir,
+        database_url=settings.database_url,
         attestation_key=settings.verification_attestation_key,
         verification_policy=verification_policy_from_settings(settings),
         verification_policy_version=settings.verification_policy_version,

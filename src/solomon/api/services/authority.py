@@ -105,7 +105,10 @@ class AuthorityService(ServiceDelegate):
         request: DependencyAssertionDecisionRequest,
     ) -> DependencyEdge:
         if assertion.decision is SuggestionDecision.CONFIRMED:
-            return assertion.suggested_edge
+            try:
+                return self.graph.get_edge(assertion.suggested_edge.id)
+            except KeyError:
+                pass
         self._failure_injector.hit("before_authoritative_write")
         operation, _ = self.operation_store.create(
             OperationRecord(
@@ -146,6 +149,42 @@ class AuthorityService(ServiceDelegate):
             elif processed.id == operation.id and processed.status is OperationStatus.RETRYING:
                 break
         raise BadRequestError("dependency assertion confirmation is durably queued for retry")
+
+    def repair_confirmed_assertion_edge(
+        self,
+        assertion_id: str,
+        *,
+        matter_id: str,
+        client_id: str,
+    ) -> DependencyEdge:
+        """Re-project one already-confirmed assertion only after its evidence lineage is reconstructed."""
+
+        assertion = self._assertion_lifecycle.get(assertion_id, matter_id=matter_id, client_id=client_id)
+        if assertion.decision is not SuggestionDecision.CONFIRMED:
+            raise BadRequestError("only a confirmed assertion can repair a missing graph edge")
+        if assertion.source_document_id is None:
+            raise BadRequestError("confirmed assertion has no reconstructible source document")
+        try:
+            source = self.document_store.get_document(assertion.source_document_id)
+        except Exception as exc:
+            raise BadRequestError("confirmed assertion source document cannot be reconstructed") from exc
+        if (
+            source.version != assertion.source_document_version
+            or source.content_sha256 != assertion.source_document_sha256
+        ):
+            raise BadRequestError("confirmed assertion source document provenance is invalid")
+        result = self._schedule_assertion_confirmation(
+            assertion,
+            DependencyAssertionDecisionRequest(
+                by="system:consistency-repair",
+                decision="confirmed",
+                matter_id=matter_id,
+                client_id=client_id,
+            ),
+        )
+        if result.source_suggestion_id != assertion.id:
+            raise BadRequestError("repaired graph edge has invalid assertion provenance")
+        return result
 
     def _dispatch_operation(self, operation: OperationRecord, worker_id: str) -> OperationRecord:
         if operation.operation_type is OperationType.AUTHORITY_CHANGE_PROPAGATION:

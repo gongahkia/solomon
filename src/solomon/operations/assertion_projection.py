@@ -84,10 +84,13 @@ class AssertionConfirmationProjection:
                 operation_id=f"{current.id}:edge",
                 attribution=AuditAttribution(actor_id=operation.actor_id, correlation_id=operation.correlation_id),
             )
-            if assertion.review_audit_id != review_entry.entry_hash or assertion.edge_audit_id != edge_entry.entry_hash:
-                assertion = assertion.model_copy(
-                    update={"review_audit_id": review_entry.entry_hash, "edge_audit_id": edge_entry.entry_hash}
-                )
+            audit_updates: dict[str, str] = {}
+            if assertion.review_audit_id is None:
+                audit_updates["review_audit_id"] = review_entry.entry_hash
+            if assertion.edge_audit_id is None:
+                audit_updates["edge_audit_id"] = edge_entry.entry_hash
+            if audit_updates:
+                assertion = assertion.model_copy(update=audit_updates)
                 self._lifecycle._graph.update_dependency_suggestion(assertion)
             current = self._operation_store.checkpoint(
                 current.id,

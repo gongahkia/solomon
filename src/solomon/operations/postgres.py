@@ -40,7 +40,10 @@ class PostgresOperationStore:
         with self._transaction():
             if self.schema is not None:
                 self._execute(f"CREATE SCHEMA IF NOT EXISTS {quote_identifier(self.schema)}")
-                self._execute(f"SET LOCAL search_path TO {quote_identifier(self.schema)}")
+                # The store keeps one connection for its lifetime.  `SET LOCAL` would
+                # revert on this transaction's commit and leave subsequent unqualified
+                # journal queries pointed at the caller's default schema.
+                self._execute(f"SET search_path TO {quote_identifier(self.schema)}")
             apply_postgres_migrations(self._execute, operation_store_migrations())
 
     def create(self, operation: OperationRecord) -> tuple[OperationRecord, bool]:

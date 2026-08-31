@@ -16,6 +16,7 @@ Rule: MCP tool names use `solomon.<snake_case>`. CLI equivalents use kebab-case 
 | `solomon.ingest` | `solomon ingest ...` | none |
 | `solomon.audit_pack` | `solomon audit-pack <item-id> <destination>` | `solomon export-audit-pack <destination>` |
 | `solomon.dependency_suggestions` | `solomon dependency-suggestions ...` | none |
+| no write MCP equivalent | `solomon defer-dependency-suggestion <suggestion-id> --by <id> --reason <text>` | none |
 | `solomon.impact` | `solomon impact <authority-id>` | `solomon impact-query <authority-id>` |
 
 ## Shim policy

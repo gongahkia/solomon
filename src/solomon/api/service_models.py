@@ -36,6 +36,11 @@ class IngestRequest(SolomonModel):
     client_id: str | None = None
     valid_from: datetime | None = None
     ingested_at: datetime | None = None
+    source_document_id: str | None = None
+    source_document_version: int | None = Field(default=None, ge=1)
+    previous_source_document_id: str | None = None
+    source_document_span_start: int | None = Field(default=None, ge=0)
+    source_document_span_end: int | None = Field(default=None, ge=1)
 
 
 class DocumentSourceRequest(SolomonModel):
@@ -209,6 +214,9 @@ class DependencySuggestionRequest(SolomonModel):
 
 class DependencySuggestionDecisionRequest(SolomonModel):
     by: str = Field(min_length=1)
+    reason: str | None = Field(default=None, min_length=1)
+    matter_id: str | None = None
+    client_id: str | None = None
 
 
 class AnswerRequest(SolomonModel):

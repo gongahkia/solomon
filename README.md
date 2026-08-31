@@ -27,6 +27,7 @@ currency, credence, verification, deterministic primitive plans, and contestabil
 
 - [MCP Quick Start](#mcp-quick-start)
 - [Currency Loop Proof](#currency-loop-proof)
+- [Evidence-to-Dependency Proof](#evidence-to-dependency-proof)
 - [Curator Console](#curator-console)
 - [CLI And SDK](#cli-and-sdk)
 - [Boundary And Memory](#boundary-and-memory)
@@ -90,6 +91,26 @@ explanations, human reaffirmation/supersession, historical recall, a verified au
 replay after restart. See [`docs/roadmap/currency-loop-proof.md`](./docs/roadmap/currency-loop-proof.md) for the
 scope, boundaries, and evaluation limits.
 
+## Evidence-to-Dependency Proof
+
+The evidence-to-currency sequence is deliberately human-gated:
+
+```text
+Ingest evidence → propose dependencies → human confirms → monitor changes → flag affected knowledge → human re-verifies
+```
+
+Run the deterministic source-evidence proof:
+
+```bash
+uv run python examples/scenarios/evidence-to-dependency-proof/run.py --workspace /tmp/solomon-evidence-to-dependency-proof
+```
+
+It creates pending suggestions from fictional source material with inspectable spans, confirms one, rejects a
+quotation-derived mention, defers one unresolved proposal, proves re-ingestion/restart/revision behavior, and shows
+that only the confirmed edge reaches currency propagation. Suggestions are not knowledge and never become edges
+without an explicit curator decision. See [`docs/roadmap/evidence-to-dependency-proof.md`](./docs/roadmap/evidence-to-dependency-proof.md)
+for the corpus, baseline, measured limits, and lifecycle.
+
 ## Curator Console
 
 Run the curator console for dependency review, verification, and audit-pack inspection:
@@ -124,8 +145,9 @@ The Python client quickstart and the source-installable TypeScript MCP client ar
   matter/client scope, verification metadata, and supersession links.
 - Tracks dependency edges between internal knowledge and external authorities, then propagates
   `StalePendingReverification` through transitive dependents when a dependency changes.
-- Creates a durable dependency-review queue from deterministic citation/reference extraction, with optional
-  Solomon-sanitized LLM assistance for curator confirmation.
+- Creates a durable dependency-review queue from deterministic cited-reliance extraction, with optional
+  Solomon-sanitized LLM assistance. Extracted references and suggestions are proposals only; curators must confirm
+  before a human-confirmed edge can affect currency.
 - Recalls live knowledge by default while preserving stale, superseded, retired, and contested items for
   review and historical reconstruction.
 - Keeps model-bound context behind the Solomon boundary for review, pseudonymization,
@@ -181,6 +203,7 @@ Currency, dependency, and references:
 - `GET /dependencies/suggestions`
 - `POST /dependencies/suggestions/{suggestion_id}/confirm`
 - `POST /dependencies/suggestions/{suggestion_id}/reject`
+- `POST /dependencies/suggestions/{suggestion_id}/defer`
 - `GET /impact/{authority_id}`
 - `GET /graph`
 - `POST /references/extract`

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from solomon.api.service_models import (
+    DependencySuggestionDecisionRequest,
     PrimitivePlanExecution,
     PrimitivePlanRequest,
     RecallRequest,
@@ -54,6 +55,12 @@ class ServiceContext(Protocol):
         use_llm: bool = False,
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]: ...
+
+    def defer_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencySuggestion: ...
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]: ...
 
@@ -150,6 +157,13 @@ class ServiceDelegate:
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]:
         return self._context._create_dependency_suggestions(item, use_llm=use_llm, router=router)
+
+    def defer_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencySuggestion:
+        return self._context.defer_dependency_suggestion(suggestion_id, request)
 
     def recall(self, request: RecallRequest) -> list[dict[str, Any]]:
         return self._context.recall(request)

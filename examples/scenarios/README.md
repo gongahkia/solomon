@@ -4,6 +4,7 @@
 
 - [`01-vendor-integration/`](01-vendor-integration/): a fictional MCP host omits stale firm context before drafting.
 - [`currency-loop-proof/`](currency-loop-proof/): a deterministic, headless authority-change → impact → human-review → re-verification/supersession proof.
+- [`evidence-to-dependency-proof/`](evidence-to-dependency-proof/): a deterministic, headless source evidence → suggestion → curator decision → confirmed-edge currency proof.
 - [`02-biglaw-sg/`](02-biglaw-sg/): a fictional Singapore firm seeds 30 items and stales seven banking memos after a MAS Notice 626 change.
 - [`03-inhouse-gc/`](03-inhouse-gc/): a fictional SEA company stales 12 NDA clauses after a PDPA-anchor change before a Copilot-like draft.
 - [`04-boutique-sg/`](04-boutique-sg/): a fictional eight-lawyer Singapore boutique seeds 50 memos and stales four privacy memos through a sparse graph.

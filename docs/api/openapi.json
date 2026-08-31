@@ -139,6 +139,83 @@
         "title": "AuthorityChangeRequest",
         "type": "object"
       },
+      "AuthorityEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_id": {
+            "minLength": 1,
+            "title": "Authority Id",
+            "type": "string"
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "diff": {
+            "additionalProperties": true,
+            "title": "Diff",
+            "type": "object"
+          },
+          "evidence_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Sha256"
+          },
+          "evidence_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Url"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "new_version": {
+            "minLength": 1,
+            "title": "New Version",
+            "type": "string"
+          },
+          "previous_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version"
+          },
+          "source_id": {
+            "minLength": 1,
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "idempotency_key",
+          "authority_id",
+          "new_version",
+          "changed_at"
+        ],
+        "title": "AuthorityEventRequest",
+        "type": "object"
+      },
       "BoundaryImportStatus": {
         "properties": {
           "client_path": {
@@ -167,6 +244,125 @@
         "title": "BoundaryImportStatus",
         "type": "object"
       },
+      "CandidateClaimDeferralRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "minLength": 1,
+            "title": "By",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "reason"
+        ],
+        "title": "CandidateClaimDeferralRequest",
+        "type": "object"
+      },
+      "CandidateClaimPromotionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "by": {
+            "minLength": 1,
+            "title": "By",
+            "type": "string"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "conclusion_polarity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConclusionPolarity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/KnowledgeKind",
+            "default": "note"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind",
+            "default": "matter-doc"
+          }
+        },
+        "required": [
+          "by"
+        ],
+        "title": "CandidateClaimPromotionRequest",
+        "type": "object"
+      },
+      "CandidateClaimRejectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "minLength": 1,
+            "title": "By",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "reason"
+        ],
+        "title": "CandidateClaimRejectionRequest",
+        "type": "object"
+      },
       "ConclusionPolarity": {
         "enum": [
           "affirmative",
@@ -174,6 +370,27 @@
         ],
         "title": "ConclusionPolarity",
         "type": "string"
+      },
+      "ConnectorConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "secret_references": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretReference"
+            },
+            "title": "Secret References",
+            "type": "object"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "title": "ConnectorConfiguration",
+        "type": "object"
       },
       "ContestRequest": {
         "additionalProperties": false,
@@ -294,6 +511,40 @@
             "minLength": 1,
             "title": "By",
             "type": "string"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "matter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matter Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "required": [
@@ -349,6 +600,61 @@
         "title": "DiagnosticsResponse",
         "type": "object"
       },
+      "DocumentSourceKind": {
+        "enum": [
+          "filesystem",
+          "microsoft-graph",
+          "api"
+        ],
+        "title": "DocumentSourceKind",
+        "type": "string"
+      },
+      "DocumentSourceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ConnectorConfiguration"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DocumentSourceKind"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "root_ref": {
+            "minLength": 1,
+            "title": "Root Ref",
+            "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "root_ref"
+        ],
+        "title": "DocumentSourceRequest",
+        "type": "object"
+      },
       "EdgeConfidence": {
         "enum": [
           "human_asserted",
@@ -366,6 +672,121 @@
         ],
         "title": "EdgeType",
         "type": "string"
+      },
+      "ErasureRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Item Ids",
+            "type": "array"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "lawful_basis": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Lawful Basis",
+            "type": "string"
+          },
+          "legal_hold_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Legal Hold Ids",
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "item",
+              "matter",
+              "client"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "erased",
+              "held"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subject_ref_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Subject Ref Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "scope",
+          "scope_id",
+          "subject_ref_sha256",
+          "lawful_basis",
+          "state"
+        ],
+        "title": "ErasureRecord",
+        "type": "object"
+      },
+      "ErasureRequest": {
+        "properties": {
+          "lawful_basis": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Lawful Basis",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "item",
+              "matter",
+              "client"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "subject_ref": {
+            "minLength": 1,
+            "title": "Subject Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "subject_ref",
+          "lawful_basis"
+        ],
+        "title": "ErasureRequest",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -493,6 +914,64 @@
             ],
             "title": "Matter Id"
           },
+          "previous_source_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Source Document Id"
+          },
+          "source_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Id"
+          },
+          "source_document_span_end": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Span End"
+          },
+          "source_document_span_start": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Span Start"
+          },
+          "source_document_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Version"
+          },
           "source_kind": {
             "$ref": "#/components/schemas/SourceKind"
           },
@@ -523,6 +1002,7 @@
         "title": "IngestRequest",
         "type": "object"
       },
+      "JsonValue": {},
       "KnowledgeContentRole": {
         "enum": [
           "fact",
@@ -542,6 +1022,97 @@
         ],
         "title": "KnowledgeKind",
         "type": "string"
+      },
+      "LegalHoldRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "hold_id": {
+            "minLength": 1,
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Released At"
+          },
+          "scope": {
+            "enum": [
+              "item",
+              "matter",
+              "client"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id",
+          "scope",
+          "scope_id",
+          "reason"
+        ],
+        "title": "LegalHoldRecord",
+        "type": "object"
+      },
+      "LegalHoldRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "item",
+              "matter",
+              "client"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "reason"
+        ],
+        "title": "LegalHoldRequest",
+        "type": "object"
       },
       "PendingAuthorityAmendment": {
         "additionalProperties": false,
@@ -765,6 +1336,294 @@
         "title": "ReferenceExtractionRequest",
         "type": "object"
       },
+      "RetentionRunRequest": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          }
+        },
+        "title": "RetentionRunRequest",
+        "type": "object"
+      },
+      "ReviewTaskAssignmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_by": {
+            "minLength": 1,
+            "title": "Assigned By",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "minLength": 1,
+            "title": "Reviewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer_id",
+          "assigned_by"
+        ],
+        "title": "ReviewTaskAssignmentRequest",
+        "type": "object"
+      },
+      "ReviewTaskResolutionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reviewer_id": {
+            "minLength": 1,
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationRequest"
+          }
+        },
+        "required": [
+          "reviewer_id",
+          "verification"
+        ],
+        "title": "ReviewTaskResolutionRequest",
+        "type": "object"
+      },
+      "ReviewTaskStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reviewer_id": {
+            "minLength": 1,
+            "title": "Reviewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer_id"
+        ],
+        "title": "ReviewTaskStartRequest",
+        "type": "object"
+      },
+      "ReviewTaskState": {
+        "enum": [
+          "open",
+          "assigned",
+          "in_review",
+          "resolved"
+        ],
+        "title": "ReviewTaskState",
+        "type": "string"
+      },
+      "SecretReference": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/SecretReferenceProvider"
+          },
+          "reference": {
+            "minLength": 1,
+            "title": "Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "reference"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      },
+      "SecretReferenceProvider": {
+        "enum": [
+          "environment",
+          "keychain",
+          "vault"
+        ],
+        "title": "SecretReferenceProvider",
+        "type": "string"
+      },
+      "ServicePrincipalCreateRequest": {
+        "properties": {
+          "principal_id": {
+            "examples": [
+              "document-connector"
+            ],
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "tenant_id": {
+            "examples": [
+              "tenant-a"
+            ],
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "tenant_id"
+        ],
+        "title": "ServicePrincipalCreateRequest",
+        "type": "object"
+      },
+      "ServicePrincipalCredentialResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "credential": {
+            "title": "Credential",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "tenant_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "scopes",
+          "credential"
+        ],
+        "title": "ServicePrincipalCredentialResponse",
+        "type": "object"
+      },
+      "ServicePrincipalResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "tenant_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "scopes"
+        ],
+        "title": "ServicePrincipalResponse",
+        "type": "object"
+      },
+      "SourceDocumentIngestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Base64"
+          },
+          "external_id": {
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "filename": {
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          }
+        },
+        "required": [
+          "external_id",
+          "filename"
+        ],
+        "title": "SourceDocumentIngestRequest",
+        "type": "object"
+      },
       "SourceKind": {
         "enum": [
           "partner",
@@ -814,7 +1673,8 @@
         "enum": [
           "pending",
           "confirmed",
-          "rejected"
+          "rejected",
+          "deferred"
         ],
         "title": "SuggestionDecision",
         "type": "string"
@@ -1193,6 +2053,285 @@
           }
         },
         "summary": "Authority Change"
+      }
+    },
+    "/authority-events": {
+      "post": {
+        "operationId": "authority_event_authority_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorityEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Authority Event Authority Events Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authority Event"
+      }
+    },
+    "/authority-polls/dead-letters": {
+      "get": {
+        "operationId": "authority_poll_dead_letters_authority_polls_dead_letters_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Authority Poll Dead Letters Authority Polls Dead Letters Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authority Poll Dead Letters"
+      }
+    },
+    "/authority-polls/dead-letters/{event_id}/retry": {
+      "post": {
+        "operationId": "retry_authority_poll_dead_letter_authority_polls_dead_letters__event_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retry Authority Poll Dead Letter Authority Polls Dead Letters  Event Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Authority Poll Dead Letter"
+      }
+    },
+    "/candidate-claims/{candidate_id}/defer": {
+      "post": {
+        "operationId": "defer_candidate_claim_candidate_claims__candidate_id__defer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateClaimDeferralRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Defer Candidate Claim Candidate Claims  Candidate Id  Defer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Defer Candidate Claim"
+      }
+    },
+    "/candidate-claims/{candidate_id}/promote": {
+      "post": {
+        "operationId": "promote_candidate_claim_candidate_claims__candidate_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateClaimPromotionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Promote Candidate Claim Candidate Claims  Candidate Id  Promote Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Candidate Claim"
+      }
+    },
+    "/candidate-claims/{candidate_id}/reject": {
+      "post": {
+        "operationId": "reject_candidate_claim_candidate_claims__candidate_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateClaimRejectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Candidate Claim Candidate Claims  Candidate Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Candidate Claim"
       }
     },
     "/contest/{item_id}": {
@@ -1652,6 +2791,38 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "matter_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Matter Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
           }
         ],
         "responses": {
@@ -1733,6 +2904,57 @@
           }
         },
         "summary": "Confirm Dependency Suggestion"
+      }
+    },
+    "/dependencies/suggestions/{suggestion_id}/defer": {
+      "post": {
+        "operationId": "defer_dependency_suggestion_dependencies_suggestions__suggestion_id__defer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suggestion_id",
+            "required": true,
+            "schema": {
+              "title": "Suggestion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DependencySuggestionDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Defer Dependency Suggestion Dependencies Suggestions  Suggestion Id  Defer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Defer Dependency Suggestion"
       }
     },
     "/dependencies/suggestions/{suggestion_id}/reject": {
@@ -2165,6 +3387,900 @@
           }
         },
         "summary": "Extract References"
+      }
+    },
+    "/retention/erasures": {
+      "get": {
+        "operationId": "erasure_requests_retention_erasures_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ErasureRecord"
+                  },
+                  "title": "Response Erasure Requests Retention Erasures Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Erasure Requests"
+      },
+      "post": {
+        "operationId": "erase_retention_scope_retention_erasures_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ErasureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Erase Retention Scope"
+      }
+    },
+    "/retention/legal-holds": {
+      "get": {
+        "operationId": "legal_holds_retention_legal_holds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LegalHoldRecord"
+                  },
+                  "title": "Response Legal Holds Retention Legal Holds Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Legal Holds"
+      },
+      "post": {
+        "operationId": "create_legal_hold_retention_legal_holds_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalHoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHoldRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Legal Hold"
+      }
+    },
+    "/retention/legal-holds/{hold_id}/release": {
+      "post": {
+        "operationId": "release_legal_hold_retention_legal_holds__hold_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hold_id",
+            "required": true,
+            "schema": {
+              "title": "Hold Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHoldRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Legal Hold"
+      }
+    },
+    "/retention/run": {
+      "post": {
+        "operationId": "apply_retention_retention_run_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ErasureRecord"
+                  },
+                  "title": "Response Apply Retention Retention Run Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Retention"
+      }
+    },
+    "/review-tasks": {
+      "get": {
+        "operationId": "review_tasks_review_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "reviewer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reviewer Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewTaskState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Review Tasks Review Tasks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Tasks"
+      }
+    },
+    "/review-tasks/{task_id}/assign": {
+      "post": {
+        "operationId": "assign_review_task_review_tasks__task_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTaskAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Assign Review Task Review Tasks  Task Id  Assign Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assign Review Task"
+      }
+    },
+    "/review-tasks/{task_id}/resolve": {
+      "post": {
+        "operationId": "resolve_review_task_review_tasks__task_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTaskResolutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Review Task Review Tasks  Task Id  Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Review Task"
+      }
+    },
+    "/review-tasks/{task_id}/start": {
+      "post": {
+        "operationId": "start_review_task_review_tasks__task_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTaskStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Review Task Review Tasks  Task Id  Start Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Review Task"
+      }
+    },
+    "/service-principals": {
+      "get": {
+        "operationId": "service_principals_service_principals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServicePrincipalResponse"
+                  },
+                  "title": "Response Service Principals Service Principals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Service Principals"
+      },
+      "post": {
+        "operationId": "create_service_principal_service_principals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServicePrincipalCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePrincipalCredentialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Service Principal"
+      }
+    },
+    "/service-principals/{principal_id}/revoke": {
+      "post": {
+        "operationId": "revoke_service_principal_service_principals__principal_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "principal_id",
+            "required": true,
+            "schema": {
+              "title": "Principal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePrincipalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Service Principal"
+      }
+    },
+    "/service-principals/{principal_id}/rotate": {
+      "post": {
+        "operationId": "rotate_service_principal_service_principals__principal_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "principal_id",
+            "required": true,
+            "schema": {
+              "title": "Principal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePrincipalCredentialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rotate Service Principal"
+      }
+    },
+    "/source-documents/{document_id}/candidates": {
+      "get": {
+        "operationId": "candidate_claims_source_documents__document_id__candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Candidate Claims Source Documents  Document Id  Candidates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Candidate Claims"
+      }
+    },
+    "/sources": {
+      "post": {
+        "operationId": "register_document_source_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Document Source Sources Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Document Source"
+      }
+    },
+    "/sources/{source_id}/documents": {
+      "get": {
+        "operationId": "source_documents_sources__source_id__documents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Source Documents Sources  Source Id  Documents Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Documents"
+      },
+      "post": {
+        "operationId": "ingest_source_document_sources__source_id__documents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDocumentIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ingest Source Document Sources  Source Id  Documents Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Source Document"
       }
     },
     "/staleness/predict": {

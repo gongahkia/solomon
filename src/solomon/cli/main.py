@@ -533,8 +533,16 @@ def dependency_suggestions(
     item_id: Annotated[str | None, typer.Option("--item-id", help="Restrict to one knowledge item.")] = None,
     decision: Annotated[SuggestionDecision | None, typer.Option("--decision")] = SuggestionDecision.PENDING,
     limit: Annotated[int, typer.Option("--limit", min=1)] = 100,
+    matter_id: Annotated[str | None, typer.Option("--matter-id", help="Restrict to one matter.")] = None,
+    client_id: Annotated[str | None, typer.Option("--client-id", help="Restrict to one client.")] = None,
 ) -> None:
-    suggestions = _service().dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+    suggestions = _service().dependency_suggestions(
+        item_id=item_id,
+        decision=decision,
+        limit=limit,
+        matter_id=matter_id,
+        client_id=client_id,
+    )
     _print_json([suggestion.model_dump(mode="json") for suggestion in suggestions])
 
 
@@ -566,6 +574,25 @@ def reject_dependency_suggestion(
     suggestion = _service().reject_dependency_suggestion(
         suggestion_id,
         DependencySuggestionDecisionRequest(by=by),
+    )
+    _print_json(suggestion.model_dump(mode="json"))
+
+
+@app.command(
+    "defer-dependency-suggestion",
+    help="Defer one dependency suggestion without creating an edge.",
+    epilog=_example(
+        "uv run solomon defer-dependency-suggestion suggestion-1 --by PartnerA --reason 'need source context'"
+    ),
+)
+def defer_dependency_suggestion(
+    suggestion_id: Annotated[str, typer.Argument(help="Dependency suggestion id.")],
+    by: Annotated[str, typer.Option("--by", help="Reviewer identifier.")],
+    reason: Annotated[str, typer.Option("--reason", help="Reason the decision remains unresolved.")],
+) -> None:
+    suggestion = _service().defer_dependency_suggestion(
+        suggestion_id,
+        DependencySuggestionDecisionRequest(by=by, reason=reason),
     )
     _print_json(suggestion.model_dump(mode="json"))
 

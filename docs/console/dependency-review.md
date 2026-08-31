@@ -18,7 +18,7 @@ Let a curator inspect proposed and confirmed dependency edges, accept or reject 
 +-----------------------------------+----------------------------------------------+
 | Suggestions queue                 | Graph view                                    |
 |                                   |                                              |
-| [pending] [confirmed] [rejected]  |   item-1  --->  regulation-r-section-12       |
+| [pending] [confirmed] [rejected] [deferred] | item-1 ---> regulation-r-section-12       |
 | item id     authority       src   |      |                                       |
 | item-1      Reg R s12       det   |      +---> dependent-1                        |
 | item-4      MAS Notice 626  llm   |                                              |
@@ -35,7 +35,7 @@ Let a curator inspect proposed and confirmed dependency edges, accept or reject 
 
 Suggestions:
 
-- `dependency_suggestions(item_id=None, decision=pending|confirmed|rejected, limit=...)`
+- `dependency_suggestions(item_id=None, decision=pending|confirmed|rejected|deferred, limit=...)`
 - `confirm_dependency_suggestion(suggestion_id, by=reviewer_id)`
 - `reject_dependency_suggestion(suggestion_id, by=reviewer_id)`
 
@@ -47,7 +47,7 @@ Graph:
 
 ## Filters
 
-- decision: pending, confirmed, rejected.
+- decision: pending, confirmed, rejected, deferred.
 - source: deterministic, llm.
 - target kind: external authority, knowledge item.
 - external authority id.
@@ -69,6 +69,7 @@ Depth controls graph traversal only. Accept/reject actions operate on the select
 - created at.
 - decided by.
 - edge reason.
+- source-document version, source span, authority span, normalized reference, and extraction explanation.
 
 ## Graph view
 
@@ -108,6 +109,18 @@ Effect:
 - suggestion decision becomes `rejected`.
 - no dependency edge is created.
 - audit journal records `dependency_suggestion_rejected`.
+
+### Defer suggestion
+
+Service call:
+
+`defer_dependency_suggestion(suggestion_id, DependencySuggestionDecisionRequest(by=reviewer_id, reason=...))`
+
+Effect:
+
+- suggestion decision becomes `deferred` with actor, time, and reason.
+- no dependency edge is created; a later curator may confirm or reject it.
+- audit journal records `dependency_suggestion_deferred`.
 
 ## HTMX behavior
 

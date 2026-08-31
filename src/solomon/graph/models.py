@@ -36,6 +36,7 @@ class DependencyEdge(SolomonModel):
     created_at: datetime = Field(default_factory=now_utc)
     created_by: str | None = None
     reason: str | None = None
+    source_suggestion_id: str | None = None
 
     @field_validator("valid_from", "valid_to", "created_at")
     @classmethod

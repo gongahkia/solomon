@@ -1,0 +1,38 @@
+{
+  "audit_pack_verified": true,
+  "currency": {
+    "confirmed_impacts": 1,
+    "deferred_impacts": 0,
+    "rejected_impacts": 0
+  },
+  "decisions": {
+    "confirmed": 1,
+    "deferred": 1,
+    "human_confirmation_required": true,
+    "rejected": 1
+  },
+  "fixture": {
+    "candidate_claims": 4,
+    "scopes": 2,
+    "synthetic_documents": 2
+  },
+  "idempotency": {
+    "rejected_suppressed": true,
+    "restart_persistence": true,
+    "unchanged_document": true
+  },
+  "reference_and_evidence": {
+    "authority_span_reconstructible": true,
+    "normalized_reference": "aster-regulation-7-section-4",
+    "source_span_reconstructible": true
+  },
+  "revision": {
+    "new_document_version": 2,
+    "suggestion_lineage": true
+  },
+  "schema": "solomon.evidence_to_dependency_proof.snapshot.v1",
+  "scope": {
+    "alpha_queue_excludes_bravo": true,
+    "cross_scope_decision_denied": true
+  }
+}

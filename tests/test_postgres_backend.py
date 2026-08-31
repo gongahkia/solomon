@@ -165,6 +165,21 @@ def test_postgres_graph_store_persists_dependency_suggestions(tmp_path: Path) ->
         id="suggestion-1",
         item_id="item-1",
         authority_ref="Regulation R section 12",
+        fingerprint="fixture-fingerprint",
+        normalized_reference="regulation-r-section-12",
+        source_document_id="document-1",
+        source_document_version=2,
+        previous_source_document_id="document-0",
+        source_span_start=10,
+        source_span_end=42,
+        source_span="The position relies on Regulation R section 12.",
+        authority_span_start=34,
+        authority_span_end=57,
+        authority_span="Regulation R section 12",
+        matter_id="matter-1",
+        client_id="client-1",
+        explanation="fixture evidence",
+        audit_correlation_id="dependency_suggestion:item-1",
         suggested_edge=DependencyEdge(
             id="edge-suggested",
             source_id="item-1",
@@ -175,11 +190,39 @@ def test_postgres_graph_store_persists_dependency_suggestions(tmp_path: Path) ->
     )
 
     graph.add_dependency_suggestion(suggestion)
-    rejected = suggestion.model_copy(update={"decision": SuggestionDecision.REJECTED, "decided_by": "Partner A"})
-    graph.update_dependency_suggestion(rejected)
+    deferred = suggestion.model_copy(
+        update={
+            "decision": SuggestionDecision.DEFERRED,
+            "decided_by": "Partner A",
+            "decided_at": _dt(2024, 1, 2),
+            "decision_reason": "need surrounding context",
+        }
+    )
+    graph.update_dependency_suggestion(deferred)
 
-    assert graph.get_dependency_suggestion("suggestion-1").decision is SuggestionDecision.REJECTED
-    assert graph.list_dependency_suggestions(item_id="item-1", decision=SuggestionDecision.REJECTED) == [rejected]
+    graph.close()
+    reopened = PostgresGraphStore("postgresql://unit/solomon", connect=lambda _dsn: _connect(tmp_path))
+    persisted = reopened.get_dependency_suggestion("suggestion-1")
+    assert persisted.decision is SuggestionDecision.DEFERRED
+    assert persisted.fingerprint == "fixture-fingerprint"
+    assert persisted.source_document_version == 2
+    assert persisted.source_span == "The position relies on Regulation R section 12."
+    assert persisted.matter_id == "matter-1"
+    assert persisted.audit_correlation_id == "dependency_suggestion:item-1"
+    assert reopened.list_dependency_suggestions(item_id="item-1", decision=SuggestionDecision.DEFERRED) == [deferred]
+
+    rejected = deferred.model_copy(
+        update={
+            "decision": SuggestionDecision.REJECTED,
+            "decided_at": _dt(2024, 1, 3),
+            "decision_reason": "reviewed as non-reliance",
+        }
+    )
+    reopened.update_dependency_suggestion(rejected)
+
+    assert reopened.get_dependency_suggestion("suggestion-1").decision is SuggestionDecision.REJECTED
+    assert reopened.list_dependency_suggestions(item_id="item-1", decision=SuggestionDecision.REJECTED) == [rejected]
+    reopened.close()
 
 
 def test_storage_bundle_can_create_postgres_store_graph_and_index(tmp_path: Path) -> None:

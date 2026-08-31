@@ -735,6 +735,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         item_id: str | None = None,
         decision: SuggestionDecision | None = None,
         limit: int = 100,
+        matter_id: str | None = None,
+        client_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return [
             suggestion.model_dump(mode="json")
@@ -742,6 +744,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 item_id=item_id,
                 decision=decision,
                 limit=limit,
+                matter_id=matter_id,
+                client_id=client_id,
             )
         ]
 
@@ -760,6 +764,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload: DependencySuggestionDecisionRequest,
     ) -> dict[str, Any]:
         return active_service(request).reject_dependency_suggestion(suggestion_id, payload).model_dump(mode="json")
+
+    @app.post("/dependencies/suggestions/{suggestion_id}/defer")
+    def defer_dependency_suggestion(
+        request: Request,
+        suggestion_id: str,
+        payload: DependencySuggestionDecisionRequest,
+    ) -> dict[str, Any]:
+        return active_service(request).defer_dependency_suggestion(suggestion_id, payload).model_dump(mode="json")
 
     @app.post("/plans/execute")
     def execute_plan(request: Request, payload: PrimitivePlanRequest) -> dict[str, Any]:

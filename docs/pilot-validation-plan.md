@@ -28,6 +28,22 @@ Use a synthetic or approved non-privileged internal-knowledge subset containing 
 
 Store raw feedback in the firm’s approved research location, not in the public repository. Summarize only de-identified findings and the test fixture/version used.
 
+## Evidence-to-Dependency owner-operated protocol
+
+The immediate protocol may be run by the repository owner as the sole curator on the synthetic
+`evidence-to-dependency-proof` scenario. It is a future observation exercise, not a completion requirement for the
+automated proof.
+
+1. Run the headless scenario, open the pending suggestion, and inspect its source and authority spans.
+2. Time how long it takes to understand the proposal, then separately confirm, reject, or defer one proposal.
+3. Record whether the span was sufficient, whether the explanation implied legal adjudication, what source context was
+   missing, whether a rejected suggestion resurfaced after unchanged re-ingestion, and whether the final report was
+   comprehensible.
+4. Record free-text friction/confusion without privileged source content or client identifiers.
+
+Result: **pending.** No owner-operated observation or external curator validation has occurred. Automated corpus,
+workflow, audit, and scope results are correctness evidence only; they do not establish usability or adoption.
+
 ## Process for turning feedback into work
 
 1. Facilitator classifies each observation as usability, documentation, correctness defect, security/privacy concern, unsupported claim, or adoption evidence.

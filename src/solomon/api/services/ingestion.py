@@ -39,6 +39,14 @@ class IngestionService(ServiceDelegate):
             metadata["conclusion"] = request.conclusion
         if request.conclusion_polarity is not None:
             metadata["conclusion_polarity"] = request.conclusion_polarity.value
+        if request.source_document_id is not None:
+            metadata["source_document"] = {
+                "id": request.source_document_id,
+                "version": request.source_document_version,
+                "previous_document_id": request.previous_source_document_id,
+                "span_start": request.source_document_span_start,
+                "span_end": request.source_document_span_end,
+            }
         item = KnowledgeItem(
             kind=request.kind,
             content=hardened.content,

@@ -16,8 +16,14 @@ from solomon.api.service_models import (
     VerificationRequest,
     VerificationReviewRequest,
 )
-from solomon.api.services.base import ServiceDelegate
+from solomon.api.services.base import ServiceContext, ServiceDelegate
 from solomon.api.services.common import digest, parse_iso_datetime
+from solomon.api.services.dependency_suggestions import (
+    DependencySuggestionLifecycle,
+    source_document_offset,
+    source_document_value,
+    source_document_version,
+)
 from solomon.audit.journal import AuditAttribution, sign_verification_attestation
 from solomon.currency.contradiction import (
     ContradictionSignal,
@@ -26,7 +32,7 @@ from solomon.currency.contradiction import (
     detect_same_authority_opposite_conclusions,
 )
 from solomon.currency.engine import register_authority_change
-from solomon.currency.models import CurrencyState, KnowledgeItem, VerifiedState
+from solomon.currency.models import CurrencyState, KnowledgeContentRole, KnowledgeItem, VerifiedState
 from solomon.currency.prediction import StalenessRiskReport, predict_staleness_risk
 from solomon.currency.verification import (
     VerificationLifecycleEvent,
@@ -43,9 +49,7 @@ from solomon.graph.suggestions import (
     DependencySuggestion,
     ReferenceExtraction,
     SuggestionDecision,
-    confirm_suggestion,
     extract_defined_terms_and_citations,
-    reject_suggestion,
     suggest_authority_dependencies,
     suggest_authority_dependencies_with_llm,
 )
@@ -54,6 +58,16 @@ from solomon.orchestrator.models import ModelRouter
 
 
 class AuthorityService(ServiceDelegate):
+    def __init__(self, context: ServiceContext) -> None:
+        super().__init__(context)
+        self._dependency_lifecycle = DependencySuggestionLifecycle(
+            graph=self.graph,
+            audit=self.audit,
+            currency_cache=self.currency_cache,
+            get_item=self._get_item,
+            on_confirmed_edge=self._detect_for_edge,
+        )
+
     def evaluate_currency(self, item_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         return self.currency_cache.get_or_evaluate(self._get_item(item_id), as_of=as_of).model_dump(mode="json")
 
@@ -256,66 +270,37 @@ class AuthorityService(ServiceDelegate):
         item_id: str | None = None,
         decision: SuggestionDecision | None = None,
         limit: int = 100,
+        matter_id: str | None = None,
+        client_id: str | None = None,
     ) -> list[DependencySuggestion]:
-        return self.graph.list_dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+        return self._dependency_lifecycle.list(
+            item_id=item_id,
+            decision=decision,
+            limit=limit,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
 
     def confirm_dependency_suggestion(
         self,
         suggestion_id: str,
         request: DependencySuggestionDecisionRequest,
     ) -> DependencyEdge:
-        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
-        if suggestion.decision is SuggestionDecision.CONFIRMED:
-            return suggestion.suggested_edge
-        if suggestion.decision is SuggestionDecision.REJECTED:
-            raise BadRequestError("rejected dependency suggestions cannot be confirmed")
-        edge = confirm_suggestion(suggestion, by=request.by)
-        edge = self.graph.add_dependency(edge)
-        self._detect_for_edge(edge)
-        confirmed = suggestion.model_copy(
-            update={
-                "decision": SuggestionDecision.CONFIRMED,
-                "decided_by": request.by,
-                "decided_at": datetime.now(timezone.utc),
-                "suggested_edge": edge,
-            }
-        )
-        self.graph.update_dependency_suggestion(confirmed)
-        self.currency_cache.invalidate({edge.source_id})
-        self.audit.append(
-            "dependency_suggestion_confirmed",
-            {
-                "suggestion_id": suggestion_id,
-                "item_id": edge.source_id,
-                "target_id": edge.target_id,
-                "edge_id": edge.id,
-                "by": request.by,
-            },
-        )
-        return edge
+        return self._dependency_lifecycle.confirm(suggestion_id, request)
 
     def reject_dependency_suggestion(
         self,
         suggestion_id: str,
         request: DependencySuggestionDecisionRequest,
     ) -> DependencySuggestion:
-        suggestion = self.graph.get_dependency_suggestion(suggestion_id)
-        if suggestion.decision is SuggestionDecision.REJECTED:
-            return suggestion
-        if suggestion.decision is SuggestionDecision.CONFIRMED:
-            raise BadRequestError("confirmed dependency suggestions cannot be rejected")
-        rejected = reject_suggestion(suggestion, by=request.by)
-        self.graph.update_dependency_suggestion(rejected)
-        self.audit.append(
-            "dependency_suggestion_rejected",
-            {
-                "suggestion_id": suggestion_id,
-                "item_id": rejected.item_id,
-                "target_id": rejected.suggested_edge.target_id,
-                "by": request.by,
-            },
-        )
-        return rejected
+        return self._dependency_lifecycle.reject(suggestion_id, request)
+
+    def defer_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencySuggestion:
+        return self._dependency_lifecycle.defer(suggestion_id, request)
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         timestamp = as_of or self._deterministic_store_timestamp()
@@ -357,11 +342,19 @@ class AuthorityService(ServiceDelegate):
         use_llm: bool = False,
         router: ModelRouter | None = None,
     ) -> list[DependencySuggestion]:
+        if item.content_role is KnowledgeContentRole.INSTRUCTION:
+            return []
         suggestions = suggest_authority_dependencies(
             item_id=item.id,
             content=item.content,
             boundary=self.boundary,
             matter_id=item.matter_id,
+            client_id=item.client_id,
+            source_document_id=source_document_value(item, "id"),
+            source_document_version=source_document_version(item),
+            previous_source_document_id=source_document_value(item, "previous_document_id"),
+            source_offset=source_document_offset(item),
+            audit_correlation_id=f"dependency_suggestion:{item.id}",
         )
         if use_llm:
             if router is None:
@@ -398,8 +391,17 @@ class AuthorityService(ServiceDelegate):
                     "target_id": stored_suggestion.suggested_edge.target_id,
                     "edge_type": stored_suggestion.suggested_edge.edge_type.value,
                     "source": stored_suggestion.source,
+                    "fingerprint": stored_suggestion.fingerprint,
+                    "source_document_id": stored_suggestion.source_document_id,
+                    "source_document_version": stored_suggestion.source_document_version,
+                    "source_span": [stored_suggestion.source_span_start, stored_suggestion.source_span_end],
+                    "authority_span": [stored_suggestion.authority_span_start, stored_suggestion.authority_span_end],
                     "authority_ref_sha256": digest(stored_suggestion.authority_ref),
                 },
+                attribution=AuditAttribution(
+                    actor_id="system:dependency-extraction",
+                    correlation_id=stored_suggestion.audit_correlation_id,
+                ),
             )
         return stored
 

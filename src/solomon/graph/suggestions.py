@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import re
@@ -18,17 +19,35 @@ from solomon.currency.models import new_uuid7, now_utc
 from solomon.graph.models import DependencyEdge, EdgeConfidence, EdgeType
 from solomon.orchestrator.models import ModelRequest, ModelRouter
 
-TOKEN_RE = re.compile(r"\[[0-9]{4}\]|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|§|s\.|v\.?|[.,;:()\"]")
-AUTHORITY_NOUNS = {"act", "code", "regulation", "regulations", "rule", "rules"}
+TOKEN_RE = re.compile(
+    r"\[[0-9]{4}\]|(?:reg|s)\.|v\.?|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|§|[.,;:()\"]",
+    re.IGNORECASE,
+)
+AUTHORITY_NOUNS = {"act", "code", "reg", "regulation", "regulations", "rule", "rules"}
 SECTION_MARKERS = {"section", "s.", "§"}
 CASE_CONNECTORS = {"of", "the", "and", "&", "pte", "ltd", "llc", "inc", "corp", "co"}
 QUOTE_DEFINITION_MARKERS = ("shall mean", "has the meaning", "means")
+POSITIVE_RELIANCE_CUES = ("relies on", "depends on", "pursuant to", "required by", "under ", "controls.", "matters.")
+NEGATIVE_RELIANCE_CUES = (
+    "does not rely",
+    "do not rely",
+    "not rely",
+    "not on ",
+    "rather than ",
+    "background only",
+    "adopts no authority",
+    "distinguishes ",
+    "rejects ",
+    "inapplicable",
+    "contrary argument",
+)
 
 
 class SuggestionDecision(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
+    DEFERRED = "deferred"
 
 
 class DependencySuggestion(SolomonModel):
@@ -38,9 +57,25 @@ class DependencySuggestion(SolomonModel):
     suggested_edge: DependencyEdge
     decision: SuggestionDecision = SuggestionDecision.PENDING
     source: Literal["deterministic", "llm"] = "deterministic"
+    fingerprint: str | None = None
+    normalized_reference: str | None = None
+    source_document_id: str | None = None
+    source_document_version: int | None = None
+    previous_source_document_id: str | None = None
+    source_span_start: int | None = None
+    source_span_end: int | None = None
+    source_span: str | None = None
+    authority_span_start: int | None = None
+    authority_span_end: int | None = None
+    authority_span: str | None = None
+    matter_id: str | None = None
+    client_id: str | None = None
+    explanation: str | None = None
+    audit_correlation_id: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
     decided_at: datetime | None = None
     decided_by: str | None = None
+    decision_reason: str | None = None
 
 
 class DefinedTerm(SolomonModel):
@@ -98,15 +133,36 @@ def suggest_authority_dependencies(
     content: str,
     boundary: SolomonBoundary,
     matter_id: str | None = None,
+    client_id: str | None = None,
+    source_document_id: str | None = None,
+    source_document_version: int | None = None,
+    previous_source_document_id: str | None = None,
+    source_offset: int = 0,
+    audit_correlation_id: str | None = None,
 ) -> list[DependencySuggestion]:
-    sanitized = boundary.sanitize_context(content, matter_id=matter_id)
+    _ = boundary.sanitize_context(content, matter_id=matter_id)
     suggestions: list[DependencySuggestion] = []
-    references = extract_defined_terms_and_citations(content=sanitized.sanitized_text)
+    references = extract_defined_terms_and_citations(content=content)
     for citation in references.citations:
-        if citation.kind not in {"authority", "section"}:
+        if citation.kind not in {"authority", "section", "case"}:
             continue
+        evidence = _reliance_evidence(content, citation)
+        if evidence is None:
+            continue
+        source_start, source_end, source_span = evidence
         authority_ref = citation.text
         authority_id = citation.normalized_id
+        fingerprint = _suggestion_fingerprint(
+            item_id=item_id,
+            target_id=authority_id,
+            source_document_id=source_document_id,
+            source_document_version=source_document_version,
+            source_span_start=source_offset + source_start,
+            source_span_end=source_offset + source_end,
+            authority_span_start=source_offset + (citation.span_start or 0),
+            authority_span_end=source_offset + (citation.span_end or 0),
+            extraction_method="deterministic",
+        )
         suggestions.append(
             DependencySuggestion(
                 item_id=item_id,
@@ -117,9 +173,27 @@ def suggest_authority_dependencies(
                     edge_type=EdgeType.INTERNAL_DEPENDS_ON_EXTERNAL,
                     target_kind="external_authority",
                     confidence=EdgeConfidence.LLM_SUGGESTED,
-                    reason="candidate authority reference extracted from Solomon-sanitized text",
+                    reason=(
+                        "candidate reliance reference extracted after Solomon boundary preflight; "
+                        "human confirmation required"
+                    ),
                 ),
                 source="deterministic",
+                fingerprint=fingerprint,
+                normalized_reference=authority_id,
+                source_document_id=source_document_id,
+                source_document_version=source_document_version,
+                previous_source_document_id=previous_source_document_id,
+                source_span_start=source_offset + source_start,
+                source_span_end=source_offset + source_end,
+                source_span=source_span,
+                authority_span_start=source_offset + (citation.span_start or 0),
+                authority_span_end=source_offset + (citation.span_end or 0),
+                authority_span=authority_ref,
+                matter_id=matter_id,
+                client_id=client_id,
+                explanation="deterministic reliance cue and cited authority co-occur in the reviewed source span",
+                audit_correlation_id=audit_correlation_id,
             )
         )
     return suggestions
@@ -174,6 +248,7 @@ def confirm_suggestion(suggestion: DependencySuggestion, *, by: str) -> Dependen
             "confidence": EdgeConfidence.HUMAN_CONFIRMED,
             "created_by": by,
             "reason": f"human confirmed suggestion: {suggestion.authority_ref}",
+            "source_suggestion_id": suggestion.id,
         }
     )
 
@@ -191,6 +266,17 @@ def reject_suggestion(suggestion: DependencySuggestion, *, by: str) -> Dependenc
     )
 
 
+def defer_suggestion(suggestion: DependencySuggestion, *, by: str, reason: str | None = None) -> DependencySuggestion:
+    return suggestion.model_copy(
+        update={
+            "decision": SuggestionDecision.DEFERRED,
+            "decided_by": by,
+            "decided_at": now_utc(),
+            "decision_reason": reason,
+        }
+    )
+
+
 def _clean(value: str) -> str:
     return " ".join(value.strip().split())
 
@@ -201,7 +287,60 @@ def _authority_id(value: str) -> str:
 
 def _citation_id(value: str) -> str:
     normalized = value.lower().replace("§", " section ")
+    normalized = re.sub(r"\breg\.?(?=\s|$)", "regulation", normalized)
+    normalized = re.sub(r"(?<![a-z.])s\.?(?=\s|$)", "section", normalized)
     return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _reliance_evidence(text: str, citation: CitationReference) -> tuple[int, int, str] | None:
+    if citation.span_start is None or citation.span_end is None:
+        return None
+    start = max(text.rfind(".", 0, citation.span_start), text.rfind("\n", 0, citation.span_start)) + 1
+    end_candidates = [
+        position
+        for position in (text.find(".", citation.span_end), text.find("\n", citation.span_end))
+        if position != -1
+    ]
+    end = min(end_candidates) + 1 if end_candidates else len(text)
+    source_span = text[start:end].strip()
+    if not source_span:
+        return None
+    normalized_sentence = source_span.lower()
+    prefix = text[max(start, citation.span_start - 56) : citation.span_start].lower()
+    if any(cue in prefix for cue in NEGATIVE_RELIANCE_CUES):
+        return None
+    if re.search(r"(?:^|[,;])\s*(?:not|rather than)\s*$", prefix):
+        return None
+    if not any(cue in normalized_sentence for cue in POSITIVE_RELIANCE_CUES):
+        return None
+    source_start = start + len(text[start:end]) - len(text[start:end].lstrip())
+    return source_start, source_start + len(source_span), source_span
+
+
+def _suggestion_fingerprint(
+    *,
+    item_id: str,
+    target_id: str,
+    source_document_id: str | None,
+    source_document_version: int | None,
+    source_span_start: int,
+    source_span_end: int,
+    authority_span_start: int,
+    authority_span_end: int,
+    extraction_method: str,
+) -> str:
+    payload = {
+        "item_id": item_id,
+        "target_id": target_id,
+        "source_document_id": source_document_id,
+        "source_document_version": source_document_version,
+        "source_span_start": source_span_start,
+        "source_span_end": source_span_end,
+        "authority_span_start": authority_span_start,
+        "authority_span_end": authority_span_end,
+        "extraction_method": extraction_method,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -307,7 +446,7 @@ def _eyecite_citations(text: str) -> list[CitationReference]:
     for citation in eyecite.get_citations(text):
         span_start, span_end = citation.span()
         rendered = _clean(_eyecite_rendered_text(citation, text[span_start:span_end]))
-        if not rendered:
+        if not rendered or rendered == "§":
             continue
         kind = _eyecite_kind(type(citation).__name__)
         citations.append(
@@ -345,7 +484,7 @@ def _grammar_citations(text: str) -> list[CitationReference]:
 def _parse_regulation_references(tokens: list[Token], text: str) -> list[CitationReference]:
     citations: list[CitationReference] = []
     for index, token in enumerate(tokens):
-        if token.lower not in {"regulation", "regulations", "rule", "rules"}:
+        if token.lower.rstrip(".") not in {"reg", "regulation", "regulations", "rule", "rules"}:
             continue
         if index + 3 >= len(tokens):
             continue
@@ -354,7 +493,8 @@ def _parse_regulation_references(tokens: list[Token], text: str) -> list[Citatio
             continue
         if not _is_section_number(tokens[marker_index + 1].text):
             continue
-        start, end = tokens[index].start, tokens[marker_index + 1].end
+        start_index = _authority_title_start(tokens, index)
+        start, end = tokens[start_index].start, tokens[marker_index + 1].end
         raw = _clean(text[start:end])
         citations.append(
             CitationReference(
@@ -373,7 +513,7 @@ def _parse_regulation_references(tokens: list[Token], text: str) -> list[Citatio
 def _parse_section_references(tokens: list[Token], text: str) -> list[CitationReference]:
     citations: list[CitationReference] = []
     for index, token in enumerate(tokens):
-        if token.lower not in AUTHORITY_NOUNS:
+        if token.lower.rstrip(".") not in AUTHORITY_NOUNS:
             continue
         marker_index = _next_section_marker(tokens, index + 1)
         if marker_index is None or marker_index + 1 >= len(tokens):
@@ -408,6 +548,9 @@ def _parse_case_references(tokens: list[Token], text: str) -> list[CitationRefer
             continue
         start, end = tokens[start_index].start, tokens[end_index].end
         raw = _trim_case_citation(_clean(text[start:end]))
+        neutral_citation = re.match(r"(.+?\bv\.?\s+.+?\s+\[\d{4}\]\s+[A-Z]{2,8}\s+\d+)", raw)
+        if neutral_citation is not None:
+            raw = neutral_citation.group(1)
         if raw:
             citations.append(
                 CitationReference(
@@ -493,6 +636,8 @@ def _authority_title_start(tokens: list[Token], noun_index: int) -> int:
         if previous.text in {".", ";", ":", ")", "("}:
             break
         if previous.text == ",":
+            break
+        if previous.lower == "and":
             break
         if not (previous.text[:1].isupper() or previous.text.isdigit() or previous.lower in CASE_CONNECTORS):
             break

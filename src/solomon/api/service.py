@@ -158,6 +158,7 @@ SERVICE_ACCESS: dict[str, ServiceAccess] = {
     "dependency_suggestions": "read",
     "confirm_dependency_suggestion": "curate",
     "reject_dependency_suggestion": "curate",
+    "defer_dependency_suggestion": "curate",
     "impact_query": "read",
     "dependency_graph": "read",
     "extract_references": "read",
@@ -710,6 +711,11 @@ class SolomonService:
                 client_id=request.client_id,
                 conclusion=request.conclusion,
                 conclusion_polarity=request.conclusion_polarity,
+                source_document_id=document.id,
+                source_document_version=document.version,
+                previous_source_document_id=document.previous_version_id,
+                source_document_span_start=candidate.start_offset,
+                source_document_span_end=candidate.end_offset,
             )
         )
         self.document_store.update_candidate(
@@ -1013,8 +1019,16 @@ class SolomonService:
         item_id: str | None = None,
         decision: SuggestionDecision | None = None,
         limit: int = 100,
+        matter_id: str | None = None,
+        client_id: str | None = None,
     ) -> list[DependencySuggestion]:
-        return self._authority.dependency_suggestions(item_id=item_id, decision=decision, limit=limit)
+        return self._authority.dependency_suggestions(
+            item_id=item_id,
+            decision=decision,
+            limit=limit,
+            matter_id=matter_id,
+            client_id=client_id,
+        )
 
     def confirm_dependency_suggestion(
         self,
@@ -1029,6 +1043,13 @@ class SolomonService:
         request: DependencySuggestionDecisionRequest,
     ) -> DependencySuggestion:
         return self._authority.reject_dependency_suggestion(suggestion_id, request)
+
+    def defer_dependency_suggestion(
+        self,
+        suggestion_id: str,
+        request: DependencySuggestionDecisionRequest,
+    ) -> DependencySuggestion:
+        return self._authority.defer_dependency_suggestion(suggestion_id, request)
 
     def impact_query(self, authority_id: str, *, as_of: datetime | None = None) -> dict[str, Any]:
         return self._authority.impact_query(authority_id, as_of=as_of)

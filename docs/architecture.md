@@ -17,7 +17,8 @@ Solomon is a Python 3.10+ FastAPI service and CLI. It is organized around durabl
 
 1. Ingest creates a `KnowledgeItem` with provenance and source-derived credence.
 2. The Solomon boundary review engine gates storage before the item is written.
-3. Dependency edges are manually tagged or suggested from boundary-sanitized text and parsed legal references.
+3. Local deterministic extraction finds cited reliance candidates after boundary preflight. Suggestions retain source
+   spans and remain pending until a curator confirms them; only then does Solomon create a dependency edge.
 4. Authority changes propagate staleness through graph dependents.
 5. Recall searches the local index, filters Live items by default, expands dependencies, and applies credence.
 6. Model context is pseudonymized by the configured boundary before any remote endpoint.

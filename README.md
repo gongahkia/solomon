@@ -28,6 +28,7 @@ currency, credence, verification, deterministic primitive plans, and contestabil
 - [MCP Quick Start](#mcp-quick-start)
 - [Currency Loop Proof](#currency-loop-proof)
 - [Evidence-to-Dependency Proof](#evidence-to-dependency-proof)
+- [Adversarial Dependency Generalization](#adversarial-dependency-generalization)
 - [Curator Console](#curator-console)
 - [CLI And SDK](#cli-and-sdk)
 - [Boundary And Memory](#boundary-and-memory)
@@ -110,6 +111,21 @@ quotation-derived mention, defers one unresolved proposal, proves re-ingestion/r
 that only the confirmed edge reaches currency propagation. Suggestions are not knowledge and never become edges
 without an explicit curator decision. See [`docs/roadmap/evidence-to-dependency-proof.md`](./docs/roadmap/evidence-to-dependency-proof.md)
 for the corpus, baseline, measured limits, and lifecycle.
+
+## Adversarial Dependency Generalization
+
+The separate 84-fixture, hash-locked synthetic challenge measures how the deterministic parser behaves beyond the
+controlled 23-fixture regression corpus. Its final held-out result passes precision, recall, abstention, and
+hard-negative FP gates but fails the predeclared exact-span and mutation-stability gates; it is therefore not a
+claim of complete generalization. Run the reproducible lifecycle/safety scenario with:
+
+```bash
+uv run python examples/scenarios/adversarial-dependency-generalization-proof/run.py \
+  --workspace /tmp/solomon-adversarial-dependency-proof
+```
+
+See [`docs/evaluations/adversarial-dependency-generalization.md`](./docs/evaluations/adversarial-dependency-generalization.md)
+for the locked corpus, raw baseline/final outputs, retained hypotheses, residual errors, and limits.
 
 ## Curator Console
 

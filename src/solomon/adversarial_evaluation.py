@@ -121,8 +121,8 @@ def render_adversarial_evaluation_report(result: dict[str, Any]) -> str:
             f"{values['abstention_accuracy']} | {values['hard_negative_false_positive_rate']} |"
         )
     rows.extend(["", "## Error-stage distribution", "", "| Stage | Count |", "| --- | ---: |"])
-    for stage, count in cast(dict[str, int], result["error_stage_distribution"]).items():
-        rows.append(f"| {stage.replace('_', ' ')} | {count} |")
+    for stage, error_count in cast(dict[str, int], result["error_stage_distribution"]).items():
+        rows.append(f"| {stage.replace('_', ' ')} | {error_count} |")
     return "\n".join(rows) + "\n"
 
 
@@ -282,8 +282,10 @@ def _score_item(
         if not (source_match and target_match):
             stage = "evidence_span_incomplete" if source_overlap and target_overlap else "evidence_span_over_broad"
             errors.append(_error(item, target_id, expected, actual, stage))
-    for target_id in expected_refs - actual_refs:
-        errors.append(_error(item, target_id[0], {"reference_span": target_id[1]}, None, "reference_not_detected"))
+    for reference_target, reference_span in expected_refs - actual_refs:
+        errors.append(
+            _error(item, reference_target, {"reference_span": reference_span}, None, "reference_not_detected")
+        )
     for target_id in actual_suggestions.keys() - expected_suggestions.keys():
         errors.append(_error(item, target_id, None, actual_suggestions[target_id], _false_positive_stage(item)))
 

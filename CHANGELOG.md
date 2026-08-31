@@ -11,6 +11,9 @@ Keep a Changelog structure.
 
 - Added the Evidence-to-Dependency Proof: a versioned synthetic corpus, deterministic baseline/final evaluation,
   inspectable cited-reliance suggestions, deferred decisions, source-document lineage, and a headless curator proof.
+- Added a hash-locked 84-fixture Adversarial Dependency Generalization Proof, raw baseline/final and mutation
+  artifacts, two bounded deterministic parser hypotheses, and a headless lifecycle/audit scenario. The final report
+  records an explicit evidence-span and mutation-stability gate failure rather than claiming complete generalization.
 
 ### Changed
 

@@ -21,9 +21,11 @@ review downstream knowledge after an authority change; it does not decide legal 
 | Rejected suggestion | A curator decided the proposal must not become an edge. | No |
 | Deferred suggestion | A curator left the proposal unresolved pending more context. | No |
 
-A mention is not a candidate dependency merely because it names an authority. The deterministic path now requires a
-positive reliance cue in the same source sentence and rejects local negation, contrast, background, or distinguishing
-cues. This is a review-budget heuristic, not a legal conclusion or a claim of comprehensive citation interpretation.
+A mention is not a candidate dependency merely because it names an authority. The deterministic path requires a
+positive reliance cue in the cited source sentence, with one bounded exception for an immediately preceding adoption
+sentence and an anaphorically anchored authority sentence. It rejects local negation, contrast, background, or
+distinguishing cues. This is a review-budget heuristic, not a legal conclusion or a claim of comprehensive citation
+interpretation.
 
 ## Trust, scope, and evidence model
 
@@ -113,6 +115,10 @@ All three were first measured on the development split and retained only because
 `benchmarks/results/evidence-to-dependency-holdout.json`, and
 `benchmarks/results/evidence-to-dependency-final.json` are reproducible. These perfect scores describe only 23 deliberately controlled fixtures and must not be generalized
 to real firm documents, legal authorities, or external curator behavior.
+
+The separate [Adversarial Dependency Generalization Proof](../evaluations/adversarial-dependency-generalization.md)
+tests a larger, independently authored synthetic corpus and records an honest partial gate failure on evidence-span
+and fixed-mutation stability. It is the relevant context for any claim beyond this controlled 23-fixture regression.
 
 ## Canonical headless workflow
 

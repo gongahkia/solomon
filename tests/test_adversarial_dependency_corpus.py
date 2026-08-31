@@ -9,6 +9,7 @@ import pytest
 
 from solomon.adversarial_corpus import (
     AdversarialCorpusIntegrityError,
+    canonical_manifest_sha256,
     corpus_summary,
     load_adversarial_dependency_corpus,
     materialize_mutations,
@@ -55,3 +56,89 @@ def test_adversarial_manifest_hash_rejects_tampering(tmp_path: Path) -> None:
     path.write_text(json.dumps(tampered), encoding="utf-8")
     with pytest.raises(AdversarialCorpusIntegrityError, match="hash mismatch"):
         load_adversarial_dependency_corpus(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema", "unsupported", "unsupported"),
+        ("status", "draft", "not locked"),
+    ],
+)
+def test_adversarial_manifest_rejects_invalid_top_level_contract(
+    tmp_path: Path, field: str, value: str, message: str
+) -> None:
+    invalid = json.loads(CORPUS.read_text(encoding="utf-8"))
+    invalid[field] = value
+    invalid["manifest_sha256"] = canonical_manifest_sha256(invalid)
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(invalid), encoding="utf-8")
+
+    with pytest.raises(AdversarialCorpusIntegrityError, match=message):
+        load_adversarial_dependency_corpus(path)
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("too_few_items", "at least 80"),
+        ("missing_field", "all required fields"),
+        ("duplicate_id", "unique"),
+        ("invalid_split", "development or holdout"),
+        ("invalid_label", "unsupported label"),
+        ("empty_text", "has no input text"),
+        ("missing_tenant", "lacks tenant scope"),
+        ("invalid_candidates", "invalid authority candidates"),
+        ("invalid_spans", "invalid span labels"),
+        ("unregistered_suggestion", "unregistered suggestion"),
+        ("invalid_count", "count does not match"),
+        ("too_few_mutations", "at least 12"),
+    ],
+)
+def test_adversarial_manifest_rejects_invalid_fixture_and_mutation_contracts(
+    tmp_path: Path, kind: str, message: str
+) -> None:
+    invalid = json.loads(CORPUS.read_text(encoding="utf-8"))
+    first = invalid["items"][0]
+    if kind == "too_few_items":
+        invalid["items"] = []
+    elif kind == "missing_field":
+        first.pop("annotation")
+    elif kind == "duplicate_id":
+        invalid["items"][1]["id"] = first["id"]
+    elif kind == "invalid_split":
+        first["split"] = "draft"
+    elif kind == "invalid_label":
+        first["label"] = "Maybe"
+    elif kind == "empty_text":
+        first["text"] = ""
+    elif kind == "missing_tenant":
+        first["scope"] = {}
+    elif kind == "invalid_candidates":
+        first["registered_authority_candidates"] = "authority"
+    elif kind == "invalid_spans":
+        first["reference_spans"] = "authority"
+    elif kind == "unregistered_suggestion":
+        first["expected_suggestions"][0]["target_id"] = "unregistered"
+    elif kind == "invalid_count":
+        first["expected_suggestion_count"] = 99
+    elif kind == "too_few_mutations":
+        invalid["mutations"] = []
+    invalid["manifest_sha256"] = canonical_manifest_sha256(invalid)
+    path = tmp_path / f"{kind}.json"
+    path.write_text(json.dumps(invalid), encoding="utf-8")
+
+    with pytest.raises(AdversarialCorpusIntegrityError, match=message):
+        load_adversarial_dependency_corpus(path)
+
+
+def test_span_and_mutation_materialization_reject_invalid_declared_input() -> None:
+    with pytest.raises(AdversarialCorpusIntegrityError, match="non-empty text"):
+        resolve_declared_span("source", {"text": "", "occurrence": 0})
+    with pytest.raises(AdversarialCorpusIntegrityError, match="absent"):
+        resolve_declared_span("source", {"text": "missing"})
+
+    corpus = load_adversarial_dependency_corpus(CORPUS)
+    corpus["mutations"][0]["transformation"] = "declared_alias_substitution"
+    with pytest.raises(AdversarialCorpusIntegrityError, match="did not change"):
+        materialize_mutations(corpus)

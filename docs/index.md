@@ -14,6 +14,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Positioning](./positioning.md)
 - [Currency Loop Proof](./roadmap/currency-loop-proof.md)
 - [Evidence-to-Dependency Proof](./roadmap/evidence-to-dependency-proof.md)
+- [Adversarial Dependency Generalization Proof](./evaluations/adversarial-dependency-generalization.md)
 - [One-pager](./one-pager.md) and [PDF](https://github.com/gongahkia/solomon/blob/main/output/pdf/solomon-one-pager.pdf)
 - [Narrated five-minute tour](./assets/solomon-five-minute-tour.mp4) with
   [WebVTT chapter captions](./assets/solomon-five-minute-tour.vtt)
@@ -32,6 +33,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Stale house-view scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/stale-house-view)
 - [Currency Loop Proof scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/currency-loop-proof)
 - [Evidence-to-Dependency Proof scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/evidence-to-dependency-proof)
+- [Adversarial Dependency Generalization scenario](https://github.com/gongahkia/solomon/tree/main/examples/scenarios/adversarial-dependency-generalization-proof)
 - [Curator console walkthroughs](./console/index.md)
 
 ## Jurisdictions

@@ -2,7 +2,7 @@
 
 # Adversarial Dependency Challenge: Untuned Baseline
 
-The raw machine-readable records in [`benchmarks/results`](../../benchmarks/results) capture the deterministic
+The raw machine-readable records in [`benchmarks/results`](https://github.com/gongahkia/solomon/tree/main/benchmarks/results) capture the deterministic
 extractor state inherited from `f8f5a18`, after the separate corpus-lock commit `cb12eb9` and before an adversarial
 production hypothesis. The evaluator itself does not persist, confirm, or propagate a suggestion.
 
@@ -11,7 +11,7 @@ production hypothesis. The evaluator itself does not persist, confirm, or propag
 The existing 23-fixture Evidence-to-Dependency corpus was rerun without changing its manifest. Its complete metrics
 remain 1.0 for reference precision/recall, suggestion precision/recall, exact and overlap evidence spans, and
 abstention; it recorded no errors, duplicates, cross-scope leakage, or pre-review confirmed edges. The fresh raw
-record is [`evidence-to-dependency-adversarial-regression.json`](../../benchmarks/results/evidence-to-dependency-adversarial-regression.json).
+record is [`evidence-to-dependency-adversarial-regression.json`](https://github.com/gongahkia/solomon/blob/main/benchmarks/results/evidence-to-dependency-adversarial-regression.json).
 
 ## Challenge measurement
 
@@ -36,10 +36,10 @@ checks were true. The parser-only evaluator reports zero persisted lifecycle out
 headless service scenario, not this corpus pass, must prove scope filtering, rejection suppression, confirmation, and
 currency boundaries.
 
-Raw records: [`development`](../../benchmarks/results/adversarial-dependency-challenge-baseline-development.json),
-[`holdout`](../../benchmarks/results/adversarial-dependency-challenge-baseline-holdout.json),
-[`all`](../../benchmarks/results/adversarial-dependency-challenge-baseline-all.json), and
-[`mutations`](../../benchmarks/results/adversarial-dependency-challenge-baseline-mutations.json).
+Raw records: [`development`](https://github.com/gongahkia/solomon/blob/main/benchmarks/results/adversarial-dependency-challenge-baseline-development.json),
+[`holdout`](https://github.com/gongahkia/solomon/blob/main/benchmarks/results/adversarial-dependency-challenge-baseline-holdout.json),
+[`all`](https://github.com/gongahkia/solomon/blob/main/benchmarks/results/adversarial-dependency-challenge-baseline-all.json), and
+[`mutations`](https://github.com/gongahkia/solomon/blob/main/benchmarks/results/adversarial-dependency-challenge-baseline-mutations.json).
 
 ## Stage-level error analysis
 

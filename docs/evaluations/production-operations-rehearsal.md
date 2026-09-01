@@ -49,9 +49,9 @@ does not separately time a maintenance drain because this profile gates new clai
 drain protocol; it makes no external RPO, RTO, zero-RPO, or SLO claim.
 
 The most recent v3 run used Docker Engine with two isolated
-`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 198.480
-seconds overall: initialization 17.959s, governed fixture creation 6.125s, coordinated backup 6.759s, backup
-inspection 5.738s, restore planning 6.568s, restore apply 6.982s, and post-restore validation/recovery 57.512s.
+`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 142.319
+seconds overall: initialization 17.846s, governed fixture creation 6.175s, coordinated backup 6.079s, backup
+inspection 5.609s, restore planning 5.544s, restore apply 6.416s, and post-restore validation/recovery 53.034s.
 The maintenance-drain field was `null` for the reason above. These figures are one local engineering observation,
 not a production recovery estimate.
 

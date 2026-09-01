@@ -832,3 +832,69 @@ def test_backup_archive_guard_paths_and_manifest_integrity(tmp_path: Path, monke
     )
     with pytest.raises(BackupError, match="unsafe backup manifest path"):
         _validate_manifest_paths(unsafe_paths, allowed_roots={"data"}, allowed_files=set())
+
+
+def test_server_restore_private_manifest_and_stale_plan_guards(tmp_path: Path) -> None:
+    from solomon.backup import (
+        EncryptedServerBackupManifest,
+        ServerBackupRecord,
+        _read_server_manifest,
+        _read_server_record,
+        _validate_server_record,
+    )
+    from solomon.currency.models import now_utc
+    from solomon.store.encryption import EncryptedArtifactManifest
+
+    with pytest.raises(BackupError, match="manifest is missing or invalid"):
+        _read_server_manifest(tmp_path / "missing-manifest.json")
+    with pytest.raises(BackupError, match="record is missing or invalid"):
+        _read_server_record(tmp_path)
+
+    encrypted = EncryptedArtifactManifest(path="checkpoint.enc", salt_b64="salt")
+    manifest = EncryptedServerBackupManifest(
+        encrypted_artifact=encrypted,
+        encrypted_sha256="0" * 64,
+        archive_sha256="1" * 64,
+        deployment_id="manifest-deployment",
+        maintenance_operation_id="manifest-maintenance",
+    )
+    record = ServerBackupRecord(
+        deployment_id="record-deployment",
+        maintenance_operation_id="record-maintenance",
+        created_at=now_utc(),
+        app_version="test",
+        database_url="postgresql://reader@db.example/solomon",
+        components=("postgresql",),
+    )
+    with pytest.raises(BackupError, match="does not match encrypted manifest"):
+        _validate_server_record(record, manifest, "postgresql://reader@db.example/solomon")
+
+    _seed_service(tmp_path)
+    database_url = "postgresql://solomon:backup-password@localhost:5432/solomon"
+    initialize_deployment(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+    )
+    archive = tmp_path / "checkpoint.enc"
+
+    def dump_postgres(destination: Path) -> None:
+        destination.write_bytes(b"postgres-dump")
+
+    create_server_encrypted_backup(
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        database_url=database_url,
+        destination=archive,
+        passphrase=TEST_PASSPHRASE,
+        dump_postgres=dump_postgres,
+    )
+    plan = plan_server_restore(archive, tmp_path / "restored", database_url=database_url, passphrase=TEST_PASSPHRASE)
+    stale = plan.model_copy(update={"plan_fingerprint": "0" * 64})
+    with pytest.raises(BackupError, match="stale or has been modified"):
+        apply_server_restore(
+            stale,
+            database_url=database_url,
+            passphrase=TEST_PASSPHRASE,
+            restore_postgres=lambda _dump: None,
+        )

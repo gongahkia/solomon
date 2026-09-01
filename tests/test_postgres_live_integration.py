@@ -109,7 +109,7 @@ def test_live_postgres_operation_journal_claims_once_and_preserves_history() -> 
 
     psycopg = pytest.importorskip("psycopg")
     schema = f"test_operations_{uuid.uuid4().hex}"
-    first = second = None
+    first = second = verified = None
     try:
         first = PostgresOperationStore(dsn, schema=schema)
         second = PostgresOperationStore(dsn, schema=schema)
@@ -160,6 +160,8 @@ def test_live_postgres_operation_journal_claims_once_and_preserves_history() -> 
             "checkpoint",
             "completed",
         ]
+        verified = PostgresOperationStore(dsn, schema=schema, initialize=False)
+        assert verified.get(operation.id).status is OperationStatus.COMPLETED
         with psycopg.connect(dsn) as conn:
             rows = conn.execute(
                 f'SELECT version FROM "{schema}".schema_migrations WHERE scope = %s ORDER BY version',  # noqa: S608
@@ -171,6 +173,8 @@ def test_live_postgres_operation_journal_claims_once_and_preserves_history() -> 
             first.close()
         if second is not None:
             second.close()
+        if verified is not None:
+            verified.close()
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 import tarfile
 from pathlib import Path
@@ -686,3 +687,143 @@ def test_archive_extraction_refuses_total_size_limit_before_extracting(
 
     with pytest.raises(BackupError, match="total-size limit"):
         _extract_archive(archive, tmp_path / "extracted")
+
+
+def test_backup_private_database_and_metadata_guards(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from solomon.backup import _database_logical_identity, _postgres_client_connection, _require_mixed_metadata
+
+    with pytest.raises(BackupError, match="absolute PostgreSQL"):
+        _postgres_client_connection("sqlite:///solomon.sqlite3")
+    with pytest.raises(BackupError, match="database user"):
+        _postgres_client_connection("postgresql://localhost/solomon")
+    monkeypatch.setenv("PGPASSWORD", "must-not-survive")
+    connection = _postgres_client_connection("postgresql://reader@db.example/solomon?sslmode=require")
+    assert "PGPASSWORD" not in connection.environment
+    assert connection.environment["PGSSLMODE"] == "require"
+    with pytest.raises(BackupError, match="identity is invalid"):
+        _database_logical_identity("postgresql://reader@db.example/")
+
+    malformed = tmp_path / "malformed"
+    malformed.mkdir()
+    (malformed / "deployment.json").write_text("not-json", encoding="utf-8")
+    with pytest.raises(BackupError, match="metadata is invalid"):
+        _require_mixed_metadata(malformed, "postgresql://reader@db.example/solomon")
+
+    sqlite_profile = tmp_path / "sqlite-profile"
+    initialize_deployment(
+        data_dir=sqlite_profile,
+        journal_dir=tmp_path / "sqlite-journal",
+        database_url=str(sqlite_profile / "solomon.sqlite3"),
+    )
+    with pytest.raises(BackupError, match="mixed PostgreSQL"):
+        _require_mixed_metadata(sqlite_profile, "postgresql://reader@db.example/solomon")
+
+
+def test_backup_private_copy_and_decrypt_guards(tmp_path: Path) -> None:
+    from typing import cast
+
+    from solomon.backup import _copy_tree, _decrypt_and_extract_server_archive, _verify_sqlite_database, _verify_staged_journal
+
+    source = tmp_path / "source"
+    source.mkdir()
+    fifo = source / "unbackable"
+    os.mkfifo(fifo)
+    with pytest.raises(BackupError, match="non-regular"):
+        _copy_tree(source, tmp_path / "copied", sqlite_consistent=False)
+
+    with pytest.raises(BackupError, match="does not exist or is unsafe"):
+        _decrypt_and_extract_server_archive(
+            tmp_path / "missing.enc",
+            cast("EncryptedServerBackupManifest", object()),
+            TEST_PASSPHRASE,
+            tmp_path,
+        )
+    unsafe_archive = tmp_path / "unsafe.enc"
+    unsafe_archive.write_bytes(b"placeholder")
+    with pytest.raises(BackupError, match="passphrase"):
+        _decrypt_and_extract_server_archive(
+            unsafe_archive,
+            cast("EncryptedServerBackupManifest", object()),
+            "",
+            tmp_path,
+        )
+    with pytest.raises(BackupError, match="SQLite database is unreadable"):
+        _verify_sqlite_database(tmp_path / "missing.sqlite3")
+    journal = tmp_path / "journal"
+    journal.mkdir()
+    _verify_staged_journal(journal)
+    (journal / "journal.jsonl").write_text("not-json\n", encoding="utf-8")
+    with pytest.raises(BackupError, match="audit journal failed verification"):
+        _verify_staged_journal(journal)
+
+
+def test_backup_archive_guard_paths_and_manifest_integrity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from solomon.backup import (
+        ARCHIVE_MANIFEST_NAME,
+        BackupArchiveManifest,
+        BackupFile,
+        MAX_ARCHIVE_MEMBER_BYTES,
+        _extract_archive,
+        _validate_manifest_paths,
+    )
+    from solomon.currency.models import now_utc
+
+    def write_tar(path: Path, members: list[tuple[str, bytes]]) -> None:
+        with tarfile.open(path, "w") as archive:
+            for name, payload in members:
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+
+    missing_manifest = tmp_path / "missing-manifest.tar"
+    write_tar(missing_manifest, [("data/item", b"value")])
+    with pytest.raises(BackupError, match="does not contain its manifest"):
+        _extract_archive(missing_manifest, tmp_path / "missing-manifest")
+
+    unsafe_member = tmp_path / "unsafe-member.tar"
+    write_tar(unsafe_member, [("../outside", b"value")])
+    with pytest.raises(BackupError, match="unsafe backup archive member"):
+        _extract_archive(unsafe_member, tmp_path / "unsafe-member")
+
+    duplicate_member = tmp_path / "duplicate-member.tar"
+    write_tar(duplicate_member, [("data/item", b"one"), ("data/item", b"two")])
+    with pytest.raises(BackupError, match="duplicate paths"):
+        _extract_archive(duplicate_member, tmp_path / "duplicate-member")
+
+    invalid_manifest = tmp_path / "invalid-manifest.tar"
+    write_tar(invalid_manifest, [(ARCHIVE_MANIFEST_NAME, b"not-json")])
+    with pytest.raises(BackupError, match="manifest is invalid"):
+        _extract_archive(invalid_manifest, tmp_path / "invalid-manifest")
+
+    data = b"value"
+    manifest = BackupArchiveManifest(
+        created_at=now_utc(),
+        files=[BackupFile(path="data/item", bytes=len(data), sha256="0" * 64)],
+    ).model_dump_json().encode()
+    integrity = tmp_path / "integrity.tar"
+    write_tar(integrity, [("data/item", data), (ARCHIVE_MANIFEST_NAME, manifest)])
+    with pytest.raises(BackupError, match="integrity failed"):
+        _extract_archive(integrity, tmp_path / "integrity")
+
+    monkeypatch.setattr("solomon.backup.MAX_ARCHIVE_MEMBER_BYTES", 1)
+    oversized = tmp_path / "oversized.tar"
+    write_tar(oversized, [("data/item", b"xx")])
+    with pytest.raises(BackupError, match="oversized member"):
+        _extract_archive(oversized, tmp_path / "oversized")
+    assert MAX_ARCHIVE_MEMBER_BYTES > 1
+
+    duplicate_paths = BackupArchiveManifest(
+        created_at=now_utc(),
+        files=[
+            BackupFile(path="data/item", bytes=1, sha256="0" * 64),
+            BackupFile(path="data/item", bytes=1, sha256="1" * 64),
+        ],
+    )
+    with pytest.raises(BackupError, match="manifest contains duplicate paths"):
+        _validate_manifest_paths(duplicate_paths, allowed_roots={"data"}, allowed_files=set())
+    unsafe_paths = BackupArchiveManifest(
+        created_at=now_utc(),
+        files=[BackupFile(path="../outside", bytes=1, sha256="0" * 64)],
+    )
+    with pytest.raises(BackupError, match="unsafe backup manifest path"):
+        _validate_manifest_paths(unsafe_paths, allowed_roots={"data"}, allowed_files=set())

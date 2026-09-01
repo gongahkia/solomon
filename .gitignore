@@ -19,3 +19,4 @@ site/
 *.sqlite3
 .playwright-cli/
 AGENTS.md
+.tmp*

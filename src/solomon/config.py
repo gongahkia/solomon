@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     oidc_role_claim: str = Field(default="roles", min_length=1)
     oidc_role_mappings: dict[str, str] = Field(default_factory=dict)
     database_url: str = "sqlite:///./solomon-data/solomon.sqlite3"
+    storage_schema_mode: str = Field(default="initialize", pattern="^(initialize|verify)$")
     content_encryption_key_ref: str | None = Field(default=None, min_length=1, max_length=256)
     content_encryption_key: SecretStr | None = None
     retention_default_days: int | None = Field(default=None, ge=1, le=36_500)
@@ -147,6 +148,7 @@ class Settings(BaseSettings):
             "boundary_timeout_seconds": self.boundary_timeout_seconds,
             "jurisdiction": self.jurisdiction,
             "database_url": self.database_url,
+            "storage_schema_mode": self.storage_schema_mode,
             "content_encryption_configured": self.content_encryption_key is not None,
             "content_encryption_key_ref": self.content_encryption_key_ref,
             "retention_default_days": self.retention_default_days,

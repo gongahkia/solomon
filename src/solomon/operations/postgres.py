@@ -27,11 +27,19 @@ from solomon.store.postgres.connection import ConnectCallable, default_connect, 
 class PostgresOperationStore:
     """PostgreSQL operation journal with `SKIP LOCKED` claims for concurrent workers."""
 
-    def __init__(self, dsn: str, *, connect: ConnectCallable | None = None, schema: str | None = None) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        connect: ConnectCallable | None = None,
+        schema: str | None = None,
+        initialize: bool = True,
+    ) -> None:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
         self._conn = (connect or default_connect)(dsn)
-        self.initialize()
+        if initialize:
+            self.initialize()
 
     def close(self) -> None:
         self._conn.close()

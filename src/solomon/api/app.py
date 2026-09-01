@@ -205,6 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         retention_default_days=resolved_settings.retention_default_days,
         telemetry=telemetry,
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
+        initialize_postgres_schema=resolved_settings.storage_schema_mode == "initialize",
     )
     tenant_services: dict[str, SolomonService] = {}
     metrics = SolomonMetrics()
@@ -230,6 +231,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             retention_default_days=resolved_settings.retention_default_days,
             telemetry=telemetry,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
+            initialize_postgres_schema=resolved_settings.storage_schema_mode == "initialize",
         )
         metrics.attach(tenant_service)
         tenant_services[tenant_id] = tenant_service

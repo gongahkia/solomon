@@ -32,12 +32,14 @@ class PostgresGraphStore:
         *,
         connect: ConnectCallable | None = None,
         schema: str | None = None,
+        initialize: bool = True,
     ) -> None:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
         self._lock = RLock()
         self._conn = (connect or default_connect)(dsn)
-        self.initialize()
+        if initialize:
+            self.initialize()
 
     def close(self) -> None:
         self._conn.close()

@@ -32,6 +32,7 @@ x-solomon: &solomon
     SOLOMON_DATABASE_NAME: solomon
     SOLOMON_DATABASE_USER: solomon
     POSTGRES_PASSWORD_FILE: /run/secrets/solomon_postgres_password
+    SOLOMON_STORAGE_SCHEMA_MODE: verify
     SOLOMON_DATA_DIR: /var/lib/solomon/data
     SOLOMON_JOURNAL_DIR: /var/lib/solomon/journal
     SOLOMON_ZERO_EGRESS_MODE: "true"
@@ -75,6 +76,9 @@ services:
   migrations:
     <<: *solomon
     command: ["solomon", "migrate"]
+    environment:
+      <<: *solomon-environment
+      SOLOMON_STORAGE_SCHEMA_MODE: initialize
     restart: "no"
 
   bootstrap:

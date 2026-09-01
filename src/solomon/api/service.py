@@ -243,6 +243,7 @@ class SolomonService:
         content_cipher: ContentEnvelopeCipher | None = None,
         retention_default_days: int | None = None,
         telemetry: SolomonTelemetry | None = None,
+        initialize_postgres_schema: bool = True,
     ) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         journal_dir.mkdir(parents=True, exist_ok=True)
@@ -251,6 +252,7 @@ class SolomonService:
             resolved_database_url,
             postgres_schema=postgres_schema,
             embedding_provider=embedding_provider,
+            initialize_postgres=initialize_postgres_schema,
         )
         self.store = storage.store
         self.graph = storage.graph
@@ -258,7 +260,11 @@ class SolomonService:
         self.tenant_id = tenant_id
         self.operation_store: Any
         if urlparse(resolved_database_url).scheme in {"postgres", "postgresql"}:
-            self.operation_store = PostgresOperationStore(resolved_database_url, schema=postgres_schema)
+            self.operation_store = PostgresOperationStore(
+                resolved_database_url,
+                schema=postgres_schema,
+                initialize=initialize_postgres_schema,
+            )
         else:
             operation_path = getattr(self.store, "path", data_dir / "solomon.sqlite3")
             self.operation_store = SQLiteOperationStore(operation_path)

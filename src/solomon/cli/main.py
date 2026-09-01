@@ -143,7 +143,7 @@ def diagnostics() -> None:
 def health() -> None:
     """Print MCP-aligned local health."""
     settings = get_settings()
-    service = _service()
+    service = _service(initialize_postgres_schema=False)
     payload = {
         "version": __version__,
         "store": {"ok": True, "item_count": len(service.store.get_many())},
@@ -157,7 +157,7 @@ def health() -> None:
 def migrate() -> None:
     """Apply durable storage migrations and exit."""
     settings = get_settings()
-    _ = _service()
+    _ = _service(initialize_postgres_schema=True)
     database_url = _service_database_url(settings)
     backend = "postgres" if database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
     _print_json({"status": "applied", "backend": backend}, sort_keys=True)
@@ -373,12 +373,21 @@ def console_serve(
     )
 
 
-def _service(*, jurisdiction: str | None = None) -> SolomonService:
+def _service(
+    *,
+    jurisdiction: str | None = None,
+    initialize_postgres_schema: bool | None = None,
+) -> SolomonService:
     settings = get_settings()
     return SolomonService(
         data_dir=settings.data_dir,
         journal_dir=settings.journal_dir,
         database_url=_service_database_url(settings),
+        initialize_postgres_schema=(
+            settings.storage_schema_mode == "initialize"
+            if initialize_postgres_schema is None
+            else initialize_postgres_schema
+        ),
         attestation_key=settings.verification_attestation_key,
         verification_policy=verification_policy_from_settings(settings),
         verification_policy_version=settings.verification_policy_version,

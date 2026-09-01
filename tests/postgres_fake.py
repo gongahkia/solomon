@@ -15,6 +15,7 @@ class FakePostgresConnection:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self.queries: list[str] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path)
         self._conn.row_factory = sqlite3.Row
@@ -22,6 +23,7 @@ class FakePostgresConnection:
         self._conn.create_function("tsv_matches", 2, _tsv_matches)
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        self.queries.append(sql)
         if "CREATE EXTENSION IF NOT EXISTS vector" in sql:
             return self._conn.execute("SELECT 1")
         if "FROM pg_extension WHERE extname" in sql:

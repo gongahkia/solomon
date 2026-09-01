@@ -30,9 +30,15 @@ def create_knowledge_store(
     *,
     postgres_connect: ConnectCallable | None = None,
     postgres_schema: str | None = None,
+    initialize_postgres: bool = True,
 ) -> KnowledgeStoreProtocol:
     if _is_postgres_url(database_url):
-        return PostgresKnowledgeStore(database_url, connect=postgres_connect, schema=postgres_schema)
+        return PostgresKnowledgeStore(
+            database_url,
+            connect=postgres_connect,
+            schema=postgres_schema,
+            initialize=initialize_postgres,
+        )
     return SQLiteKnowledgeStore(_sqlite_path_from_url(database_url))
 
 
@@ -42,6 +48,7 @@ def create_storage_bundle(
     postgres_connect: ConnectCallable | None = None,
     postgres_schema: str | None = None,
     embedding_provider: RetrievalEmbeddingProvider | None = None,
+    initialize_postgres: bool = True,
 ) -> StorageBundle:
     parsed = urlparse(database_url)
     if parsed.scheme in {"", "sqlite"}:
@@ -53,13 +60,24 @@ def create_storage_bundle(
         )
     if _is_postgres_url(database_url):
         return StorageBundle(
-            store=PostgresKnowledgeStore(database_url, connect=postgres_connect, schema=postgres_schema),
-            graph=PostgresGraphStore(database_url, connect=postgres_connect, schema=postgres_schema),
+            store=PostgresKnowledgeStore(
+                database_url,
+                connect=postgres_connect,
+                schema=postgres_schema,
+                initialize=initialize_postgres,
+            ),
+            graph=PostgresGraphStore(
+                database_url,
+                connect=postgres_connect,
+                schema=postgres_schema,
+                initialize=initialize_postgres,
+            ),
             index=PostgresRetrievalIndex(
                 database_url,
                 connect=postgres_connect,
                 schema=postgres_schema,
                 provider=embedding_provider,
+                initialize=initialize_postgres,
             ),
         )
     raise UnsupportedStoreBackend(f"unsupported store backend: {parsed.scheme}")

@@ -26,6 +26,8 @@ def test_production_compose_declares_required_services_and_secrets() -> None:
     assert "SOLOMON_CONTENT_ENCRYPTION_KEY_FILE" in compose
     assert "POSTGRES_PASSWORD_FILE" in compose
     assert "DAC_READ_SEARCH" in compose
+    assert "SOLOMON_STORAGE_SCHEMA_MODE: verify" in compose
+    assert "SOLOMON_STORAGE_SCHEMA_MODE: initialize" in compose
 
 
 def test_production_surface_ci_matrix_and_smoke_harness() -> None:

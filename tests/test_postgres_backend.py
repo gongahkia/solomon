@@ -17,6 +17,7 @@ from solomon.graph.suggestions import (
     DependencySuggestion,
     SuggestionDecision,
 )
+from solomon.operations.postgres import PostgresOperationStore
 from solomon.orchestrator.retrieval import (
     EmbeddingStrategy,
     HashedEmbeddingProvider,
@@ -71,6 +72,34 @@ def _connect(tmp_path: Path) -> FakePostgresConnection:
 def test_postgres_identifier_quoting_rejects_sql_fragments() -> None:
     with pytest.raises(StoreError, match="invalid SQL identifier"):
         quote_identifier("retrieval_index; DROP TABLE knowledge_items; --")
+
+
+def test_postgres_verified_storage_open_does_not_issue_schema_ddl(tmp_path: Path) -> None:
+    connections: list[FakePostgresConnection] = []
+
+    def connect(_dsn: str) -> FakePostgresConnection:
+        connection = _connect(tmp_path)
+        connections.append(connection)
+        return connection
+
+    bundle = create_storage_bundle(
+        "postgresql://unit/solomon",
+        postgres_connect=connect,
+        initialize_postgres=False,
+    )
+    operation_store = PostgresOperationStore(
+        "postgresql://unit/solomon",
+        connect=connect,
+        initialize=False,
+    )
+
+    assert len(connections) == 4
+    assert all(connection.queries == [] for connection in connections)
+
+    bundle.store.close()
+    bundle.graph.close()
+    bundle.index.close()
+    operation_store.close()
 
 
 def test_postgres_retrieval_rejects_ambiguous_configuration_and_short_circuits_empty_queries(

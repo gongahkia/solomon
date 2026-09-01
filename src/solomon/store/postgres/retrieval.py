@@ -48,6 +48,7 @@ class PostgresRetrievalIndex:
         schema: str | None = None,
         strategy: EmbeddingStrategy | None = None,
         provider: RetrievalEmbeddingProvider | None = None,
+        initialize: bool = True,
     ) -> None:
         self.dsn = dsn
         self.schema = normalize_schema(schema)
@@ -58,7 +59,8 @@ class PostgresRetrievalIndex:
         if self.strategy.dimensions != POSTGRES_VECTOR_DIMENSIONS:
             raise ValueError(f"Postgres retrieval requires {POSTGRES_VECTOR_DIMENSIONS}-dimensional embeddings")
         self._conn = (connect or default_connect)(dsn)
-        self.initialize()
+        if initialize:
+            self.initialize()
 
     def initialize(self) -> None:
         with self._transaction():

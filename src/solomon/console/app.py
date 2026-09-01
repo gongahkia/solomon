@@ -77,6 +77,7 @@ def create_console_app(*, settings: Settings | None = None, service: SolomonServ
             otlp_endpoint=resolved_settings.telemetry_otlp_endpoint,
         ),
         boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
+        initialize_postgres_schema=resolved_settings.storage_schema_mode == "initialize",
     )
     app = FastAPI(title="Solomon Console")
     app.state.service = resolved_service

@@ -23,7 +23,7 @@ prerequisite for this rehearsal.
 | Static checks | `uv run ruff check …` and `uv run mypy …` over changed deployment, backup, CLI, migration, and test files | Passed at each implementation phase. |
 | Compose model | `TMPDIR=/home/gongahkia /bin/sh scripts/check_production_compose.sh` | Passed. |
 | Production Compose smoke | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker smoke. |
-| Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_OPERATIONS_REPORT_PATH=… timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v2`. |
+| Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_OPERATIONS_REPORT_PATH=… timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v3`. |
 | N-to-N+1 upgrade | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_UPGRADE_REPORT_PATH=… timeout 900 scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`. |
 | Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py` | Passed. Helm result is static validation only. |
 
@@ -39,6 +39,14 @@ assertion provenance. The checkpoint also contains a queued duplicate confirmati
 assertion: source and restored readiness report it as degraded, the restarted worker completes it without a duplicate
 edge or currency effect, the consistency report remains empty, and readiness returns to ready. This demonstrates
 component recovery and continued operation; it does not prove distributed atomic restore.
+
+The v3 report records host-monotonic elapsed times for initialization, fixture creation, coordinated backup, backup
+inspection, restore planning, restore apply, post-restore validation/recovery, and the whole rehearsal. Its dataset is
+the four-item, two-scope governed fixture plus one queued duplicate confirmation; component counts are recorded in
+the same report. It defines the recovery point as completed domain writes and durable queued operations before the
+coordinated maintenance checkpoint. New writes are blocked by maintenance or outside that checkpoint. The report
+does not separately time a maintenance drain because this profile gates new claims rather than implementing a timed
+drain protocol; it makes no external RPO, RTO, zero-RPO, or SLO claim.
 
 The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. The actual N binary creates the
 same two-scope governed fixture: source/version lineage, confirmed/rejected/deferred/withdrawn assertions, graph and
@@ -68,6 +76,6 @@ rehearsal does not replace those tests or introduce a new extraction/parser base
 ## Limits
 
 Not run here: a live Kubernetes/Helm deployment, managed PostgreSQL backup/restore, external backup replication,
-incremental backup, performance/RPO/RTO measurement, multi-host failure, a physical host power-loss simulation during
-backup/restore, or the complete release-quality suite. Helm remains static-only and experimental. These omissions
-mean no broader production availability or disaster-recovery claim is made.
+incremental backup, an externally validated RPO/RTO measurement, multi-host failure, a physical host power-loss
+simulation during backup/restore, or the complete release-quality suite. Helm remains static-only and experimental.
+These omissions mean no broader production availability or disaster-recovery claim is made.

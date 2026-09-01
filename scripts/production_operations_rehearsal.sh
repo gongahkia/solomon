@@ -32,6 +32,12 @@ if [ -n "$report_path" ] && [ -e "$report_path" ]; then
     exit 2
 fi
 
+monotonic_ns() {
+    python -c 'import time; print(time.monotonic_ns())'
+}
+
+rehearsal_started_ns="$(monotonic_ns)"
+
 cleanup() {
     status=$?
     docker rm --force "$source_pg" "$restore_pg" >/dev/null 2>&1 || true
@@ -114,9 +120,12 @@ restored_run() {
         "$image" "$@"
 }
 
+initialization_started_ns="$(monotonic_ns)"
 source_run solomon migrate >/dev/null
 source_run solomon deployment init --owner rehearsal >/dev/null
 source_run solomon deployment preflight --require-initialized --format json >/dev/null
+initialization_completed_ns="$(monotonic_ns)"
+fixture_started_ns="$(monotonic_ns)"
 source_run python /app/examples/scenarios/governed-dependency-assertion-proof/run.py \
     --workspace /state/source-proof \
     --data-dir /state/source-data \
@@ -125,14 +134,21 @@ source_run python /app/examples/scenarios/governed-dependency-assertion-proof/ru
     --audit-pack-dir /state/source-data/pre-backup-audit-pack \
     --queue-recovery-operation \
     --serial-confirmation > "$work/source-fixture.json"
+fixture_completed_ns="$(monotonic_ns)"
 source_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/source-consistency.json"
 source_run solomon deployment verify --matter-id matter-alpha --client-id client-alpha --format json > "$work/source-verify.json"
+backup_started_ns="$(monotonic_ns)"
 source_run solomon deployment backup /state/checkpoint.enc >/dev/null
+backup_completed_ns="$(monotonic_ns)"
+backup_inspection_started_ns="$(monotonic_ns)"
 source_run solomon deployment backup-inspect /state/checkpoint.enc >/dev/null
+backup_inspection_completed_ns="$(monotonic_ns)"
 source_run solomon health > "$work/source-health.json"
 source_run python -c 'import json; from solomon.api.service import SolomonService; from solomon.config import get_settings; from solomon.semantic_inventory import semantic_inventory; s=get_settings(); print(json.dumps(semantic_inventory(SolomonService(data_dir=s.data_dir, journal_dir=s.journal_dir, database_url=s.database_url)), sort_keys=True))' > "$work/source-inventory.json"
 
+restore_plan_started_ns="$(monotonic_ns)"
 restore_run solomon deployment restore-plan /state/checkpoint.enc /state/restored --output /state/restore-plan.json >/dev/null
+restore_plan_completed_ns="$(monotonic_ns)"
 restore_tables="$(docker exec "$restore_pg" psql -U solomon -d solomon -Atc \
     "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_schema <> 'information_schema' AND table_schema NOT LIKE 'pg_%' AND table_type = 'BASE TABLE' ORDER BY 1")"
 if [ -n "$restore_tables" ]; then
@@ -140,7 +156,10 @@ if [ -n "$restore_tables" ]; then
     printf '%s\n' "$restore_tables" >&2
     exit 1
 fi
+restore_apply_started_ns="$(monotonic_ns)"
 restore_run solomon deployment restore --plan /state/restore-plan.json --apply >/dev/null
+restore_apply_completed_ns="$(monotonic_ns)"
+post_restore_validation_started_ns="$(monotonic_ns)"
 restored_run solomon deployment preflight --require-initialized --format json >/dev/null
 restored_run solomon health > "$work/restored-health.json"
 restored_run solomon consistency check --matter-id matter-alpha --client-id client-alpha > "$work/restored-consistency.json"
@@ -156,8 +175,10 @@ restored_run python /app/examples/scenarios/governed-dependency-assertion-proof/
     --journal-dir /state/restored/journal \
     --database-url "$restore_url" \
     --post-restore-write > "$work/post-restore-write.json"
+post_restore_validation_completed_ns="$(monotonic_ns)"
+rehearsal_completed_ns="$(monotonic_ns)"
 
-python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" "$work/source-fixture.json" "$work/source-consistency.json" "$work/restored-consistency.json" "$work/source-verify.json" "$work/restored-verify.json" "$work/restored-audit-pack.json" "$work/recovery-worker.json" "$work/restored-recovery-consistency.json" "$work/recovered-verify.json" "$work/post-restore-write.json" "$report_path" <<'PY'
+python - "$work/source-health.json" "$work/restored-health.json" "$work/source-inventory.json" "$work/restored-inventory.json" "$work/source-fixture.json" "$work/source-consistency.json" "$work/restored-consistency.json" "$work/source-verify.json" "$work/restored-verify.json" "$work/restored-audit-pack.json" "$work/recovery-worker.json" "$work/restored-recovery-consistency.json" "$work/recovered-verify.json" "$work/post-restore-write.json" "$report_path" "$rehearsal_started_ns" "$initialization_started_ns" "$initialization_completed_ns" "$fixture_started_ns" "$fixture_completed_ns" "$backup_started_ns" "$backup_completed_ns" "$backup_inspection_started_ns" "$backup_inspection_completed_ns" "$restore_plan_started_ns" "$restore_plan_completed_ns" "$restore_apply_started_ns" "$restore_apply_completed_ns" "$post_restore_validation_started_ns" "$post_restore_validation_completed_ns" "$rehearsal_completed_ns" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -208,8 +229,32 @@ if recovered_verify["state"] != "ready":
     raise SystemExit("deployment verification did not return to ready after operation recovery")
 if post_restore_write["result"] != "passed" or not post_restore_write["edge_provenance_matches"]:
     raise SystemExit("post-restore governed write did not retain edge provenance")
+
+timestamps = [int(value) for value in sys.argv[16:]]
+(
+    rehearsal_started,
+    initialization_started,
+    initialization_completed,
+    fixture_started,
+    fixture_completed,
+    backup_started,
+    backup_completed,
+    backup_inspection_started,
+    backup_inspection_completed,
+    restore_plan_started,
+    restore_plan_completed,
+    restore_apply_started,
+    restore_apply_completed,
+    post_restore_validation_started,
+    post_restore_validation_completed,
+    rehearsal_completed,
+) = timestamps
+
+def seconds(start: int, completed: int) -> float:
+    return round((completed - start) / 1_000_000_000, 6)
+
 result = {
-    "schema_id": "solomon.production_operations_rehearsal.v2",
+    "schema_id": "solomon.production_operations_rehearsal.v3",
     "profile": "mixed-postgresql-sqlite",
     "source_item_count": source["store"]["item_count"],
     "restored_item_count": restored["store"]["item_count"],
@@ -226,6 +271,26 @@ result = {
     "restored_audit_pack": restored_audit_pack,
     "recovered_operations": recovery_worker["completed"],
     "post_restore_write": post_restore_write,
+    "recovery_point": {
+        "boundary": "completed domain writes and durable queued operations before coordinated maintenance checkpoint",
+        "outside_boundary": "writes attempted after maintenance begins are rejected or remain outside this backup",
+        "claim": "local rehearsal evidence only; no external RPO or zero-RPO claim",
+    },
+    "timing_seconds": {
+        "clock": "host_monotonic",
+        "initialization": seconds(initialization_started, initialization_completed),
+        "fixture_creation": seconds(fixture_started, fixture_completed),
+        "coordinated_backup": seconds(backup_started, backup_completed),
+        "backup_inspection": seconds(backup_inspection_started, backup_inspection_completed),
+        "restore_plan": seconds(restore_plan_started, restore_plan_completed),
+        "restore_apply": seconds(restore_apply_started, restore_apply_completed),
+        "post_restore_validation_and_recovery": seconds(
+            post_restore_validation_started, post_restore_validation_completed
+        ),
+        "whole_rehearsal": seconds(rehearsal_started, rehearsal_completed),
+        "maintenance_drain": None,
+        "maintenance_drain_note": "not separately instrumented; this profile maintenance-gates new claims rather than timing a drain",
+    },
     "result": "passed",
 }
 serialized = json.dumps(result, sort_keys=True)

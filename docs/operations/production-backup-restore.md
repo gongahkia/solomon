@@ -100,6 +100,10 @@ not retry against that target: keep it isolated, inspect its PostgreSQL and loca
 and use a fresh empty target or a verified checkpoint under operator control. This is deliberate operator-required
 recovery, not a cross-store rollback claim.
 
+`scripts/production_operations_rehearsal.sh` emits the local elapsed timing and recovery-point description in its
+versioned JSON report. Treat those numbers only as reproducible engineering evidence for its four-item, two-scope
+fixture on the executing host; they are not an RPO, RTO, or availability commitment.
+
 After a successful restore, point a fresh deployment at the restored local paths and database. Run preflight,
 health, the scoped consistency inspector, the worker, and audit-pack verification before accepting user traffic:
 

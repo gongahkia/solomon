@@ -40,6 +40,8 @@ class PostgresOperationStore:
         self._conn = (connect or default_connect)(dsn)
         if initialize:
             self.initialize()
+        elif self.schema is not None:
+            self._set_schema_search_path()
 
     def close(self) -> None:
         self._conn.close()
@@ -48,11 +50,20 @@ class PostgresOperationStore:
         with self._transaction():
             if self.schema is not None:
                 self._execute(f"CREATE SCHEMA IF NOT EXISTS {quote_identifier(self.schema)}")
-                # The store keeps one connection for its lifetime.  `SET LOCAL` would
-                # revert on this transaction's commit and leave subsequent unqualified
-                # journal queries pointed at the caller's default schema.
-                self._execute(f"SET search_path TO {quote_identifier(self.schema)}")
+                self._set_schema_search_path(commit=False)
             apply_postgres_migrations(self._execute, operation_store_migrations())
+
+    def _set_schema_search_path(self, *, commit: bool = True) -> None:
+        # The store keeps one connection for its lifetime. `SET LOCAL` would
+        # revert on commit and leave subsequent unqualified journal queries
+        # pointed at the caller's default schema.
+        if self.schema is None:
+            return
+        if commit:
+            with self._transaction():
+                self._execute(f"SET search_path TO {quote_identifier(self.schema)}")
+            return
+        self._execute(f"SET search_path TO {quote_identifier(self.schema)}")
 
     def create(self, operation: OperationRecord) -> tuple[OperationRecord, bool]:
         existing = self._by_idempotency(operation.operation_type, operation.scope, operation.idempotency_key)

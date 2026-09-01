@@ -41,6 +41,10 @@ migrations take a transaction-scoped advisory lock. Bootstrap takes a file lock 
 marker. The application is stopped or maintenance-gated for the bounded backup interval; the worker then makes no
 new claims and service mutation is refused.
 
+The migration job is the only Compose service in schema-initializing mode. API, console, worker, and their health
+probes open the verified existing schema without DDL, so an ordinary readiness probe does not block behind a relation
+lock held by a live request. This deployment sequencing does not make application writes or mixed stores atomic.
+
 A server backup is an encrypted full checkpoint: SQLite copies use SQLite's backup API; PostgreSQL uses `pg_dump`
 custom format; audit JSONL is verified; and an encrypted archive plus sidecar manifest are atomically published only
 after all components complete. Restore is deliberately separate: it validates the encrypted archive and audit chain,

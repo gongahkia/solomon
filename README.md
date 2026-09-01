@@ -613,9 +613,11 @@ curl -X POST http://localhost:8140/recall \
   -d '{"query":"contract renewal"}'
 ```
 
-Postgres retrieval requires the self-hosted `pgvector` extension. Startup runs `CREATE EXTENSION IF NOT EXISTS vector`,
-validates it, and applies the transactional `vector(256)`/HNSW migration; the database role therefore needs that
-extension installed and creation privilege.
+Postgres retrieval requires the self-hosted `pgvector` extension. In the local/default profile, storage initialization
+creates and validates the extension and applies the transactional `vector(256)`/HNSW migration. The production Compose
+profile performs those actions only through its one-shot `solomon migrate` job; its long-running processes open an
+already-migrated schema without issuing DDL. The database role used for migrations therefore needs that extension
+installed and creation privilege.
 
 Remote model egress requires explicit configuration:
 
@@ -646,6 +648,11 @@ curl -H 'Authorization: Bearer change-me' http://localhost:8140/health
 the API, curator console, and a single filesystem-source worker. It keeps Postgres, durable Solomon state, and journals
 in named volumes; bind mounts are deliberately absent. The worker synchronizes enabled filesystem sources only; scale it
 only after introducing a source-level distributed lease.
+
+The migration job is the only Compose service configured with `SOLOMON_STORAGE_SCHEMA_MODE=initialize`. API, console,
+and worker use `verify`, which opens the existing PostgreSQL schema without schema DDL; a health check therefore cannot
+wait behind a live relation lock held by a normal request. `solomon migrate` explicitly enables initialization even when
+the surrounding environment is configured for verification.
 
 Create four files outside the checkout, each mode `0600`: `server_api_key`, `console_bearer_token`, `postgres_password`,
 and a Base64-encoded 32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.

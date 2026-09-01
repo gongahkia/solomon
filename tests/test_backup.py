@@ -8,6 +8,7 @@ import os
 import sqlite3
 import tarfile
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -720,9 +721,13 @@ def test_backup_private_database_and_metadata_guards(monkeypatch: pytest.MonkeyP
 
 
 def test_backup_private_copy_and_decrypt_guards(tmp_path: Path) -> None:
-    from typing import cast
-
-    from solomon.backup import _copy_tree, _decrypt_and_extract_server_archive, _verify_sqlite_database, _verify_staged_journal
+    from solomon.backup import (
+        EncryptedServerBackupManifest,
+        _copy_tree,
+        _decrypt_and_extract_server_archive,
+        _verify_sqlite_database,
+        _verify_staged_journal,
+    )
 
     source = tmp_path / "source"
     source.mkdir()
@@ -760,9 +765,9 @@ def test_backup_private_copy_and_decrypt_guards(tmp_path: Path) -> None:
 def test_backup_archive_guard_paths_and_manifest_integrity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from solomon.backup import (
         ARCHIVE_MANIFEST_NAME,
+        MAX_ARCHIVE_MEMBER_BYTES,
         BackupArchiveManifest,
         BackupFile,
-        MAX_ARCHIVE_MEMBER_BYTES,
         _extract_archive,
         _validate_manifest_paths,
     )

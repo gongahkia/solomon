@@ -17,7 +17,13 @@ from solomon.graph.suggestions import (
     DependencySuggestion,
     SuggestionDecision,
 )
-from solomon.orchestrator.retrieval import MatterContext, RecallOptions, RetrievalOrchestrator
+from solomon.orchestrator.retrieval import (
+    EmbeddingStrategy,
+    HashedEmbeddingProvider,
+    MatterContext,
+    RecallOptions,
+    RetrievalOrchestrator,
+)
 from solomon.store.factory import create_storage_bundle
 from solomon.store.postgres import (
     PostgresGraphStore,
@@ -65,6 +71,23 @@ def _connect(tmp_path: Path) -> FakePostgresConnection:
 def test_postgres_identifier_quoting_rejects_sql_fragments() -> None:
     with pytest.raises(StoreError, match="invalid SQL identifier"):
         quote_identifier("retrieval_index; DROP TABLE knowledge_items; --")
+
+
+def test_postgres_retrieval_rejects_ambiguous_configuration_and_short_circuits_empty_queries(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="either an embedding strategy or provider"):
+        PostgresRetrievalIndex(
+            "postgresql://unit/solomon",
+            strategy=EmbeddingStrategy(),
+            provider=HashedEmbeddingProvider(),
+        )
+    with pytest.raises(ValueError, match="256-dimensional"):
+        PostgresRetrievalIndex("postgresql://unit/solomon", strategy=EmbeddingStrategy(dimensions=128))
+
+    index = PostgresRetrievalIndex("postgresql://unit/solomon", connect=lambda _dsn: _connect(tmp_path))
+    assert index.embedding_refs([]) == {}
+    assert index.search("!!!") == []
 
 
 def test_postgres_knowledge_store_preserves_append_only_store_semantics(tmp_path: Path) -> None:

@@ -19,18 +19,18 @@ prerequisite for this rehearsal.
 | --- | --- | --- |
 | Baseline focused tests | `uv run pytest -q tests/test_backup.py tests/test_migrations.py tests/test_helm_chart.py tests/test_production_compose.py` | 17 passed before implementation. |
 | Focused implementation tests | `uv run pytest -q tests/test_backup.py tests/test_backup_subprocess_interruption.py tests/test_cli.py tests/test_deployment.py tests/test_semantic_inventory.py tests/test_governed_dependency_assertion_demo.py` | 49 passed after governed restore, readiness verification, archive-bound, and abrupt-interruption work. |
-| Full suite and coverage | `SOLOMON_TEST_POSTGRES_DSN=… uv run pytest --cov=src/solomon` | 540 collected with an isolated live pgvector PostgreSQL; coverage report passed at 90%. A first no-PostgreSQL invocation reached only 88%, so it is not used as release evidence. |
-| Static checks | `uv run ruff check …` and `uv run mypy …` over changed deployment, backup, CLI, migration, and test files | Passed at each implementation phase. |
+| Full suite and coverage | `SOLOMON_TEST_POSTGRES_DSN=… uv run pytest -q --cov=src/solomon` | 560 passed, 2 skipped (optional external model integration environments), with an isolated live pgvector PostgreSQL; total coverage was 90.04%. |
+| Static checks | `uv run ruff check src/solomon tests`; `uv run mypy src/solomon`; `uv run mkdocs build --strict`; license and file-length checks | Passed. |
 | Compose model | `TMPDIR=/home/gongahkia /bin/sh scripts/check_production_compose.sh` | Passed. |
-| Production Compose smoke | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 timeout 600 scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker smoke. |
-| Full checkpoint/restore | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_OPERATIONS_REPORT_PATH=… timeout 600 scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v3`. |
-| N-to-N+1 upgrade | `TMPDIR=/home/gongahkia/solomon-verification.qF5pz4 SOLOMON_UPGRADE_REPORT_PATH=… timeout 900 scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`. |
-| Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py` | Passed. Helm result is static validation only. |
+| Production Compose smoke | `scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker became healthy; the harness removed its exact disposable volumes and network. |
+| Full checkpoint/restore | `SOLOMON_OPERATIONS_REPORT_PATH=… scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v3`. |
+| N-to-N+1 upgrade | `scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`. |
+| Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py`; `pip-audit --skip-editable` | Passed. Helm result is static validation only. |
 
 The checkpoint/restore scenario starts from a migrated, initialized source profile and exercises two isolated scopes.
 It creates human and trusted-upstream assertions in pending, confirmed, rejected, deferred, and withdrawn states;
 preserves source version lineage and a reverification request; proves the confirmed edge's currency effect; verifies
-scope denial, confirmation idempotency, audit-pack integrity, source and restored readiness, and zero scoped
+scope denial, confirmation idempotency, audit-pack integrity, source and restored recovery status, and zero scoped
 consistency findings. It creates and inspects an encrypted full backup, refuses application tables before restore,
 restores an empty isolated PostgreSQL target and absent local root, compares 12 canonical content-redacting semantic
 component hashes (including source documents, candidates, local SQLite state, graph, operations, and audit
@@ -49,9 +49,9 @@ does not separately time a maintenance drain because this profile gates new clai
 drain protocol; it makes no external RPO, RTO, zero-RPO, or SLO claim.
 
 The most recent v3 run used Docker Engine with two isolated
-`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 151.309
-seconds overall: initialization 20.046s, governed fixture creation 7.157s, coordinated backup 6.805s, backup
-inspection 5.808s, restore planning 6.070s, restore apply 6.580s, and post-restore validation/recovery 54.822s.
+`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 198.480
+seconds overall: initialization 17.959s, governed fixture creation 6.125s, coordinated backup 6.759s, backup
+inspection 5.738s, restore planning 6.568s, restore apply 6.982s, and post-restore validation/recovery 57.512s.
 The maintenance-drain field was `null` for the reason above. These figures are one local engineering observation,
 not a production recovery estimate.
 
@@ -83,6 +83,6 @@ rehearsal does not replace those tests or introduce a new extraction/parser base
 ## Limits
 
 Not run here: a live Kubernetes/Helm deployment, managed PostgreSQL backup/restore, external backup replication,
-incremental backup, an externally validated RPO/RTO measurement, multi-host failure, a physical host power-loss
-simulation during backup/restore, or the complete release-quality suite. Helm remains static-only and experimental.
+incremental backup, an externally validated RPO/RTO measurement, multi-host failure, or a physical host power-loss
+simulation during backup/restore. Helm remains static-only and experimental.
 These omissions mean no broader production availability or disaster-recovery claim is made.

@@ -26,6 +26,8 @@ class FakePostgresConnection:
             return self._conn.execute("SELECT 1")
         if "FROM pg_extension WHERE extname" in sql:
             return self._conn.execute("SELECT 1")
+        if "pg_advisory_xact_lock" in sql:
+            return self._conn.execute("SELECT 1")
         add_column = re.fullmatch(
             r'\s*ALTER TABLE\s+((?:"[A-Za-z_][A-Za-z0-9_]*"\.)?"[A-Za-z_][A-Za-z0-9_]*")\s+'
             r"ADD COLUMN IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s+.+",

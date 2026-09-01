@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from solomon.api.service import IngestRequest, SolomonService
@@ -58,4 +59,7 @@ def test_semantic_inventory_helpers_handle_missing_and_unsafe_local_records(tmp_
     (data_dir / "deployment.json").write_text('{"schema": "test"}', encoding="utf-8")
     (data_dir / "linked.json").symlink_to(data_dir / "deployment.json")
     assert _metadata_records(data_dir) == [{"path": "deployment.json", "content": {"schema": "test"}}]
-    assert _json_value(b"binary") == {"bytes": 6, "bytes_sha256": "9a3a2f0c0f1c6e5e18ca5ab3aeb1f36a50f3e623ef5d7e6a2a1e4b8e5e2a8278"}
+    assert _json_value(b"binary") == {
+        "bytes": 6,
+        "bytes_sha256": "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
+    }

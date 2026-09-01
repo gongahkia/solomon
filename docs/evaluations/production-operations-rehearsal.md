@@ -48,6 +48,13 @@ coordinated maintenance checkpoint. New writes are blocked by maintenance or out
 does not separately time a maintenance drain because this profile gates new claims rather than implementing a timed
 drain protocol; it makes no external RPO, RTO, zero-RPO, or SLO claim.
 
+The most recent v3 run used Docker Engine with two isolated
+`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 151.309
+seconds overall: initialization 20.046s, governed fixture creation 7.157s, coordinated backup 6.805s, backup
+inspection 5.808s, restore planning 6.070s, restore apply 6.580s, and post-restore validation/recovery 54.822s.
+The maintenance-drain field was `null` for the reason above. These figures are one local engineering observation,
+not a production recovery estimate.
+
 The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. The actual N binary creates the
 same two-scope governed fixture: source/version lineage, confirmed/rejected/deferred/withdrawn assertions, graph and
 currency effects, audit pack, and lifecycle safeguards. The current release creates and verifies a pre-upgrade

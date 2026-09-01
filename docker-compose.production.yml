@@ -13,6 +13,10 @@ x-solomon: &solomon
     - ALL
   cap_add:
     - CHOWN
+    # Docker Compose file secrets retain the host operator's ownership. The root
+    # entrypoint needs read-only DAC bypass solely to load those 0600 mounts
+    # before it drops to the unprivileged solomon user.
+    - DAC_READ_SEARCH
     - SETGID
     - SETUID
   tmpfs:

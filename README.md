@@ -649,6 +649,8 @@ only after introducing a source-level distributed lease.
 
 Create four files outside the checkout, each mode `0600`: `server_api_key`, `console_bearer_token`, `postgres_password`,
 and a Base64-encoded 32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.
+Docker Compose bind-mounts file secrets with the host operator's ownership. The production entrypoint reads them before
+dropping to UID 10001; its narrowly scoped `DAC_READ_SEARCH` capability is absent from the executed Solomon process.
 
 ```bash
 install -d -m 0700 /opt/solomon/secrets

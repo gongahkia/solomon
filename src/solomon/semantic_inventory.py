@@ -12,6 +12,13 @@ from typing import Any
 
 from solomon.api.service import SolomonService
 
+_SOURCE_RECORD_QUERIES = {
+    "source_documents": "SELECT document_json FROM source_documents",
+    "source_change_events": "SELECT event_json FROM source_change_events",
+    "candidate_claims": "SELECT candidate_json FROM candidate_claims",
+    "document_sources": "SELECT source_json FROM document_sources",
+}
+
 
 def semantic_inventory(service: SolomonService) -> dict[str, Any]:
     """Return a content-redacting checkpoint comparison across durable components.
@@ -79,9 +86,16 @@ def _json_column(database: sqlite3.Connection, table: str, column: str) -> list[
         str(row[0])
         for row in database.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
-    if table not in available:
+    query = _SOURCE_RECORD_QUERIES.get(table)
+    expected_column = {
+        "source_documents": "document_json",
+        "source_change_events": "event_json",
+        "candidate_claims": "candidate_json",
+        "document_sources": "source_json",
+    }.get(table)
+    if table not in available or query is None or column != expected_column:
         return []
-    return [json.loads(row[0]) for row in database.execute(f"SELECT {column} FROM {table}")]  # noqa: S608
+    return [json.loads(row[0]) for row in database.execute(query)]
 
 
 def _sqlite_state_records(data_dir: Path) -> list[dict[str, Any]]:
@@ -100,9 +114,11 @@ def _sqlite_state_records(data_dir: Path) -> list[dict[str, Any]]:
                 )
             ]
             for table in tables:
+                identifier = table.replace('"', '""')
                 rows = [
                     {key: _json_value(value) for key, value in dict(row).items()}
-                    for row in database.execute(f'SELECT * FROM "{table}"')  # noqa: S608
+                    # `table` comes only from sqlite_master and embedded quotes are escaped.
+                    for row in database.execute(f'SELECT * FROM "{identifier}"')  # noqa: S608  # nosec B608
                 ]
                 records.append(
                     {

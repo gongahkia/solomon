@@ -55,6 +55,13 @@ def test_semantic_inventory_helpers_handle_missing_and_unsafe_local_records(tmp_
     (data_dir / "linked.sqlite3").symlink_to(target)
     assert _sqlite_state_records(data_dir) == [{"path": "linked.sqlite3", "state": "unsafe"}]
 
+    quoted_database = data_dir / "quoted.sqlite3"
+    with sqlite3.connect(quoted_database) as database:
+        database.execute('CREATE TABLE "quoted""table" (value TEXT)')
+        database.execute('INSERT INTO "quoted""table" (value) VALUES (?)', ("safe",))
+    sqlite_state = _sqlite_state_records(data_dir)
+    assert {"path": "quoted.sqlite3", "table": 'quoted"table', "rows": [{"value": "safe"}]} in sqlite_state
+
     (data_dir / ".solomon-maintenance.json").write_text("not-json", encoding="utf-8")
     (data_dir / "deployment.json").write_text('{"schema": "test"}', encoding="utf-8")
     (data_dir / "linked.json").symlink_to(data_dir / "deployment.json")

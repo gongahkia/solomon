@@ -133,10 +133,12 @@ solomon worker --once
 
 PostgreSQL migrations serialize on an advisory lock. The operation-store 2 migration adds the
 `idx_knowledge_operations_status_updated` index; it does not rewrite operation or audit history. Re-running
-`migrate` is idempotent. In the production Compose profile, it is the only schema-initializing service; API, console,
-worker, and their health probes use verified-schema mode and do not issue DDL against live relations. An older binary
-rejects the unknown version 2 migration, so rollback is not an in-place database downgrade. Stop the failed target
-binary and restore the verified pre-upgrade checkpoint into fresh targets, or make a forward repair after investigation.
+`migrate` is idempotent. In the production Compose profile, API, console, worker, and their health probes use
+verified-schema mode and do not issue DDL against existing live relations. The authenticated tenant-provisioning path
+is the narrow exception: it initializes a new isolated tenant schema before adding that tenant to the registry. An
+older binary rejects the unknown version 2 migration, so rollback is not an in-place database downgrade. Stop the
+failed target binary and restore the verified pre-upgrade checkpoint into fresh targets, or make a forward repair after
+investigation.
 
 The real N-to-N+1 rehearsal is available to an operator with Docker and the repository history:
 

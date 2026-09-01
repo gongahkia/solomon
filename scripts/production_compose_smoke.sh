@@ -51,3 +51,42 @@ curl --fail --silent --show-error \
 curl --fail --silent --show-error \
     -H 'Authorization: Bearer test-console-bearer-token' \
     "http://$console_endpoint/console/sources" >/dev/null
+curl --fail --silent --show-error \
+    -H 'x-api-key: test-server-api-key' \
+    -H 'Content-Type: application/json' \
+    -X POST "http://$api_endpoint/tenants" \
+    --data '{"tenant_id":"compose-smoke","display_name":"Compose smoke"}' >/dev/null
+api_response="$(curl --fail --silent --show-error \
+    -H 'x-api-key: test-server-api-key' \
+    -H 'x-tenant-id: compose-smoke' \
+    -H 'Content-Type: application/json' \
+    -X POST "http://$api_endpoint/ingest" \
+    --data '{"content":"Compose rehearsal position: structure X remains governed by Regulation R section 12.","kind":"house-view","source_kind":"partner","source_ref":"compose-rehearsal","author":"Compose Rehearsal"}')"
+api_item_id="$(printf '%s' "$api_response" | python -c '
+import json
+import sys
+value = json.load(sys.stdin).get("id")
+if not isinstance(value, str) or not value:
+    raise SystemExit("authenticated API ingest did not return an item id")
+print(value)
+')"
+curl --fail --silent --show-error \
+    -H 'x-api-key: test-server-api-key' \
+    -H 'x-tenant-id: compose-smoke' \
+    "http://$api_endpoint/currency/$api_item_id" > "$secrets_dir/api-currency.json"
+# Run the in-profile CLI through the production entrypoint so file-backed
+# secrets are loaded before it drops to the unprivileged service identity.
+docker compose --project-name "$project" -f docker-compose.production.yml --profile production \
+    exec -T --user root api /usr/local/bin/solomon-entrypoint solomon deployment preflight \
+    --require-initialized --format json > "$secrets_dir/cli-preflight.json"
+python - "$secrets_dir/api-currency.json" "$secrets_dir/cli-preflight.json" <<'PY'
+import json
+import sys
+
+currency = json.load(open(sys.argv[1], encoding="utf-8"))
+preflight = json.load(open(sys.argv[2], encoding="utf-8"))
+if not isinstance(currency.get("currency_state"), str):
+    raise SystemExit("authenticated API read did not return currency state")
+if preflight.get("ready") is not True:
+    raise SystemExit("in-profile CLI preflight was not ready")
+PY

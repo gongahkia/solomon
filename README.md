@@ -649,10 +649,11 @@ the API, curator console, and a single filesystem-source worker. It keeps Postgr
 in named volumes; bind mounts are deliberately absent. The worker synchronizes enabled filesystem sources only; scale it
 only after introducing a source-level distributed lease.
 
-The migration job is the only Compose service configured with `SOLOMON_STORAGE_SCHEMA_MODE=initialize`. API, console,
-and worker use `verify`, which opens the existing PostgreSQL schema without schema DDL; a health check therefore cannot
-wait behind a live relation lock held by a normal request. `solomon migrate` explicitly enables initialization even when
-the surrounding environment is configured for verification.
+The migration job initializes the base PostgreSQL schema. API, console, and worker use `verify`, which opens existing
+schemas without schema DDL; a health check therefore cannot wait behind a live relation lock held by a normal request.
+The one exception is authenticated tenant provisioning: it initializes a new tenant's isolated schema before publishing
+that tenant in the registry. `solomon migrate` explicitly enables initialization even when the surrounding environment
+is configured for verification.
 
 Create four files outside the checkout, each mode `0600`: `server_api_key`, `console_bearer_token`, `postgres_password`,
 and a Base64-encoded 32-byte `content_encryption_key`. The content key reference is non-secret deployment metadata.

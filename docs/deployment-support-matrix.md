@@ -20,7 +20,7 @@ builds. The canonical production rehearsal is the single-host production Compose
 | audit JSONL | required local persistence | Hash chained and file-locked on a shared POSIX filesystem. It is not an object-store or multi-region audit system. |
 | filesystem/object storage | filesystem only | Source documents live in the local state volume. No object-store backend is implemented or supported. |
 | CLI | supported | Operational mutation is CLI-only with stable JSON where documented. |
-| REST administration | constrained | Existing authenticated API conventions remain available; this milestone does not require a new destructive restore endpoint. |
+| REST administration | constrained | Existing authenticated API conventions remain available; tenant provisioning initializes isolated storage before the registry entry becomes routable. This milestone does not require a destructive restore endpoint. |
 | maintained SDKs | supported read/API clients | Updated only if a supported REST contract changes. |
 | MCP | supported read-only | No backup, restore, migration, or repair mutation is exposed. |
 | operation worker | required in recommended production | Resumes journal work after restart; single worker is required for source sync until a distributed source lease exists. |

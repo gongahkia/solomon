@@ -60,6 +60,11 @@ def test_production_surface_ci_matrix_and_smoke_harness() -> None:
         "curl --fail --silent --show-error",
         "Authorization: Bearer test-console-bearer-token",
         '"http://$console_endpoint/console/sources"',
+        "x-api-key: test-server-api-key",
+        '"http://$api_endpoint/tenants"',
+        '"http://$api_endpoint/ingest"',
+        '"http://$api_endpoint/currency/$api_item_id"',
+        "exec -T --user root api /usr/local/bin/solomon-entrypoint solomon deployment preflight",
         "down --volumes --remove-orphans",
     ):
         assert fragment in smoke.read_text(encoding="utf-8")

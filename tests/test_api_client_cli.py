@@ -759,6 +759,57 @@ def test_server_tenant_registry_lifecycle_and_keys(tmp_path: Path) -> None:
     assert "pbkdf2_sha256" in raw_registry
 
 
+def test_server_verified_schema_reopens_a_provisioned_tenant(tmp_path: Path) -> None:
+    settings = Settings(
+        sku="server",
+        zero_egress_mode=False,
+        data_dir=tmp_path / "data",
+        journal_dir=tmp_path / "journal",
+        server_api_key="admin-secret",
+        server_auto_provision_tenants=False,
+        storage_schema_mode="verify",
+    )
+    admin_headers = {"x-api-key": "admin-secret"}
+    tenant_headers = {"x-api-key": "tenant-secret", "x-tenant-id": "verified-tenant"}
+
+    async def provision_and_write() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=create_app(settings))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created = await client.post(
+                "/tenants",
+                headers=admin_headers,
+                json={"tenant_id": "verified-tenant", "api_key": "tenant-secret"},
+            )
+            ingested = await client.post(
+                "/ingest",
+                headers=tenant_headers,
+                json={
+                    "kind": "position",
+                    "content": "verified schema tenant position",
+                    "source_kind": "partner",
+                    "source_ref": "verified-schema-memo",
+                },
+            )
+            return created, ingested
+
+    async def reopen_and_read() -> httpx.Response:
+        transport = httpx.ASGITransport(app=create_app(settings))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post(
+                "/recall",
+                headers=tenant_headers,
+                json={"query": "verified schema tenant", "review_mode": True},
+            )
+
+    created, ingested = asyncio.run(provision_and_write())
+    reopened = asyncio.run(reopen_and_read())
+
+    assert created.status_code == 201
+    assert ingested.status_code == 200
+    assert reopened.status_code == 200
+    assert len(reopened.json()) == 1
+
+
 def test_sync_client_uses_httpx_transport() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/ingest":

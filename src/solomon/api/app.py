@@ -211,11 +211,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     metrics = SolomonMetrics()
     metrics.attach(service)
 
-    def service_for_tenant(tenant_id: str) -> SolomonService:
-        existing = tenant_services.get(tenant_id)
-        if existing is not None:
-            return existing
-        tenant_service = SolomonService(
+    def _new_tenant_service(tenant_id: str, *, initialize_postgres_schema: bool) -> SolomonService:
+        return SolomonService(
             data_dir=resolved_settings.data_dir / "tenants" / tenant_id,
             journal_dir=resolved_settings.journal_dir / "tenants" / tenant_id,
             attestation_key=resolved_settings.verification_attestation_key,
@@ -231,8 +228,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             retention_default_days=resolved_settings.retention_default_days,
             telemetry=telemetry,
             boundary=SolomonBoundary(policy=boundary_policy_from_settings(resolved_settings)),
+            initialize_postgres_schema=initialize_postgres_schema,
+        )
+
+    def service_for_tenant(tenant_id: str) -> SolomonService:
+        existing = tenant_services.get(tenant_id)
+        if existing is not None:
+            return existing
+        tenant_service = _new_tenant_service(
+            tenant_id,
             initialize_postgres_schema=resolved_settings.storage_schema_mode == "initialize",
         )
+        metrics.attach(tenant_service)
+        tenant_services[tenant_id] = tenant_service
+        return tenant_service
+
+    def provision_tenant_service(tenant_id: str) -> SolomonService:
+        """Initialize a new tenant before its registry entry becomes routable."""
+
+        existing = tenant_services.get(tenant_id)
+        if existing is not None:
+            return existing
+        # Provisioning is the sole server request path allowed to create a new
+        # tenant schema. Normal API, CLI, worker, and probe opens use verified
+        # schemas and therefore do not issue DDL.
+        tenant_service = _new_tenant_service(tenant_id, initialize_postgres_schema=True)
         metrics.attach(tenant_service)
         tenant_services[tenant_id] = tenant_service
         return tenant_service
@@ -324,7 +344,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                 if _admin_principal(resolved_settings, supplied_api_key) is None:
                     return _auth_error()
-                record = tenant_registry.ensure_tenant(tenant_id)
+                try:
+                    provision_tenant_service(tenant_id)
+                    record = tenant_registry.ensure_tenant(tenant_id)
+                except Exception:
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "error": {
+                                "code": "tenant_provisioning_failed",
+                                "message": "tenant storage provisioning did not complete",
+                            }
+                        },
+                    )
             if record.status != "active":
                 return JSONResponse(
                     status_code=403,
@@ -455,7 +487,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if tenant_registry.get(payload.tenant_id) is not None:
+            raise HTTPException(status_code=409, detail="tenant already exists")
         try:
+            provision_tenant_service(payload.tenant_id)
             record = tenant_registry.create_tenant(
                 payload.tenant_id,
                 display_name=payload.display_name,
@@ -464,6 +499,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except TenantAlreadyExistsError as exc:
             raise HTTPException(status_code=409, detail="tenant already exists") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="tenant storage provisioning failed") from exc
         return _tenant_response(record)
 
     @app.post("/tenants/{tenant_id}/suspend", response_model=TenantResponse)

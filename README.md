@@ -728,6 +728,10 @@ external Postgres, ingress TLS, and validation.
 - [`docs/deployment.md`](./docs/deployment.md): supported persistence profiles and upgrade/recovery obligations.
 - [`docs/operations/crash-consistency.md`](./docs/operations/crash-consistency.md): operation inspection, retry,
   and guarded repair procedure.
+- [`docs/operations/production-backup-restore.md`](./docs/operations/production-backup-restore.md): coordinated
+  backup, guarded restore, upgrade, and rollback procedure for the recommended production profile.
+- [`docs/operations/production-troubleshooting.md`](./docs/operations/production-troubleshooting.md): safe response
+  procedures for failed migrations, incomplete backups, failed restores, and incompatible rollback.
 - [`docs/evaluations/crash-consistency-reconciliation-proof.md`](./docs/evaluations/crash-consistency-reconciliation-proof.md):
   deterministic crash/recovery evidence and its limits.
 - [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.

@@ -23,6 +23,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Deployment profiles](./deployment.md)
 - [Crash consistency operations guide](./operations/crash-consistency.md)
 - [Production backup, restore, and upgrade guide](./operations/production-backup-restore.md)
+- [Production operations troubleshooting guide](./operations/production-troubleshooting.md)
 
 ## Architecture and evidence
 

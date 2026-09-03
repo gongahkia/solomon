@@ -5,6 +5,8 @@
 This guide applies only to the recommended single-host mixed PostgreSQL/SQLite/JSONL profile. It is a coordinated
 checkpoint and recovery procedure, not a distributed transaction or a point-in-time recovery product.
 
+For incident-specific failure handling, use the companion [production troubleshooting guide](./production-troubleshooting.md).
+
 ## Before any operation
 
 Keep the PostgreSQL volume/database, `solomon-data`, and `solomon-journal` together. Losing any one of them means

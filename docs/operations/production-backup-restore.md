@@ -6,6 +6,8 @@ This guide applies only to the recommended single-host mixed PostgreSQL/SQLite/J
 checkpoint and recovery procedure, not a distributed transaction or a point-in-time recovery product.
 
 For incident-specific failure handling, use the companion [production troubleshooting guide](./production-troubleshooting.md).
+For backup artifact handling and excluded-secret responsibilities, use the companion
+[production backup security guide](./production-backup-security.md).
 
 ## Before any operation
 

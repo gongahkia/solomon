@@ -730,6 +730,8 @@ external Postgres, ingress TLS, and validation.
   and guarded repair procedure.
 - [`docs/operations/production-backup-restore.md`](./docs/operations/production-backup-restore.md): coordinated
   backup, guarded restore, upgrade, and rollback procedure for the recommended production profile.
+- [`docs/operations/production-backup-security.md`](./docs/operations/production-backup-security.md): backup artifact
+  protection, excluded secrets, restore admission controls, and operator responsibilities.
 - [`docs/operations/production-troubleshooting.md`](./docs/operations/production-troubleshooting.md): safe response
   procedures for failed migrations, incomplete backups, failed restores, and incompatible rollback.
 - [`docs/evaluations/crash-consistency-reconciliation-proof.md`](./docs/evaluations/crash-consistency-reconciliation-proof.md):

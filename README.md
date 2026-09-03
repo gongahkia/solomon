@@ -747,6 +747,12 @@ external Postgres, ingress TLS, and validation.
 - [`docs/cli-governed-dependency-assertions.md`](./docs/cli-governed-dependency-assertions.md): non-interactive assertion CLI.
 - [`docs/auth-governed-dependency-assertions.md`](./docs/auth-governed-dependency-assertions.md): assertion permission and scope matrix.
 - [`docs/evaluations/governed-dependency-assertion-proof.md`](./docs/evaluations/governed-dependency-assertion-proof.md): proof evidence and local verification limits.
+- [`docs/evaluations/evidence/2026-09-04-production-rehearsal/`](./docs/evaluations/evidence/2026-09-04-production-rehearsal/):
+  redacted JSON from fresh checkpoint/restore and N-to-N+1 Docker rehearsals.
+- [`docs/pilot/owner-operated-protocol.md`](./docs/pilot/owner-operated-protocol.md): preparation-only protocol for
+  a small owner-authorized non-sensitive corpus.
+- [`docs/pilot/owner-operated-results-template.md`](./docs/pilot/owner-operated-results-template.md): private
+  results template and owner-approved redacted-summary gate.
 - [`docs/cli-mcp-verb-audit.md`](./docs/cli-mcp-verb-audit.md): CLI names aligned to MCP tool names.
 - [`docs/sdk/`](./docs/sdk/): Python and TypeScript SDK quickstarts.
 - [`docs/adr/README.md`](./docs/adr/README.md): architecture decision records.

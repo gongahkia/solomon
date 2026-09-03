@@ -4,6 +4,10 @@
 
 No external pilot validation had occurred when issues #1, #2, #3, and #5 were retired on 2026-08-31. Their reviewer prompts are preserved here as hypotheses, not evidence or endorsements.
 
+The prepared [owner-operated pilot protocol](./pilot/owner-operated-protocol.md) and private
+[results template](./pilot/owner-operated-results-template.md) add required preregistration, measurements, claim
+boundaries, and redaction controls. They do not record a completed pilot.
+
 ## Bounded scenario
 
 Use a synthetic or approved non-privileged internal-knowledge subset containing a known authority change, two confirmed direct dependencies, at least one transitive dependency, an unaffected comparison item, and a matter/client scope boundary. A facilitator records the authority event, participants inspect default and review-mode retrieval, inspect `why` and the audit pack, then complete or reject a review decision. Do not claim legal correctness, prevented loss, production readiness, model safety, or confidentiality compliance from this session.

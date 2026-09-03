@@ -39,7 +39,14 @@ contested. It does not decide the law or replace lawyer review.
 - [Cross-boundary operation matrix](./cross-boundary-operation-matrix.md)
 - [Crash consistency proof record](./evaluations/crash-consistency-reconciliation-proof.md)
 - [Production operations rehearsal record](./evaluations/production-operations-rehearsal.md)
+- [2026-09-04 redacted production rehearsal evidence](./evaluations/evidence/2026-09-04-production-rehearsal/README.md)
 - [Interview architecture narrative](./interview/crash-consistency.md)
+
+## Owner-operated pilot preparation
+
+- [Pilot validation hypotheses](./pilot-validation-plan.md)
+- [Owner-operated pilot protocol](./pilot/owner-operated-protocol.md)
+- [Private owner-operated results template](./pilot/owner-operated-results-template.md)
 
 ## Demonstrations
 

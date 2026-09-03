@@ -23,8 +23,8 @@ prerequisite for this rehearsal.
 | Static checks | `uv run ruff check src/solomon tests`; `uv run mypy src/solomon`; `uv run mkdocs build --strict`; license and file-length checks | Passed. |
 | Compose model | `TMPDIR=/home/gongahkia /bin/sh scripts/check_production_compose.sh` | Passed. |
 | Production Compose smoke | `scripts/production_compose_smoke.sh` | Passed: production image build, migration, bootstrap, API, console, and worker became healthy; an authenticated admin provisioned an isolated tenant, an authenticated tenant API ingest/read succeeded, and the in-container CLI preflight was ready. The harness removed its exact disposable volumes and network. |
-| Full checkpoint/restore | `SOLOMON_OPERATIONS_REPORT_PATH=… scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v3`. |
-| N-to-N+1 upgrade | `scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`. |
+| Full checkpoint/restore | `SOLOMON_OPERATIONS_REPORT_PATH=… scripts/production_operations_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_operations_rehearsal.v3`; see the [2026-09-04 redacted report](./evidence/2026-09-04-production-rehearsal/checkpoint-restore-v3.json). |
+| N-to-N+1 upgrade | `scripts/production_upgrade_rehearsal.sh` | Passed with real isolated pgvector PostgreSQL; retained report schema `solomon.production_upgrade_rehearsal.v2`; see the [2026-09-04 redacted report](./evidence/2026-09-04-production-rehearsal/upgrade-n-to-n-plus-one-v2.json). |
 | Release surfaces | TypeScript `npm ci && npm run typecheck && npm test`; `scripts/check_helm_chart.sh`; PyInstaller and `scripts/smoke_local_binary.py`; `scripts/release_quality_gates.py`; `pip-audit --skip-editable` | Passed. Helm result is static validation only. |
 
 The checkpoint/restore scenario starts from a migrated, initialized source profile and exercises two isolated scopes.
@@ -32,7 +32,7 @@ It creates human and trusted-upstream assertions in pending, confirmed, rejected
 preserves source version lineage and a reverification request; proves the confirmed edge's currency effect; verifies
 scope denial, confirmation idempotency, audit-pack integrity, source and restored recovery status, and zero scoped
 consistency findings. It creates and inspects an encrypted full backup, refuses application tables before restore,
-restores an empty isolated PostgreSQL target and absent local root, compares 12 canonical content-redacting semantic
+restores an empty isolated PostgreSQL target and absent local root, compares 11 canonical content-redacting semantic
 component hashes (including source documents, candidates, local SQLite state, graph, operations, and audit
 correlation), verifies the retained audit pack, and completes a new governed post-restore graph write with matching
 assertion provenance. The checkpoint also contains a queued duplicate confirmation for an existing validly confirmed
@@ -48,12 +48,12 @@ coordinated maintenance checkpoint. New writes are blocked by maintenance or out
 does not separately time a maintenance drain because this profile gates new claims rather than implementing a timed
 drain protocol; it makes no external RPO, RTO, zero-RPO, or SLO claim.
 
-The most recent v3 run used Docker Engine with two isolated
-`pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers and disposable host-local state. It took 142.319
-seconds overall: initialization 17.846s, governed fixture creation 6.175s, coordinated backup 6.079s, backup
-inspection 5.609s, restore planning 5.544s, restore apply 6.416s, and post-restore validation/recovery 53.034s.
-The maintenance-drain field was `null` for the reason above. These figures are one local engineering observation,
-not a production recovery estimate.
+The latest v3 run used Docker Engine with two isolated `pgvector/pgvector:0.8.2-pg16-bookworm` PostgreSQL containers
+and disposable host-local state. Its [redacted report](./evidence/2026-09-04-production-rehearsal/checkpoint-restore-v3.json)
+took 186.511 seconds overall: initialization 23.310s, governed fixture creation 7.673s, coordinated backup 7.869s,
+backup inspection 9.157s, restore planning 7.430s, restore apply 11.434s, and post-restore validation/recovery
+65.624s. The maintenance-drain field was `null` for the reason above. These figures are one local engineering
+observation, not a production recovery estimate.
 
 The upgrade scenario builds committed `2d74983b` for N and current HEAD for N+1. The actual N binary creates the
 same two-scope governed fixture: source/version lineage, confirmed/rejected/deferred/withdrawn assertions, graph and

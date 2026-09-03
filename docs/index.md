@@ -25,6 +25,7 @@ contested. It does not decide the law or replace lawyer review.
 - [Production backup, restore, and upgrade guide](./operations/production-backup-restore.md)
 - [Production backup security and excluded secrets](./operations/production-backup-security.md)
 - [Production operations troubleshooting guide](./operations/production-troubleshooting.md)
+- [Five-minute local production proof](./operations/five-minute-local-production-proof.md)
 
 ## Architecture and evidence
 

@@ -734,6 +734,8 @@ external Postgres, ingress TLS, and validation.
   protection, excluded secrets, restore admission controls, and operator responsibilities.
 - [`docs/operations/production-troubleshooting.md`](./docs/operations/production-troubleshooting.md): safe response
   procedures for failed migrations, incomplete backups, failed restores, and incompatible rollback.
+- [`docs/operations/five-minute-local-production-proof.md`](./docs/operations/five-minute-local-production-proof.md):
+  concise disposable checkpoint-and-restore rehearsal, with explicitly non-guaranteed local timing evidence.
 - [`docs/evaluations/crash-consistency-reconciliation-proof.md`](./docs/evaluations/crash-consistency-reconciliation-proof.md):
   deterministic crash/recovery evidence and its limits.
 - [`docs/positioning.md`](./docs/positioning.md): partner-facing product narrative.

@@ -13,8 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/securetemp"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/securetemp"
 )
 
 type Pack struct {

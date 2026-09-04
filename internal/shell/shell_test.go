@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 type compatibilityFixture struct {
@@ -81,7 +81,7 @@ func TestResolveAction(t *testing.T) {
 }
 
 func TestInlineDiagnostic(t *testing.T) {
-	if got := InlineDiagnostic("safe", "0.91", "git status"); got != "close-enough [safe/0.91]: git status" {
+	if got := InlineDiagnostic("safe", "0.91", "git status"); got != "solomon [safe/0.91]: git status" {
 		t.Fatalf("InlineDiagnostic() = %q", got)
 	}
 }
@@ -158,9 +158,9 @@ func TestAdaptersRateLimitDiagnosticsPerSession(t *testing.T) {
 		interruptEnd string
 		post         string
 	}{
-		{"zsh", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
-		{"fish", "_CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0", "_close_enough_allow_diagnostic", "_close_enough_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "daemon request --operation post-failure --shell fish"},
-		{"pwsh", "CloseEnoughDiagnosticCount = 0", "Allow-CloseEnoughDiagnostic", "Allow-CloseEnoughSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "daemon request --operation post-failure --shell powershell"},
+		{"zsh", "_SOLOMON_DIAGNOSTIC_COUNT=0", "_solomon_allow_diagnostic", "_solomon_allow_suggestion", `if [[ "$action" == hint ]]; then`, `if [[ "$action" == interrupt ]]; then`, "  return 1\n  fi", "daemon request --operation post-failure --shell zsh"},
+		{"fish", "_SOLOMON_DIAGNOSTIC_COUNT 0", "_solomon_allow_diagnostic", "_solomon_allow_suggestion", `if test "$fields[2]" = hint`, `if test "$fields[2]" = interrupt`, "    return\n  end", "daemon request --operation post-failure --shell fish"},
+		{"pwsh", "SolomonDiagnosticCount = 0", "Allow-SolomonDiagnostic", "Allow-SolomonSuggestion", "if ($decision.action -eq 'hint')", "if ($decision.action -eq 'interrupt')", "    return\n  }", "daemon request --operation post-failure --shell powershell"},
 	} {
 		t.Run(test.shell, func(t *testing.T) {
 			script, err := Script(test.shell)
@@ -192,9 +192,9 @@ func TestAdaptersAssociateFailuresWithNextManualSuccess(t *testing.T) {
 		shell   string
 		needles []string
 	}{
-		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", `_CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"`, `post-success --shell zsh --session "$$" --token "$token"`, `post-failure --shell zsh --session "$$" --token "$token"`}},
-		{"fish", []string{"_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN", "_CLOSE_ENOUGH_AUTOMATIC_REWRITE 1", `post-success --shell fish --session "$fish_pid" --token "$token"`, `post-failure --shell fish --session "$fish_pid" --token "$token"`}},
-		{"pwsh", []string{"CloseEnoughPendingFailureToken", "CloseEnoughAutomaticRewrite = $true", "post-success --shell powershell --session $PID --token $token", "post-failure --shell powershell --session $PID --token $token"}},
+		{"zsh", []string{"_SOLOMON_PENDING_FAILURE_TOKEN", `_SOLOMON_AUTOMATIC_REWRITE="$command"`, `post-success --shell zsh --session "$$" --token "$token"`, `post-failure --shell zsh --session "$$" --token "$token"`}},
+		{"fish", []string{"_SOLOMON_PENDING_FAILURE_TOKEN", "_SOLOMON_AUTOMATIC_REWRITE 1", `post-success --shell fish --session "$fish_pid" --token "$token"`, `post-failure --shell fish --session "$fish_pid" --token "$token"`}},
+		{"pwsh", []string{"SolomonPendingFailureToken", "SolomonAutomaticRewrite = $true", "post-success --shell powershell --session $PID --token $token", "post-failure --shell powershell --session $PID --token $token"}},
 	}
 	for _, test := range tests {
 		t.Run(test.shell, func(t *testing.T) {
@@ -217,9 +217,9 @@ func TestAdaptersSuppressRepeatedSuggestions(t *testing.T) {
 		cache string
 		allow string
 	}{
-		{"zsh", "typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
-		{"fish", "set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS", "_close_enough_allow_suggestion"},
-		{"pwsh", "CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()", "Allow-CloseEnoughSuggestion"},
+		{"zsh", "typeset -gA _SOLOMON_SEEN_SUGGESTIONS", "_solomon_allow_suggestion"},
+		{"fish", "set -g _SOLOMON_SEEN_SUGGESTIONS", "_solomon_allow_suggestion"},
+		{"pwsh", "SolomonSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()", "Allow-SolomonSuggestion"},
 	} {
 		t.Run(test.shell, func(t *testing.T) {
 			script, err := Script(test.shell)
@@ -247,19 +247,19 @@ func TestZshSuppressesRepeatedSuggestions(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	record := "1\thint\tsafe\t0.90\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
-	harness := `zle() { [[ "$1" == -M ]] && print -r -- "$2"; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; repeat 6 { BUFFER=gti; _close_enough_check; }`
+	harness := `zle() { [[ "$1" == -M ]] && print -r -- "$2"; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; repeat 6 { BUFFER=gti; _solomon_check; }`
 	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
 	command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "RECORD="+record)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("zsh rate-limit harness: %v: %s", err, output)
 	}
-	if got := strings.Count(string(output), "close-enough [safe/0.90]: git status"); got != 1 {
+	if got := strings.Count(string(output), "solomon [safe/0.90]: git status"); got != 1 {
 		t.Fatalf("rendered hints = %d, want 1: %s", got, output)
 	}
 }
@@ -279,11 +279,11 @@ func TestZshFailureTokenSurvivesManualSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := filepath.Join(directory, "calls")
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\nprintf '1\\tnone\\t\\t\\t\\t\\t\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _close_enough_preexec 'git sttaus'; false; _close_enough_precmd; _close_enough_preexec 'git status'; true; _close_enough_precmd; _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=retained; _CLOSE_ENOUGH_AUTOMATIC_REWRITE='git status'; _close_enough_preexec 'git status'; true; _close_enough_precmd; print -r -- "pending=$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"`
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _solomon_preexec 'git sttaus'; false; _solomon_precmd; _solomon_preexec 'git status'; true; _solomon_precmd; _SOLOMON_PENDING_FAILURE_TOKEN=retained; _SOLOMON_AUTOMATIC_REWRITE='git status'; _solomon_preexec 'git status'; true; _solomon_precmd; print -r -- "pending=$_SOLOMON_PENDING_FAILURE_TOKEN"`
 	command := exec.Command(zsh, "-fc", harness, "zsh", adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "CALLS="+calls)
 	output, err := command.CombinedOutput()
@@ -383,9 +383,9 @@ func TestSafeRuleAcceptances(t *testing.T) {
 
 func TestAdaptersUseCompactInlineDiagnosticLayout(t *testing.T) {
 	markers := map[string]string{
-		"zsh":        `close-enough [$risk/$confidence]: $suggestion`,
-		"fish":       `close-enough [$fields[3]/$fields[4]]: $suggestion`,
-		"powershell": `close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)`,
+		"zsh":        `solomon [$risk/$confidence]: $suggestion`,
+		"fish":       `solomon [$fields[3]/$fields[4]]: $suggestion`,
+		"powershell": `solomon [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion)`,
 	}
 	for name, marker := range markers {
 		script, err := Script(name)
@@ -524,7 +524,7 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CAPTURE\"\noperation= command=\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --operation|--command) key=$1; shift; test $# -gt 0 || exit 1; case \"$key\" in --operation) operation=$1 ;; --command) command=$1 ;; esac ;;\n  esac\n  shift\ndone\nif [ \"$operation\" = handshake ]; then\n  printf '1\\tready\\t\\t\\t\\t\\t\\n'\nelif [ \"$command\" = \"$COMMAND_INPUT\" ]; then\n  printf '%s\\n' \"$COMMAND_RECORD\"\nelif [ \"$command\" = \"$SAFE_INPUT\" ]; then\n  printf '%s\\n' \"$SAFE_RECORD\"\nelse\n  printf '%s\\n' \"$HIGH_RECORD\"\nfi\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -534,7 +534,7 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 	rewriteResult := filepath.Join(directory, "rewrite-buffer")
 	highRiskResult := filepath.Join(directory, "high-risk-buffer")
 	marker := filepath.Join(directory, "marker")
-	safeInput, highInput := "close-enough-safe-rewrite", "close-enough-high-rewrite"
+	safeInput, highInput := "solomon-safe-rewrite", "solomon-high-rewrite"
 	env := append(os.Environ(),
 		"PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"CAPTURE="+capture,
@@ -552,13 +552,13 @@ func runCommandInjectionFixture(t *testing.T, shellName, shellPath string, fixtu
 	var command *exec.Cmd
 	switch shellName {
 	case "zsh":
-		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; print -rn -- "$BUFFER" > "$COMMAND_RESULT"; BUFFER="$SAFE_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$REWRITE_RESULT"; BUFFER="$HIGH_INPUT"; _close_enough_check; print -rn -- "$BUFFER" > "$HIGH_RISK_RESULT"`
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _solomon_check; print -rn -- "$BUFFER" > "$COMMAND_RESULT"; BUFFER="$SAFE_INPUT"; _solomon_check; print -rn -- "$BUFFER" > "$REWRITE_RESULT"; BUFFER="$HIGH_INPUT"; _solomon_check; print -rn -- "$BUFFER" > "$HIGH_RISK_RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Payload)
 	case "bash":
-		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$COMMAND_RESULT"; READLINE_LINE="$SAFE_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$REWRITE_RESULT"; READLINE_LINE="$HIGH_INPUT"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$HIGH_RISK_RESULT"`
+		harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE="$2"; _solomon_accept_line; printf %s "$READLINE_LINE" > "$COMMAND_RESULT"; READLINE_LINE="$SAFE_INPUT"; _solomon_accept_line; printf %s "$READLINE_LINE" > "$REWRITE_RESULT"; READLINE_LINE="$HIGH_INPUT"; _solomon_accept_line; printf %s "$READLINE_LINE" > "$HIGH_RISK_RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Payload)
 	case "fish":
-		harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$COMMAND_RESULT"; set -g BUFFER "$SAFE_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$REWRITE_RESULT"; set -g BUFFER "$HIGH_INPUT"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$HIGH_RISK_RESULT"`
+		harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _solomon_accept_line; printf '%s' "$BUFFER" > "$COMMAND_RESULT"; set -g BUFFER "$SAFE_INPUT"; _solomon_accept_line; printf '%s' "$BUFFER" > "$REWRITE_RESULT"; set -g BUFFER "$HIGH_INPUT"; _solomon_accept_line; printf '%s' "$BUFFER" > "$HIGH_RISK_RESULT"`
 		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Payload)
 	default:
 		t.Fatalf("unsupported shell %q", shellName)
@@ -633,7 +633,7 @@ func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string,
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \" $* \" in *\" --operation handshake \"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\" --operation pre-send \"*) printf '%s\\n' \"$RECORD\" ;; *) exit 1 ;; esac\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -643,13 +643,13 @@ func runSafeRewriteSecondEnterFixture(t *testing.T, shellName, shellPath string,
 	var command *exec.Cmd
 	switch shellName {
 	case "zsh":
-		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _solomon_check; first=$?; first_buffer="$BUFFER"; _solomon_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Input)
 	case "bash":
-		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_buffer="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_buffer|$second|$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE="$2"; _solomon_accept_line; first=$?; first_buffer="$READLINE_LINE"; _solomon_accept_line; second=$?; printf '%s' "$first|$first_buffer|$second|$READLINE_LINE" > "$RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Input)
 	case "fish":
-		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
+		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _solomon_accept_line; set -g FIRST_BUFFER "$BUFFER"; _solomon_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
 		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Input)
 	default:
 		t.Fatalf("unsupported shell %q", shellName)
@@ -740,7 +740,7 @@ func runRewriteUndoFixture(t *testing.T, shellName, shellPath string, fixture re
 	const token = "undo-token"
 	rewrite := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(fixture.Suggestion)) + "\t" + base64.StdEncoding.EncodeToString([]byte(token))
 	undoRestore := "1\tedit-in-buffer\tsafe\t\t\t\t" + base64.StdEncoding.EncodeToString([]byte(fixture.Input))
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) printf '%s\\n' \"$REWRITE\" ;; *\"--operation undo\"*) case \"$UNDO_OUTCOME\" in restore) printf '%s\\n' \"$UNDO_RESTORE\" ;; expired) printf '1\\tnone\\t\\t\\t\\t\\t\\n' ;; malformed) printf 'malformed\\n' ;; unavailable) exit 1 ;; esac ;; *) exit 1 ;; esac\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -765,15 +765,15 @@ autoload() { :; }
 add-zsh-hook() { :; }
 source "$1"
 BUFFER="$2"
-_close_enough_check; first=$?
+_solomon_check; first=$?
 rewritten="$BUFFER"
-_close_enough_undo_rewrite
+_solomon_undo_rewrite
 after="$BUFFER"
 second=skip
 if [[ "$SUBMIT_AFTER_UNDO" == true ]]; then
-  _close_enough_check; second=$?
+  _solomon_check; second=$?
 fi
-print -rn -- "$first|$rewritten|$after|$second|$BIND_G|$_CLOSE_ENOUGH_UNDO_WIDGET" > "$RESULT"`
+print -rn -- "$first|$rewritten|$after|$second|$BIND_G|$_SOLOMON_UNDO_WIDGET" > "$RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Input)
 	case "bash":
 		harness := `BIND_G=abort
@@ -783,29 +783,29 @@ bind() {
     return
   fi
   if [ "$1" = -X ]; then
-    [ "$BIND_G" = _close_enough_undo_rewrite ] && printf '"\\C-g" "_close_enough_undo_rewrite"\n'
+    [ "$BIND_G" = _solomon_undo_rewrite ] && printf '"\\C-g" "_solomon_undo_rewrite"\n'
     return
   fi
   if [ "$1" = -x ]; then
     case "$2" in
-      *C-g*) BIND_G=_close_enough_undo_rewrite ;;
+      *C-g*) BIND_G=_solomon_undo_rewrite ;;
     esac
     return
   fi
   BIND_G="${1##*: }"
 }
 source "$1"
-_close_enough_submit_line() { :; }
+_solomon_submit_line() { :; }
 READLINE_LINE="$2"
-_close_enough_accept_line; first=$?
+_solomon_accept_line; first=$?
 rewritten="$READLINE_LINE"
-_close_enough_undo_rewrite
+_solomon_undo_rewrite
 after="$READLINE_LINE"
 second=skip
 if [ "$SUBMIT_AFTER_UNDO" = true ]; then
-  _close_enough_accept_line; second=$?
+  _solomon_accept_line; second=$?
 fi
-printf '%s|%s|%s|%s|%s|%s' "$first" "$rewritten" "$after" "$second" "$BIND_G" "$_close_enough_undo_binding" > "$RESULT"`
+printf '%s|%s|%s|%s|%s|%s' "$first" "$rewritten" "$after" "$second" "$BIND_G" "$_solomon_undo_binding" > "$RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Input)
 	case "fish":
 		harness := `set -g EXECUTES 0
@@ -841,11 +841,11 @@ function commandline
 end
 source "$argv[1]"
 set -g BUFFER "$argv[2]"
-_close_enough_accept_line
+_solomon_accept_line
 set -g REWRITTEN "$BUFFER"
-_close_enough_undo_rewrite
+_solomon_undo_rewrite
 if test "$SUBMIT_AFTER_UNDO" = true
-  _close_enough_accept_line
+  _solomon_accept_line
 end
 printf '%s|%s|%s|%s' "$REWRITTEN" "$BUFFER" "$EXECUTES" "$BIND_G" > "$RESULT"`
 		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Input)
@@ -904,9 +904,9 @@ func TestAdaptersExposePendingRewriteUndoBindings(t *testing.T) {
 		shell   string
 		needles []string
 	}{
-		{"zsh", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell zsh", "press Ctrl-G to undo"}},
-		{"fish", []string{"_CLOSE_ENOUGH_PENDING_UNDO_TOKEN", "_close_enough_undo_rewrite", "--operation undo --shell fish", "press Ctrl-G to undo"}},
-		{"powershell", []string{"CloseEnoughPendingUndoToken", "Invoke-CloseEnoughPendingRewriteUndo", "--operation undo --shell powershell", "Ctrl+g", "press Ctrl-G to undo"}},
+		{"zsh", []string{"_SOLOMON_PENDING_UNDO_TOKEN", "_solomon_undo_rewrite", "--operation undo --shell zsh", "press Ctrl-G to undo"}},
+		{"fish", []string{"_SOLOMON_PENDING_UNDO_TOKEN", "_solomon_undo_rewrite", "--operation undo --shell fish", "press Ctrl-G to undo"}},
+		{"powershell", []string{"SolomonPendingUndoToken", "Invoke-SolomonPendingRewriteUndo", "--operation undo --shell powershell", "Ctrl+g", "press Ctrl-G to undo"}},
 	}
 	for _, test := range tests {
 		t.Run(test.shell, func(t *testing.T) {
@@ -928,8 +928,8 @@ func TestAdaptersForwardBoundedPostFailureEvidence(t *testing.T) {
 		name  string
 		wants []string
 	}{
-		{"zsh", []string{`local failure_output="exit status $exit_status"`, `capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
-		{"bash", []string{`failure_output="exit status $exit_status"`, `capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
+		{"zsh", []string{`local failure_output="exit status $exit_status"`, `capture read --socket "$SOLOMON_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
+		{"bash", []string{`failure_output="exit status $exit_status"`, `capture read --socket "$SOLOMON_CAPTURE_SOCKET"`, `--failure-output "$failure_output"`}},
 		{"fish", []string{`--failure-output "exit status $command_status"`}},
 		{"powershell", []string{`--failure-output $failureOutput`}},
 	} {
@@ -990,7 +990,7 @@ func runHighRiskConfirmationFixture(t *testing.T, shellName, shellPath string, f
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \" $* \" in *\" --operation handshake \"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\" --operation pre-send \"*) if test -e \"$STATE\"; then printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; else : > \"$STATE\"; printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -1000,13 +1000,13 @@ func runHighRiskConfirmationFixture(t *testing.T, shellName, shellPath string, f
 	var command *exec.Cmd
 	switch shellName {
 	case "zsh":
-		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
+		harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _solomon_check; first=$?; first_buffer="$BUFFER"; _solomon_check; second=$?; print -rn -- "$first|$first_buffer|$second|$BUFFER" > "$RESULT"`
 		command = exec.Command(shellPath, "-fc", harness, "zsh", adapter, fixture.Command)
 	case "bash":
-		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s' "$first|$first_line|$second|$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE="$2"; _solomon_accept_line; first=$?; first_line="$READLINE_LINE"; _solomon_accept_line; second=$?; printf '%s' "$first|$first_line|$second|$READLINE_LINE" > "$RESULT"`
 		command = exec.Command(shellPath, "--noprofile", "--norc", "-c", harness, "bash", adapter, fixture.Command)
 	case "fish":
-		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; set -g FIRST_BUFFER "$BUFFER"; _close_enough_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
+		harness := `set -g EXECUTES 0; function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTES (math $EXECUTES + 1); end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _solomon_accept_line; set -g FIRST_BUFFER "$BUFFER"; _solomon_accept_line; printf '%s' "$FIRST_BUFFER|$BUFFER|$EXECUTES" > "$RESULT"`
 		command = exec.Command(shellPath, "-c", harness, adapter, fixture.Command)
 	default:
 		t.Fatalf("unsupported shell %q", shellName)
@@ -1047,7 +1047,7 @@ func TestFishInterruptPreventsExecution(t *testing.T) {
 	branch := script[interrupt:]
 	repaint := strings.Index(branch, "commandline -f repaint")
 	execute := strings.Index(branch[repaint:], "commandline -f execute")
-	if repaint < 0 || execute < 0 || !strings.Contains(branch[:repaint], "echo \"close-enough") || !strings.Contains(branch[repaint:repaint+execute], "return") {
+	if repaint < 0 || execute < 0 || !strings.Contains(branch[:repaint], "echo \"solomon") || !strings.Contains(branch[repaint:repaint+execute], "return") {
 		t.Fatalf("fish interrupt does not precede execution: %q", script)
 	}
 }
@@ -1057,11 +1057,11 @@ func TestZshInitializationIsGuardedAndRetainsInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := "if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then"
-	marker := "typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1"
+	guard := "if (( ! ${+_SOLOMON_ZSH_LOADED} )); then"
+	marker := "typeset -g _SOLOMON_ZSH_LOADED=1"
 	interrupt := `if [[ "$action" == interrupt ]]; then`
-	accept := `zle "$_CLOSE_ENOUGH_ENTER_WIDGET"`
-	if !strings.HasPrefix(script, "# close-enough zsh integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") {
+	accept := `zle "$_SOLOMON_ENTER_WIDGET"`
+	if !strings.HasPrefix(script, "# solomon zsh integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") {
 		t.Fatalf("zsh script lacks an enclosing idempotence guard: %q", script)
 	}
 	interruptStart := strings.Index(script, interrupt)
@@ -1080,7 +1080,7 @@ func TestZshPreExecutionUsesCapturedBuffer(t *testing.T) {
 	if !strings.Contains(script, capture) || strings.Index(script, check) < strings.Index(script, capture) || strings.Contains(script, `--command "$BUFFER"`) {
 		t.Fatalf("zsh pre-execution check does not use a captured buffer: %q", script)
 	}
-	if !strings.Contains(script, `2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }`) {
+	if !strings.Contains(script, `2>/dev/null)" || { _SOLOMON_DAEMON_READY=0; return 0; }`) {
 		t.Fatalf("zsh check failure does not preserve normal submission: %q", script)
 	}
 }
@@ -1096,7 +1096,7 @@ func TestZshHintRenderingDoesNotSuppressSubmission(t *testing.T) {
 	if start < 0 || end < start || !strings.Contains(script[start:end], "zle -M") || !strings.Contains(script[start:end], "return 0") {
 		t.Fatalf("zsh hint path is not non-blocking: %q", script)
 	}
-	if strings.Index(script, `zle "$_CLOSE_ENOUGH_ENTER_WIDGET"`) < end || !strings.Contains(script[end:], "return 1") {
+	if strings.Index(script, `zle "$_SOLOMON_ENTER_WIDGET"`) < end || !strings.Contains(script[end:], "return 1") {
 		t.Fatalf("zsh interrupt path does not retain the confirmation boundary: %q", script)
 	}
 }
@@ -1107,13 +1107,13 @@ func TestZshInterruptReturnsBeforeCommandExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	interrupt := `if [[ "$action" == interrupt ]]; then`
-	widget := "function _close_enough_accept_line {"
+	widget := "function _solomon_accept_line {"
 	interruptStart, widgetStart := strings.Index(script, interrupt), strings.Index(script, widget)
 	if interruptStart < 0 || widgetStart < interruptStart || !strings.Contains(script[interruptStart:widgetStart], "return 1") {
 		t.Fatalf("zsh interrupt does not suppress command submission: %q", script)
 	}
-	widgetEnd := strings.Index(script[widgetStart:], "zle -N _close_enough_accept_line")
-	if widgetEnd < 0 || !strings.Contains(script[widgetStart:widgetStart+widgetEnd], "if ! _close_enough_check; then\n    return 0\n  fi\n  zle \"$_CLOSE_ENOUGH_ENTER_WIDGET\"") {
+	widgetEnd := strings.Index(script[widgetStart:], "zle -N _solomon_accept_line")
+	if widgetEnd < 0 || !strings.Contains(script[widgetStart:widgetStart+widgetEnd], "if ! _solomon_check; then\n    return 0\n  fi\n  zle \"$_SOLOMON_ENTER_WIDGET\"") {
 		t.Fatalf("zsh enter widget executes without an explicit suppression gate: %q", script)
 	}
 }
@@ -1125,9 +1125,9 @@ func TestZshEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	}
 	bind := `binding="$(bindkey -M main '^M')" || return 0`
 	widget := `widget="${binding##* }"`
-	install := `bindkey -M main '^M' _close_enough_accept_line`
-	restore := `bindkey -M main '^M' "$_CLOSE_ENOUGH_ENTER_WIDGET"`
-	if !strings.Contains(script, bind) || !strings.Contains(script, widget) || !strings.Contains(script, install) || !strings.Contains(script, `[[ "$binding" == *" _close_enough_accept_line" ]] || return 0`) || !strings.Contains(script, restore) || strings.Contains(script, "bindkey '^M' _close_enough_accept_line") {
+	install := `bindkey -M main '^M' _solomon_accept_line`
+	restore := `bindkey -M main '^M' "$_SOLOMON_ENTER_WIDGET"`
+	if !strings.Contains(script, bind) || !strings.Contains(script, widget) || !strings.Contains(script, install) || !strings.Contains(script, `[[ "$binding" == *" _solomon_accept_line" ]] || return 0`) || !strings.Contains(script, restore) || strings.Contains(script, "bindkey '^M' _solomon_accept_line") {
 		t.Fatalf("zsh Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
@@ -1147,7 +1147,7 @@ func TestZshRestoresPreexistingEnterBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "bindings")
-	harness := `current=existing-widget; zle() { :; }; bindkey() { if [[ "$#" == 3 ]]; then print '"^M" '$current; else current="$4"; print -r -- "$current" >> "$CAPTURE"; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _close_enough_restore_enter; print -r -- "$current"`
+	harness := `current=existing-widget; zle() { :; }; bindkey() { if [[ "$#" == 3 ]]; then print '"^M" '$current; else current="$4"; print -r -- "$current" >> "$CAPTURE"; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; _solomon_restore_enter; print -r -- "$current"`
 	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
 	command.Env = append(os.Environ(), "CAPTURE="+capture)
 	output, err := command.CombinedOutput()
@@ -1161,7 +1161,7 @@ func TestZshRestoresPreexistingEnterBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(bindings); got != "_close_enough_accept_line\nexisting-widget\n" {
+	if got := string(bindings); got != "_solomon_accept_line\nexisting-widget\n" {
 		t.Fatalf("binding changes = %q", got)
 	}
 }
@@ -1180,7 +1180,7 @@ func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1202,7 @@ func TestZshAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 				payload = test.want
 			}
 			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
-			harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _close_enough_check; print -rn -- "$BUFFER" > "$RESULT"`
+			harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER="$2"; _solomon_check; print -rn -- "$BUFFER" > "$RESULT"`
 			command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath, test.input)
 			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
 			if output, err := command.CombinedOutput(); err != nil {
@@ -1239,13 +1239,13 @@ func TestZshSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
-	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER=gti; _close_enough_check; first=$?; first_buffer="$BUFFER"; _close_enough_check; second=$?; print -r -- "$first|$first_buffer|$second|$BUFFER"`
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER=gti; _solomon_check; first=$?; first_buffer="$BUFFER"; _solomon_check; second=$?; print -r -- "$first|$first_buffer|$second|$BUFFER"`
 	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
 	output, err := command.CombinedOutput()
@@ -1278,14 +1278,14 @@ func TestZshHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	state := filepath.Join(directory, "state")
 	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
-	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER='git push --force'; _close_enough_check; first=$?; _close_enough_check; second=$?; print -r -- "$first|$second|$BUFFER"`
+	harness := `zle() { :; }; bindkey() { if [[ "$1" == -M && "$2" == main && "$3" == '^M' && "$#" == 3 ]]; then print '"^M" accept-line'; fi; }; autoload() { :; }; add-zsh-hook() { :; }; source "$1"; BUFFER='git push --force'; _solomon_check; first=$?; _solomon_check; second=$?; print -r -- "$first|$second|$BUFFER"`
 	command := exec.Command(zsh, "-fc", harness, "zsh", scriptPath)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
 	output, err := command.CombinedOutput()
@@ -1318,7 +1318,7 @@ func TestZshInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\tinterrupt\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1331,7 +1331,7 @@ expect "CE> "
 send -- "source \$ADAPTER\r"
 expect "CE> "
 send -- "touch \$MARKER\r"
-expect {close-enough [safe/1]: keep buffer}
+expect {solomon [safe/1]: keep buffer}
 send -- "\003"
 expect "CE> "
 send -- "test ! -e \$MARKER && print protected\r"
@@ -1363,7 +1363,7 @@ func TestZshInteractivePTYHintSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1376,7 +1376,7 @@ expect "CE> "
 send -- "source \$ADAPTER\r"
 expect "CE> "
 send -- "touch \$MARKER\r"
-expect {close-enough [safe/1]: keep buffer}
+expect {solomon [safe/1]: keep buffer}
 expect "CE> "
 send -- "exit\r"
 expect eof`
@@ -1405,7 +1405,7 @@ func TestZshInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	capture := filepath.Join(directory, "calls")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -1451,9 +1451,9 @@ func TestBashInitializationIsGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := `if [ -z "${_CLOSE_ENOUGH_BASH_LOADED+x}" ]; then`
-	marker := "_CLOSE_ENOUGH_BASH_LOADED=1"
-	if !strings.HasPrefix(script, "# close-enough bash integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") || strings.Count(script, `bind -x '"\C-m":_close_enough_accept_line'`) != 1 || strings.Count(script, "trap _close_enough_debug DEBUG") != 1 {
+	guard := `if [ -z "${_SOLOMON_BASH_LOADED+x}" ]; then`
+	marker := "_SOLOMON_BASH_LOADED=1"
+	if !strings.HasPrefix(script, "# solomon bash integration\n"+guard+"\n"+marker) || !strings.HasSuffix(strings.TrimSpace(script), "fi") || strings.Count(script, `bind -x '"\C-m":_solomon_accept_line'`) != 1 || strings.Count(script, "trap _solomon_debug DEBUG") != 1 {
 		t.Fatalf("bash script lacks an enclosing idempotence guard: %q", script)
 	}
 }
@@ -1494,7 +1494,7 @@ func TestBashInterruptPreservesBufferBeforeReturning(t *testing.T) {
 		t.Fatalf("bash interrupt branch is missing: %q", script)
 	}
 	branch := script[start:]
-	if strings.Contains(branch, "READLINE_LINE=") || !strings.Contains(branch, "_close_enough_pending_confirmation=\"$command\"\n    return 1") {
+	if strings.Contains(branch, "READLINE_LINE=") || !strings.Contains(branch, "_solomon_pending_confirmation=\"$command\"\n    return 1") {
 		t.Fatalf("bash interrupt path does not suppress command execution: %q", script)
 	}
 }
@@ -1517,15 +1517,15 @@ func TestBashPostFailureConsumesCapturedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := "_close_enough_prompt() {"
+	prompt := "_solomon_prompt() {"
 	start := strings.Index(script, prompt)
 	if start < 0 {
 		t.Fatalf("bash post-failure prompt hook is missing: %q", script)
 	}
 	branch := script[start:]
-	consume := "_close_enough_last_command=''"
+	consume := "_solomon_last_command=''"
 	trigger := `daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command"`
-	if !strings.Contains(script, "_close_enough_debug() {") || !strings.Contains(script, "_close_enough_last_command=$BASH_COMMAND") || !strings.Contains(branch, `local status=$? command="$_close_enough_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	if !strings.Contains(script, "_solomon_debug() {") || !strings.Contains(script, "_solomon_last_command=$BASH_COMMAND") || !strings.Contains(branch, `local status=$? command="$_solomon_last_command"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, trigger) || strings.Contains(branch, "solomon check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("bash post-failure hook does not consume command safely: %q", branch)
 	}
 }
@@ -1552,22 +1552,22 @@ func TestBashHandshakeFailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handshake := "_close_enough_handshake() {"
-	check := "_close_enough_accept_line() {"
+	handshake := "_solomon_handshake() {"
+	check := "_solomon_accept_line() {"
 	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
 	if handshakeStart < 0 || checkStart < handshakeStart {
 		t.Fatalf("bash handshake is missing: %q", script)
 	}
 	handshakeBody := script[handshakeStart:checkStart]
-	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell bash --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[ "${#fields[@]}" -ge 2 ] || return 1`) || !strings.Contains(handshakeBody, `[ "$version" = 1 ] && [ "$action" = ready ] || return 1`) || !strings.Contains(handshakeBody, "_close_enough_daemon_ready=1") {
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell bash --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[ "${#fields[@]}" -ge 2 ] || return 1`) || !strings.Contains(handshakeBody, `[ "$version" = 1 ] && [ "$action" = ready ] || return 1`) || !strings.Contains(handshakeBody, "_solomon_daemon_ready=1") {
 		t.Fatalf("bash handshake contract = %q", handshakeBody)
 	}
-	checkEnd := strings.Index(script[checkStart:], "_close_enough_enter_binding=")
+	checkEnd := strings.Index(script[checkStart:], "_solomon_enter_binding=")
 	if checkEnd < 0 {
 		t.Fatalf("bash accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, `_close_enough_handshake || { _close_enough_submit_line "$command"; return; }`) || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_close_enough_daemon_ready=0;") || !strings.Contains(checkBody, `_close_enough_pending_confirmation=''; _close_enough_submit_line "$command"; return`) {
+	if !strings.Contains(checkBody, `_solomon_handshake || { _solomon_submit_line "$command"; return; }`) || !strings.Contains(checkBody, `--operation pre-send --shell bash --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_solomon_daemon_ready=0;") || !strings.Contains(checkBody, `_solomon_pending_confirmation=''; _solomon_submit_line "$command"; return`) {
 		t.Fatalf("bash handshake fallback = %q", checkBody)
 	}
 }
@@ -1577,7 +1577,7 @@ func TestBashProtocolDecodingPreservesEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `printf %s "$1" | base64 --decode`) || !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || { _close_enough_submit_line "$command"; return; }`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_submit_line "$command"; return; }`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `printf %s "$1" | base64 --decode`) || !strings.Contains(script, `separator=$'\034'`) || !strings.Contains(script, `record="${record//$'\t'/$separator}"`) || !strings.Contains(script, `IFS="$separator" read -r -a fields <<< "$record"`) || !strings.Contains(script, `[ "${#fields[@]}" -eq 7 ] || [ "${#fields[@]}" -eq 8 ] || { _solomon_submit_line "$command"; return; }`) || !strings.Contains(script, `suggestion="$(_solomon_decode "$suggestion")" || { _solomon_submit_line "$command"; return; }`) {
 		t.Fatalf("bash protocol decoder is not binary-safe and fixed-field: %q", script)
 	}
 }
@@ -1599,7 +1599,7 @@ func FuzzBashProtocolDecoderMalformedRecords(f *testing.F) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		f.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$RECORD\"\n"), 0o700); err != nil {
 		f.Fatal(err)
 	}
@@ -1610,7 +1610,7 @@ func FuzzBashProtocolDecoderMalformedRecords(f *testing.F) {
 		result := filepath.Join(directory, "result")
 		marker := filepath.Join(directory, "marker")
 		input := `$(touch "$MARKER")`
-		harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
+		harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE="$2"; _solomon_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
 		command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter, input)
 		command.Env = append(os.Environ(), "PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"), "MARKER="+marker, "RECORD="+record, "RESULT="+result)
 		if output, err := command.CombinedOutput(); err != nil {
@@ -1653,7 +1653,7 @@ func TestBashEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `bind -p 2>/dev/null | command grep '^"\\C-m": '`) || !strings.Contains(script, `[ "$binding" = '"\C-m": accept-line' ] || return 0`) || !strings.Contains(script, `bind -x '"\C-m":_close_enough_accept_line'`) || !strings.Contains(script, `bind -X 2>/dev/null | command grep -F '"\C-m": _close_enough_accept_line' >/dev/null || return 0`) || !strings.Contains(script, `bind '"\C-m": accept-line'`) {
+	if !strings.Contains(script, `bind -p 2>/dev/null | command grep '^"\\C-m": '`) || !strings.Contains(script, `[ "$binding" = '"\C-m": accept-line' ] || return 0`) || !strings.Contains(script, `bind -x '"\C-m":_solomon_accept_line'`) || !strings.Contains(script, `bind -X 2>/dev/null | command grep -F '"\C-m": _solomon_accept_line' >/dev/null || return 0`) || !strings.Contains(script, `bind '"\C-m": accept-line'`) {
 		t.Fatalf("bash Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
@@ -1673,7 +1673,7 @@ func TestBashRestoresPreexistingEnterBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "bindings")
-	harness := `current=accept-line; bind() { case "$1" in -p) printf '"\C-m": %s\n' "$current" ;; -x) current=_close_enough_accept_line; printf '%s\n' "$current" >> "$CAPTURE" ;; -X) test "$current" = _close_enough_accept_line && printf '"\C-m": _close_enough_accept_line\n' ;; *) current=accept-line; printf '%s\n' "$current" >> "$CAPTURE" ;; esac; }; source "$1"; _close_enough_restore_enter; printf '%s\n' "$current"`
+	harness := `current=accept-line; bind() { case "$1" in -p) printf '"\C-m": %s\n' "$current" ;; -x) current=_solomon_accept_line; printf '%s\n' "$current" >> "$CAPTURE" ;; -X) test "$current" = _solomon_accept_line && printf '"\C-m": _solomon_accept_line\n' ;; *) current=accept-line; printf '%s\n' "$current" >> "$CAPTURE" ;; esac; }; source "$1"; _solomon_restore_enter; printf '%s\n' "$current"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
 	command.Env = append(os.Environ(), "CAPTURE="+capture)
 	output, err := command.CombinedOutput()
@@ -1687,7 +1687,7 @@ func TestBashRestoresPreexistingEnterBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(bindings); got != "_close_enough_accept_line\naccept-line\n" {
+	if got := string(bindings); got != "_solomon_accept_line\naccept-line\n" {
 		t.Fatalf("binding changes = %q", got)
 	}
 }
@@ -1706,7 +1706,7 @@ func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1721,7 +1721,7 @@ func TestBashAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 				payload = test.want
 			}
 			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
-			harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE="$2"; _close_enough_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
+			harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE="$2"; _solomon_accept_line; printf %s "$READLINE_LINE" > "$RESULT"`
 			command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter, test.input)
 			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
 			if output, err := command.CombinedOutput(); err != nil {
@@ -1758,13 +1758,13 @@ func TestBashSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
-	harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE=gti; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE=gti; _solomon_accept_line; first=$?; first_line="$READLINE_LINE"; _solomon_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
 	output, err := command.CombinedOutput()
@@ -1797,14 +1797,14 @@ func TestBashHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	state := filepath.Join(directory, "state")
 	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
-	harness := `source "$1"; _close_enough_submit_line() { :; }; READLINE_LINE='git push --force'; _close_enough_accept_line; first=$?; first_line="$READLINE_LINE"; _close_enough_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
+	harness := `source "$1"; _solomon_submit_line() { :; }; READLINE_LINE='git push --force'; _solomon_accept_line; first=$?; first_line="$READLINE_LINE"; _solomon_accept_line; second=$?; printf '%s|%s|%s|%s\n' "$first" "$first_line" "$second" "$READLINE_LINE"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
 	output, err := command.CombinedOutput()
@@ -1830,8 +1830,8 @@ func TestFishInitializationIsGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := "if not set -q _CLOSE_ENOUGH_FISH_LOADED\n  set -g _CLOSE_ENOUGH_FISH_LOADED 1"
-	if !strings.HasPrefix(script, "# close-enough fish integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "end") || strings.Count(script, "bind \\r _close_enough_accept_line") != 1 {
+	guard := "if not set -q _SOLOMON_FISH_LOADED\n  set -g _SOLOMON_FISH_LOADED 1"
+	if !strings.HasPrefix(script, "# solomon fish integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "end") || strings.Count(script, "bind \\r _solomon_accept_line") != 1 {
 		t.Fatalf("fish script lacks an enclosing idempotence guard: %q", script)
 	}
 }
@@ -1879,9 +1879,9 @@ func TestFishPostFailureTriggersDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := "function _close_enough_post_failure --on-event fish_postexec"
+	hook := "function _solomon_post_failure --on-event fish_postexec"
 	start := strings.Index(script, hook)
-	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `if test -z "$command"`) || !strings.Contains(script[start:], `if test $command_status -ne 0`) || !strings.Contains(script[start:], `daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command"`) || strings.Contains(script[start:], "close-enough check --stage post") {
+	if start < 0 || !strings.Contains(script[start:], "set -l command_status $status") || !strings.Contains(script[start:], "set -l command $argv[1]") || !strings.Contains(script[start:], `if test -z "$command"`) || !strings.Contains(script[start:], `if test $command_status -ne 0`) || !strings.Contains(script[start:], `daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command"`) || strings.Contains(script[start:], "solomon check --stage post") {
 		t.Fatalf("fish post-failure hook is missing or unsafe: %q", script)
 	}
 }
@@ -1908,22 +1908,22 @@ func TestFishHandshakeFailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handshake := "function _close_enough_handshake"
-	check := "function _close_enough_accept_line"
+	handshake := "function _solomon_handshake"
+	check := "function _solomon_accept_line"
 	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
 	if handshakeStart < 0 || checkStart < handshakeStart {
 		t.Fatalf("fish handshake is missing: %q", script)
 	}
 	handshakeBody := script[handshakeStart:checkStart]
-	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell fish --session "$fish_pid" --ensure=true --format record`) || !strings.Contains(handshakeBody, `if test (count $fields) -lt 2`) || !strings.Contains(handshakeBody, `if test "$fields[1]" != 1; or test "$fields[2]" != ready`) || !strings.Contains(handshakeBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 1") {
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell fish --session "$fish_pid" --ensure=true --format record`) || !strings.Contains(handshakeBody, `if test (count $fields) -lt 2`) || !strings.Contains(handshakeBody, `if test "$fields[1]" != 1; or test "$fields[2]" != ready`) || !strings.Contains(handshakeBody, "set -g _SOLOMON_DAEMON_READY 1") {
 		t.Fatalf("fish handshake contract = %q", handshakeBody)
 	}
-	checkEnd := strings.Index(script[checkStart:], "function _close_enough_bind_enter")
+	checkEnd := strings.Index(script[checkStart:], "function _solomon_bind_enter")
 	if checkEnd < 0 {
 		t.Fatalf("fish accept-line function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake; or begin\n    commandline -f execute") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "set -g _CLOSE_ENOUGH_DAEMON_READY 0") {
+	if !strings.Contains(checkBody, "_solomon_handshake; or begin\n    commandline -f execute") || !strings.Contains(checkBody, `--operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "set -g _SOLOMON_DAEMON_READY 0") {
 		t.Fatalf("fish handshake fallback = %q", checkBody)
 	}
 }
@@ -1933,7 +1933,7 @@ func TestFishProtocolDecodingValidatesFixedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `function _close_enough_decode`) || !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1`) || !strings.Contains(script, `printf '%s' "$argv[1]" | base64`) || !strings.Contains(script, "if test (count $fields) -ne 7") || !strings.Contains(script, `set -l suggestion (_close_enough_decode "$fields[7]")`) || !strings.Contains(script, "or return") {
+	if !strings.Contains(script, `function _solomon_decode`) || !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1`) || !strings.Contains(script, `printf '%s' "$argv[1]" | base64`) || !strings.Contains(script, "if test (count $fields) -ne 7") || !strings.Contains(script, `set -l suggestion (_solomon_decode "$fields[7]")`) || !strings.Contains(script, "or return") {
 		t.Fatalf("fish protocol decoder is not binary-safe and fixed-field: %q", script)
 	}
 }
@@ -1943,7 +1943,7 @@ func TestFishEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `set -l binding (bind \r)`) || !strings.Contains(script, `test "$binding" != "bind --preset enter execute"`) || !strings.Contains(script, `bind \r _close_enough_accept_line`) || !strings.Contains(script, `string match -q "* _close_enough_accept_line" -- (bind \r)`) || !strings.Contains(script, `bind --erase \r`) {
+	if !strings.Contains(script, `set -l binding (bind \r)`) || !strings.Contains(script, `test "$binding" != "bind --preset enter execute"`) || !strings.Contains(script, `bind \r _solomon_accept_line`) || !strings.Contains(script, `string match -q "* _solomon_accept_line" -- (bind \r)`) || !strings.Contains(script, `bind --erase \r`) {
 		t.Fatalf("fish Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
@@ -1963,7 +1963,7 @@ func TestFishRestoresPreexistingEnterBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "bindings")
-	harness := `set -g CURRENT 'bind --preset enter execute'; function bind; if test (count $argv) -eq 1; echo $CURRENT; else if test "$argv[1]" = --erase; set -g CURRENT 'bind --preset enter execute'; echo erase >> "$CAPTURE"; else set -g CURRENT "bind $argv[1] $argv[2]"; echo $argv[2] >> "$CAPTURE"; end; end; source "$argv[1]"; _close_enough_restore_enter; echo $CURRENT`
+	harness := `set -g CURRENT 'bind --preset enter execute'; function bind; if test (count $argv) -eq 1; echo $CURRENT; else if test "$argv[1]" = --erase; set -g CURRENT 'bind --preset enter execute'; echo erase >> "$CAPTURE"; else set -g CURRENT "bind $argv[1] $argv[2]"; echo $argv[2] >> "$CAPTURE"; end; end; source "$argv[1]"; _solomon_restore_enter; echo $CURRENT`
 	command := exec.Command(fish, "-c", harness, adapter)
 	command.Env = append(os.Environ(), "CAPTURE="+capture)
 	output, err := command.CombinedOutput()
@@ -1977,7 +1977,7 @@ func TestFishRestoresPreexistingEnterBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(bindings); got != "_close_enough_accept_line\nerase\n" {
+	if got := string(bindings); got != "_solomon_accept_line\nerase\n" {
 		t.Fatalf("binding changes = %q", got)
 	}
 }
@@ -1996,7 +1996,7 @@ func TestFishAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2011,7 +2011,7 @@ func TestFishAdapterDoesNotEvaluateCommandOrRewritePayloads(t *testing.T) {
 				payload = test.want
 			}
 			record := "1\t" + test.action + "\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte(payload))
-			harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _close_enough_accept_line; printf '%s' "$BUFFER" > "$RESULT"`
+			harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; end; end; source "$argv[1]"; set -g BUFFER "$argv[2]"; _solomon_accept_line; printf '%s' "$BUFFER" > "$RESULT"`
 			command := exec.Command(fish, "-c", harness, adapter, test.input)
 			command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RESULT="+result, "RECORD="+record, "MARKER="+marker)
 			if output, err := command.CombinedOutput(); err != nil {
@@ -2048,13 +2048,13 @@ func TestFishSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '%s\\n' \"$RECORD\" ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	record := "1\trewrite\tsafe\t1\t\t\t" + base64.StdEncoding.EncodeToString([]byte("git status"))
-	harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTE_COUNT (math $EXECUTE_COUNT + 1); end; end; source "$argv[1]"; set -g BUFFER gti; set -g EXECUTE_COUNT 0; _close_enough_accept_line; _close_enough_accept_line; printf '%s|%s\n' "$BUFFER" "$EXECUTE_COUNT"`
+	harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -r; set -g BUFFER "$argv[2]"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTE_COUNT (math $EXECUTE_COUNT + 1); end; end; source "$argv[1]"; set -g BUFFER gti; set -g EXECUTE_COUNT 0; _solomon_accept_line; _solomon_accept_line; printf '%s|%s\n' "$BUFFER" "$EXECUTE_COUNT"`
 	command := exec.Command(fish, "-c", harness, adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "RECORD="+record)
 	output, err := command.CombinedOutput()
@@ -2087,14 +2087,14 @@ func TestFishHighRiskConfirmationSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *\"--operation pre-send\"*) count=0; test -f \"$STATE\" && count=$(cat \"$STATE\"); if test \"$count\" = 0; then printf '1\\tinterrupt\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; printf 1 > \"$STATE\"; else printf '1\\tsubmit\\thigh\\t1\\t\\t\\t%s\\n' \"$SUGGESTION\"; fi ;; *) exit 1 ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	capture := filepath.Join(directory, "calls")
 	state := filepath.Join(directory, "state")
 	suggestion := base64.StdEncoding.EncodeToString([]byte("git push --force"))
-	harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTE_COUNT (math $EXECUTE_COUNT + 1); end; end; source "$argv[1]"; set -g BUFFER 'git push --force'; set -g EXECUTE_COUNT 0; _close_enough_accept_line; _close_enough_accept_line; printf '%s|%s\n' "$BUFFER" "$EXECUTE_COUNT"`
+	harness := `function bind; if test (count $argv) -eq 1; echo "bind --preset enter execute"; end; end; function commandline; if test "$argv[1]" = -b; printf '%s' "$BUFFER"; else if test "$argv[1]" = -f; and test "$argv[2]" = execute; set -g EXECUTE_COUNT (math $EXECUTE_COUNT + 1); end; end; source "$argv[1]"; set -g BUFFER 'git push --force'; set -g EXECUTE_COUNT 0; _solomon_accept_line; _solomon_accept_line; printf '%s|%s\n' "$BUFFER" "$EXECUTE_COUNT"`
 	command := exec.Command(fish, "-c", harness, adapter)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "CAPTURE="+capture, "STATE="+state, "SUGGESTION="+suggestion)
 	output, err := command.CombinedOutput()
@@ -2127,7 +2127,7 @@ func TestFishInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\tinterrupt\\tsafe\\t1\\tY2hlY2s=\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2156,7 +2156,7 @@ send -- "source \$ADAPTER\r"
 expect_text "source \$ADAPTER\r\n"
 expect_text {CE> }
 send -- "touch \$MARKER\r"
-expect_text {close-enough [safe/1]: keep buffer (check)}
+expect_text {solomon [safe/1]: keep buffer (check)}
 close`
 	command := exec.Command(expect, "-c", pty)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
@@ -2182,7 +2182,7 @@ func TestFishInteractivePTYHintSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checked := filepath.Join(directory, "checked")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\ncase \"$*\" in *\"--operation handshake\"*) printf '1\\tready\\t\\t\\t\\t\\t\\n' ;; *) printf '1\\thint\\tsafe\\t1\\t\\t\\ta2VlcCBidWZmZXI=\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -2251,7 +2251,7 @@ func TestFishInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	capture := filepath.Join(directory, "calls")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -2307,8 +2307,8 @@ func TestPowerShellInitializationIsGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := "if (-not $global:CloseEnoughAdapterLoaded) {\n$global:CloseEnoughAdapterLoaded = $true"
-	if !strings.HasPrefix(script, "# close-enough PowerShell integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "}") || strings.Count(script, "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock") != 1 {
+	guard := "if (-not $global:SolomonAdapterLoaded) {\n$global:SolomonAdapterLoaded = $true"
+	if !strings.HasPrefix(script, "# solomon PowerShell integration\n"+guard) || !strings.HasSuffix(strings.TrimSpace(script), "}") || strings.Count(script, "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock") != 1 {
 		t.Fatalf("PowerShell script lacks an enclosing idempotence guard: %q", script)
 	}
 }
@@ -2368,7 +2368,7 @@ func TestPowerShellPostFailureConsumesHistoryEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:CloseEnoughLastHistoryId") || !strings.Contains(script, `daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine`) || strings.Contains(script, "close-enough check --stage post") {
+	if !strings.Contains(script, "function global:prompt {") || !strings.Contains(script, "$status = $?") || !strings.Contains(script, "$entry = Get-History -Count 1") || !strings.Contains(script, "$entry.Id -ne $global:SolomonLastHistoryId") || !strings.Contains(script, `daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine`) || strings.Contains(script, "solomon check --stage post") {
 		t.Fatalf("PowerShell post-failure hook is missing or unsafe: %q", script)
 	}
 }
@@ -2395,26 +2395,26 @@ func TestPowerShellHandshakeFailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handshake := "function global:Test-CloseEnoughDaemonHandshake {"
+	handshake := "function global:Test-SolomonDaemonHandshake {"
 	handshakeStart := strings.Index(script, handshake)
 	if handshakeStart < 0 {
 		t.Fatalf("PowerShell handshake is missing: %q", script)
 	}
-	handshakeEnd := strings.Index(script[handshakeStart:], "function global:Allow-CloseEnoughDiagnostic")
+	handshakeEnd := strings.Index(script[handshakeStart:], "function global:Allow-SolomonDiagnostic")
 	if handshakeEnd < 0 {
 		t.Fatalf("PowerShell handshake function is unterminated: %q", script)
 	}
 	handshakeBody := script[handshakeStart : handshakeStart+handshakeEnd]
-	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json`) || !strings.Contains(handshakeBody, `$decision.version -ne 1 -or $decision.action -ne 'ready'`) || !strings.Contains(handshakeBody, "$global:CloseEnoughDaemonReady = $true") {
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json`) || !strings.Contains(handshakeBody, `$decision.version -ne 1 -or $decision.action -ne 'ready'`) || !strings.Contains(handshakeBody, "$global:SolomonDaemonReady = $true") {
 		t.Fatalf("PowerShell handshake contract = %q", handshakeBody)
 	}
 	handlerStart := strings.Index(script, "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {")
-	handlerEnd := strings.Index(script[handlerStart:], "function global:Test-CloseEnoughDaemonHandshake")
+	handlerEnd := strings.Index(script[handlerStart:], "function global:Test-SolomonDaemonHandshake")
 	if handlerStart < 0 || handlerEnd < 0 {
 		t.Fatalf("PowerShell Enter handler is missing: %q", script)
 	}
 	handler := script[handlerStart : handlerStart+handlerEnd]
-	if !strings.Contains(handler, "if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }") || !strings.Contains(handler, `--operation pre-send --shell powershell --session $PID --ensure=false`) || strings.Count(handler, "[Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return") < 4 {
+	if !strings.Contains(handler, "if (-not (Test-SolomonDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }") || !strings.Contains(handler, `--operation pre-send --shell powershell --session $PID --ensure=false`) || strings.Count(handler, "[Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return") < 4 {
 		t.Fatalf("PowerShell handshake fallback = %q", handler)
 	}
 }
@@ -2424,7 +2424,7 @@ func TestPowerShellProtocolDecodingFailsOpenOnMalformedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `$record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { $global:CloseEnoughDaemonReady = $false;`) {
+	if !strings.Contains(script, `$record = & solomon daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command`) || !strings.Contains(script, `$LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)`) || !strings.Contains(script, `ConvertFrom-Json -ErrorAction Stop`) || !strings.Contains(script, `catch { $global:SolomonDaemonReady = $false;`) {
 		t.Fatalf("PowerShell protocol decoder is not binary-safe and failure-aware: %q", script)
 	}
 }
@@ -2434,7 +2434,7 @@ func TestPowerShellEnterBindingIsCollisionSafeAndRestorable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `Get-PSReadLineKeyHandler -Chord Enter`) || !strings.Contains(script, `$global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine'`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -ScriptBlock`) || !strings.Contains(script, `function global:Restore-CloseEnoughEnterHandler`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine`) {
+	if !strings.Contains(script, `Get-PSReadLineKeyHandler -Chord Enter`) || !strings.Contains(script, `$global:SolomonPreviousEnterHandler.Function -eq 'AcceptLine'`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -ScriptBlock`) || !strings.Contains(script, `function global:Restore-SolomonEnterHandler`) || !strings.Contains(script, `Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine`) {
 		t.Fatalf("PowerShell Enter binding is not collision-safe and restorable: %q", script)
 	}
 }
@@ -2471,7 +2471,7 @@ func TestPowerShellInteractivePTYLoadsAdapter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '{\"version\":1,\"action\":\"none\",\"risk\":\"safe\",\"confidence\":0}\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2525,7 +2525,7 @@ func TestPowerShellInteractivePTYInterruptPreventsExecution(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"interrupt\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2555,7 +2555,7 @@ send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Conv
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
-expect_text {close-enough [safe/1]: keep buffer}
+expect_text {solomon [safe/1]: keep buffer}
 close`
 	command := exec.Command(expect, "-c", pty)
 	command.Env = append(os.Environ(), "PATH="+directory+":"+os.Getenv("PATH"), "ADAPTER="+adapter, "MARKER="+marker)
@@ -2581,7 +2581,7 @@ func TestPowerShellInteractivePTYHintSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checked := filepath.Join(directory, "checked")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ntouch "+strconv.Quote(checked)+"\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"hint\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"keep buffer\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -2612,7 +2612,7 @@ send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Conv
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
-expect_text {close-enough [safe/1]: keep buffer}
+expect_text {solomon [safe/1]: keep buffer}
 send -- "exit\r"
 expect {
   eof {}
@@ -2646,7 +2646,7 @@ func TestPowerShellInteractivePTYSafeRewriteSubmitsOnSecondEnter(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	capture := filepath.Join(directory, "calls")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *\"--command gti\"*) printf '{\"version\":1,\"action\":\"rewrite\",\"risk\":\"safe\",\"confidence\":1,\"suggestion\":\"Set-Content -NoNewline -Path $env:MARKER -Value executed\",\"explanation\":\"fixed\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"submit\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -2677,7 +2677,7 @@ send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Conv
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "gti\r"
-expect_text {close-enough corrected: Set-Content -NoNewline -Path $env:MARKER -Value executed (fixed; press Enter again)}
+expect_text {solomon corrected: Set-Content -NoNewline -Path $env:MARKER -Value executed (fixed; press Enter again)}
 send -- "\r"
 expect_regex {PS .*?> }
 send -- "exit\r"
@@ -2717,7 +2717,7 @@ func TestPowerShellInteractivePTYHighRiskConfirmationSubmitsOnSecondEnter(t *tes
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	capture := filepath.Join(directory, "calls")
 	state := filepath.Join(directory, "state")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CAPTURE\"\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *\"--command Set-Content\"*) if test -e \"$STATE\"; then printf '{\"version\":1,\"action\":\"submit\"}\\n'; else : > \"$STATE\"; printf '{\"version\":1,\"action\":\"interrupt\",\"risk\":\"high\",\"confidence\":1,\"suggestion\":\"press Enter again\",\"explanation\":\"confirmation required\"}\\n'; fi ;; *) printf '{\"version\":1,\"action\":\"submit\"}\\n' ;; esac\n"), 0o700); err != nil {
@@ -2749,7 +2749,7 @@ send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Conv
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
-expect_text {close-enough [high/1]: press Enter again (confirmation required)}
+expect_text {solomon [high/1]: press Enter again (confirmation required)}
 send -- "\r"
 expect_regex {PS .*?> }
 send -- "exit\r"
@@ -2789,7 +2789,7 @@ func TestPowerShellInteractivePTYRestoresDefaultEnterBinding(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\ncase \"$*\" in *\"--operation handshake\"*) printf '{\"version\":1,\"action\":\"ready\"}\\n' ;; *) printf '{\"version\":1,\"action\":\"none\"}\\n' ;; esac\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2817,7 +2817,7 @@ expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS .*?> }
-send -- "Restore-CloseEnoughEnterHandler; (Get-PSReadLineKeyHandler -Chord Enter).Function\r"
+send -- "Restore-SolomonEnterHandler; (Get-PSReadLineKeyHandler -Chord Enter).Function\r"
 expect_text {AcceptLine}
 expect_regex {PS .*?> }
 send -- "exit\r"
@@ -2874,7 +2874,7 @@ send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Conv
 expect_text {CE_CUSTOM_ENTER}
 expect_text {CE_ADAPTER_READY}
 expect_regex {PS.*>}
-send -- "Restore-CloseEnoughEnterHandler; Write-Output CE_CUSTOM_RESTORED\r"
+send -- "Restore-SolomonEnterHandler; Write-Output CE_CUSTOM_RESTORED\r"
 expect_text {CE_CUSTOM_ENTER}
 expect_text {CE_CUSTOM_RESTORED}
 expect_regex {PS.*>}
@@ -2905,7 +2905,7 @@ func TestPowerShellInteractivePTYDaemonFailureSubmitsCommand(t *testing.T) {
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(checker, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -2966,10 +2966,10 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preexec := "function _close_enough_preexec {"
-	precmd := "function _close_enough_precmd {"
+	preexec := "function _solomon_preexec {"
+	precmd := "function _solomon_precmd {"
 	preexecStart, precmdStart := strings.Index(script, preexec), strings.Index(script, precmd)
-	if preexecStart < 0 || precmdStart < preexecStart || !strings.Contains(script[preexecStart:precmdStart], `_CLOSE_ENOUGH_LAST_COMMAND="$1"`) || !strings.Contains(script[preexecStart:precmdStart], "_CLOSE_ENOUGH_PENDING_REWRITE=''") {
+	if preexecStart < 0 || precmdStart < preexecStart || !strings.Contains(script[preexecStart:precmdStart], `_SOLOMON_LAST_COMMAND="$1"`) || !strings.Contains(script[preexecStart:precmdStart], "_SOLOMON_PENDING_REWRITE=''") {
 		t.Fatalf("zsh post-failure hooks are missing: %q", script)
 	}
 	end := strings.Index(script[precmdStart:], "autoload -Uz add-zsh-hook")
@@ -2977,9 +2977,9 @@ func TestZshPostFailureConsumesCapturedCommand(t *testing.T) {
 		t.Fatalf("zsh precmd hook is unterminated: %q", script)
 	}
 	branch := script[precmdStart : precmdStart+end]
-	consume := "_CLOSE_ENOUGH_LAST_COMMAND=''"
+	consume := "_SOLOMON_LAST_COMMAND=''"
 	trigger := `daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command"`
-	if !strings.Contains(branch, `local exit_status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Contains(branch, "close-enough check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
+	if !strings.Contains(branch, `local exit_status=$? command="$_SOLOMON_LAST_COMMAND"`) || !strings.Contains(branch, consume) || !strings.Contains(branch, `[[ -z "$command" ]] && return`) || !strings.Contains(branch, trigger) || strings.Contains(branch, "solomon check --stage post") || strings.Index(branch, consume) > strings.Index(branch, trigger) {
 		t.Fatalf("zsh post-failure trigger does not consume command safely: %q", branch)
 	}
 }
@@ -3006,22 +3006,22 @@ func TestZshHandshakeFailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handshake := "function _close_enough_handshake {"
-	check := "function _close_enough_check {"
+	handshake := "function _solomon_handshake {"
+	check := "function _solomon_check {"
 	handshakeStart, checkStart := strings.Index(script, handshake), strings.Index(script, check)
 	if handshakeStart < 0 || checkStart < handshakeStart {
 		t.Fatalf("zsh handshake is missing: %q", script)
 	}
 	handshakeBody := script[handshakeStart:checkStart]
-	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[[ "$version" == "1" && "$action" == ready ]] || return 1`) || !strings.Contains(handshakeBody, "_CLOSE_ENOUGH_DAEMON_READY=1") {
+	if !strings.Contains(handshakeBody, `daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record`) || !strings.Contains(handshakeBody, `[[ "$version" == "1" && "$action" == ready ]] || return 1`) || !strings.Contains(handshakeBody, "_SOLOMON_DAEMON_READY=1") {
 		t.Fatalf("zsh handshake contract = %q", handshakeBody)
 	}
-	checkEnd := strings.Index(script[checkStart:], "function _close_enough_accept_line {")
+	checkEnd := strings.Index(script[checkStart:], "function _solomon_accept_line {")
 	if checkEnd < 0 {
 		t.Fatalf("zsh check function is unterminated: %q", script)
 	}
 	checkBody := script[checkStart : checkStart+checkEnd]
-	if !strings.Contains(checkBody, "_close_enough_handshake || return 0") || !strings.Contains(checkBody, `--operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_CLOSE_ENOUGH_DAEMON_READY=0; return 0") {
+	if !strings.Contains(checkBody, "_solomon_handshake || return 0") || !strings.Contains(checkBody, `--operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record`) || !strings.Contains(checkBody, "_SOLOMON_DAEMON_READY=0; return 0") {
 		t.Fatalf("zsh handshake fallback = %q", checkBody)
 	}
 }
@@ -3031,7 +3031,7 @@ func TestZshProtocolDecodingFailsOpenOnMalformedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `print -rn -- "$1" | base64 --decode`) || strings.Contains(script, "_close_enough_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 || ${#fields} == 8 )) || return 0`) || !strings.Contains(script, `suggestion="$(_close_enough_decode "$suggestion")" || return 0`) {
+	if !strings.Contains(script, `if base64 --decode </dev/null >/dev/null 2>&1; then`) || !strings.Contains(script, `print -rn -- "$1" | base64 --decode`) || strings.Contains(script, "_solomon_decode { echo") || !strings.Contains(script, `fields=("${(@ps:\t:)record}")`) || !strings.Contains(script, `(( ${#fields} == 7 || ${#fields} == 8 )) || return 0`) || !strings.Contains(script, `suggestion="$(_solomon_decode "$suggestion")" || return 0`) {
 		t.Fatalf("zsh protocol decoder is not binary-safe and fail-open: %q", script)
 	}
 }
@@ -3069,7 +3069,7 @@ func TestUnsupportedAdapterFailsClosed(t *testing.T) {
 func TestExperimentalCaptureBootstrapIsRestrictedToBashAndZsh(t *testing.T) {
 	for _, name := range []string{"bash", "zsh"} {
 		bootstrap, err := ExperimentalCaptureBootstrap(name)
-		if err != nil || !strings.Contains(bootstrap, "exec close-enough capture start --shell "+name) || !strings.Contains(bootstrap, "CLOSE_ENOUGH_CAPTURE_ACTIVE") {
+		if err != nil || !strings.Contains(bootstrap, "exec solomon capture start --shell "+name) || !strings.Contains(bootstrap, "SOLOMON_CAPTURE_ACTIVE") {
 			t.Fatalf("bootstrap(%q) = %q, %v", name, bootstrap, err)
 		}
 	}
@@ -3092,7 +3092,7 @@ func TestBashAdapterPreservesPromptAndDebugTrapWithoutPreSendHook(t *testing.T) 
 	if err := os.WriteFile(adapter, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	checker := filepath.Join(directory, "close-enough")
+	checker := filepath.Join(directory, "solomon")
 	checkerScript := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\nprintf '1\\thint\\thigh\\thigh\\tY2F1c2U=\\t\\tZ2l0IHN0YXR1cw==\\n'\n"
 	if err := os.WriteFile(checker, []byte(checkerScript), 0o700); err != nil {
 		t.Fatal(err)
@@ -3104,7 +3104,7 @@ trap ':' DEBUG
 source "$1"
 history -s 'git sttaus'
 false
-_close_enough_bash_precmd
+_solomon_bash_precmd
 printf '%s' "$PROMPT_COMMAND" > "$PROMPT_STATE"
 trap -p DEBUG > "$TRAP_STATE"`
 	command := exec.Command(bash, "--noprofile", "--norc", "-c", harness, "bash", adapter)
@@ -3113,7 +3113,7 @@ trap -p DEBUG > "$TRAP_STATE"`
 		t.Fatalf("bash adapter harness: %v: %s", err, output)
 	}
 	prompt, err := os.ReadFile(filepath.Join(directory, "prompt"))
-	if err != nil || !strings.HasPrefix(string(prompt), "printf existing;") || !strings.Contains(string(prompt), "_close_enough_bash_precmd") {
+	if err != nil || !strings.HasPrefix(string(prompt), "printf existing;") || !strings.Contains(string(prompt), "_solomon_bash_precmd") {
 		t.Fatalf("PROMPT_COMMAND = %q, %v", prompt, err)
 	}
 	trapOutput, err := os.ReadFile(trapState)

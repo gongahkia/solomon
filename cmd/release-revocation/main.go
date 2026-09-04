@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gongahkia/close-enough/internal/releasepolicy"
+	"github.com/gongahkia/solomon/internal/releasepolicy"
 )
 
 func main() {

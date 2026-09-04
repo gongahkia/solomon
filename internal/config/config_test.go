@@ -119,7 +119,7 @@ func TestRemovedRegistrySettingsAreIgnoredOnDiskAndRejectedBySet(t *testing.T) {
 
 func TestRemovedRegistrySessionOverridesAreIgnored(t *testing.T) {
 	values, err := sessionValues(Paths{Environ: func() []string {
-		return []string{"CLOSE_ENOUGH_REGISTRY_ENABLED=true", "CLOSE_ENOUGH_AUTO_UPDATE_ENABLED=true"}
+		return []string{"SOLOMON_REGISTRY_ENABLED=true", "SOLOMON_AUTO_UPDATE_ENABLED=true"}
 	}})
 	if err != nil || len(values) != 0 {
 		t.Fatalf("session values = %#v, %v", values, err)
@@ -163,7 +163,7 @@ func TestSetV1PolicySettings(t *testing.T) {
 }
 
 func TestCuratedPackEnablementSessionOverride(t *testing.T) {
-	cfg, err := ApplySessionOverrides(Default(), map[string]string{"CLOSE_ENOUGH_CURATED_PACKS_ENABLED": "false"})
+	cfg, err := ApplySessionOverrides(Default(), map[string]string{"SOLOMON_CURATED_PACKS_ENABLED": "false"})
 	if err != nil || cfg.CuratedPacksEnabled {
 		t.Fatalf("curated pack session override = %#v, %v", cfg, err)
 	}
@@ -176,7 +176,7 @@ func TestGlobalPathPrefersAbsoluteXDGConfigHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(base, "close-enough", "config.json")
+	want := filepath.Join(base, "solomon", "config.json")
 	if path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
@@ -188,7 +188,7 @@ func TestGlobalPathIgnoresRelativeXDGConfigHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(string(filepath.Separator), "home", "user", ".config", "close-enough", "config.json")
+	want := filepath.Join(string(filepath.Separator), "home", "user", ".config", "solomon", "config.json")
 	if path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
@@ -204,7 +204,7 @@ func TestGlobalPathPropagatesHomeFailure(t *testing.T) {
 
 func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 	base := t.TempDir()
-	path := filepath.Join(base, "close-enough", "config.json")
+	path := filepath.Join(base, "solomon", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -231,10 +231,10 @@ func TestLoadUsesProvidedXDGConfigHome(t *testing.T) {
 
 func TestApplySessionOverridesUsesStrictAllowlist(t *testing.T) {
 	cfg, err := ApplySessionOverrides(Default(), map[string]string{
-		"CLOSE_ENOUGH_MODE":             "rewrite",
-		"CLOSE_ENOUGH_AUTO_APPLY_SAFE":  "true",
-		"CLOSE_ENOUGH_UNDO_ENABLED":     "false",
-		"CLOSE_ENOUGH_UNDO_TTL_SECONDS": "45",
+		"SOLOMON_MODE":             "rewrite",
+		"SOLOMON_AUTO_APPLY_SAFE":  "true",
+		"SOLOMON_UNDO_ENABLED":     "false",
+		"SOLOMON_UNDO_TTL_SECONDS": "45",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -254,10 +254,10 @@ func TestCurrentSchemaRejectsRetiredLocalHistorySetting(t *testing.T) {
 
 func TestApplySessionOverridesRejectsUnknownAndInvalidValues(t *testing.T) {
 	for name, values := range map[string]map[string]string{
-		"unknown":  {"CLOSE_ENOUGH_UNSAFE": "true"},
-		"boolean":  {"CLOSE_ENOUGH_AUTO_APPLY_SAFE": "1"},
-		"mode":     {"CLOSE_ENOUGH_MODE": "unsafe"},
-		"undo ttl": {"CLOSE_ENOUGH_UNDO_TTL_SECONDS": "0"},
+		"unknown":  {"SOLOMON_UNSAFE": "true"},
+		"boolean":  {"SOLOMON_AUTO_APPLY_SAFE": "1"},
+		"mode":     {"SOLOMON_MODE": "unsafe"},
+		"undo ttl": {"SOLOMON_UNDO_TTL_SECONDS": "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ApplySessionOverrides(Default(), values); err == nil {
@@ -269,7 +269,7 @@ func TestApplySessionOverridesRejectsUnknownAndInvalidValues(t *testing.T) {
 
 func TestSessionValuesRejectsDuplicateOverrides(t *testing.T) {
 	_, err := sessionValues(Paths{Environ: func() []string {
-		return []string{"CLOSE_ENOUGH_MODE=hint", "CLOSE_ENOUGH_MODE=rewrite"}
+		return []string{"SOLOMON_MODE=hint", "SOLOMON_MODE=rewrite"}
 	}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate session override") {
 		t.Fatalf("unexpected error: %v", err)
@@ -282,7 +282,7 @@ func TestLoadAppliesSessionOverrides(t *testing.T) {
 		CWD:  func() (string, error) { return t.TempDir(), nil },
 		Env:  func(string) string { return "" },
 		Environ: func() []string {
-			return []string{"CLOSE_ENOUGH_MODE=interrupt"}
+			return []string{"SOLOMON_MODE=interrupt"}
 		},
 	})
 	if err != nil {
@@ -295,7 +295,7 @@ func TestLoadAppliesSessionOverrides(t *testing.T) {
 
 func TestSessionOverridesDoNotPersist(t *testing.T) {
 	base := t.TempDir()
-	path := filepath.Join(base, "close-enough", "config.json")
+	path := filepath.Join(base, "solomon", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestSessionOverridesDoNotPersist(t *testing.T) {
 			}
 			return ""
 		},
-		Environ: func() []string { return []string{"CLOSE_ENOUGH_MODE=interrupt"} },
+		Environ: func() []string { return []string{"SOLOMON_MODE=interrupt"} },
 	}
 	withOverride, err := Load(paths)
 	if err != nil || withOverride.Mode != "interrupt" {
@@ -327,7 +327,7 @@ func TestSessionOverridesDoNotPersist(t *testing.T) {
 func TestSessionOverridesTakePrecedenceOverApprovedProjectAndGlobalConfig(t *testing.T) {
 	root := t.TempDir()
 	configHome := filepath.Join(root, "config")
-	globalPath := filepath.Join(configHome, "close-enough", "config.json")
+	globalPath := filepath.Join(configHome, "solomon", "config.json")
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestSessionOverridesTakePrecedenceOverApprovedProjectAndGlobalConfig(t *tes
 	}
 	project := filepath.Join(root, "project")
 	writeProjectConfig(t, project, "rewrite", true)
-	projectPath := filepath.Join(project, ".close-enough", "config.json")
+	projectPath := filepath.Join(project, ".solomon", "config.json")
 	if err := os.WriteFile(projectPath, []byte(`{"mode":"rewrite","auto_apply_safe":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestSessionOverridesTakePrecedenceOverApprovedProjectAndGlobalConfig(t *tes
 			}
 			return ""
 		},
-		Environ: func() []string { return []string{"CLOSE_ENOUGH_MODE=interrupt", "CLOSE_ENOUGH_AUTO_APPLY_SAFE=false"} },
+		Environ: func() []string { return []string{"SOLOMON_MODE=interrupt", "SOLOMON_AUTO_APPLY_SAFE=false"} },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -398,7 +398,7 @@ func TestLoadSkipsUntrustedProjectConfiguration(t *testing.T) {
 func TestApprovedProjectConfigurationOverridesOnlySpecifiedFields(t *testing.T) {
 	directory := t.TempDir()
 	writeProjectConfig(t, directory, "hint", true)
-	path := filepath.Join(directory, ".close-enough", "config.json")
+	path := filepath.Join(directory, ".solomon", "config.json")
 	if err := os.WriteFile(path, []byte(`{"mode":"rewrite","display":{"trace":true},"auto_apply_safe":false}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestApprovedProjectConfigurationOverridesOnlySpecifiedFields(t *testing.T) 
 func TestUnapprovedProjectConfigurationCannotOverrideGlobalConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	writeProjectConfig(t, directory, "rewrite", false)
-	path := filepath.Join(directory, ".close-enough", "config.json")
+	path := filepath.Join(directory, ".solomon", "config.json")
 	base := Default()
 	base.Mode = "interrupt"
 	merged, err := mergeApprovedProject(base, path)
@@ -427,7 +427,7 @@ func TestUnapprovedProjectConfigurationCannotOverrideGlobalConfiguration(t *test
 
 func TestProjectPathRejectsNonRegularConfiguration(t *testing.T) {
 	directory := t.TempDir()
-	configPath := filepath.Join(directory, ".close-enough", "config.json")
+	configPath := filepath.Join(directory, ".solomon", "config.json")
 	if err := os.MkdirAll(configPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -442,8 +442,8 @@ func TestTrustedProjectRejectsInsecureMarkers(t *testing.T) {
 	}
 	directory := t.TempDir()
 	writeProjectConfig(t, directory, "hint", true)
-	configPath := filepath.Join(directory, ".close-enough", "config.json")
-	marker := filepath.Join(directory, ".close-enough", "trusted")
+	configPath := filepath.Join(directory, ".solomon", "config.json")
+	marker := filepath.Join(directory, ".solomon", "trusted")
 	if !trustedProject(configPath) {
 		t.Fatal("expected secure marker to be trusted")
 	}
@@ -470,8 +470,8 @@ func TestTrustedProjectRejectsSymlinkMarker(t *testing.T) {
 	}
 	directory := t.TempDir()
 	writeProjectConfig(t, directory, "hint", true)
-	configPath := filepath.Join(directory, ".close-enough", "config.json")
-	marker := filepath.Join(directory, ".close-enough", "trusted")
+	configPath := filepath.Join(directory, ".solomon", "config.json")
+	marker := filepath.Join(directory, ".solomon", "trusted")
 	target := filepath.Join(directory, "target")
 	if err := os.WriteFile(target, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -508,7 +508,7 @@ func TestTrustedProjectPermissionRegressionCorpus(t *testing.T) {
 				t.Fatalf("invalid trusted project fixture: %#v", fixture)
 			}
 			directory := t.TempDir()
-			configDirectory := filepath.Join(directory, ".close-enough")
+			configDirectory := filepath.Join(directory, ".solomon")
 			if err := os.MkdirAll(configDirectory, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -589,7 +589,7 @@ func loadFromDirectory(t *testing.T, directory string) (Config, error) {
 
 func writeProjectConfig(t *testing.T, directory, mode string, trusted bool) {
 	t.Helper()
-	configDirectory := filepath.Join(directory, ".close-enough")
+	configDirectory := filepath.Join(directory, ".solomon")
 	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}

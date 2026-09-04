@@ -19,9 +19,9 @@ case "$output" in
   *) exit 2 ;;
 esac
 [ -x "$auditor" ]
-[ -d "$module/cmd/close-enough" ]
+[ -d "$module/cmd/solomon" ]
 
 cd "$module"
-GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$auditor" check ./cmd/close-enough
-GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$auditor" report ./cmd/close-enough > "$output"
+GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$auditor" check ./cmd/solomon
+GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$auditor" report ./cmd/solomon > "$output"
 test -s "$output"

@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/gongahkia/close-enough/internal/config"
+	"github.com/gongahkia/solomon/internal/config"
 )
 
 type decisionContractCase struct {

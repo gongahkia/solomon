@@ -9,7 +9,7 @@ func TestRuntimeDirectoryUsesAbsoluteXDGPath(t *testing.T) {
 		}
 		return ""
 	})
-	if err != nil || path != "/run/user/1000/close-enough" {
+	if err != nil || path != "/run/user/1000/solomon" {
 		t.Fatalf("RuntimeDirectory() = %q, %v", path, err)
 	}
 }

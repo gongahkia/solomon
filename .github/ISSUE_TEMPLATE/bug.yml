@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Close Enough behavior problem
+description: Report a reproducible Solomon behavior problem
 title: "bug: "
 labels: [bug]
 body:
@@ -10,7 +10,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Close Enough version or commit
+      label: Solomon version or commit
       placeholder: v0.1.0 or abc1234
     validations:
       required: true

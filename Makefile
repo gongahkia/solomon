@@ -1,4 +1,4 @@
-BIN ?= close-enough
+BIN ?= solomon
 BUILD_FLAGS := -trimpath -buildvcs=false -mod=readonly
 VERSION ?= dev
 COMMIT ?= unknown
@@ -7,7 +7,7 @@ LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 .PHONY: build test vet ci latency-gate verify-local benchmark-daemon benchmark-pre-execution benchmark-path-cache benchmark-pack-loading
 
 build:
-	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/close-enough
+	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/solomon
 
 test:
 	go test -race ./...

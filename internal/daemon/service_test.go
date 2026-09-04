@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/localstate"
-	"github.com/gongahkia/close-enough/internal/packs"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/localstate"
+	"github.com/gongahkia/solomon/internal/packs"
 )
 
 func TestNormalizedLearningCommand(t *testing.T) {

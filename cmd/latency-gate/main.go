@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 const (
@@ -19,7 +19,7 @@ const (
 )
 
 func main() {
-	directory, err := os.MkdirTemp("", "close-enough-latency-")
+	directory, err := os.MkdirTemp("", "solomon-latency-")
 	if err != nil {
 		fail(err)
 	}

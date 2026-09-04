@@ -33,18 +33,18 @@ func TestWindowsInstallerVerifiesArtifactsAndManagesShellInitialization(t *testi
 	profile := filepath.Join(t.TempDir(), "profile.ps1")
 	environment := replaceHarnessEnvironment(os.Environ(), "PATH", fakeDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runWindowsInstaller(t, pwsh, environment, "-Version", version, "-ReleaseBaseUrl", server.URL, "-InstallDir", installDirectory, "-Shell", "powershell", "-ShellProfile", profile)
-	target := filepath.Join(installDirectory, "close-enough.exe")
+	target := filepath.Join(installDirectory, "solomon.exe")
 	data, err := exec.Command(target, "version").Output()
-	if err != nil || strings.TrimSpace(string(data)) != "close-enough dev" {
+	if err != nil || strings.TrimSpace(string(data)) != "solomon dev" {
 		t.Fatalf("installed binary version = %q, %v", data, err)
 	}
 	initialization, err := os.ReadFile(profile)
-	if err != nil || strings.Count(string(initialization), "# >>> close-enough initialize >>>") != 1 || !strings.Contains(string(initialization), target) {
+	if err != nil || strings.Count(string(initialization), "# >>> solomon initialize >>>") != 1 || !strings.Contains(string(initialization), target) {
 		t.Fatalf("shell initialization = %q, %v", initialization, err)
 	}
 	runWindowsInstaller(t, pwsh, environment, "-Version", version, "-ReleaseBaseUrl", server.URL, "-InstallDir", installDirectory, "-Shell", "powershell", "-ShellProfile", profile)
 	initialization, err = os.ReadFile(profile)
-	if err != nil || strings.Count(string(initialization), "# >>> close-enough initialize >>>") != 1 {
+	if err != nil || strings.Count(string(initialization), "# >>> solomon initialize >>>") != 1 {
 		t.Fatalf("idempotent initialization = %q, %v", initialization, err)
 	}
 	runWindowsInstaller(t, pwsh, environment, "-Uninstall", "-InstallDir", installDirectory, "-Shell", "powershell", "-ShellProfile", profile)
@@ -52,7 +52,7 @@ func TestWindowsInstallerVerifiesArtifactsAndManagesShellInitialization(t *testi
 		t.Fatalf("installed binary remains after uninstall: %v", err)
 	}
 	initialization, err = os.ReadFile(profile)
-	if err != nil || strings.Contains(string(initialization), "close-enough initialize") {
+	if err != nil || strings.Contains(string(initialization), "solomon initialize") {
 		t.Fatalf("shell initialization remains after uninstall = %q, %v", initialization, err)
 	}
 	if _, err := os.Stat(filepath.Join(releaseDirectory, archive)); err != nil {
@@ -62,19 +62,19 @@ func TestWindowsInstallerVerifiesArtifactsAndManagesShellInitialization(t *testi
 
 func writeWindowsInstallerRelease(t *testing.T, directory, version string) string {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "close-enough.exe")
+	binary := filepath.Join(t.TempDir(), "solomon.exe")
 	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-o", binary, ".")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build installer fixture: %v\n%s", err, data)
 	}
-	archive := "close-enough_" + version + "_windows_amd64.zip"
+	archive := "solomon_" + version + "_windows_amd64.zip"
 	path := filepath.Join(directory, archive)
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writer := zip.NewWriter(file)
-	entry, err := writer.Create(strings.TrimSuffix(archive, ".zip") + "/close-enough.exe")
+	entry, err := writer.Create(strings.TrimSuffix(archive, ".zip") + "/solomon.exe")
 	if err != nil {
 		t.Fatal(err)
 	}

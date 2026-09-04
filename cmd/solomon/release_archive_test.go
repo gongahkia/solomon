@@ -29,11 +29,11 @@ func TestReleaseArchiveScriptDarwinAMD64(t *testing.T) {
 func testReleaseArchive(t *testing.T, target string) {
 	t.Helper()
 	directory := t.TempDir()
-	binary := filepath.Join(directory, "close-enough")
+	binary := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	root := "close-enough-" + target
+	root := "solomon-" + target
 	archive := filepath.Join(directory, root+".tar.gz")
 	command := exec.Command("sh", "../../scripts/release-archive.sh", binary, archive, root)
 	if data, err := command.CombinedOutput(); err != nil {
@@ -58,7 +58,7 @@ func testReleaseArchive(t *testing.T, target string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if header.Name != root+"/close-enough" {
+		if header.Name != root+"/solomon" {
 			continue
 		}
 		data, err := io.ReadAll(reader)
@@ -70,7 +70,7 @@ func testReleaseArchive(t *testing.T, target string) {
 }
 
 func TestReleaseArchiveScriptRejectsMissingBinary(t *testing.T) {
-	command := exec.Command("sh", "../../scripts/release-archive.sh", filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "release.tar.gz"), "close-enough-linux-amd64")
+	command := exec.Command("sh", "../../scripts/release-archive.sh", filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "release.tar.gz"), "solomon-linux-amd64")
 	if data, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("missing binary archived successfully: %s", data)
 	}

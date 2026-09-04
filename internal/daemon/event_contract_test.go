@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 func TestDaemonEventContractRedactsRequestSecrets(t *testing.T) {

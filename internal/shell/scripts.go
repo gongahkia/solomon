@@ -1,262 +1,262 @@
 package shell
 
-const zshScript = `# close-enough zsh integration
-if (( ! ${+_CLOSE_ENOUGH_ZSH_LOADED} )); then
-typeset -g _CLOSE_ENOUGH_ZSH_LOADED=1
-function _close_enough_decode {
+const zshScript = `# solomon zsh integration
+if (( ! ${+_SOLOMON_ZSH_LOADED} )); then
+typeset -g _SOLOMON_ZSH_LOADED=1
+function _solomon_decode {
   if base64 --decode </dev/null >/dev/null 2>&1; then
     print -rn -- "$1" | base64 --decode
   else
     print -rn -- "$1" | base64 -D
   fi
 }
-typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_COUNT=0
-typeset -gi _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT=5
-typeset -gi _CLOSE_ENOUGH_DAEMON_READY=0
-typeset -gi _CLOSE_ENOUGH_FAILURE_SEQUENCE=0
-typeset -g _CLOSE_ENOUGH_PENDING_REWRITE=''
-typeset -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
-typeset -g _CLOSE_ENOUGH_UNDO_WIDGET=''
-typeset -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
-typeset -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=''
-typeset -g _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
-typeset -gA _CLOSE_ENOUGH_SEEN_SUGGESTIONS
-function _close_enough_allow_diagnostic {
-  (( _CLOSE_ENOUGH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT )) || return 1
-  (( ++_CLOSE_ENOUGH_DIAGNOSTIC_COUNT ))
+typeset -gi _SOLOMON_DIAGNOSTIC_COUNT=0
+typeset -gi _SOLOMON_DIAGNOSTIC_LIMIT=5
+typeset -gi _SOLOMON_DAEMON_READY=0
+typeset -gi _SOLOMON_FAILURE_SEQUENCE=0
+typeset -g _SOLOMON_PENDING_REWRITE=''
+typeset -g _SOLOMON_PENDING_UNDO_TOKEN=''
+typeset -g _SOLOMON_UNDO_WIDGET=''
+typeset -g _SOLOMON_AUTOMATIC_REWRITE=''
+typeset -g _SOLOMON_PENDING_FAILURE_TOKEN=''
+typeset -g _SOLOMON_LAST_COMMAND_TOKEN=none
+typeset -gA _SOLOMON_SEEN_SUGGESTIONS
+function _solomon_allow_diagnostic {
+  (( _SOLOMON_DIAGNOSTIC_COUNT < _SOLOMON_DIAGNOSTIC_LIMIT )) || return 1
+  (( ++_SOLOMON_DIAGNOSTIC_COUNT ))
 }
-function _close_enough_allow_suggestion {
+function _solomon_allow_suggestion {
   [[ -n "$1" ]] || return 1
-  (( ${+_CLOSE_ENOUGH_SEEN_SUGGESTIONS[$1]} )) && return 1
-  _close_enough_allow_diagnostic || return 1
-  _CLOSE_ENOUGH_SEEN_SUGGESTIONS[$1]=1
+  (( ${+_SOLOMON_SEEN_SUGGESTIONS[$1]} )) && return 1
+  _solomon_allow_diagnostic || return 1
+  _SOLOMON_SEEN_SUGGESTIONS[$1]=1
 }
-function _close_enough_handshake {
-  (( _CLOSE_ENOUGH_DAEMON_READY )) && return 0
+function _solomon_handshake {
+  (( _SOLOMON_DAEMON_READY )) && return 0
   local record version action
   local -a fields
-  record="$(command close-enough daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record 2>/dev/null)" || return 1
+  record="$(command solomon daemon request --operation handshake --shell zsh --session "$$" --ensure=true --format record 2>/dev/null)" || return 1
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return 1
   version="${fields[1]}" action="${fields[2]}"
   [[ "$version" == "1" && "$action" == ready ]] || return 1
-  _CLOSE_ENOUGH_DAEMON_READY=1
+  _SOLOMON_DAEMON_READY=1
 }
-function _close_enough_restore_undo {
+function _solomon_restore_undo {
   local binding
-  [[ -n "$_CLOSE_ENOUGH_UNDO_WIDGET" ]] || return 0
+  [[ -n "$_SOLOMON_UNDO_WIDGET" ]] || return 0
   binding="$(bindkey -M main '^G')" || return 0
-  [[ "$binding" == *" _close_enough_undo_rewrite" ]] || return 0
-  bindkey -M main '^G' "$_CLOSE_ENOUGH_UNDO_WIDGET"
-  _CLOSE_ENOUGH_UNDO_WIDGET=''
+  [[ "$binding" == *" _solomon_undo_rewrite" ]] || return 0
+  bindkey -M main '^G' "$_SOLOMON_UNDO_WIDGET"
+  _SOLOMON_UNDO_WIDGET=''
 }
-function _close_enough_clear_pending_undo {
-  _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
-  _close_enough_restore_undo
+function _solomon_clear_pending_undo {
+  _SOLOMON_PENDING_UNDO_TOKEN=''
+  _solomon_restore_undo
 }
-function _close_enough_clear_pending_rewrite {
-  _CLOSE_ENOUGH_PENDING_REWRITE=''
-  _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
-  _close_enough_clear_pending_undo
+function _solomon_clear_pending_rewrite {
+  _SOLOMON_PENDING_REWRITE=''
+  _SOLOMON_AUTOMATIC_REWRITE=''
+  _solomon_clear_pending_undo
 }
-function _close_enough_bind_undo {
+function _solomon_bind_undo {
   local binding widget
-  [[ -z "$_CLOSE_ENOUGH_UNDO_WIDGET" ]] || return 0
+  [[ -z "$_SOLOMON_UNDO_WIDGET" ]] || return 0
   binding="$(bindkey -M main '^G')" || return 1
   widget="${binding##* }"
   [[ -n "$widget" && "$widget" != \"* ]] || return 1
-  _CLOSE_ENOUGH_UNDO_WIDGET="$widget"
-  bindkey -M main '^G' _close_enough_undo_rewrite || { _CLOSE_ENOUGH_UNDO_WIDGET=''; return 1; }
+  _SOLOMON_UNDO_WIDGET="$widget"
+  bindkey -M main '^G' _solomon_undo_rewrite || { _SOLOMON_UNDO_WIDGET=''; return 1; }
 }
-function _close_enough_undo_rewrite {
+function _solomon_undo_rewrite {
   local record version action risk suggestion
   local -a fields
-  [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" && -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" ]] || return 0
-  record="$(command close-enough daemon request --operation undo --shell zsh --session "$$" --token "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)" || { _close_enough_clear_pending_undo; return 0; }
+  [[ -n "$_SOLOMON_PENDING_REWRITE" && -n "$_SOLOMON_PENDING_UNDO_TOKEN" ]] || return 0
+  record="$(command solomon daemon request --operation undo --shell zsh --session "$$" --token "$_SOLOMON_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)" || { _solomon_clear_pending_undo; return 0; }
   fields=("${(@ps:\t:)record}")
-  (( ${#fields} == 7 )) || { _close_enough_clear_pending_undo; return 0; }
+  (( ${#fields} == 7 )) || { _solomon_clear_pending_undo; return 0; }
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" suggestion="${fields[7]}"
-  [[ "$version" == "1" && "$action" == edit-in-buffer && "$risk" == safe ]] || { _close_enough_clear_pending_undo; return 0; }
-  suggestion="$(_close_enough_decode "$suggestion")" || { _close_enough_clear_pending_undo; return 0; }
-  [[ -n "$suggestion" ]] || { _close_enough_clear_pending_undo; return 0; }
+  [[ "$version" == "1" && "$action" == edit-in-buffer && "$risk" == safe ]] || { _solomon_clear_pending_undo; return 0; }
+  suggestion="$(_solomon_decode "$suggestion")" || { _solomon_clear_pending_undo; return 0; }
+  [[ -n "$suggestion" ]] || { _solomon_clear_pending_undo; return 0; }
   BUFFER="$suggestion"
-  _close_enough_clear_pending_rewrite
-  zle -M "close-enough restored: $suggestion"
+  _solomon_clear_pending_rewrite
+  zle -M "solomon restored: $suggestion"
   zle -R
 }
-function _close_enough_check {
+function _solomon_check {
   local command record version action risk confidence cause consequence suggestion suggestion_key undo_token
   local -a fields
   command="$BUFFER"
-  if [[ -n "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
-    if [[ "$command" == "$_CLOSE_ENOUGH_PENDING_REWRITE" ]]; then
-      _close_enough_clear_pending_rewrite
-      _CLOSE_ENOUGH_AUTOMATIC_REWRITE="$command"
+  if [[ -n "$_SOLOMON_PENDING_REWRITE" ]]; then
+    if [[ "$command" == "$_SOLOMON_PENDING_REWRITE" ]]; then
+      _solomon_clear_pending_rewrite
+      _SOLOMON_AUTOMATIC_REWRITE="$command"
       return 0
     fi
-    _close_enough_clear_pending_rewrite
+    _solomon_clear_pending_rewrite
   fi
-  _close_enough_handshake || return 0
-  record="$(command close-enough daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _CLOSE_ENOUGH_DAEMON_READY=0; return 0; }
+  _solomon_handshake || return 0
+  record="$(command solomon daemon request --operation pre-send --shell zsh --session "$$" --ensure=false --format undo-record --command "$command" 2>/dev/null)" || { _SOLOMON_DAEMON_READY=0; return 0; }
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 || ${#fields} == 8 )) || return 0
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" consequence="${fields[6]}" suggestion="${fields[7]}"
   [[ "$version" == "1" ]] || return 0
   [[ "$action" == none ]] && return 0
   suggestion_key="$suggestion"
-  suggestion="$(_close_enough_decode "$suggestion")" || return 0
-  cause="$(_close_enough_decode "$cause")" || cause=''
+  suggestion="$(_solomon_decode "$suggestion")" || return 0
+  cause="$(_solomon_decode "$cause")" || cause=''
   if [[ "$action" == submit ]]; then
     return 0
   fi
   if [[ "$action" == rewrite ]]; then
     if [[ "$risk" != safe || -z "$suggestion" ]]; then
-      zle -M "close-enough: refused unsafe rewrite"
+      zle -M "solomon: refused unsafe rewrite"
       return 1
     fi
     BUFFER="$suggestion"
-    _CLOSE_ENOUGH_PENDING_REWRITE="$suggestion"
+    _SOLOMON_PENDING_REWRITE="$suggestion"
     undo_token=''
     if (( ${#fields} == 8 )) && [[ -n "${fields[8]}" ]]; then
-      undo_token="$(_close_enough_decode "${fields[8]}")" || undo_token=''
-      _CLOSE_ENOUGH_PENDING_UNDO_TOKEN="$undo_token"
-      _close_enough_bind_undo || _CLOSE_ENOUGH_PENDING_UNDO_TOKEN=''
+      undo_token="$(_solomon_decode "${fields[8]}")" || undo_token=''
+      _SOLOMON_PENDING_UNDO_TOKEN="$undo_token"
+      _solomon_bind_undo || _SOLOMON_PENDING_UNDO_TOKEN=''
     fi
-    if [[ -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" ]]; then
-      zle -M "close-enough corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)"
+    if [[ -n "$_SOLOMON_PENDING_UNDO_TOKEN" ]]; then
+      zle -M "solomon corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)"
     else
-      zle -M "close-enough corrected: $suggestion ($cause; press Enter again)"
+      zle -M "solomon corrected: $suggestion ($cause; press Enter again)"
     fi
     zle -R
     return 1
   fi
   if [[ "$action" == hint ]]; then
-    if _close_enough_allow_suggestion "$suggestion_key"; then
-      zle -M "close-enough [$risk/$confidence]: $suggestion ($cause)"
+    if _solomon_allow_suggestion "$suggestion_key"; then
+      zle -M "solomon [$risk/$confidence]: $suggestion ($cause)"
     fi
     return 0
   fi
   if [[ "$action" == interrupt ]]; then
-    zle -M "close-enough [$risk/$confidence]: $suggestion ($cause)"
+    zle -M "solomon [$risk/$confidence]: $suggestion ($cause)"
     return 1
   fi
   return 0
 }
-function _close_enough_accept_line {
-  if ! _close_enough_check; then
+function _solomon_accept_line {
+  if ! _solomon_check; then
     return 0
   fi
-  zle "$_CLOSE_ENOUGH_ENTER_WIDGET"
+  zle "$_SOLOMON_ENTER_WIDGET"
 }
-zle -N _close_enough_accept_line
-zle -N _close_enough_undo_rewrite
-typeset -g _CLOSE_ENOUGH_ENTER_WIDGET=''
-function _close_enough_bind_enter {
+zle -N _solomon_accept_line
+zle -N _solomon_undo_rewrite
+typeset -g _SOLOMON_ENTER_WIDGET=''
+function _solomon_bind_enter {
   local binding widget
   binding="$(bindkey -M main '^M')" || return 0
   widget="${binding##* }"
   [[ -z "$widget" || "$widget" == \"* ]] && return 0
-  _CLOSE_ENOUGH_ENTER_WIDGET="$widget"
-  bindkey -M main '^M' _close_enough_accept_line
+  _SOLOMON_ENTER_WIDGET="$widget"
+  bindkey -M main '^M' _solomon_accept_line
 }
-function _close_enough_restore_enter {
+function _solomon_restore_enter {
   local binding
   binding="$(bindkey -M main '^M')" || return 0
-  [[ "$binding" == *" _close_enough_accept_line" ]] || return 0
-  bindkey -M main '^M' "$_CLOSE_ENOUGH_ENTER_WIDGET"
-  _CLOSE_ENOUGH_ENTER_WIDGET=''
+  [[ "$binding" == *" _solomon_accept_line" ]] || return 0
+  bindkey -M main '^M' "$_SOLOMON_ENTER_WIDGET"
+  _SOLOMON_ENTER_WIDGET=''
 }
-_close_enough_bind_enter
-typeset -g _CLOSE_ENOUGH_LAST_COMMAND=''
-function _close_enough_preexec {
-  if [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]]; then
-    [[ -z "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]] || command close-enough capture reset --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" >/dev/null 2>&1
-    print -rn -- $'\e]1337;CloseEnough='"$CLOSE_ENOUGH_CAPTURE_MARKER"$'\a'
+_solomon_bind_enter
+typeset -g _SOLOMON_LAST_COMMAND=''
+function _solomon_preexec {
+  if [[ -n "${SOLOMON_CAPTURE_MARKER:-}" ]]; then
+    [[ -z "${SOLOMON_CAPTURE_SOCKET:-}" ]] || command solomon capture reset --socket "$SOLOMON_CAPTURE_SOCKET" >/dev/null 2>&1
+    print -rn -- $'\e]1337;Solomon='"$SOLOMON_CAPTURE_MARKER"$'\a'
   fi
-  _CLOSE_ENOUGH_LAST_COMMAND="$1"
-  _CLOSE_ENOUGH_PENDING_REWRITE=''
-  _close_enough_clear_pending_undo
-  if [[ "$1" == "$_CLOSE_ENOUGH_AUTOMATIC_REWRITE" ]]; then
-    _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
+  _SOLOMON_LAST_COMMAND="$1"
+  _SOLOMON_PENDING_REWRITE=''
+  _solomon_clear_pending_undo
+  if [[ "$1" == "$_SOLOMON_AUTOMATIC_REWRITE" ]]; then
+    _SOLOMON_LAST_COMMAND_TOKEN=none
   else
-    _CLOSE_ENOUGH_LAST_COMMAND_TOKEN="${_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN:-none}"
-    _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN=''
+    _SOLOMON_LAST_COMMAND_TOKEN="${_SOLOMON_PENDING_FAILURE_TOKEN:-none}"
+    _SOLOMON_PENDING_FAILURE_TOKEN=''
   fi
-  _CLOSE_ENOUGH_AUTOMATIC_REWRITE=''
+  _SOLOMON_AUTOMATIC_REWRITE=''
 }
-function _close_enough_precmd {
-  local exit_status=$? command="$_CLOSE_ENOUGH_LAST_COMMAND" token="$_CLOSE_ENOUGH_LAST_COMMAND_TOKEN" record version action risk confidence cause suggestion suggestion_key
+function _solomon_precmd {
+  local exit_status=$? command="$_SOLOMON_LAST_COMMAND" token="$_SOLOMON_LAST_COMMAND_TOKEN" record version action risk confidence cause suggestion suggestion_key
   local -a fields
-  _CLOSE_ENOUGH_LAST_COMMAND=''
-  _CLOSE_ENOUGH_LAST_COMMAND_TOKEN=none
+  _SOLOMON_LAST_COMMAND=''
+  _SOLOMON_LAST_COMMAND_TOKEN=none
   [[ -z "$command" ]] && return
   if [[ $exit_status -eq 0 ]]; then
-    command close-enough daemon request --operation post-success --shell zsh --session "$$" --token "$token" --ensure=false --command "$command" >/dev/null 2>&1
+    command solomon daemon request --operation post-success --shell zsh --session "$$" --token "$token" --ensure=false --command "$command" >/dev/null 2>&1
     return
   fi
-  (( ++_CLOSE_ENOUGH_FAILURE_SEQUENCE ))
-  token="failure-$$-${_CLOSE_ENOUGH_FAILURE_SEQUENCE}"
-  _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN="$token"
+  (( ++_SOLOMON_FAILURE_SEQUENCE ))
+  token="failure-$$-${_SOLOMON_FAILURE_SEQUENCE}"
+  _SOLOMON_PENDING_FAILURE_TOKEN="$token"
   local failure_output="exit status $exit_status" captured
-  if [[ -n "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]]; then
-    captured="$(command close-enough capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
+  if [[ -n "${SOLOMON_CAPTURE_SOCKET:-}" ]]; then
+    captured="$(command solomon capture read --socket "$SOLOMON_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
   fi
-  record="$(command close-enough daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return
+  record="$(command solomon daemon request --operation post-failure --shell zsh --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return
   fields=("${(@ps:\t:)record}")
   (( ${#fields} == 7 )) || return
   version="${fields[1]}" action="${fields[2]}" risk="${fields[3]}" confidence="${fields[4]}" cause="${fields[5]}" suggestion="${fields[7]}"
   [[ "$version" == "1" && "$action" != none ]] || return
   suggestion_key="$suggestion"
-  suggestion="$(_close_enough_decode "$suggestion")" || return
-  cause="$(_close_enough_decode "$cause")" || cause=''
+  suggestion="$(_solomon_decode "$suggestion")" || return
+  cause="$(_solomon_decode "$cause")" || cause=''
   [[ -n "$suggestion" ]] || return
-  if _close_enough_allow_suggestion "$suggestion_key"; then
-    print -r -- "close-enough [$risk/$confidence]: $suggestion ($cause)"
+  if _solomon_allow_suggestion "$suggestion_key"; then
+    print -r -- "solomon [$risk/$confidence]: $suggestion ($cause)"
   fi
 }
 autoload -Uz add-zsh-hook
-add-zsh-hook preexec _close_enough_preexec
-add-zsh-hook precmd _close_enough_precmd
+add-zsh-hook preexec _solomon_preexec
+add-zsh-hook precmd _solomon_precmd
 fi
 `
 
-const fishScript = `# close-enough fish integration
-if not set -q _CLOSE_ENOUGH_FISH_LOADED
-  set -g _CLOSE_ENOUGH_FISH_LOADED 1
-set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT 0
-set -g _CLOSE_ENOUGH_DIAGNOSTIC_LIMIT 5
-set -g _CLOSE_ENOUGH_DAEMON_READY 0
-set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE 0
-set -g _CLOSE_ENOUGH_PENDING_REWRITE
-set -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
-set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
-set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN
-set -g _CLOSE_ENOUGH_SEEN_SUGGESTIONS
-function _close_enough_allow_diagnostic
-  if test $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT -ge $_CLOSE_ENOUGH_DIAGNOSTIC_LIMIT
+const fishScript = `# solomon fish integration
+if not set -q _SOLOMON_FISH_LOADED
+  set -g _SOLOMON_FISH_LOADED 1
+set -g _SOLOMON_DIAGNOSTIC_COUNT 0
+set -g _SOLOMON_DIAGNOSTIC_LIMIT 5
+set -g _SOLOMON_DAEMON_READY 0
+set -g _SOLOMON_FAILURE_SEQUENCE 0
+set -g _SOLOMON_PENDING_REWRITE
+set -g _SOLOMON_PENDING_UNDO_TOKEN
+set -g _SOLOMON_AUTOMATIC_REWRITE 0
+set -g _SOLOMON_PENDING_FAILURE_TOKEN
+set -g _SOLOMON_SEEN_SUGGESTIONS
+function _solomon_allow_diagnostic
+  if test $_SOLOMON_DIAGNOSTIC_COUNT -ge $_SOLOMON_DIAGNOSTIC_LIMIT
     return 1
   end
-  set -g _CLOSE_ENOUGH_DIAGNOSTIC_COUNT (math $_CLOSE_ENOUGH_DIAGNOSTIC_COUNT + 1)
+  set -g _SOLOMON_DIAGNOSTIC_COUNT (math $_SOLOMON_DIAGNOSTIC_COUNT + 1)
 end
-function _close_enough_allow_suggestion
+function _solomon_allow_suggestion
   set -l key $argv[1]
   test -n "$key"; or return 1
-  contains -- "$key" $_CLOSE_ENOUGH_SEEN_SUGGESTIONS; and return 1
-  _close_enough_allow_diagnostic; or return 1
-  set -ga _CLOSE_ENOUGH_SEEN_SUGGESTIONS "$key"
+  contains -- "$key" $_SOLOMON_SEEN_SUGGESTIONS; and return 1
+  _solomon_allow_diagnostic; or return 1
+  set -ga _SOLOMON_SEEN_SUGGESTIONS "$key"
 end
-function _close_enough_decode
+function _solomon_decode
   if base64 --decode </dev/null >/dev/null 2>&1
     printf '%s' "$argv[1]" | base64 --decode
   else
     printf '%s' "$argv[1]" | base64 -D
   end
 end
-function _close_enough_handshake
-  if test "$_CLOSE_ENOUGH_DAEMON_READY" = 1
+function _solomon_handshake
+  if test "$_SOLOMON_DAEMON_READY" = 1
     return
   end
-  set -l record (command close-enough daemon request --operation handshake --shell fish --session "$fish_pid" --ensure=true --format record 2>/dev/null)
+  set -l record (command solomon daemon request --operation handshake --shell fish --session "$fish_pid" --ensure=true --format record 2>/dev/null)
   if test $status -ne 0
     return 1
   end
@@ -267,82 +267,82 @@ function _close_enough_handshake
   if test "$fields[1]" != 1; or test "$fields[2]" != ready
     return 1
   end
-  set -g _CLOSE_ENOUGH_DAEMON_READY 1
+  set -g _SOLOMON_DAEMON_READY 1
 end
-function _close_enough_restore_undo
-  if not set -q _CLOSE_ENOUGH_FISH_UNDO_BOUND
+function _solomon_restore_undo
+  if not set -q _SOLOMON_FISH_UNDO_BOUND
     return
   end
-  if string match -q "* _close_enough_undo_rewrite" -- (bind \cg)
+  if string match -q "* _solomon_undo_rewrite" -- (bind \cg)
     bind --erase \cg
   end
-  set -e _CLOSE_ENOUGH_FISH_UNDO_BOUND
+  set -e _SOLOMON_FISH_UNDO_BOUND
 end
-function _close_enough_clear_pending_undo
-  set -e _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
-  _close_enough_restore_undo
+function _solomon_clear_pending_undo
+  set -e _SOLOMON_PENDING_UNDO_TOKEN
+  _solomon_restore_undo
 end
-function _close_enough_clear_pending_rewrite
-  set -e _CLOSE_ENOUGH_PENDING_REWRITE
-  set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
-  _close_enough_clear_pending_undo
+function _solomon_clear_pending_rewrite
+  set -e _SOLOMON_PENDING_REWRITE
+  set -g _SOLOMON_AUTOMATIC_REWRITE 0
+  _solomon_clear_pending_undo
 end
-function _close_enough_bind_undo
-  if set -q _CLOSE_ENOUGH_FISH_UNDO_BOUND
+function _solomon_bind_undo
+  if set -q _SOLOMON_FISH_UNDO_BOUND
     return
   end
   bind \cg >/dev/null 2>&1
   if test $status -eq 0
     return 1
   end
-  set -g _CLOSE_ENOUGH_FISH_UNDO_BOUND 1
-  bind \cg _close_enough_undo_rewrite; or begin
-    set -e _CLOSE_ENOUGH_FISH_UNDO_BOUND
+  set -g _SOLOMON_FISH_UNDO_BOUND 1
+  bind \cg _solomon_undo_rewrite; or begin
+    set -e _SOLOMON_FISH_UNDO_BOUND
     return 1
   end
 end
-function _close_enough_undo_rewrite
-  if not set -q _CLOSE_ENOUGH_PENDING_REWRITE; or not set -q _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
+function _solomon_undo_rewrite
+  if not set -q _SOLOMON_PENDING_REWRITE; or not set -q _SOLOMON_PENDING_UNDO_TOKEN
     return
   end
-  set -l record (command close-enough daemon request --operation undo --shell fish --session "$fish_pid" --token "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)
+  set -l record (command solomon daemon request --operation undo --shell fish --session "$fish_pid" --token "$_SOLOMON_PENDING_UNDO_TOKEN" --ensure=false --format record 2>/dev/null)
   if test $status -ne 0
-    _close_enough_clear_pending_undo
+    _solomon_clear_pending_undo
     return
   end
   set -l fields (string split \t -- $record)
   if test (count $fields) -ne 7; or test "$fields[1]" != 1; or test "$fields[2]" != edit-in-buffer; or test "$fields[3]" != safe
-    _close_enough_clear_pending_undo
+    _solomon_clear_pending_undo
     return
   end
-  set -l suggestion (_close_enough_decode "$fields[7]")
+  set -l suggestion (_solomon_decode "$fields[7]")
   if test $status -ne 0; or test -z "$suggestion"
-    _close_enough_clear_pending_undo
+    _solomon_clear_pending_undo
     return
   end
   commandline -r "$suggestion"
-  _close_enough_clear_pending_rewrite
-  echo "close-enough restored: $suggestion" >&2
+  _solomon_clear_pending_rewrite
+  echo "solomon restored: $suggestion" >&2
   commandline -f repaint
 end
-function _close_enough_accept_line
+function _solomon_accept_line
   set -l command (commandline -b)
-  if set -q _CLOSE_ENOUGH_PENDING_REWRITE; and test -n "$_CLOSE_ENOUGH_PENDING_REWRITE"
-    if test "$command" = "$_CLOSE_ENOUGH_PENDING_REWRITE"
-      _close_enough_clear_pending_rewrite
-      set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 1
+  if set -q _SOLOMON_PENDING_REWRITE; and test -n "$_SOLOMON_PENDING_REWRITE"
+    if test "$command" = "$_SOLOMON_PENDING_REWRITE"
+      _solomon_clear_pending_rewrite
+      set -g _SOLOMON_AUTOMATIC_REWRITE 1
       commandline -f execute
       return
     end
-    _close_enough_clear_pending_rewrite
+    _solomon_clear_pending_rewrite
   end
-  _close_enough_handshake; or begin
+  _solomon_handshake; or begin
     commandline -f execute
     return
   end
-  set -l record (command close-enough daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record --command "$command" 2>/dev/null)
+  set -l record (command solomon daemon request --operation pre-send --shell fish --session "$fish_pid" --ensure=false --format undo-record --command "$command" 2>/dev/null)
   if test $status -ne 0
-    set -g _CLOSE_ENOUGH_DAEMON_READY 0
+    set -g _SOLOMON_DAEMON_READY 0
     commandline -f execute
     return
   end
@@ -360,107 +360,107 @@ function _close_enough_accept_line
     return
   end
   if test "$fields[2]" = rewrite
-    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+    set -l suggestion (_solomon_decode "$fields[7]"); or begin
       commandline -f execute
       return
     end
-    set -l cause (_close_enough_decode "$fields[5]"); or begin
+    set -l cause (_solomon_decode "$fields[5]"); or begin
       commandline -f execute
       return
     end
     if test "$fields[3]" != safe; or test -z "$suggestion"
-      echo "close-enough: refused unsafe rewrite" >&2
+      echo "solomon: refused unsafe rewrite" >&2
       commandline -f repaint
       return
     end
     commandline -r "$suggestion"
-    set -g _CLOSE_ENOUGH_PENDING_REWRITE "$suggestion"
+    set -g _SOLOMON_PENDING_REWRITE "$suggestion"
     if test (count $fields) -eq 8; and test -n "$fields[8]"
-      set -l undo_token (_close_enough_decode "$fields[8]")
+      set -l undo_token (_solomon_decode "$fields[8]")
       if test $status -eq 0; and test -n "$undo_token"
-        set -g _CLOSE_ENOUGH_PENDING_UNDO_TOKEN "$undo_token"
-        _close_enough_bind_undo; or set -e _CLOSE_ENOUGH_PENDING_UNDO_TOKEN
+        set -g _SOLOMON_PENDING_UNDO_TOKEN "$undo_token"
+        _solomon_bind_undo; or set -e _SOLOMON_PENDING_UNDO_TOKEN
       end
     end
-    if set -q _CLOSE_ENOUGH_PENDING_UNDO_TOKEN; and test -n "$_CLOSE_ENOUGH_PENDING_UNDO_TOKEN"
-      echo "close-enough corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)" >&2
+    if set -q _SOLOMON_PENDING_UNDO_TOKEN; and test -n "$_SOLOMON_PENDING_UNDO_TOKEN"
+      echo "solomon corrected: $suggestion ($cause; press Ctrl-G to undo or Enter again)" >&2
     else
-      echo "close-enough corrected: $suggestion ($cause; press Enter again)" >&2
+      echo "solomon corrected: $suggestion ($cause; press Enter again)" >&2
     end
     return
   end
   if test "$fields[2]" = hint
     set -l suggestion_key "$fields[7]"
-    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+    set -l suggestion (_solomon_decode "$fields[7]"); or begin
       commandline -f execute
       return
     end
-    set -l cause (_close_enough_decode "$fields[5]"); or begin
+    set -l cause (_solomon_decode "$fields[5]"); or begin
       commandline -f execute
       return
     end
-    if _close_enough_allow_suggestion "$suggestion_key"
-      echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
+    if _solomon_allow_suggestion "$suggestion_key"
+      echo "solomon [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     end
     commandline -f execute
     return
   end
   if test "$fields[2]" = interrupt
-    set -l suggestion (_close_enough_decode "$fields[7]"); or begin
+    set -l suggestion (_solomon_decode "$fields[7]"); or begin
       commandline -f execute
       return
     end
-    set -l cause (_close_enough_decode "$fields[5]"); or begin
+    set -l cause (_solomon_decode "$fields[5]"); or begin
       commandline -f execute
       return
     end
-    echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
+    echo "solomon [$fields[3]/$fields[4]]: $suggestion ($cause)" >&2
     commandline -f repaint
     return
   end
   commandline -f execute
 end
-function _close_enough_bind_enter
+function _solomon_bind_enter
   set -l binding (bind \r)
   if test "$binding" != "bind --preset enter execute"
     return
   end
-  set -g _CLOSE_ENOUGH_FISH_ENTER_BOUND 1
-  bind \r _close_enough_accept_line
+  set -g _SOLOMON_FISH_ENTER_BOUND 1
+  bind \r _solomon_accept_line
 end
-function _close_enough_restore_enter
-  if not set -q _CLOSE_ENOUGH_FISH_ENTER_BOUND
+function _solomon_restore_enter
+  if not set -q _SOLOMON_FISH_ENTER_BOUND
     return
   end
-  if string match -q "* _close_enough_accept_line" -- (bind \r)
+  if string match -q "* _solomon_accept_line" -- (bind \r)
     bind --erase \r
   end
-  set -e _CLOSE_ENOUGH_FISH_ENTER_BOUND
+  set -e _SOLOMON_FISH_ENTER_BOUND
 end
-_close_enough_bind_enter
-function _close_enough_post_failure --on-event fish_postexec
+_solomon_bind_enter
+function _solomon_post_failure --on-event fish_postexec
   set -l command_status $status
   set -l command $argv[1]
   set -l token none
   if test -z "$command"
     return
   end
-  if test "$_CLOSE_ENOUGH_AUTOMATIC_REWRITE" != 1
-    if set -q _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN; and test -n "$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"
-      set token "$_CLOSE_ENOUGH_PENDING_FAILURE_TOKEN"
-      set -e _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN
+  if test "$_SOLOMON_AUTOMATIC_REWRITE" != 1
+    if set -q _SOLOMON_PENDING_FAILURE_TOKEN; and test -n "$_SOLOMON_PENDING_FAILURE_TOKEN"
+      set token "$_SOLOMON_PENDING_FAILURE_TOKEN"
+      set -e _SOLOMON_PENDING_FAILURE_TOKEN
     end
   end
-  set -g _CLOSE_ENOUGH_AUTOMATIC_REWRITE 0
+  set -g _SOLOMON_AUTOMATIC_REWRITE 0
   if test $command_status -eq 0
-    command close-enough daemon request --operation post-success --shell fish --session "$fish_pid" --token "$token" --ensure=false --command "$command" >/dev/null 2>/dev/null
+    command solomon daemon request --operation post-success --shell fish --session "$fish_pid" --token "$token" --ensure=false --command "$command" >/dev/null 2>/dev/null
     return
   end
   if test $command_status -ne 0
-    set -g _CLOSE_ENOUGH_FAILURE_SEQUENCE (math $_CLOSE_ENOUGH_FAILURE_SEQUENCE + 1)
-    set token "failure-$fish_pid-$_CLOSE_ENOUGH_FAILURE_SEQUENCE"
-    set -g _CLOSE_ENOUGH_PENDING_FAILURE_TOKEN "$token"
-    set -l record (command close-enough daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command" --failure-output "exit status $command_status" 2>/dev/null)
+    set -g _SOLOMON_FAILURE_SEQUENCE (math $_SOLOMON_FAILURE_SEQUENCE + 1)
+    set token "failure-$fish_pid-$_SOLOMON_FAILURE_SEQUENCE"
+    set -g _SOLOMON_PENDING_FAILURE_TOKEN "$token"
+    set -l record (command solomon daemon request --operation post-failure --shell fish --session "$fish_pid" --token "$token" --format record --command "$command" --failure-output "exit status $command_status" 2>/dev/null)
     if test $status -ne 0
       return
     end
@@ -472,210 +472,210 @@ function _close_enough_post_failure --on-event fish_postexec
       return
     end
     set -l suggestion_key "$fields[7]"
-    set -l suggestion (_close_enough_decode "$fields[7]")
-    set -l cause (_close_enough_decode "$fields[5]")
+    set -l suggestion (_solomon_decode "$fields[7]")
+    set -l cause (_solomon_decode "$fields[5]")
     or return
-    if test -n "$suggestion"; and _close_enough_allow_suggestion "$suggestion_key"
-      echo "close-enough [$fields[3]/$fields[4]]: $suggestion ($cause)"
+    if test -n "$suggestion"; and _solomon_allow_suggestion "$suggestion_key"
+      echo "solomon [$fields[3]/$fields[4]]: $suggestion ($cause)"
     end
   end
 end
 end
 `
 
-const bashScript = `# close-enough bash integration
-if [[ -z "${_CLOSE_ENOUGH_BASH_LOADED:-}" ]]; then
-_CLOSE_ENOUGH_BASH_LOADED=1
-_CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT=0
-_CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT=5
-_CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE=0
-_CLOSE_ENOUGH_BASH_LAST_COMMAND=''
-_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS=$'\n'
-_close_enough_bash_decode() {
+const bashScript = `# solomon bash integration
+if [[ -z "${_SOLOMON_BASH_LOADED:-}" ]]; then
+_SOLOMON_BASH_LOADED=1
+_SOLOMON_BASH_DIAGNOSTIC_COUNT=0
+_SOLOMON_BASH_DIAGNOSTIC_LIMIT=5
+_SOLOMON_BASH_FAILURE_SEQUENCE=0
+_SOLOMON_BASH_LAST_COMMAND=''
+_SOLOMON_BASH_SEEN_SUGGESTIONS=$'\n'
+_solomon_bash_decode() {
   if base64 --decode </dev/null >/dev/null 2>&1; then
     printf '%s' "$1" | base64 --decode
   else
     printf '%s' "$1" | base64 -D
   fi
 }
-_close_enough_bash_allow_suggestion() {
+_solomon_bash_allow_suggestion() {
   local key="$1"
   [[ -n "$key" ]] || return 1
-  case "$_CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS" in *$'\n'"$key"$'\n'*) return 1 ;; esac
-  (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT < _CLOSE_ENOUGH_BASH_DIAGNOSTIC_LIMIT )) || return 1
-  (( _CLOSE_ENOUGH_BASH_DIAGNOSTIC_COUNT++ ))
-  _CLOSE_ENOUGH_BASH_SEEN_SUGGESTIONS+="$key"$'\n'
+  case "$_SOLOMON_BASH_SEEN_SUGGESTIONS" in *$'\n'"$key"$'\n'*) return 1 ;; esac
+  (( _SOLOMON_BASH_DIAGNOSTIC_COUNT < _SOLOMON_BASH_DIAGNOSTIC_LIMIT )) || return 1
+  (( _SOLOMON_BASH_DIAGNOSTIC_COUNT++ ))
+  _SOLOMON_BASH_SEEN_SUGGESTIONS+="$key"$'\n'
 }
-_close_enough_bash_capture_mark() {
-  [[ -n "${CLOSE_ENOUGH_CAPTURE_MARKER:-}" ]] || return 0
-  [[ -z "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]] || command close-enough capture reset --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" >/dev/null 2>&1
-  printf '\033]1337;CloseEnough=%s\a' "$CLOSE_ENOUGH_CAPTURE_MARKER"
+_solomon_bash_capture_mark() {
+  [[ -n "${SOLOMON_CAPTURE_MARKER:-}" ]] || return 0
+  [[ -z "${SOLOMON_CAPTURE_SOCKET:-}" ]] || command solomon capture reset --socket "$SOLOMON_CAPTURE_SOCKET" >/dev/null 2>&1
+  printf '\033]1337;Solomon=%s\a' "$SOLOMON_CAPTURE_MARKER"
 }
-_close_enough_bash_precmd() {
+_solomon_bash_precmd() {
   local exit_status=$? command token record version action risk confidence cause suggestion suggestion_key failure_output captured
-  command="$(builtin fc -ln -1 2>/dev/null)" || { _close_enough_bash_capture_mark; return 0; }
+  command="$(builtin fc -ln -1 2>/dev/null)" || { _solomon_bash_capture_mark; return 0; }
   command="${command%$'\n'}"
-  _close_enough_bash_capture_mark
-  [[ -n "$command" && "$command" != "$_CLOSE_ENOUGH_BASH_LAST_COMMAND" ]] || return 0
-  _CLOSE_ENOUGH_BASH_LAST_COMMAND="$command"
+  _solomon_bash_capture_mark
+  [[ -n "$command" && "$command" != "$_SOLOMON_BASH_LAST_COMMAND" ]] || return 0
+  _SOLOMON_BASH_LAST_COMMAND="$command"
   [[ "$exit_status" -ne 0 ]] || return 0
-  (( _CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE++ ))
-  token="failure-$$-$_CLOSE_ENOUGH_BASH_FAILURE_SEQUENCE"
+  (( _SOLOMON_BASH_FAILURE_SEQUENCE++ ))
+  token="failure-$$-$_SOLOMON_BASH_FAILURE_SEQUENCE"
   failure_output="exit status $exit_status"
-  if [[ -n "${CLOSE_ENOUGH_CAPTURE_SOCKET:-}" ]]; then
-    captured="$(command close-enough capture read --socket "$CLOSE_ENOUGH_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
+  if [[ -n "${SOLOMON_CAPTURE_SOCKET:-}" ]]; then
+    captured="$(command solomon capture read --socket "$SOLOMON_CAPTURE_SOCKET" --command "$command" 2>/dev/null)" && [[ -n "$captured" ]] && failure_output="$captured"
   fi
-  record="$(command close-enough daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return 0
+  record="$(command solomon daemon request --operation post-failure --shell bash --session "$$" --token "$token" --format record --command "$command" --failure-output "$failure_output" 2>/dev/null)" || return 0
   IFS=$'\t' read -r version action risk confidence cause _ suggestion <<< "$record"
   [[ "$version" == 1 && "$action" != none && -n "$suggestion" ]] || return 0
   suggestion_key="$suggestion"
-  suggestion="$(_close_enough_bash_decode "$suggestion")" || return 0
-  cause="$(_close_enough_bash_decode "$cause")" || cause=''
-  if _close_enough_bash_allow_suggestion "$suggestion_key"; then
-    printf 'close-enough [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause"
+  suggestion="$(_solomon_bash_decode "$suggestion")" || return 0
+  cause="$(_solomon_bash_decode "$cause")" || cause=''
+  if _solomon_bash_allow_suggestion "$suggestion_key"; then
+    printf 'solomon [%s/%s]: %s (%s)\n' "$risk" "$confidence" "$suggestion" "$cause"
   fi
 }
-if [[ "${PROMPT_COMMAND:-}" != *"_close_enough_bash_precmd"* ]]; then
-  PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}_close_enough_bash_precmd"
+if [[ "${PROMPT_COMMAND:-}" != *"_solomon_bash_precmd"* ]]; then
+  PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}_solomon_bash_precmd"
 fi
 fi
 `
 
-const powerShellScript = `# close-enough PowerShell integration
-if (-not $global:CloseEnoughAdapterLoaded) {
-$global:CloseEnoughAdapterLoaded = $true
-$global:CloseEnoughLastHistoryId = 0
-$global:CloseEnoughDiagnosticCount = 0
-$global:CloseEnoughDiagnosticLimit = 5
-$global:CloseEnoughDaemonReady = $false
-$global:CloseEnoughFailureSequence = 0
-$global:CloseEnoughPendingRewrite = $null
-$global:CloseEnoughPendingUndoToken = $null
-$global:CloseEnoughPreviousUndoHandler = $null
-$global:CloseEnoughUndoBound = $false
-$global:CloseEnoughAutomaticRewrite = $false
-$global:CloseEnoughPendingFailureToken = $null
-$global:CloseEnoughPendingConfirmation = $null
-$global:CloseEnoughSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
-$global:CloseEnoughPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
-$global:CloseEnoughPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
-if ($global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
+const powerShellScript = `# solomon PowerShell integration
+if (-not $global:SolomonAdapterLoaded) {
+$global:SolomonAdapterLoaded = $true
+$global:SolomonLastHistoryId = 0
+$global:SolomonDiagnosticCount = 0
+$global:SolomonDiagnosticLimit = 5
+$global:SolomonDaemonReady = $false
+$global:SolomonFailureSequence = 0
+$global:SolomonPendingRewrite = $null
+$global:SolomonPendingUndoToken = $null
+$global:SolomonPreviousUndoHandler = $null
+$global:SolomonUndoBound = $false
+$global:SolomonAutomaticRewrite = $false
+$global:SolomonPendingFailureToken = $null
+$global:SolomonPendingConfirmation = $null
+$global:SolomonSeenSuggestions = [System.Collections.Generic.HashSet[string]]::new()
+$global:SolomonPreviousPrompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock
+$global:SolomonPreviousEnterHandler = Get-PSReadLineKeyHandler -Chord Enter
+if ($global:SolomonPreviousEnterHandler.Function -eq 'AcceptLine') {
 Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   $command = $line
-  if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite)) {
-    if ($command -eq $global:CloseEnoughPendingRewrite) {
-      Clear-CloseEnoughPendingRewrite
-      $global:CloseEnoughAutomaticRewrite = $true
+  if (-not [string]::IsNullOrEmpty($global:SolomonPendingRewrite)) {
+    if ($command -eq $global:SolomonPendingRewrite) {
+      Clear-SolomonPendingRewrite
+      $global:SolomonAutomaticRewrite = $true
       [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
       return
     }
-    Clear-CloseEnoughPendingRewrite
+    Clear-SolomonPendingRewrite
   }
-  if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingConfirmation) -and $command -ne $global:CloseEnoughPendingConfirmation) {
-    $global:CloseEnoughPendingConfirmation = $null
+  if (-not [string]::IsNullOrEmpty($global:SolomonPendingConfirmation) -and $command -ne $global:SolomonPendingConfirmation) {
+    $global:SolomonPendingConfirmation = $null
   }
-  if (-not (Test-CloseEnoughDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
-  $record = & close-enough daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command 2>$null
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
-  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
-  if ($decision.version -ne 1) { $global:CloseEnoughDaemonReady = $false; $global:CloseEnoughPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  if (-not (Test-SolomonDaemonHandshake)) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  $record = & solomon daemon request --operation pre-send --shell powershell --session $PID --ensure=false --command $command 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { $global:SolomonDaemonReady = $false; $global:SolomonPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $global:SolomonDaemonReady = $false; $global:SolomonPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
+  if ($decision.version -ne 1) { $global:SolomonDaemonReady = $false; $global:SolomonPendingConfirmation = $null; [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return }
   if ($decision.action -eq 'rewrite') {
     if ($decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) {
-      Write-Host "close-enough: refused unsafe rewrite"
+      Write-Host "solomon: refused unsafe rewrite"
       return
     }
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
-    $global:CloseEnoughPendingRewrite = $decision.suggestion
-    $global:CloseEnoughPendingUndoToken = $decision.undo_token
-    if (-not [string]::IsNullOrEmpty($global:CloseEnoughPendingUndoToken) -and (Enable-CloseEnoughUndoBinding)) {
-      Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Ctrl-G to undo or Enter again)"
+    $global:SolomonPendingRewrite = $decision.suggestion
+    $global:SolomonPendingUndoToken = $decision.undo_token
+    if (-not [string]::IsNullOrEmpty($global:SolomonPendingUndoToken) -and (Enable-SolomonUndoBinding)) {
+      Write-Host "solomon corrected: $($decision.suggestion) ($($decision.explanation); press Ctrl-G to undo or Enter again)"
     } else {
-      $global:CloseEnoughPendingUndoToken = $null
-      Write-Host "close-enough corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
+      $global:SolomonPendingUndoToken = $null
+      Write-Host "solomon corrected: $($decision.suggestion) ($($decision.explanation); press Enter again)"
     }
     return
   }
   if ($decision.action -eq 'hint') {
-    if (Allow-CloseEnoughSuggestion $decision.suggestion) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
+    if (Allow-SolomonSuggestion $decision.suggestion) { Write-Host "solomon [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
   if ($decision.action -eq 'submit') {
-    $global:CloseEnoughPendingConfirmation = $null
+    $global:SolomonPendingConfirmation = $null
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     return
   }
   if ($decision.action -eq 'interrupt') {
-    Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))"
-    $global:CloseEnoughPendingConfirmation = $command
+    Write-Host "solomon [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))"
+    $global:SolomonPendingConfirmation = $command
     return
   }
   [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
 }
-function global:Test-CloseEnoughDaemonHandshake {
-  if ($global:CloseEnoughDaemonReady) { return $true }
-  $record = & close-enough daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json 2>$null
+function global:Test-SolomonDaemonHandshake {
+  if ($global:SolomonDaemonReady) { return $true }
+  $record = & solomon daemon request --operation handshake --shell powershell --session $PID --ensure=true --format json 2>$null
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { return $false }
   try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { return $false }
   if ($decision.version -ne 1 -or $decision.action -ne 'ready') { return $false }
-  $global:CloseEnoughDaemonReady = $true
+  $global:SolomonDaemonReady = $true
   return $true
 }
-function global:Allow-CloseEnoughDiagnostic {
-  if ($global:CloseEnoughDiagnosticCount -ge $global:CloseEnoughDiagnosticLimit) { return $false }
-  $global:CloseEnoughDiagnosticCount += 1
+function global:Allow-SolomonDiagnostic {
+  if ($global:SolomonDiagnosticCount -ge $global:SolomonDiagnosticLimit) { return $false }
+  $global:SolomonDiagnosticCount += 1
   return $true
 }
-function global:Allow-CloseEnoughSuggestion {
+function global:Allow-SolomonSuggestion {
   param([string]$Suggestion)
-  if ([string]::IsNullOrEmpty($Suggestion) -or $global:CloseEnoughSeenSuggestions.Contains($Suggestion)) { return $false }
-  if (-not (Allow-CloseEnoughDiagnostic)) { return $false }
-  [void]$global:CloseEnoughSeenSuggestions.Add($Suggestion)
+  if ([string]::IsNullOrEmpty($Suggestion) -or $global:SolomonSeenSuggestions.Contains($Suggestion)) { return $false }
+  if (-not (Allow-SolomonDiagnostic)) { return $false }
+  [void]$global:SolomonSeenSuggestions.Add($Suggestion)
   return $true
 }
-function global:Restore-CloseEnoughUndoBinding {
-  if (-not $global:CloseEnoughUndoBound) { return }
-  if ($null -ne $global:CloseEnoughPreviousUndoHandler -and -not [string]::IsNullOrEmpty($global:CloseEnoughPreviousUndoHandler.Function)) {
-    Set-PSReadLineKeyHandler -Key Ctrl+g -Function $global:CloseEnoughPreviousUndoHandler.Function
+function global:Restore-SolomonUndoBinding {
+  if (-not $global:SolomonUndoBound) { return }
+  if ($null -ne $global:SolomonPreviousUndoHandler -and -not [string]::IsNullOrEmpty($global:SolomonPreviousUndoHandler.Function)) {
+    Set-PSReadLineKeyHandler -Key Ctrl+g -Function $global:SolomonPreviousUndoHandler.Function
   }
-  $global:CloseEnoughPreviousUndoHandler = $null
-  $global:CloseEnoughUndoBound = $false
+  $global:SolomonPreviousUndoHandler = $null
+  $global:SolomonUndoBound = $false
 }
-function global:Clear-CloseEnoughPendingUndo {
-  $global:CloseEnoughPendingUndoToken = $null
-  Restore-CloseEnoughUndoBinding
+function global:Clear-SolomonPendingUndo {
+  $global:SolomonPendingUndoToken = $null
+  Restore-SolomonUndoBinding
 }
-function global:Clear-CloseEnoughPendingRewrite {
-  $global:CloseEnoughPendingRewrite = $null
-  $global:CloseEnoughAutomaticRewrite = $false
-  Clear-CloseEnoughPendingUndo
+function global:Clear-SolomonPendingRewrite {
+  $global:SolomonPendingRewrite = $null
+  $global:SolomonAutomaticRewrite = $false
+  Clear-SolomonPendingUndo
 }
-function global:Enable-CloseEnoughUndoBinding {
-  if ($global:CloseEnoughUndoBound) { return $true }
+function global:Enable-SolomonUndoBinding {
+  if ($global:SolomonUndoBound) { return $true }
   $handler = Get-PSReadLineKeyHandler -Chord Ctrl+g -ErrorAction SilentlyContinue
   if ($null -eq $handler -or [string]::IsNullOrEmpty($handler.Function)) { return $false }
-  $global:CloseEnoughPreviousUndoHandler = $handler
-  try { Set-PSReadLineKeyHandler -Key Ctrl+g -ScriptBlock { Invoke-CloseEnoughPendingRewriteUndo } } catch { $global:CloseEnoughPreviousUndoHandler = $null; return $false }
-  $global:CloseEnoughUndoBound = $true
+  $global:SolomonPreviousUndoHandler = $handler
+  try { Set-PSReadLineKeyHandler -Key Ctrl+g -ScriptBlock { Invoke-SolomonPendingRewriteUndo } } catch { $global:SolomonPreviousUndoHandler = $null; return $false }
+  $global:SolomonUndoBound = $true
   return $true
 }
-function global:Invoke-CloseEnoughPendingRewriteUndo {
-  if ([string]::IsNullOrEmpty($global:CloseEnoughPendingRewrite) -or [string]::IsNullOrEmpty($global:CloseEnoughPendingUndoToken)) { return }
-  $record = & close-enough daemon request --operation undo --shell powershell --session $PID --token $global:CloseEnoughPendingUndoToken --ensure=false --format json 2>$null
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { Clear-CloseEnoughPendingUndo; return }
-  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { Clear-CloseEnoughPendingUndo; return }
-  if ($decision.version -ne 1 -or $decision.action -ne 'edit-in-buffer' -or $decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) { Clear-CloseEnoughPendingUndo; return }
+function global:Invoke-SolomonPendingRewriteUndo {
+  if ([string]::IsNullOrEmpty($global:SolomonPendingRewrite) -or [string]::IsNullOrEmpty($global:SolomonPendingUndoToken)) { return }
+  $record = & solomon daemon request --operation undo --shell powershell --session $PID --token $global:SolomonPendingUndoToken --ensure=false --format json 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($record)) { Clear-SolomonPendingUndo; return }
+  try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { Clear-SolomonPendingUndo; return }
+  if ($decision.version -ne 1 -or $decision.action -ne 'edit-in-buffer' -or $decision.risk -ne 'safe' -or [string]::IsNullOrEmpty($decision.suggestion)) { Clear-SolomonPendingUndo; return }
   $line = $null; $cursor = $null
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
   [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $decision.suggestion)
-  Clear-CloseEnoughPendingRewrite
-  Write-Host "close-enough restored: $($decision.suggestion)"
+  Clear-SolomonPendingRewrite
+  Write-Host "solomon restored: $($decision.suggestion)"
 }
-function global:Restore-CloseEnoughEnterHandler {
-  if ($null -ne $global:CloseEnoughPreviousEnterHandler -and $global:CloseEnoughPreviousEnterHandler.Function -eq 'AcceptLine') {
+function global:Restore-SolomonEnterHandler {
+  if ($null -ne $global:SolomonPreviousEnterHandler -and $global:SolomonPreviousEnterHandler.Function -eq 'AcceptLine') {
     Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine
   }
 }
@@ -683,29 +683,29 @@ function global:prompt {
   $status = $?
   $entry = Get-History -Count 1
   $token = 'none'
-  $automaticRewrite = $global:CloseEnoughAutomaticRewrite
-  $global:CloseEnoughAutomaticRewrite = $false
-  if ($status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
-    $global:CloseEnoughLastHistoryId = $entry.Id
-    if (-not $automaticRewrite -and -not [string]::IsNullOrEmpty($global:CloseEnoughPendingFailureToken)) {
-      $token = $global:CloseEnoughPendingFailureToken
-      $global:CloseEnoughPendingFailureToken = $null
+  $automaticRewrite = $global:SolomonAutomaticRewrite
+  $global:SolomonAutomaticRewrite = $false
+  if ($status -and $null -ne $entry -and $entry.Id -ne $global:SolomonLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
+    $global:SolomonLastHistoryId = $entry.Id
+    if (-not $automaticRewrite -and -not [string]::IsNullOrEmpty($global:SolomonPendingFailureToken)) {
+      $token = $global:SolomonPendingFailureToken
+      $global:SolomonPendingFailureToken = $null
     }
-    & close-enough daemon request --operation post-success --shell powershell --session $PID --token $token --ensure=false --command $entry.CommandLine 2>$null | Out-Null
+    & solomon daemon request --operation post-success --shell powershell --session $PID --token $token --ensure=false --command $entry.CommandLine 2>$null | Out-Null
   }
-  if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:CloseEnoughLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
-    $global:CloseEnoughLastHistoryId = $entry.Id
-    $global:CloseEnoughFailureSequence += 1
-    $token = "failure-$PID-$($global:CloseEnoughFailureSequence)"
-    $global:CloseEnoughPendingFailureToken = $token
+  if (-not $status -and $null -ne $entry -and $entry.Id -ne $global:SolomonLastHistoryId -and -not [string]::IsNullOrEmpty($entry.CommandLine)) {
+    $global:SolomonLastHistoryId = $entry.Id
+    $global:SolomonFailureSequence += 1
+    $token = "failure-$PID-$($global:SolomonFailureSequence)"
+    $global:SolomonPendingFailureToken = $token
     $failureOutput = "exit status $LASTEXITCODE"
-    $record = & close-enough daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine --failure-output $failureOutput 2>$null
+    $record = & solomon daemon request --operation post-failure --shell powershell --session $PID --token $token --format json --command $entry.CommandLine --failure-output $failureOutput 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($record)) {
       try { $decision = $record | ConvertFrom-Json -ErrorAction Stop } catch { $decision = $null }
-      if ($null -ne $decision -and $decision.version -eq 1 -and $decision.action -ne 'none' -and -not [string]::IsNullOrEmpty($decision.suggestion) -and (Allow-CloseEnoughSuggestion $decision.suggestion)) { Write-Host "close-enough [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
+      if ($null -ne $decision -and $decision.version -eq 1 -and $decision.action -ne 'none' -and -not [string]::IsNullOrEmpty($decision.suggestion) -and (Allow-SolomonSuggestion $decision.suggestion)) { Write-Host "solomon [$($decision.risk)/$($decision.confidence)]: $($decision.suggestion) ($($decision.explanation))" }
     }
   }
-  if ($null -ne $global:CloseEnoughPreviousPrompt) { & $global:CloseEnoughPreviousPrompt }
+  if ($null -ne $global:SolomonPreviousPrompt) { & $global:SolomonPreviousPrompt }
 }
 }
 `

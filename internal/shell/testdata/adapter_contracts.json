@@ -15,7 +15,7 @@
     "capabilities": ["post-failure", "hint"],
     "configuration": ["mode", "display"],
     "limitations": ["post-failure hints only", "no pre-execution interrupt or rewrite", "experimental output capture requires init flag and script utility"],
-    "markers": ["PROMPT_COMMAND", "--operation post-failure --shell bash", "_close_enough_bash_capture_mark"]
+    "markers": ["PROMPT_COMMAND", "--operation post-failure --shell bash", "_solomon_bash_capture_mark"]
   },
   {
     "name": "fish",

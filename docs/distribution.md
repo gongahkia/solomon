@@ -1,6 +1,6 @@
 # Distribution plan
 
-Close Enough is not yet publicly released. The repository currently supports source installation from a clone with Go 1.25 or newer. No Homebrew, WinGet, or AUR package should be advertised until the first signed public release exists.
+Solomon is not yet publicly released. The repository currently supports source installation from a clone with Go 1.25 or newer. No Homebrew, WinGet, or AUR package should be advertised until the first signed public release exists.
 
 ## First public release
 
@@ -12,10 +12,10 @@ After those assets are published, validate each installer against the immutable 
 
 | Channel | Status | Release prerequisite |
 | --- | --- | --- |
-| Go | Ready after tagging | Publish a public semantic-version tag; users install `github.com/gongahkia/close-enough/cmd/close-enough@vX.Y.Z`. |
+| Go | Ready after tagging | Publish a public semantic-version tag; users install `github.com/gongahkia/solomon/cmd/solomon@vX.Y.Z`. |
 | Direct archive | Ready after tagging | Publish the signed archives, checksums, bundles, and installers. |
-| Homebrew | Planned | Create the owner-maintained `homebrew-close-enough` tap and add a formula with the two macOS archive URLs and SHA-256 digests. |
+| Homebrew | Planned | Create the owner-maintained `homebrew-solomon` tap and add a formula with the two macOS archive URLs and SHA-256 digests. |
 | WinGet | Planned | Submit a manifest referencing stable public Windows installer assets and their SHA-256 hash, then test install and uninstall through WinGet. |
 | AUR | Planned | Publish an owner-maintained `PKGBUILD` that builds from a signed source tag or verifies a release archive. |
 
-Do not publish placeholder formulas or manifests: every package must resolve to an immutable public version, verify its expected digest where the ecosystem supports it, expose `close-enough version`, and have an uninstall path. Keep this document in sync with the release workflow and the public README.
+Do not publish placeholder formulas or manifests: every package must resolve to an immutable public version, verify its expected digest where the ecosystem supports it, expose `solomon version`, and have an uninstall path. Keep this document in sync with the release workflow and the public README.

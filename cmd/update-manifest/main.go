@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gongahkia/close-enough/internal/updatechannel"
+	"github.com/gongahkia/solomon/internal/updatechannel"
 )
 
 func main() {

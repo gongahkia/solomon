@@ -14,8 +14,8 @@ import (
 )
 
 func TestReproducibleLocalBuild(t *testing.T) {
-	first := filepath.Join(t.TempDir(), "close-enough")
-	second := filepath.Join(t.TempDir(), "close-enough")
+	first := filepath.Join(t.TempDir(), "solomon")
+	second := filepath.Join(t.TempDir(), "solomon")
 	for _, output := range []string{first, second} {
 		command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-o", output, ".")
 		if data, err := command.CombinedOutput(); err != nil {
@@ -41,7 +41,7 @@ func TestReproducibleLocalBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(firstData, secondData) || string(firstData) != "close-enough dev\n" {
+	if !bytes.Equal(firstData, secondData) || string(firstData) != "solomon dev\n" {
 		t.Fatalf("unexpected version output: %q, %q", firstData, secondData)
 	}
 }
@@ -54,7 +54,7 @@ func TestLocalBuildRejectsMissingPackage(t *testing.T) {
 }
 
 func TestBuildInjectsVersionAndCommit(t *testing.T) {
-	output := filepath.Join(t.TempDir(), "close-enough")
+	output := filepath.Join(t.TempDir(), "solomon")
 	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit=abc123", "-o", output, ".")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build injected metadata: %v\n%s", err, data)
@@ -63,13 +63,13 @@ func TestBuildInjectsVersionAndCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "close-enough v1.2.3 (abc123)\n" {
+	if string(data) != "solomon v1.2.3 (abc123)\n" {
 		t.Fatalf("version output = %q", data)
 	}
 }
 
 func TestReleaseArtifactChecksumVerification(t *testing.T) {
-	artifact := filepath.Join(t.TempDir(), "close-enough-linux-amd64")
+	artifact := filepath.Join(t.TempDir(), "solomon-linux-amd64")
 	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit=abc123", "-o", artifact, ".")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build release artifact: %v\n%s", err, data)
@@ -99,7 +99,7 @@ func TestReleaseBuildMatrixTargets(t *testing.T) {
 		{goos: "windows", goarch: "amd64"},
 	} {
 		t.Run(target.goos+"-"+target.goarch, func(t *testing.T) {
-			output := filepath.Join(t.TempDir(), "close-enough")
+			output := filepath.Join(t.TempDir(), "solomon")
 			command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-ldflags", "-X main.version=v1.2.3 -X main.commit=abc123", "-o", output, ".")
 			command.Env = replaceHarnessEnvironment(replaceHarnessEnvironment(replaceHarnessEnvironment(os.Environ(), "GOOS", target.goos), "GOARCH", target.goarch), "CGO_ENABLED", "0")
 			if data, err := command.CombinedOutput(); err != nil {
@@ -241,7 +241,7 @@ func TestReleaseWorkflowPublishesChecksumManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, marker := range []string{
-		"for artifact in close-enough_*.tar.gz close-enough_*.zip",
+		"for artifact in solomon_*.tar.gz solomon_*.zip",
 		"sha256sum \"$artifact\"",
 		") > dist/checksums.txt",
 		"test \"$(wc -l < dist/checksums.txt | tr -d ' ')\" -eq 5",

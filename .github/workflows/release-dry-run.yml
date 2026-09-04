@@ -45,14 +45,14 @@ jobs:
       - id: archive
         run: |
           mkdir -p dist
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=$RELEASE_VERSION -X main.commit=$GITHUB_SHA" -o dist/close-enough ./cmd/close-enough
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=$RELEASE_VERSION -X main.commit=$GITHUB_SHA" -o dist/solomon ./cmd/solomon
           extension=tar.gz
           if [ "${{ matrix.goos }}" = windows ]; then extension=zip; fi
           archive=$(sh scripts/release-name.sh "$RELEASE_VERSION" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$extension")
           if [ "$extension" = zip ]; then
-            sh scripts/release-zip.sh dist/close-enough "dist/$archive" "${archive%.zip}"
+            sh scripts/release-zip.sh dist/solomon "dist/$archive" "${archive%.zip}"
           else
-            sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+            sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
           fi
           printf 'path=%s\n' "dist/$archive" >> "$GITHUB_OUTPUT"
       - run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0

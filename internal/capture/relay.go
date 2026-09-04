@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/redact"
+	"github.com/gongahkia/solomon/internal/redact"
 )
 
 const MaxOutputBytes = 8 << 10
@@ -43,7 +43,7 @@ func Start(socket, token string) (*Relay, error) {
 		_ = listener.Close()
 		return nil, err
 	}
-	relay := &Relay{listener: listener, marker: "\x1b]1337;CloseEnough=" + token + "\a"}
+	relay := &Relay{listener: listener, marker: "\x1b]1337;Solomon=" + token + "\a"}
 	go relay.serve()
 	return relay, nil
 }

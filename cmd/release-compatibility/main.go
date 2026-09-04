@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gongahkia/close-enough/internal/releasecompat"
+	"github.com/gongahkia/solomon/internal/releasecompat"
 )
 
 func main() {

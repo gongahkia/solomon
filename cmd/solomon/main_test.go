@@ -20,13 +20,13 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/clierr"
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/daemon"
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/localstate"
-	"github.com/gongahkia/close-enough/internal/packs"
-	"github.com/gongahkia/close-enough/internal/runtimecheck"
+	"github.com/gongahkia/solomon/internal/clierr"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/daemon"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/localstate"
+	"github.com/gongahkia/solomon/internal/packs"
+	"github.com/gongahkia/solomon/internal/runtimecheck"
 )
 
 type terminalEscapeFixture struct {
@@ -47,7 +47,7 @@ func TestRunExitCodes(t *testing.T) {
 		{
 			name: "configuration",
 			setup: func(t *testing.T) {
-				path := filepath.Join(t.TempDir(), "close-enough", "config.json")
+				path := filepath.Join(t.TempDir(), "solomon", "config.json")
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -110,7 +110,7 @@ func TestInitExperimentalOutputCaptureIsExplicitAndShellBound(t *testing.T) {
 	if err := run([]string{"init", "--shell", "bash", "--experimental-output-capture"}, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "exec close-enough capture start --shell bash") || !strings.Contains(output.String(), "PROMPT_COMMAND") {
+	if !strings.Contains(output.String(), "exec solomon capture start --shell bash") || !strings.Contains(output.String(), "PROMPT_COMMAND") {
 		t.Fatalf("experimental bash init = %q", output.String())
 	}
 	if err := run([]string{"init", "--shell", "fish", "--experimental-output-capture"}, io.Discard, io.Discard); clierr.Code(err) != clierr.ExitUsage {
@@ -122,11 +122,11 @@ func TestVersionStringUsesInjectedBuildMetadata(t *testing.T) {
 	originalVersion, originalCommit := version, commit
 	t.Cleanup(func() { version, commit = originalVersion, originalCommit })
 	version, commit = "v1.2.3", "abc123"
-	if got := versionString(); got != "close-enough v1.2.3 (abc123)" {
+	if got := versionString(); got != "solomon v1.2.3 (abc123)" {
 		t.Fatalf("versionString() = %q", got)
 	}
 	commit = "unknown"
-	if got := versionString(); got != "close-enough v1.2.3" {
+	if got := versionString(); got != "solomon v1.2.3" {
 		t.Fatalf("versionString() = %q", got)
 	}
 }
@@ -144,7 +144,7 @@ func TestCheckJSONIncludesStageWithoutRawCommand(t *testing.T) {
 }
 
 func TestChecksumCommandGeneratesAndVerifiesManifest(t *testing.T) {
-	artifact := filepath.Join(t.TempDir(), "close-enough_v1.2.3_linux_amd64.tar.gz")
+	artifact := filepath.Join(t.TempDir(), "solomon_v1.2.3_linux_amd64.tar.gz")
 	if err := os.WriteFile(artifact, []byte("artifact"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestCheckScreenReaderMode(t *testing.T) {
 
 func TestCheckPlainUsesConfiguredDisplayFields(t *testing.T) {
 	configHome := t.TempDir()
-	path := filepath.Join(configHome, "close-enough", "config.json")
+	path := filepath.Join(configHome, "solomon", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -563,11 +563,11 @@ func TestInspectDecisionCommand(t *testing.T) {
 func TestPackDirectoryUsesAbsoluteXDGDataHome(t *testing.T) {
 	base := t.TempDir()
 	directory, err := packDirectory(func() (string, error) { return "/unused", nil }, func(string) string { return base })
-	if err != nil || directory != filepath.Join(base, "close-enough", "packs") {
+	if err != nil || directory != filepath.Join(base, "solomon", "packs") {
 		t.Fatalf("pack directory = %q, %v", directory, err)
 	}
 	directory, err = packDirectory(func() (string, error) { return "/home/user", nil }, func(string) string { return "relative" })
-	if err != nil || directory != "/home/user/.local/share/close-enough/packs" {
+	if err != nil || directory != "/home/user/.local/share/solomon/packs" {
 		t.Fatalf("fallback pack directory = %q, %v", directory, err)
 	}
 }
@@ -584,13 +584,13 @@ func TestRuntimePackResolverLoadsInstalledPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`{"schema_version":1,"id":"local-tool","version":"1.0.0","publisher":"close-enough","rules":[{"id":"local-tool-typo","command":"local-tool","pattern":"teh","replacement":"the","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
+	data := []byte(`{"schema_version":1,"id":"local-tool","version":"1.0.0","publisher":"solomon","rules":[{"id":"local-tool-typo","command":"local-tool","pattern":"teh","replacement":"the","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	keyring := packs.Keyring{}
-	if err := keyring.Add("close-enough", publicKey); err != nil {
+	if err := keyring.Add("solomon", publicKey); err != nil {
 		t.Fatal(err)
 	}
 	keyringPath, err := packKeyringPath(func() (string, error) { return "/unused", nil }, environment)
@@ -744,7 +744,7 @@ func TestCheckPlainNoSuggestionFallback(t *testing.T) {
 
 func TestRenderErrorEscapesTerminalControlCharacters(t *testing.T) {
 	err := errors.New("invalid\x1b[31m\nnext\u0085")
-	if got := renderError(err); got != "close-enough: invalid\\x1B[31m\\x0Anext\\u0085\n" {
+	if got := renderError(err); got != "solomon: invalid\\x1B[31m\\x0Anext\\u0085\n" {
 		t.Fatalf("renderError() = %q", got)
 	}
 }
@@ -779,7 +779,7 @@ func TestTerminalEscapeInjectionRegressionCorpus(t *testing.T) {
 }
 
 func TestRenderErrorPreservesSafeText(t *testing.T) {
-	if got := renderError(errors.New("missing --command")); got != "close-enough: missing --command\n" {
+	if got := renderError(errors.New("missing --command")); got != "solomon: missing --command\n" {
 		t.Fatalf("renderError() = %q", got)
 	}
 }

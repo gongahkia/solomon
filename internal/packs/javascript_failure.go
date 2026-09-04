@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 const maxJavaScriptFailureOutputBytes = 8 << 10

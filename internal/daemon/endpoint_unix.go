@@ -19,7 +19,7 @@ func LocalEndpoint(runtimeDirectory string) (Endpoint, error) {
 		return Endpoint{Network: "unix", Address: path}, nil
 	}
 	sum := sha256.Sum256([]byte(runtimeDirectory))
-	directory := filepath.Join(os.TempDir(), "close-enough-"+hex.EncodeToString(sum[:8]))
+	directory := filepath.Join(os.TempDir(), "solomon-"+hex.EncodeToString(sum[:8]))
 	if err := PrepareDirectory(directory); err != nil {
 		return Endpoint{}, err
 	}

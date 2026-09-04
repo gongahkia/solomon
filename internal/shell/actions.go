@@ -45,7 +45,7 @@ func ResolveAction(action, risk, suggestion string) ActionResult {
 }
 
 func InlineDiagnostic(risk, confidence, suggestion string) string {
-	return fmt.Sprintf("close-enough [%s/%s]: %s", risk, confidence, suggestion)
+	return fmt.Sprintf("solomon [%s/%s]: %s", risk, confidence, suggestion)
 }
 
 type ConfirmationDialog struct {

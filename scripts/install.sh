@@ -1,18 +1,18 @@
 #!/bin/sh
 set -eu
 
-repository=${CLOSE_ENOUGH_REPOSITORY:-gongahkia/close-enough}
-version=${CLOSE_ENOUGH_VERSION:-}
-release_base=${CLOSE_ENOUGH_RELEASE_BASE_URL:-}
-install_dir=${CLOSE_ENOUGH_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}
-selected_shell=${CLOSE_ENOUGH_SHELL:-}
-shell_rc=${CLOSE_ENOUGH_SHELL_RC:-}
+repository=${SOLOMON_REPOSITORY:-gongahkia/solomon}
+version=${SOLOMON_VERSION:-}
+release_base=${SOLOMON_RELEASE_BASE_URL:-}
+install_dir=${SOLOMON_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}
+selected_shell=${SOLOMON_SHELL:-}
+shell_rc=${SOLOMON_SHELL_RC:-}
 legacy_bash_rc=$HOME/.bashrc
-start_marker='# >>> close-enough initialize >>>'
-end_marker='# <<< close-enough initialize <<<'
+start_marker='# >>> solomon initialize >>>'
+end_marker='# <<< solomon initialize <<<'
 
 fail() {
-  printf '%s\n' "close-enough installer: $*" >&2
+  printf '%s\n' "solomon installer: $*" >&2
   exit 1
 }
 
@@ -55,7 +55,7 @@ resolve_version() {
     return
   fi
   require_command curl
-  api_base=${CLOSE_ENOUGH_API_URL:-https://api.github.com}
+  api_base=${SOLOMON_API_URL:-https://api.github.com}
   metadata=$(mktemp)
   trap 'rm -f "$metadata"' EXIT HUP INT TERM
   curl --fail --location --silent --show-error "$api_base/repos/$repository/releases/latest" -o "$metadata" || fail "could not resolve the latest release"
@@ -133,7 +133,7 @@ detect_shell_init() {
         esac
       fi
       selected_shell=none
-      printf '%s\n' 'close-enough: Bash integration is unavailable; installed the CLI without shell initialization' >&2
+      printf '%s\n' 'solomon: Bash integration is unavailable; installed the CLI without shell initialization' >&2
       ;;
     zsh|fish|none) ;;
     *) selected_shell=none ;;
@@ -160,7 +160,7 @@ remove_shell_init_at() {
   [ -f "$target" ] || return 0
   grep -Fqx "$start_marker" "$target" || return 0
   grep -Fqx "$end_marker" "$target" || fail "managed shell initialization is incomplete in $target"
-  temporary=$(mktemp "${target}.close-enough.XXXXXX")
+  temporary=$(mktemp "${target}.solomon.XXXXXX")
   awk -v start="$start_marker" -v end="$end_marker" '
     $0 == start { skipping = 1; next }
     skipping && $0 == end { skipping = 0; next }
@@ -198,7 +198,7 @@ add_shell_init() {
     grep -Fqx "$end_marker" "$shell_rc" || fail "managed shell initialization is incomplete in $shell_rc"
     return
   fi
-  binary=$(shell_quote "$install_dir/close-enough")
+  binary=$(shell_quote "$install_dir/solomon")
   printf '\n' >> "$shell_rc"
   {
     printf '%s\n' "$start_marker"
@@ -224,7 +224,7 @@ uninstall() {
     /*) ;;
     *) fail "installation directory must be absolute" ;;
   esac
-  target=$install_dir/close-enough
+  target=$install_dir/solomon
   if [ -L "$target" ]; then
     fail "refusing to remove symbolic link $target"
   fi
@@ -255,7 +255,7 @@ esac
 require_command curl
 require_command tar
 
-archive="close-enough_${version}_${goos}_${goarch}.tar.gz"
+archive="solomon_${version}_${goos}_${goarch}.tar.gz"
 root=${archive%.tar.gz}
 if [ -z "$release_base" ]; then
   release_base="https://github.com/$repository/releases/download/$version"
@@ -272,12 +272,12 @@ verify_checksum "$artifact" "$manifest" "$archive"
 verify_signature "$artifact" "$bundle"
 members=$(tar -tzf "$artifact") || fail "invalid release archive"
 [ "$members" = "$root/
-$root/close-enough" ] || fail "release archive has unexpected contents"
+$root/solomon" ] || fail "release archive has unexpected contents"
 mkdir -p "$install_dir"
-temporary_binary=$(mktemp "${install_dir}/.close-enough.XXXXXX")
-tar -xOzf "$artifact" "$root/close-enough" > "$temporary_binary" || fail "could not extract release binary"
+temporary_binary=$(mktemp "${install_dir}/.solomon.XXXXXX")
+tar -xOzf "$artifact" "$root/solomon" > "$temporary_binary" || fail "could not extract release binary"
 [ -s "$temporary_binary" ] || fail "release binary is empty"
 chmod 755 "$temporary_binary"
-mv -f "$temporary_binary" "$install_dir/close-enough"
+mv -f "$temporary_binary" "$install_dir/solomon"
 add_shell_init
-printf 'installed close-enough %s to %s\n' "$version" "$install_dir/close-enough"
+printf 'installed solomon %s to %s\n' "$version" "$install_dir/solomon"

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "package-manager-regression",
   "version": "1.0.0",
-  "publisher": "close-enough",
+  "publisher": "solomon",
   "rules": [
     {
       "id": "npm-install-instal",

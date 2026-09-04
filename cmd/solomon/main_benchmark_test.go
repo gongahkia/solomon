@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/daemon"
+	"github.com/gongahkia/solomon/internal/daemon"
 )
 
 func BenchmarkRequestDaemonColdStartFailOpen(b *testing.B) {

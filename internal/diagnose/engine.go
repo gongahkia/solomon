@@ -18,8 +18,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/redact"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/redact"
 )
 
 type Risk string

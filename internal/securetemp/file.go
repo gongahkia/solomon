@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/gongahkia/close-enough/internal/filesystem"
+	"github.com/gongahkia/solomon/internal/filesystem"
 )
 
 type File struct {

@@ -23,18 +23,18 @@ case "$archive" in
   *.tar.gz)
     [ "$goos" != windows ]
     root=${root%.tar.gz}
-    binary="$root/close-enough"
+    binary="$root/solomon"
     listing=$(tar -tzf "$archive")
     ;;
   *.zip)
     [ "$goos" = windows ]
     root=${root%.zip}
-    binary="$root/close-enough.exe"
+    binary="$root/solomon.exe"
     listing=$(unzip -Z1 "$archive")
     ;;
   *) exit 2 ;;
 esac
-[ "$root" = "close-enough_${version}_${goos}_${goarch}" ]
+[ "$root" = "solomon_${version}_${goos}_${goarch}" ]
 expected_listing=$(printf '%s/\n%s\n' "$root" "$binary")
 [ "$listing" = "$expected_listing" ]
 
@@ -48,7 +48,7 @@ esac
 [ ! -L "$temporary/$binary" ]
 binary_path="$temporary/$binary"
 output=$("$binary_path" version)
-prefix="close-enough $version ("
+prefix="solomon $version ("
 commit=${output#"$prefix"}
 [ "$commit" != "$output" ]
 case "$commit" in

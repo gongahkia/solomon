@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Never include credentials, private paths, or production output. Close Enough does not automatically run repairs.
+        Never include credentials, private paths, or production output. Solomon does not automatically run repairs.
   - type: textarea
     id: failure
     attributes:

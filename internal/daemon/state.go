@@ -11,7 +11,7 @@ func StateDirectory(home func() (string, error), environment func(string) string
 		return "", errors.New("state environment lookup is required")
 	}
 	if value := environment("XDG_STATE_HOME"); filepath.IsAbs(value) {
-		return filepath.Join(value, "close-enough"), nil
+		return filepath.Join(value, "solomon"), nil
 	}
 	if home == nil {
 		return "", errors.New("home directory lookup is required")
@@ -23,5 +23,5 @@ func StateDirectory(home func() (string, error), environment func(string) string
 	if value == "" || !filepath.IsAbs(value) {
 		return "", fmt.Errorf("home directory must be absolute")
 	}
-	return filepath.Join(value, ".local", "state", "close-enough"), nil
+	return filepath.Join(value, ".local", "state", "solomon"), nil
 }

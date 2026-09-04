@@ -22,5 +22,5 @@ mkdir -p "$(dirname "$archive")"
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 mkdir "$temporary/$root"
-cp "$binary" "$temporary/$root/close-enough"
+cp "$binary" "$temporary/$root/solomon"
 tar -C "$temporary" -czf "$archive" "$root"

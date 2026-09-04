@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gongahkia/close-enough/internal/filesystem"
-	"github.com/gongahkia/close-enough/internal/securetemp"
+	"github.com/gongahkia/solomon/internal/filesystem"
+	"github.com/gongahkia/solomon/internal/securetemp"
 )
 
 const (
@@ -179,7 +179,7 @@ func globalPath(home func() (string, error), env func(string) string) (string, e
 		}
 		base = filepath.Join(value, ".config")
 	}
-	return filepath.Join(base, "close-enough", "config.json"), nil
+	return filepath.Join(base, "solomon", "config.json"), nil
 }
 
 func Load(paths Paths) (Config, error) {
@@ -216,13 +216,13 @@ func applySessionPrecedence(base Config, paths Paths) (Config, error) {
 }
 
 var sessionOverrideKeys = map[string]string{
-	"CLOSE_ENOUGH_MODE":                   "mode",
-	"CLOSE_ENOUGH_AUTO_APPLY_SAFE":        "auto_apply_safe",
-	"CLOSE_ENOUGH_CURATED_PACKS_ENABLED":  "curated_packs_enabled",
-	"CLOSE_ENOUGH_RISK_INTERRUPT":         "risk_interrupt",
-	"CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
-	"CLOSE_ENOUGH_UNDO_ENABLED":           "undo_enabled",
-	"CLOSE_ENOUGH_UNDO_TTL_SECONDS":       "undo_ttl_seconds",
+	"SOLOMON_MODE":                   "mode",
+	"SOLOMON_AUTO_APPLY_SAFE":        "auto_apply_safe",
+	"SOLOMON_CURATED_PACKS_ENABLED":  "curated_packs_enabled",
+	"SOLOMON_RISK_INTERRUPT":         "risk_interrupt",
+	"SOLOMON_LOCAL_LEARNING_ENABLED": "local_learning_enabled",
+	"SOLOMON_UNDO_ENABLED":           "undo_enabled",
+	"SOLOMON_UNDO_TTL_SECONDS":       "undo_ttl_seconds",
 }
 
 func sessionValues(paths Paths) (map[string]string, error) {
@@ -236,10 +236,10 @@ func sessionValues(paths Paths) (map[string]string, error) {
 	values := map[string]string{}
 	for _, entry := range paths.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !strings.HasPrefix(key, "CLOSE_ENOUGH_") {
+		if !ok || !strings.HasPrefix(key, "SOLOMON_") {
 			continue
 		}
-		if key == "CLOSE_ENOUGH_REGISTRY_ENABLED" || key == "CLOSE_ENOUGH_AUTO_UPDATE_ENABLED" {
+		if key == "SOLOMON_REGISTRY_ENABLED" || key == "SOLOMON_AUTO_UPDATE_ENABLED" {
 			continue
 		}
 		if _, exists := values[key]; exists {
@@ -289,7 +289,7 @@ func LoadGlobal(path string) (Config, error) {
 
 func projectPath(cwd string) (string, bool) {
 	for dir := cwd; ; dir = filepath.Dir(dir) {
-		candidate := filepath.Join(dir, ".close-enough", "config.json")
+		candidate := filepath.Join(dir, ".solomon", "config.json")
 		info, err := os.Stat(candidate)
 		if err == nil && info.Mode().IsRegular() && trustedProject(candidate) {
 			return candidate, true

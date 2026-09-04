@@ -11,8 +11,8 @@ import (
 )
 
 func TestRelayKeepsOnlyMarkedRedactedOutput(t *testing.T) {
-	relay := &Relay{marker: "\x1b]1337;CloseEnough=token\a"}
-	relay.Feed("old output\n\x1b]1337;CloseEnough=token\a")
+	relay := &Relay{marker: "\x1b]1337;Solomon=token\a"}
+	relay.Feed("old output\n\x1b]1337;Solomon=token\a")
 	relay.Feed("git sttaus\nfatal: TOKEN=top-secret\n")
 	got := relay.Snapshot("git sttaus")
 	if strings.Contains(got, "top-secret") || strings.Contains(got, "git sttaus") || !strings.Contains(got, "TOKEN=[REDACTED]") {
@@ -21,7 +21,7 @@ func TestRelayKeepsOnlyMarkedRedactedOutput(t *testing.T) {
 }
 
 func TestRelayRetainsBoundedLatestOutput(t *testing.T) {
-	relay := &Relay{marker: "\x1b]1337;CloseEnough=token\a"}
+	relay := &Relay{marker: "\x1b]1337;Solomon=token\a"}
 	relay.Feed(relay.marker + strings.Repeat("x", MaxOutputBytes+128))
 	if got := len(relay.Snapshot("")); got != MaxOutputBytes {
 		t.Fatalf("snapshot length = %d, want %d", got, MaxOutputBytes)
@@ -29,8 +29,8 @@ func TestRelayRetainsBoundedLatestOutput(t *testing.T) {
 }
 
 func TestRelayHandlesSplitMarker(t *testing.T) {
-	relay := &Relay{marker: "\x1b]1337;CloseEnough=token\a"}
-	relay.Feed("before\x1b]1337;CloseEnough=to")
+	relay := &Relay{marker: "\x1b]1337;Solomon=token\a"}
+	relay.Feed("before\x1b]1337;Solomon=to")
 	relay.Feed("ken\aerror: unknown command\n")
 	if got := relay.Snapshot(""); got != "error: unknown command" {
 		t.Fatalf("snapshot = %q", got)
@@ -38,7 +38,7 @@ func TestRelayHandlesSplitMarker(t *testing.T) {
 }
 
 func TestRelayResetDiscardsPreviousCommandOutput(t *testing.T) {
-	relay := &Relay{marker: "\x1b]1337;CloseEnough=token\a"}
+	relay := &Relay{marker: "\x1b]1337;Solomon=token\a"}
 	relay.Feed(relay.marker + "old error")
 	relay.Reset()
 	relay.Feed(relay.marker + "new error")
@@ -48,7 +48,7 @@ func TestRelayResetDiscardsPreviousCommandOutput(t *testing.T) {
 }
 
 func TestRelayStripsTerminalControlSequences(t *testing.T) {
-	relay := &Relay{marker: "\x1b]1337;CloseEnough=token\a"}
+	relay := &Relay{marker: "\x1b]1337;Solomon=token\a"}
 	relay.Feed(relay.marker + "\x1b[31merror\x1b[0m")
 	if got := relay.Snapshot(""); got != "error" {
 		t.Fatalf("snapshot = %q", got)
@@ -66,7 +66,7 @@ func TestRelayReadUsesPrivateSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer relay.Close()
-	relay.Feed("\x1b]1337;CloseEnough=token\aerror: command failed")
+	relay.Feed("\x1b]1337;Solomon=token\aerror: command failed")
 	got, err := Read(relay.listener.Addr().String(), "")
 	if err != nil || got != "error: command failed" {
 		t.Fatalf("Read() = %q, %v", got, err)
@@ -84,7 +84,7 @@ func TestRelaySocketReadDoesNotTreatACommandNamedResetAsAReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer relay.Close()
-	relay.Feed("\x1b]1337;CloseEnough=token\areset\ncommand failed")
+	relay.Feed("\x1b]1337;Solomon=token\areset\ncommand failed")
 	got, err := Read(relay.listener.Addr().String(), "reset")
 	if err != nil || got != "command failed" {
 		t.Fatalf("Read() = %q, %v", got, err)

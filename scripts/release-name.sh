@@ -20,4 +20,4 @@ case "$goos-$goarch-$extension" in
   linux-amd64-tar.gz|linux-arm64-tar.gz|darwin-amd64-tar.gz|darwin-arm64-tar.gz|windows-amd64-zip ) ;;
   *) exit 2 ;;
 esac
-printf 'close-enough_%s_%s_%s.%s\n' "$version" "$goos" "$goarch" "$extension"
+printf 'solomon_%s_%s_%s.%s\n' "$version" "$goos" "$goarch" "$extension"

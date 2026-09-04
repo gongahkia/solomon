@@ -1,4 +1,4 @@
-module github.com/gongahkia/close-enough
+module github.com/gongahkia/solomon
 
 go 1.25.0
 

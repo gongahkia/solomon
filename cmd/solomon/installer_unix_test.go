@@ -31,16 +31,16 @@ func TestUnixInstallerDownloadsAndVerifiesReleaseAssets(t *testing.T) {
 	rc := filepath.Join(t.TempDir(), "zshrc")
 	environment := installerEnvironment(server.URL, version, fakeDirectory, installDirectory, rc, log)
 	runUnixInstaller(t, environment)
-	target := filepath.Join(installDirectory, "close-enough")
+	target := filepath.Join(installDirectory, "solomon")
 	data, err := exec.Command(target, "version").Output()
-	if err != nil || string(data) != "close-enough dev\n" {
+	if err != nil || string(data) != "solomon dev\n" {
 		t.Fatalf("installed binary version = %q, %v", data, err)
 	}
 	initialization, err := os.ReadFile(rc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(initialization), "# >>> close-enough initialize >>>") != 1 || strings.Count(string(initialization), "# <<< close-enough initialize <<<") != 1 {
+	if strings.Count(string(initialization), "# >>> solomon initialize >>>") != 1 || strings.Count(string(initialization), "# <<< solomon initialize <<<") != 1 {
 		t.Fatalf("shell initialization = %q", initialization)
 	}
 	verification, err := os.ReadFile(log)
@@ -49,7 +49,7 @@ func TestUnixInstallerDownloadsAndVerifiesReleaseAssets(t *testing.T) {
 	}
 	runUnixInstaller(t, environment)
 	initialization, err = os.ReadFile(rc)
-	if err != nil || strings.Count(string(initialization), "# >>> close-enough initialize >>>") != 1 {
+	if err != nil || strings.Count(string(initialization), "# >>> solomon initialize >>>") != 1 {
 		t.Fatalf("idempotent initialization = %q, %v", initialization, err)
 	}
 	runUnixInstaller(t, environment, "--uninstall")
@@ -57,7 +57,7 @@ func TestUnixInstallerDownloadsAndVerifiesReleaseAssets(t *testing.T) {
 		t.Fatalf("installed binary remains after uninstall: %v", err)
 	}
 	initialization, err = os.ReadFile(rc)
-	if err != nil || strings.Contains(string(initialization), "close-enough initialize") {
+	if err != nil || strings.Contains(string(initialization), "solomon initialize") {
 		t.Fatalf("shell initialization remains after uninstall = %q, %v", initialization, err)
 	}
 }
@@ -72,7 +72,7 @@ func TestUnixInstallerRemovesLegacyBashInitialization(t *testing.T) {
 	writeFakeCosign(t, fakeDirectory)
 	home := t.TempDir()
 	legacy := filepath.Join(home, ".bashrc")
-	legacyBlock := "# before\n# >>> close-enough initialize >>>\neval \"$(close-enough init --shell bash)\"\n# <<< close-enough initialize <<<\n# after\n"
+	legacyBlock := "# before\n# >>> solomon initialize >>>\neval \"$(solomon init --shell bash)\"\n# <<< solomon initialize <<<\n# after\n"
 	if err := os.WriteFile(legacy, []byte(legacyBlock), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestUnixInstallerRemovesLegacyBashInitialization(t *testing.T) {
 	environment = replaceHarnessEnvironment(environment, "HOME", home)
 	runUnixInstaller(t, environment)
 	data, err := os.ReadFile(legacy)
-	if err != nil || strings.Contains(string(data), "close-enough initialize") || !strings.Contains(string(data), "# before") || !strings.Contains(string(data), "# after") {
+	if err != nil || strings.Contains(string(data), "solomon initialize") || !strings.Contains(string(data), "# before") || !strings.Contains(string(data), "# after") {
 		t.Fatalf("legacy Bash initialization = %q, %v", data, err)
 	}
 }
@@ -101,11 +101,11 @@ func TestUnixInstallerRejectsChecksumAndSignatureFailures(t *testing.T) {
 	if data, err := runUnixInstallerOutput(environment); err == nil || !strings.Contains(string(data), "checksum mismatch") {
 		t.Fatalf("checksum failure = %v\n%s", err, data)
 	}
-	if _, err := os.Lstat(filepath.Join(environmentValue(environment, "CLOSE_ENOUGH_INSTALL_DIR"), "close-enough")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(environmentValue(environment, "SOLOMON_INSTALL_DIR"), "solomon")); !os.IsNotExist(err) {
 		t.Fatalf("checksum failure installed a binary: %v", err)
 	}
 	writeUnixInstallerRelease(t, releaseDirectory, version)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_TEST_COSIGN_FAIL", "1")
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_TEST_COSIGN_FAIL", "1")
 	if data, err := runUnixInstallerOutput(environment); err == nil || !strings.Contains(string(data), "Sigstore") {
 		t.Fatalf("signature failure = %v\n%s", err, data)
 	}
@@ -139,7 +139,7 @@ func TestInstallerScriptsVerifyArtifactsWithoutRegisteringServices(t *testing.T)
 
 func writeUnixInstallerRelease(t *testing.T, directory, version string) string {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "close-enough")
+	binary := filepath.Join(t.TempDir(), "solomon")
 	command := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-mod=readonly", "-o", binary, ".")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build installer fixture: %v\n%s", err, data)
@@ -164,7 +164,7 @@ func writeUnixInstallerRelease(t *testing.T, directory, version string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.WriteHeader(&tar.Header{Name: root + "/close-enough", Mode: 0o755, Size: info.Size(), Typeflag: tar.TypeReg}); err != nil {
+	if err := writer.WriteHeader(&tar.Header{Name: root + "/solomon", Mode: 0o755, Size: info.Size(), Typeflag: tar.TypeReg}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.Copy(writer, input); err != nil {
@@ -197,7 +197,7 @@ func writeUnixInstallerRelease(t *testing.T, directory, version string) string {
 }
 
 func installerArchiveName(version string) string {
-	return "close-enough_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	return "solomon_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 }
 
 func writeFakeCosign(t *testing.T, directory string) {
@@ -211,11 +211,11 @@ set -eu
 [ -f "$4" ]
 [ "$5" = --certificate-identity ]
 case "$6" in
-  https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/v*) ;;
+  https://github.com/gongahkia/solomon/.github/workflows/release.yml@refs/tags/v*) ;;
   *) exit 1 ;;
 esac
-[ "${CLOSE_ENOUGH_TEST_COSIGN_FAIL:-}" != 1 ] || exit 1
-printf '%s\n' "$@" > "$CLOSE_ENOUGH_TEST_COSIGN_LOG"
+[ "${SOLOMON_TEST_COSIGN_FAIL:-}" != 1 ] || exit 1
+printf '%s\n' "$@" > "$SOLOMON_TEST_COSIGN_LOG"
 `
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -223,12 +223,12 @@ printf '%s\n' "$@" > "$CLOSE_ENOUGH_TEST_COSIGN_LOG"
 }
 
 func installerEnvironment(releaseBaseURL, version, fakeDirectory, installDirectory, rc, log string) []string {
-	environment := replaceHarnessEnvironment(os.Environ(), "CLOSE_ENOUGH_VERSION", version)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_RELEASE_BASE_URL", releaseBaseURL)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_INSTALL_DIR", installDirectory)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_SHELL", "zsh")
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_SHELL_RC", rc)
-	environment = replaceHarnessEnvironment(environment, "CLOSE_ENOUGH_TEST_COSIGN_LOG", log)
+	environment := replaceHarnessEnvironment(os.Environ(), "SOLOMON_VERSION", version)
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_RELEASE_BASE_URL", releaseBaseURL)
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_INSTALL_DIR", installDirectory)
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_SHELL", "zsh")
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_SHELL_RC", rc)
+	environment = replaceHarnessEnvironment(environment, "SOLOMON_TEST_COSIGN_LOG", log)
 	return replaceHarnessEnvironment(environment, "PATH", fakeDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 

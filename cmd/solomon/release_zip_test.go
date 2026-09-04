@@ -11,12 +11,12 @@ import (
 
 func TestReleaseZIPScript(t *testing.T) {
 	directory := t.TempDir()
-	binary := filepath.Join(directory, "close-enough")
+	binary := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	archive := filepath.Join(directory, "close-enough-windows-amd64.zip")
-	command := exec.Command("sh", "../../scripts/release-zip.sh", binary, archive, "close-enough-windows-amd64")
+	archive := filepath.Join(directory, "solomon-windows-amd64.zip")
+	command := exec.Command("sh", "../../scripts/release-zip.sh", binary, archive, "solomon-windows-amd64")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("create release ZIP: %v\n%s", err, data)
 	}
@@ -26,7 +26,7 @@ func TestReleaseZIPScript(t *testing.T) {
 	}
 	defer reader.Close()
 	for _, file := range reader.File {
-		if file.Name != "close-enough-windows-amd64/close-enough.exe" {
+		if file.Name != "solomon-windows-amd64/solomon.exe" {
 			continue
 		}
 		content, err := file.Open()
@@ -44,7 +44,7 @@ func TestReleaseZIPScript(t *testing.T) {
 }
 
 func TestReleaseZIPScriptRejectsMissingBinary(t *testing.T) {
-	command := exec.Command("sh", "../../scripts/release-zip.sh", filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "release.zip"), "close-enough-windows-amd64")
+	command := exec.Command("sh", "../../scripts/release-zip.sh", filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "release.zip"), "solomon-windows-amd64")
 	if data, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("missing binary archived successfully: %s", data)
 	}

@@ -90,7 +90,7 @@ func parseArtifact(source ArtifactInput, version string) (Artifact, error) {
 		return Artifact{}, errors.New("invalid update artifact extension")
 	}
 	parts := strings.Split(strings.TrimSuffix(name, extension), "_")
-	if len(parts) != 4 || parts[0] != "close-enough" || parts[1] != version {
+	if len(parts) != 4 || parts[0] != "solomon" || parts[1] != version {
 		return Artifact{}, errors.New("invalid update artifact name")
 	}
 	osName, arch := parts[2], parts[3]

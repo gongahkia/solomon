@@ -17,7 +17,7 @@ func TestGenerate(t *testing.T) {
 		{os: "darwin", arch: "arm64", extension: ".tar.gz"},
 		{os: "windows", arch: "amd64", extension: ".zip"},
 	} {
-		name := "close-enough_v1.2.3_" + target.os + "_" + target.arch + target.extension
+		name := "solomon_v1.2.3_" + target.os + "_" + target.arch + target.extension
 		input.Artifacts = append(input.Artifacts, ArtifactInput{Name: name, Data: []byte(target.os + target.arch), SignatureName: name + ".sigstore.json", Signature: []byte("signature")})
 	}
 	manifest, err := Generate(input)
@@ -40,7 +40,7 @@ func TestGenerateRejectsInvalidInput(t *testing.T) {
 	}
 	input.Artifacts = make([]ArtifactInput, 5)
 	for index := range input.Artifacts {
-		input.Artifacts[index] = ArtifactInput{Name: "close-enough_v1.2.3_linux_amd64.tar.gz", Data: []byte("artifact"), SignatureName: "wrong", Signature: []byte("signature")}
+		input.Artifacts[index] = ArtifactInput{Name: "solomon_v1.2.3_linux_amd64.tar.gz", Data: []byte("artifact"), SignatureName: "wrong", Signature: []byte("signature")}
 	}
 	if _, err := Generate(input); err == nil {
 		t.Fatal("accepted invalid signature association")

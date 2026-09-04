@@ -52,10 +52,10 @@ func Script(name string) (string, error) {
 func ExperimentalCaptureBootstrap(name string) (string, error) {
 	switch shellName(name) {
 	case "bash", "zsh":
-		return `# close-enough experimental output capture (opt-in)
-if [[ -z "${CLOSE_ENOUGH_CAPTURE_ACTIVE:-}" ]]; then
-  export CLOSE_ENOUGH_CAPTURE_ACTIVE=bootstrap
-  exec close-enough capture start --shell ` + shellName(name) + `
+		return `# solomon experimental output capture (opt-in)
+if [[ -z "${SOLOMON_CAPTURE_ACTIVE:-}" ]]; then
+  export SOLOMON_CAPTURE_ACTIVE=bootstrap
+  exec solomon capture start --shell ` + shellName(name) + `
 fi`, nil
 	default:
 		return "", fmt.Errorf("experimental output capture is available only for bash and zsh")

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/clierr"
+	"github.com/gongahkia/solomon/internal/clierr"
 )
 
 type cliHarness struct {
@@ -29,7 +29,7 @@ func TestCLIEndToEnd(t *testing.T) {
 	harness := newCLIHarness(t)
 	t.Run("version", func(t *testing.T) {
 		result := harness.run(t, harness.configHome, "version")
-		if result.exitCode != clierr.ExitSuccess || result.stdout != "close-enough dev\n" || result.stderr != "" {
+		if result.exitCode != clierr.ExitSuccess || result.stdout != "solomon dev\n" || result.stderr != "" {
 			t.Fatalf("version result = %#v", result)
 		}
 	})
@@ -64,13 +64,13 @@ func TestCLIEndToEnd(t *testing.T) {
 	})
 	t.Run("usage failure", func(t *testing.T) {
 		result := harness.run(t, harness.configHome, "check")
-		if result.exitCode != clierr.ExitUsage || result.stdout != "" || !strings.HasPrefix(result.stderr, "close-enough: --command is required\n") {
+		if result.exitCode != clierr.ExitUsage || result.stdout != "" || !strings.HasPrefix(result.stderr, "solomon: --command is required\n") {
 			t.Fatalf("usage result = %#v", result)
 		}
 	})
 	t.Run("configuration failure", func(t *testing.T) {
 		configHome := t.TempDir()
-		path := filepath.Join(configHome, "close-enough", "config.json")
+		path := filepath.Join(configHome, "solomon", "config.json")
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestCLIEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		result := harness.run(t, configHome, "config", "show")
-		if result.exitCode != clierr.ExitConfiguration || result.stdout != "" || !strings.HasPrefix(result.stderr, "close-enough: ") {
+		if result.exitCode != clierr.ExitConfiguration || result.stdout != "" || !strings.HasPrefix(result.stderr, "solomon: ") {
 			t.Fatalf("configuration result = %#v", result)
 		}
 	})
@@ -86,7 +86,7 @@ func TestCLIEndToEnd(t *testing.T) {
 
 func newCLIHarness(t *testing.T) cliHarness {
 	t.Helper()
-	name := "close-enough"
+	name := "solomon"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}

@@ -23,15 +23,15 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/capture"
-	"github.com/gongahkia/close-enough/internal/clierr"
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/daemon"
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/localstate"
-	"github.com/gongahkia/close-enough/internal/packs"
-	"github.com/gongahkia/close-enough/internal/runtimecheck"
-	"github.com/gongahkia/close-enough/internal/shell"
+	"github.com/gongahkia/solomon/internal/capture"
+	"github.com/gongahkia/solomon/internal/clierr"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/daemon"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/localstate"
+	"github.com/gongahkia/solomon/internal/packs"
+	"github.com/gongahkia/solomon/internal/runtimecheck"
+	"github.com/gongahkia/solomon/internal/shell"
 )
 
 var version = "dev"
@@ -65,7 +65,7 @@ func startupError(args []string, report runtimecheck.Report) error {
 }
 
 func renderError(err error) string {
-	return "close-enough: " + sanitizeTerminalText(err.Error()) + "\n"
+	return "solomon: " + sanitizeTerminalText(err.Error()) + "\n"
 }
 
 func sanitizeTerminalText(value string) string {
@@ -123,13 +123,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 func versionString() string {
 	if commit == "" || commit == "unknown" {
-		return "close-enough " + version
+		return "solomon " + version
 	}
-	return "close-enough " + version + " (" + commit + ")"
+	return "solomon " + version + " (" + commit + ")"
 }
 
 func usage(w io.Writer) error {
-	if _, err := fmt.Fprintln(w, "usage: close-enough <init|check|config|doctor|version|help>\n\nstart here:\n  close-enough init --shell zsh\n  close-enough check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum"); err != nil {
+	if _, err := fmt.Fprintln(w, "usage: solomon <init|check|config|doctor|version|help>\n\nstart here:\n  solomon init --shell zsh\n  solomon check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum"); err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	return clierr.New(clierr.Usage, "invalid command")
@@ -137,24 +137,24 @@ func usage(w io.Writer) error {
 
 func helpCommand(args []string, stdout io.Writer) error {
 	if len(args) > 1 {
-		return clierr.New(clierr.Usage, "usage: close-enough help [init|check|config|doctor]")
+		return clierr.New(clierr.Usage, "usage: solomon help [init|check|config|doctor]")
 	}
 	if len(args) == 0 {
-		_, err := fmt.Fprintln(stdout, "close-enough keeps shell repairs safe and quiet by default.\n\nusage: close-enough <init|check|config|doctor|version|help>\n\nstart here:\n  close-enough init --shell zsh\n  close-enough check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum")
+		_, err := fmt.Fprintln(stdout, "solomon keeps shell repairs safe and quiet by default.\n\nusage: solomon <init|check|config|doctor|version|help>\n\nstart here:\n  solomon init --shell zsh\n  solomon check --format plain --command 'git sttaus'\n\ncommands:\n  init       print shell integration\n  check      inspect one command\n  config     view or change configuration\n  doctor     report adapter support\n  version    print build information\n  help       show this help\n\nadvanced: inspect-decision, rule, learn, pack, daemon, checksum")
 		return clierr.Wrap(clierr.Operation, err)
 	}
 	var text string
 	switch args[0] {
 	case "init":
-		text = "usage: close-enough init --shell <bash|zsh|fish|powershell> [--experimental-output-capture]\n\nPrint shell integration. Experimental output capture is opt-in and currently available for Bash and Zsh."
+		text = "usage: solomon init --shell <bash|zsh|fish|powershell> [--experimental-output-capture]\n\nPrint shell integration. Experimental output capture is opt-in and currently available for Bash and Zsh."
 	case "check":
-		text = "usage: close-enough check --command <command> [--stage pre|post] [--format json|plain|record] [--color auto|always|never]"
+		text = "usage: solomon check --command <command> [--stage pre|post] [--format json|plain|record] [--color auto|always|never]"
 	case "config":
-		text = "usage: close-enough config [show|set <key> <value>]"
+		text = "usage: solomon config [show|set <key> <value>]"
 	case "doctor":
-		text = "usage: close-enough doctor\n\nReport capabilities and limitations for the current shell."
+		text = "usage: solomon doctor\n\nReport capabilities and limitations for the current shell."
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough help [init|check|config|doctor]")
+		return clierr.New(clierr.Usage, "usage: solomon help [init|check|config|doctor]")
 	}
 	_, err := fmt.Fprintln(stdout, text)
 	return clierr.Wrap(clierr.Operation, err)
@@ -162,7 +162,7 @@ func helpCommand(args []string, stdout io.Writer) error {
 
 func learnCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
+		return clierr.New(clierr.Usage, "usage: solomon learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
 	}
 	cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
 	if err != nil {
@@ -183,7 +183,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "list":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn list")
+			return clierr.New(clierr.Usage, "usage: solomon learn list")
 		}
 		drafts, err := store.ListReviewableDrafts(context.Background())
 		if err != nil {
@@ -199,7 +199,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		}{Drafts: drafts, Rules: rules}))
 	case "activate":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn activate <draft-id> <off|hint|rewrite>")
+			return clierr.New(clierr.Usage, "usage: solomon learn activate <draft-id> <off|hint|rewrite>")
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
@@ -213,7 +213,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(rule))
 	case "edit":
 		if len(args) != 4 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn edit <draft-id> <failed-command> <corrected-command>")
+			return clierr.New(clierr.Usage, "usage: solomon learn edit <draft-id> <failed-command> <corrected-command>")
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
@@ -227,7 +227,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(draft))
 	case "set-action":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn set-action <rule-id> <off|hint|rewrite>")
+			return clierr.New(clierr.Usage, "usage: solomon learn set-action <rule-id> <off|hint|rewrite>")
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
@@ -240,7 +240,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		return nil
 	case "enable", "disable":
 		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn "+args[0]+" <rule-id>")
+			return clierr.New(clierr.Usage, "usage: solomon learn "+args[0]+" <rule-id>")
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
@@ -253,7 +253,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		return nil
 	case "remove":
 		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough learn remove <rule-id>")
+			return clierr.New(clierr.Usage, "usage: solomon learn remove <rule-id>")
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
@@ -266,7 +266,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		return nil
 	case "purge":
 		if len(args) != 2 || args[1] != "--confirm=PURGE" {
-			return clierr.New(clierr.Usage, "usage: close-enough learn purge --confirm=PURGE")
+			return clierr.New(clierr.Usage, "usage: solomon learn purge --confirm=PURGE")
 		}
 		if err := store.PurgeLearning(context.Background()); err != nil {
 			return clierr.Wrap(clierr.Operation, err)
@@ -274,7 +274,7 @@ func learnCommand(args []string, stdout io.Writer) error {
 		restartDaemonIfRunning()
 		return nil
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
+		return clierr.New(clierr.Usage, "usage: solomon learn <list|activate|edit|set-action|enable|disable|remove|purge> ...")
 	}
 }
 
@@ -294,7 +294,7 @@ func restartDaemonIfRunning() {
 
 func daemonCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough daemon <serve|status|stop|request>")
+		return clierr.New(clierr.Usage, "usage: solomon daemon <serve|status|stop|request>")
 	}
 	runtimeDirectory, err := daemon.RuntimeDirectory(os.UserHomeDir, os.Getenv)
 	if err != nil {
@@ -307,7 +307,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "status":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough daemon status")
+			return clierr.New(clierr.Usage, "usage: solomon daemon status")
 		}
 		response, err := (daemon.Client{Endpoint: endpoint}).Request(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StatusOperation})
 		if err != nil {
@@ -316,7 +316,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(response))
 	case "serve":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough daemon serve")
+			return clierr.New(clierr.Usage, "usage: solomon daemon serve")
 		}
 		cfg, err := config.Load(config.Paths{Home: os.UserHomeDir, CWD: os.Getwd, Env: os.Getenv, Environ: os.Environ})
 		if err != nil {
@@ -359,7 +359,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, server.Serve(ctx))
 	case "stop":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough daemon stop")
+			return clierr.New(clierr.Usage, "usage: solomon daemon stop")
 		}
 		response, err := (daemon.Client{Endpoint: endpoint}).Request(context.Background(), daemon.Request{Version: daemon.ProtocolVersion, Operation: daemon.StopOperation})
 		if err != nil {
@@ -369,7 +369,7 @@ func daemonCommand(args []string, stdout io.Writer) error {
 	case "request":
 		return daemonRequestCommand(args[1:], endpoint, stdout)
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough daemon <serve|status|stop|request>")
+		return clierr.New(clierr.Usage, "usage: solomon daemon <serve|status|stop|request>")
 	}
 }
 
@@ -385,7 +385,7 @@ func daemonRequestCommand(args []string, endpoint daemon.Endpoint, stdout io.Wri
 	format := fs.String("format", "json", "json, record, or undo-record")
 	ensure := fs.Bool("ensure", true, "start the local daemon when unavailable")
 	if err := fs.Parse(args); err != nil || *operation == "" || fs.NArg() != 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough daemon request --operation <handshake|status|pre-send|post-failure|post-success|undo|confirm|stop> [--shell <shell>] [--command <command>] [--failure-output <output>] [--session <id>] [--token <token>] [--format <json|record|undo-record>] [--ensure=<true|false>]")
+		return clierr.New(clierr.Usage, "usage: solomon daemon request --operation <handshake|status|pre-send|post-failure|post-success|undo|confirm|stop> [--shell <shell>] [--command <command>] [--failure-output <output>] [--session <id>] [--token <token>] [--format <json|record|undo-record>] [--ensure=<true|false>]")
 	}
 	if *format != "json" && *format != "record" && *format != "undo-record" {
 		return clierr.New(clierr.Usage, "daemon request --format must be json, record, or undo-record")
@@ -620,7 +620,7 @@ func initCommand(args []string, stdout io.Writer) error {
 
 func captureCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read|reset>")
+		return clierr.New(clierr.Usage, "usage: solomon capture <start|read|reset>")
 	}
 	switch args[0] {
 	case "start":
@@ -631,7 +631,7 @@ func captureCommand(args []string, stdout io.Writer) error {
 		socket := fs.String("socket", "", "relay socket")
 		command := fs.String("command", "", "command line")
 		if err := fs.Parse(args[1:]); err != nil || *socket == "" || fs.NArg() != 0 {
-			return clierr.New(clierr.Usage, "usage: close-enough capture read --socket <socket> --command <command>")
+			return clierr.New(clierr.Usage, "usage: solomon capture read --socket <socket> --command <command>")
 		}
 		output, err := capture.Read(*socket, *command)
 		if err != nil {
@@ -644,11 +644,11 @@ func captureCommand(args []string, stdout io.Writer) error {
 		fs.SetOutput(io.Discard)
 		socket := fs.String("socket", "", "relay socket")
 		if err := fs.Parse(args[1:]); err != nil || *socket == "" || fs.NArg() != 0 {
-			return clierr.New(clierr.Usage, "usage: close-enough capture reset --socket <socket>")
+			return clierr.New(clierr.Usage, "usage: solomon capture reset --socket <socket>")
 		}
 		return clierr.Wrap(clierr.Operation, capture.Reset(*socket))
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough capture <start|read|reset>")
+		return clierr.New(clierr.Usage, "usage: solomon capture <start|read|reset>")
 	}
 }
 
@@ -657,7 +657,7 @@ func captureStartCommand(args []string) error {
 	fs.SetOutput(io.Discard)
 	shellName := fs.String("shell", "", "shell")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*shellName != "bash" && *shellName != "zsh") {
-		return clierr.New(clierr.Usage, "usage: close-enough capture start --shell <bash|zsh>")
+		return clierr.New(clierr.Usage, "usage: solomon capture start --shell <bash|zsh>")
 	}
 	if runtime.GOOS == "windows" {
 		return clierr.New(clierr.Operation, "experimental output capture is unavailable on Windows")
@@ -670,7 +670,7 @@ func captureStartCommand(args []string) error {
 	if err != nil {
 		return clierr.Wrap(clierr.Operation, errors.New("experimental output capture requires mkfifo"))
 	}
-	directory, err := os.MkdirTemp("", "close-enough-capture-*")
+	directory, err := os.MkdirTemp("", "solomon-capture-*")
 	if err != nil {
 		return clierr.Wrap(clierr.Operation, err)
 	}
@@ -703,7 +703,7 @@ func captureStartCommand(args []string) error {
 	}
 	command := scriptCaptureCommand(scriptPath, fifo, shellPath)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-	command.Env = append(os.Environ(), "CLOSE_ENOUGH_CAPTURE_ACTIVE=1", "CLOSE_ENOUGH_CAPTURE_SOCKET="+filepath.Join(directory, "relay.sock"), "CLOSE_ENOUGH_CAPTURE_MARKER="+token)
+	command.Env = append(os.Environ(), "SOLOMON_CAPTURE_ACTIVE=1", "SOLOMON_CAPTURE_SOCKET="+filepath.Join(directory, "relay.sock"), "SOLOMON_CAPTURE_MARKER="+token)
 	return clierr.Wrap(clierr.Operation, command.Run())
 }
 
@@ -1002,7 +1002,7 @@ func configCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(cfg))
 	}
 	if len(args) != 3 || args[0] != "set" {
-		return clierr.New(clierr.Usage, "usage: close-enough config [show|set <key> <value>]")
+		return clierr.New(clierr.Usage, "usage: solomon config [show|set <key> <value>]")
 	}
 	path, err := config.GlobalPath(os.UserHomeDir)
 	if err != nil {
@@ -1022,7 +1022,7 @@ func configCommand(args []string, stdout io.Writer) error {
 }
 
 func ruleCommand(args []string, stdout io.Writer) error {
-	usage := "usage: close-enough rule <list|add <id> <command>|update <id> <command>|remove <id>>"
+	usage := "usage: solomon rule <list|add <id> <command>|update <id> <command>|remove <id>>"
 	if len(args) == 0 {
 		return clierr.New(clierr.Usage, usage)
 	}
@@ -1037,7 +1037,7 @@ func ruleCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "list":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough rule list")
+			return clierr.New(clierr.Usage, "usage: solomon rule list")
 		}
 		exceptions := cfg.RuleExceptions
 		if exceptions == nil {
@@ -1046,7 +1046,7 @@ func ruleCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(exceptions))
 	case "add", "update":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough rule "+args[0]+" <id> <command>")
+			return clierr.New(clierr.Usage, "usage: solomon rule "+args[0]+" <id> <command>")
 		}
 		if args[0] == "add" {
 			err = cfg.AddRuleException(config.RuleException{ID: args[1], Command: args[2]})
@@ -1055,7 +1055,7 @@ func ruleCommand(args []string, stdout io.Writer) error {
 		}
 	case "remove":
 		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough rule remove <id>")
+			return clierr.New(clierr.Usage, "usage: solomon rule remove <id>")
 		}
 		err = cfg.RemoveRuleException(args[1])
 	default:
@@ -1072,12 +1072,12 @@ func ruleCommand(args []string, stdout io.Writer) error {
 
 func packCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall|trust> ...")
+		return clierr.New(clierr.Usage, "usage: solomon pack <validate|install|uninstall|trust> ...")
 	}
 	switch args[0] {
 	case "validate":
 		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack validate <path>")
+			return clierr.New(clierr.Usage, "usage: solomon pack validate <path>")
 		}
 		pack, err := packs.Load(args[1])
 		if err != nil {
@@ -1091,7 +1091,7 @@ func packCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, err)
 	case "install":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack install <pack.json> <signature>")
+			return clierr.New(clierr.Usage, "usage: solomon pack install <pack.json> <signature>")
 		}
 		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
 		if err != nil {
@@ -1125,7 +1125,7 @@ func packCommand(args []string, stdout io.Writer) error {
 		return clierr.Wrap(clierr.Operation, err)
 	case "uninstall":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack uninstall <id> <version>")
+			return clierr.New(clierr.Usage, "usage: solomon pack uninstall <id> <version>")
 		}
 		directory, err := packDirectory(os.UserHomeDir, os.Getenv)
 		if err != nil {
@@ -1142,13 +1142,13 @@ func packCommand(args []string, stdout io.Writer) error {
 	case "trust":
 		return packTrustCommand(args[1:], stdout)
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough pack <validate|install|uninstall|trust> ...")
+		return clierr.New(clierr.Usage, "usage: solomon pack <validate|install|uninstall|trust> ...")
 	}
 }
 
 func packTrustCommand(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return clierr.New(clierr.Usage, "usage: close-enough pack trust <add|list|remove> ...")
+		return clierr.New(clierr.Usage, "usage: solomon pack trust <add|list|remove> ...")
 	}
 	path, err := packKeyringPath(os.UserHomeDir, os.Getenv)
 	if err != nil {
@@ -1161,12 +1161,12 @@ func packTrustCommand(args []string, stdout io.Writer) error {
 	switch args[0] {
 	case "list":
 		if len(args) != 1 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack trust list")
+			return clierr.New(clierr.Usage, "usage: solomon pack trust list")
 		}
 		return clierr.Wrap(clierr.Operation, json.NewEncoder(stdout).Encode(keyring))
 	case "add":
 		if len(args) != 3 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack trust add <publisher> <base64-ed25519-public-key>")
+			return clierr.New(clierr.Usage, "usage: solomon pack trust add <publisher> <base64-ed25519-public-key>")
 		}
 		key, err := packs.ParsePublisherPublicKey(args[2])
 		if err != nil {
@@ -1177,13 +1177,13 @@ func packTrustCommand(args []string, stdout io.Writer) error {
 		}
 	case "remove":
 		if len(args) != 2 {
-			return clierr.New(clierr.Usage, "usage: close-enough pack trust remove <publisher>")
+			return clierr.New(clierr.Usage, "usage: solomon pack trust remove <publisher>")
 		}
 		if !keyring.Remove(args[1]) {
 			return clierr.New(clierr.Input, "publisher is not trusted")
 		}
 	default:
-		return clierr.New(clierr.Usage, "usage: close-enough pack trust <add|list|remove> ...")
+		return clierr.New(clierr.Usage, "usage: solomon pack trust <add|list|remove> ...")
 	}
 	if err := packs.WriteKeyring(path, keyring); err != nil {
 		return clierr.Wrap(clierr.Configuration, err)
@@ -1201,7 +1201,7 @@ func packDirectory(home func() (string, error), environment func(string) string)
 		}
 		base = filepath.Join(value, ".local", "share")
 	}
-	return filepath.Join(base, "close-enough", "packs"), nil
+	return filepath.Join(base, "solomon", "packs"), nil
 }
 
 func packKeyringPath(home func() (string, error), environment func(string) string) (string, error) {
@@ -1213,7 +1213,7 @@ func packKeyringPath(home func() (string, error), environment func(string) strin
 		}
 		base = filepath.Join(value, ".config")
 	}
-	return filepath.Join(base, "close-enough", "pack-keyring.json"), nil
+	return filepath.Join(base, "solomon", "pack-keyring.json"), nil
 }
 
 func doctorCommand(stdout io.Writer) error {

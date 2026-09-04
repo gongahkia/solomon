@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/gongahkia/close-enough/internal/securetemp"
+	"github.com/gongahkia/solomon/internal/securetemp"
 )
 
 type State struct {

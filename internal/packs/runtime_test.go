@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 func TestRuntimeResolverMatchesBundledRule(t *testing.T) {
@@ -67,7 +67,7 @@ func TestRuntimeResolverRequiresAnExactRuleMatchForDestructiveSuffixes(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if match, ok := resolver.MatchLine("git brnach -D close-enough-audit-target"); ok {
+	if match, ok := resolver.MatchLine("git brnach -D solomon-audit-target"); ok {
 		t.Fatalf("unsafe suffix matched bundled safe rule: %#v", match)
 	}
 }
@@ -82,7 +82,7 @@ func TestRuntimeResolverExpandsCaptureTemplates(t *testing.T) {
 		want  string
 	}{
 		{input: "docker search --stars=5", want: "docker search --filter=stars=5"},
-		{input: "helm uninstall close-enough", want: "helm status close-enough"},
+		{input: "helm uninstall solomon", want: "helm status solomon"},
 		{input: "aws s3 rm s3://example-bucket --recursive", want: "aws s3 ls s3://example-bucket"},
 	} {
 		match, ok := resolver.MatchLine(test.input)
@@ -118,10 +118,10 @@ func TestRuntimeResolverRejectsComplexShellSyntax(t *testing.T) {
 
 func TestLoadInstalledIsDeterministicAndRejectsUnsafeEntries(t *testing.T) {
 	directory := t.TempDir()
-	first := Pack{SchemaVersion: 1, ID: "alpha", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "alpha-rule", Command: "alpha", Pattern: "typo", Replacement: "fixed", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only command"}}}
-	second := Pack{SchemaVersion: 1, ID: "beta", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "beta-rule", Command: "beta", Pattern: "typo", Replacement: "fixed", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only command"}}}
+	first := Pack{SchemaVersion: 1, ID: "alpha", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "alpha-rule", Command: "alpha", Pattern: "typo", Replacement: "fixed", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only command"}}}
+	second := Pack{SchemaVersion: 1, ID: "beta", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "beta-rule", Command: "beta", Pattern: "typo", Replacement: "fixed", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only command"}}}
 	for _, pack := range []Pack{second, first} {
-		data := []byte(`{"schema_version":1,"id":"` + pack.ID + `","version":"1.0.0","publisher":"close-enough","rules":[{"id":"` + pack.ID + `-rule","command":"` + pack.ID + `","pattern":"typo","replacement":"fixed","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
+		data := []byte(`{"schema_version":1,"id":"` + pack.ID + `","version":"1.0.0","publisher":"solomon","rules":[{"id":"` + pack.ID + `-rule","command":"` + pack.ID + `","pattern":"typo","replacement":"fixed","cause":"typo","risk":"safe","risk_rationale":"read-only command"}]}`)
 		if err := os.WriteFile(filepath.Join(directory, installedPackName(pack)), data, 0o600); err != nil {
 			t.Fatal(err)
 		}

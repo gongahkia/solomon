@@ -1,6 +1,6 @@
-# Contributing to Close Enough
+# Contributing to Solomon
 
-Close Enough accepts focused bug fixes, repair-pack additions, documentation improvements, tests, and portability work. Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
+Solomon accepts focused bug fixes, repair-pack additions, documentation improvements, tests, and portability work. Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
 ## Before opening a pull request
 
@@ -8,7 +8,7 @@ Use an issue form to describe a user-visible bug or repair request. For a small,
 
 Never include credentials, access tokens, cookies, private repository URLs, or unredacted terminal logs. Replace sensitive values with clear placeholders before sharing a command or failure output.
 
-Keep one change set to one problem. Preserve Close Enough's default model: diagnose locally, explain the proposed repair, and require a user action before execution. Do not add automatic command replay, telemetry, remote inference, or a background service without an explicit design decision.
+Keep one change set to one problem. Preserve Solomon's default model: diagnose locally, explain the proposed repair, and require a user action before execution. Do not add automatic command replay, telemetry, remote inference, or a background service without an explicit design decision.
 
 ## Development checks
 

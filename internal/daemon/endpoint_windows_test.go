@@ -13,7 +13,7 @@ func TestLocalEndpointUsesRuntimeScopedNamedPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if endpoint.Network != "npipe" || !strings.HasPrefix(endpoint.Address, `\\.\pipe\close-enough-`) {
+	if endpoint.Network != "npipe" || !strings.HasPrefix(endpoint.Address, `\\.\pipe\solomon-`) {
 		t.Fatalf("endpoint = %#v", endpoint)
 	}
 	again, err := LocalEndpoint(directory)

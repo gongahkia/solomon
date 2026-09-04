@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/redact"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/redact"
 )
 
 const (

@@ -13,4 +13,4 @@ esac
 case "$version" in
   *[!0-9A-Za-z.+-]* ) exit 2 ;;
 esac
-printf 'close-enough-packs_%s.tar.gz\n' "$version"
+printf 'solomon-packs_%s.tar.gz\n' "$version"

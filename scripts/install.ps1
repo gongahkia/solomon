@@ -1,21 +1,21 @@
 [CmdletBinding()]
 param(
     [switch]$Uninstall,
-    [string]$Version = $env:CLOSE_ENOUGH_VERSION,
-    [string]$Repository = $(if ($env:CLOSE_ENOUGH_REPOSITORY) { $env:CLOSE_ENOUGH_REPOSITORY } else { 'gongahkia/close-enough' }),
-    [string]$ReleaseBaseUrl = $env:CLOSE_ENOUGH_RELEASE_BASE_URL,
-    [string]$InstallDir = $(if ($env:CLOSE_ENOUGH_INSTALL_DIR) { $env:CLOSE_ENOUGH_INSTALL_DIR } else { Join-Path $HOME '.local/bin' }),
-    [string]$Shell = $(if ($env:CLOSE_ENOUGH_SHELL) { $env:CLOSE_ENOUGH_SHELL } else { 'powershell' }),
-    [string]$ShellProfile = $env:CLOSE_ENOUGH_SHELL_RC
+    [string]$Version = $env:SOLOMON_VERSION,
+    [string]$Repository = $(if ($env:SOLOMON_REPOSITORY) { $env:SOLOMON_REPOSITORY } else { 'gongahkia/solomon' }),
+    [string]$ReleaseBaseUrl = $env:SOLOMON_RELEASE_BASE_URL,
+    [string]$InstallDir = $(if ($env:SOLOMON_INSTALL_DIR) { $env:SOLOMON_INSTALL_DIR } else { Join-Path $HOME '.local/bin' }),
+    [string]$Shell = $(if ($env:SOLOMON_SHELL) { $env:SOLOMON_SHELL } else { 'powershell' }),
+    [string]$ShellProfile = $env:SOLOMON_SHELL_RC
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$startMarker = '# >>> close-enough initialize >>>'
-$endMarker = '# <<< close-enough initialize <<<'
+$startMarker = '# >>> solomon initialize >>>'
+$endMarker = '# <<< solomon initialize <<<'
 
 function Fail([string]$Message) {
-    throw "close-enough installer: $Message"
+    throw "solomon installer: $Message"
 }
 
 function Test-Repository([string]$Value) {
@@ -35,7 +35,7 @@ function Resolve-Version {
         Test-Version $Version
         return $Version
     }
-    $apiBase = if ($env:CLOSE_ENOUGH_API_URL) { $env:CLOSE_ENOUGH_API_URL } else { 'https://api.github.com' }
+    $apiBase = if ($env:SOLOMON_API_URL) { $env:SOLOMON_API_URL } else { 'https://api.github.com' }
     $release = Invoke-RestMethod -Uri "$apiBase/repos/$Repository/releases/latest"
     $resolved = [string]$release.tag_name
     Test-Version $resolved
@@ -175,7 +175,7 @@ function Install-Archive([string]$Artifact, [string]$Root, [string]$Destination)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($Artifact)
     try {
-        $entryName = "$Root/close-enough.exe"
+        $entryName = "$Root/solomon.exe"
         $allowed = @("$Root/", $entryName)
         foreach ($entry in $archive.Entries) {
             if ($allowed -notcontains $entry.FullName) {
@@ -191,7 +191,7 @@ function Install-Archive([string]$Artifact, [string]$Root, [string]$Destination)
             Fail 'release binary is missing or empty'
         }
         [System.IO.Directory]::CreateDirectory($Destination) | Out-Null
-        $temporary = Join-Path $Destination ('.close-enough-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+        $temporary = Join-Path $Destination ('.solomon-' + [Guid]::NewGuid().ToString('N') + '.tmp')
         try {
             $input = $entry.Open()
             try {
@@ -204,7 +204,7 @@ function Install-Archive([string]$Artifact, [string]$Root, [string]$Destination)
             } finally {
                 $input.Dispose()
             }
-            Move-Item -LiteralPath $temporary -Destination (Join-Path $Destination 'close-enough.exe') -Force
+            Move-Item -LiteralPath $temporary -Destination (Join-Path $Destination 'solomon.exe') -Force
         } finally {
             if (Test-Path -LiteralPath $temporary) {
                 Remove-Item -LiteralPath $temporary -Force
@@ -220,7 +220,7 @@ if ($Uninstall) {
     if (-not [System.IO.Path]::IsPathRooted($InstallDir)) {
         Fail 'installation directory must be absolute'
     }
-    $target = Join-Path $InstallDir 'close-enough.exe'
+    $target = Join-Path $InstallDir 'solomon.exe'
     if (Test-Path -LiteralPath $target -PathType Container) {
         Fail "installation target is not a regular file"
     }
@@ -236,9 +236,9 @@ $architecture = Get-TargetArchitecture
 if (-not [System.IO.Path]::IsPathRooted($InstallDir)) {
     Fail 'installation directory must be absolute'
 }
-$archiveName = "close-enough_${Version}_windows_${architecture}.zip"
+$archiveName = "solomon_${Version}_windows_${architecture}.zip"
 $root = [System.IO.Path]::GetFileNameWithoutExtension($archiveName)
-$temporary = Join-Path ([System.IO.Path]::GetTempPath()) ('close-enough-install-' + [Guid]::NewGuid().ToString('N'))
+$temporary = Join-Path ([System.IO.Path]::GetTempPath()) ('solomon-install-' + [Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($temporary) | Out-Null
 try {
     $baseUrl = Get-ReleaseBaseUrl
@@ -251,8 +251,8 @@ try {
     Verify-Checksum $artifact $manifest $archiveName
     Verify-Signature $artifact $bundle
     Install-Archive $artifact $root $InstallDir
-    Add-ShellInitialization (Join-Path $InstallDir 'close-enough.exe')
-    Write-Output "installed close-enough $Version to $(Join-Path $InstallDir 'close-enough.exe')"
+    Add-ShellInitialization (Join-Path $InstallDir 'solomon.exe')
+    Write-Output "installed solomon $Version to $(Join-Path $InstallDir 'solomon.exe')"
 } finally {
     if (Test-Path -LiteralPath $temporary) {
         Remove-Item -LiteralPath $temporary -Recurse -Force

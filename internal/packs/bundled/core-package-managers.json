@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "core-package-managers",
   "version": "0.4.0",
-  "publisher": "close-enough",
+  "publisher": "solomon",
   "capabilities": ["matcher-v1", "transformation-v1", "explanation-v1", "risk-v1"],
   "rules": [{
     "id": "npm-install-instal",

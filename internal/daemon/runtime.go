@@ -11,7 +11,7 @@ func RuntimeDirectory(home func() (string, error), environment func(string) stri
 		return "", errors.New("runtime environment lookup is required")
 	}
 	if value := environment("XDG_RUNTIME_DIR"); filepath.IsAbs(value) {
-		return filepath.Join(value, "close-enough"), nil
+		return filepath.Join(value, "solomon"), nil
 	}
 	if home == nil {
 		return "", errors.New("home directory lookup is required")
@@ -23,5 +23,5 @@ func RuntimeDirectory(home func() (string, error), environment func(string) stri
 	if value == "" || !filepath.IsAbs(value) {
 		return "", fmt.Errorf("home directory must be absolute")
 	}
-	return filepath.Join(value, ".cache", "close-enough", "runtime"), nil
+	return filepath.Join(value, ".cache", "solomon", "runtime"), nil
 }

@@ -53,30 +53,30 @@ jobs:
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
           go-version: '1.26.6'
-      - run: mkdir -p dist && GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/close-enough ./cmd/close-enough
+      - run: mkdir -p dist && GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/solomon ./cmd/solomon
       - if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" linux amd64 tar.gz)
-          sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
       - if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" linux arm64 tar.gz)
-          sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
       - if: matrix.goos == 'darwin' && matrix.goarch == 'arm64'
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" darwin arm64 tar.gz)
-          sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
       - if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" darwin amd64 tar.gz)
-          sh scripts/release-archive.sh dist/close-enough "dist/$archive" "${archive%.tar.gz}"
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
       - if: matrix.goos == 'windows' && matrix.goarch == 'amd64'
         run: |
           archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" windows amd64 zip)
-          sh scripts/release-zip.sh dist/close-enough "dist/$archive" "${archive%.zip}"
+          sh scripts/release-zip.sh dist/solomon "dist/$archive" "${archive%.zip}"
       - id: release-archive
         run: |
-          archive=$(find dist -maxdepth 1 -type f ! -name close-enough -print -quit)
+          archive=$(find dist -maxdepth 1 -type f ! -name solomon -print -quit)
           test -n "$archive"
           printf 'path=%s\n' "$archive" >> "$GITHUB_OUTPUT"
       - run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
@@ -180,7 +180,7 @@ jobs:
       - run: |
           (
             cd dist
-            for artifact in close-enough_*.tar.gz close-enough_*.zip; do
+            for artifact in solomon_*.tar.gz solomon_*.zip; do
               test -f "$artifact" || continue
               sha256sum "$artifact"
             done | LC_ALL=C sort

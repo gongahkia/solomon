@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gongahkia/close-enough/internal/config"
-	"github.com/gongahkia/close-enough/internal/diagnose"
-	"github.com/gongahkia/close-enough/internal/packs"
+	"github.com/gongahkia/solomon/internal/config"
+	"github.com/gongahkia/solomon/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/packs"
 )
 
 func rewriteConfig() config.Config {
@@ -77,7 +77,7 @@ func TestServiceDoesNotApplyAReadOnlyRuleToDestructiveSuffixes(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := Service{Config: rewriteConfig(), Packs: resolver}
-	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "git brnach -D close-enough-audit-target"})
+	response, err := service.Handle(context.Background(), Request{Version: ProtocolVersion, Operation: PreSendOperation, Command: "git brnach -D solomon-audit-target"})
 	if err != nil {
 		t.Fatal(err)
 	}

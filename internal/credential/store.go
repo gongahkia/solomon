@@ -37,7 +37,7 @@ func (keys HistoryKeys) Load(ctx context.Context, scope string) ([]byte, error) 
 	if !validScope(scope) {
 		return nil, errors.New("invalid history key scope")
 	}
-	key, err := keys.store.Load(ctx, "close-enough/history", scope)
+	key, err := keys.store.Load(ctx, "solomon/history", scope)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (keys HistoryKeys) Save(ctx context.Context, scope string, key []byte) erro
 	if len(key) != HistoryKeySize {
 		return errors.New("invalid history key length")
 	}
-	return keys.store.Save(ctx, "close-enough/history", scope, append([]byte(nil), key...))
+	return keys.store.Save(ctx, "solomon/history", scope, append([]byte(nil), key...))
 }
 
 func (keys HistoryKeys) Delete(ctx context.Context, scope string) error {
@@ -87,7 +87,7 @@ func (keys HistoryKeys) Delete(ctx context.Context, scope string) error {
 	if !validScope(scope) {
 		return errors.New("invalid history key scope")
 	}
-	return keys.store.Delete(ctx, "close-enough/history", scope)
+	return keys.store.Delete(ctx, "solomon/history", scope)
 }
 
 func validScope(scope string) bool {

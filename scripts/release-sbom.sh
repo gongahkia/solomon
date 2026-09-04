@@ -21,5 +21,5 @@ esac
 [ -x "$generator" ]
 [ -f "$module/go.mod" ]
 
-GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$generator" app -json -output "$output" -main cmd/close-enough "$module"
+GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 "$generator" app -json -output "$output" -main cmd/solomon "$module"
 test -s "$output"

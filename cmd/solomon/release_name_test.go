@@ -9,9 +9,9 @@ func TestReleaseNameScript(t *testing.T) {
 	for _, test := range []struct {
 		version, goos, goarch, extension, want string
 	}{
-		{version: "v1.2.3", goos: "linux", goarch: "amd64", extension: "tar.gz", want: "close-enough_v1.2.3_linux_amd64.tar.gz\n"},
-		{version: "v1.2.3-rc.1+build.7", goos: "darwin", goarch: "arm64", extension: "tar.gz", want: "close-enough_v1.2.3-rc.1+build.7_darwin_arm64.tar.gz\n"},
-		{version: "v1.2.3", goos: "windows", goarch: "amd64", extension: "zip", want: "close-enough_v1.2.3_windows_amd64.zip\n"},
+		{version: "v1.2.3", goos: "linux", goarch: "amd64", extension: "tar.gz", want: "solomon_v1.2.3_linux_amd64.tar.gz\n"},
+		{version: "v1.2.3-rc.1+build.7", goos: "darwin", goarch: "arm64", extension: "tar.gz", want: "solomon_v1.2.3-rc.1+build.7_darwin_arm64.tar.gz\n"},
+		{version: "v1.2.3", goos: "windows", goarch: "amd64", extension: "zip", want: "solomon_v1.2.3_windows_amd64.zip\n"},
 	} {
 		t.Run(test.goos+"-"+test.goarch, func(t *testing.T) {
 			command := exec.Command("sh", "../../scripts/release-name.sh", test.version, test.goos, test.goarch, test.extension)

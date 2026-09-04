@@ -12,7 +12,7 @@ import (
 
 func TestReleasePackNameScript(t *testing.T) {
 	command := exec.Command("sh", "../../scripts/release-pack-name.sh", "v1.2.3-rc.1+build.7")
-	if data, err := command.Output(); err != nil || string(data) != "close-enough-packs_v1.2.3-rc.1+build.7.tar.gz\n" {
+	if data, err := command.Output(); err != nil || string(data) != "solomon-packs_v1.2.3-rc.1+build.7.tar.gz\n" {
 		t.Fatalf("pack release name = %q, %v", data, err)
 	}
 }
@@ -30,8 +30,8 @@ func TestReleasePackBundleScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator := writePackValidator(t, directory, "exit 0")
-	archive := filepath.Join(directory, "close-enough-packs_v1.2.3.tar.gz")
-	if data, err := exec.Command("sh", "../../scripts/release-pack-bundle.sh", validator, source, archive, "close-enough-packs_v1.2.3").CombinedOutput(); err != nil {
+	archive := filepath.Join(directory, "solomon-packs_v1.2.3.tar.gz")
+	if data, err := exec.Command("sh", "../../scripts/release-pack-bundle.sh", validator, source, archive, "solomon-packs_v1.2.3").CombinedOutput(); err != nil {
 		t.Fatalf("bundle release packs: %v\n%s", err, data)
 	}
 	file, err := os.Open(archive)
@@ -63,7 +63,7 @@ func TestReleasePackBundleScript(t *testing.T) {
 		}
 		contents[header.Name] = string(data)
 	}
-	if contents["close-enough-packs_v1.2.3/alpha.json"] != "{\"id\":\"alpha\"}\n" || contents["close-enough-packs_v1.2.3/beta.json"] != "{\"id\":\"beta\"}\n" {
+	if contents["solomon-packs_v1.2.3/alpha.json"] != "{\"id\":\"alpha\"}\n" || contents["solomon-packs_v1.2.3/beta.json"] != "{\"id\":\"beta\"}\n" {
 		t.Fatalf("pack bundle contents = %#v", contents)
 	}
 }
@@ -78,8 +78,8 @@ func TestReleasePackBundleScriptRejectsFailedValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator := writePackValidator(t, directory, "exit 9")
-	archive := filepath.Join(directory, "close-enough-packs_v1.2.3.tar.gz")
-	if data, err := exec.Command("sh", "../../scripts/release-pack-bundle.sh", validator, source, archive, "close-enough-packs_v1.2.3").CombinedOutput(); err == nil {
+	archive := filepath.Join(directory, "solomon-packs_v1.2.3.tar.gz")
+	if data, err := exec.Command("sh", "../../scripts/release-pack-bundle.sh", validator, source, archive, "solomon-packs_v1.2.3").CombinedOutput(); err == nil {
 		t.Fatalf("invalid pack bundle succeeded: %s", data)
 	}
 	if _, err := os.Stat(archive); !os.IsNotExist(err) {
@@ -89,7 +89,7 @@ func TestReleasePackBundleScriptRejectsFailedValidation(t *testing.T) {
 
 func writePackValidator(t *testing.T, directory, body string) string {
 	t.Helper()
-	validator := filepath.Join(directory, "close-enough")
+	validator := filepath.Join(directory, "solomon")
 	if err := os.WriteFile(validator, []byte("#!/bin/sh\nset -eu\n[ \"$1\" = pack ]\n[ \"$2\" = validate ]\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}

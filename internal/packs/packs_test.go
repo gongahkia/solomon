@@ -13,11 +13,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 func TestValidatePack(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "^sttaus$", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestSchemaCompatibilityPolicyRejectsLegacyAndFutureVersions(t *testing.T) {
 
 func TestRejectUnknownManifestField(t *testing.T) {
 	path := t.TempDir() + "/pack.json"
-	data := []byte(`{"schema_version":1,"id":"core","version":"1","publisher":"close-enough","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe"}],"unknown":true}`)
+	data := []byte(`{"schema_version":1,"id":"core","version":"1","publisher":"solomon","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe"}],"unknown":true}`)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,8 @@ func TestRejectUnknownManifestField(t *testing.T) {
 func TestLoadRejectsNestedUnknownFieldsAndTrailingJSON(t *testing.T) {
 	path := t.TempDir() + "/pack.json"
 	for _, data := range [][]byte{
-		[]byte(`{"schema_version":1,"id":"core","version":"1","publisher":"close-enough","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe","unknown":true}]}`),
-		[]byte(`{"schema_version":1,"id":"core","version":"1","publisher":"close-enough","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe"}]} {}`),
+		[]byte(`{"schema_version":1,"id":"core","version":"1","publisher":"solomon","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe","unknown":true}]}`),
+		[]byte(`{"schema_version":1,"id":"core","version":"1","publisher":"solomon","rules":[{"id":"ok","command":"git","pattern":"x","replacement":"y","cause":"z","risk":"safe"}]} {}`),
 	} {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
@@ -67,7 +67,7 @@ func TestLoadRejectsNestedUnknownFieldsAndTrailingJSON(t *testing.T) {
 
 func FuzzDecodePack(f *testing.F) {
 	for _, seed := range [][]byte{
-		[]byte(`{"schema_version":1,"id":"core","version":"1.0.0","publisher":"close-enough","rules":[]}`),
+		[]byte(`{"schema_version":1,"id":"core","version":"1.0.0","publisher":"solomon","rules":[]}`),
 		[]byte(`{"schema_version":1,"id":"core","unknown":true}`),
 		[]byte(`{"schema_version":1} {}`),
 		[]byte(`{`),
@@ -92,7 +92,7 @@ func FuzzDecodePack(f *testing.F) {
 }
 
 func TestRejectInvalidPattern(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "bad", Command: "git", Pattern: "[", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.Validate(); err == nil {
 		t.Fatal("expected error")
 	}
@@ -119,11 +119,11 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 			t.Fatalf("accepted invalid semantic version %q", value)
 		}
 	}
-	base := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	base := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	for _, mutate := range []func(*Pack){
 		func(pack *Pack) { pack.ID = "Core" },
 		func(pack *Pack) { pack.Version = "1" },
-		func(pack *Pack) { pack.Publisher = "close_enough" },
+		func(pack *Pack) { pack.Publisher = "solomon" },
 		func(pack *Pack) { pack.Rules[0].ID = "rule_1" },
 	} {
 		pack := base
@@ -135,7 +135,7 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 }
 
 func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	compiled, err := Compile(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestCompileMatchesDeclarativeRulesWithoutEvaluation(t *testing.T) {
 		t.Fatal("matcher ignored declared command")
 	}
 	marker := t.TempDir() + "/marker"
-	injection := Pack{SchemaVersion: SchemaVersionV1, ID: "literal", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "literal-text", Command: "git", Pattern: `^\$\(touch .+\)$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "literal input match"}}}
+	injection := Pack{SchemaVersion: SchemaVersionV1, ID: "literal", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "literal-text", Command: "git", Pattern: `^\$\(touch .+\)$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "literal input match"}}}
 	compiled, err = Compile(injection)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestTransformationTemplateValidation(t *testing.T) {
 		{`^sttaus$`, `$(touch marker)`, false},
 		{`^sttaus$`, `status$`, false},
 	} {
-		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: test.pattern, Replacement: test.replacement, Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: test.pattern, Replacement: test.replacement, Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 		if got := pack.Validate() == nil; got != test.valid {
 			t.Fatalf("template %q with %q valid = %t, want %t", test.pattern, test.replacement, got, test.valid)
 		}
@@ -243,7 +243,7 @@ func TestExplanationTemplateValidation(t *testing.T) {
 		{"$(touch marker)", false},
 		{string(make([]byte, 513)), false},
 	} {
-		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^(sttaus)$`, Replacement: "status", Cause: test.cause, Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^(sttaus)$`, Replacement: "status", Cause: test.cause, Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 		if got := pack.Validate() == nil; got != test.valid {
 			t.Fatalf("explanation %q valid = %t, want %t", test.cause, got, test.valid)
 		}
@@ -263,7 +263,7 @@ func TestRiskMetadataValidation(t *testing.T) {
 		{diagnose.Risk("invalid"), "unknown", false},
 		{diagnose.RiskHigh, "unsafe\nreason", false},
 	} {
-		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: test.risk, RiskRationale: test.rationale}}}
+		pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: test.risk, RiskRationale: test.rationale}}}
 		if got := pack.Validate() == nil; got != test.valid {
 			t.Fatalf("risk metadata %#v valid = %t, want %t", test, got, test.valid)
 		}
@@ -280,7 +280,7 @@ func TestFixtureLoadAndRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := RunFixture(pack, fixture); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestFixtureCorpusLoadAndRun(t *testing.T) {
 	if len(corpus) != 2 || corpus[0].Cases[0].ID != "alpha" {
 		t.Fatalf("corpus = %#v", corpus)
 	}
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: "git-status", Command: "git", Pattern: `^sttaus$`, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
@@ -1469,7 +1469,7 @@ func TestSignedGitPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "git-regression.json"))
@@ -1483,13 +1483,13 @@ func TestSignedGitPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed pack fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed pack fixture")
 	}
 }
@@ -1508,7 +1508,7 @@ func TestSignedPackageManagerPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "package-manager-regression.json"))
@@ -1522,13 +1522,13 @@ func TestSignedPackageManagerPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed package manager fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed package manager fixture")
 	}
 }
@@ -1547,7 +1547,7 @@ func TestSignedJavaScriptPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "javascript-regression.json"))
@@ -1561,13 +1561,13 @@ func TestSignedJavaScriptPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed JavaScript fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed JavaScript fixture")
 	}
 }
@@ -1586,7 +1586,7 @@ func TestSignedPythonPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "python-regression.json"))
@@ -1600,13 +1600,13 @@ func TestSignedPythonPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed Python fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed Python fixture")
 	}
 }
@@ -1625,7 +1625,7 @@ func TestSignedRustPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "rust-regression.json"))
@@ -1639,13 +1639,13 @@ func TestSignedRustPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed Rust fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed Rust fixture")
 	}
 }
@@ -1664,7 +1664,7 @@ func TestSignedGoPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "go-regression.json"))
@@ -1678,13 +1678,13 @@ func TestSignedGoPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed Go fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed Go fixture")
 	}
 }
@@ -1703,7 +1703,7 @@ func TestSignedContainersPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "containers-regression.json"))
@@ -1717,13 +1717,13 @@ func TestSignedContainersPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed container fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed container fixture")
 	}
 }
@@ -1742,7 +1742,7 @@ func TestSignedKubernetesCloudPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
 	pack, err := Load(filepath.Join(directory, "kubernetes-cloud-regression.json"))
@@ -1756,13 +1756,13 @@ func TestSignedKubernetesCloudPackFixtureAndRegressionCorpus(t *testing.T) {
 	if err := RunFixtureCorpus(pack, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(append(payload, ' '), signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(append(payload, ' '), signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted tampered signed Kubernetes/cloud fixture")
 	}
-	if !keyring.Revoke("close-enough") {
+	if !keyring.Revoke("solomon") {
 		t.Fatal("did not revoke fixture publisher")
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked signed Kubernetes/cloud fixture")
 	}
 }
@@ -2008,7 +2008,7 @@ func TestExtractKubernetesCloudFailureEvidence(t *testing.T) {
 
 func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 	pack := func(id, ruleID, pattern string) Pack {
-		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "close-enough", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+		return Pack{SchemaVersion: SchemaVersionV1, ID: id, Version: "1.0.0", Publisher: "solomon", Rules: []Rule{{ID: ruleID, Command: "git", Pattern: pattern, Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	}
 	resolved, err := Resolve([]Pack{pack("zeta", "zeta-rule", "zeta"), pack("alpha", "alpha-rule", "alpha")})
 	if err != nil || len(resolved) != 2 || resolved[0].Pack.ID != "alpha" || resolved[1].Pack.ID != "zeta" {
@@ -2025,7 +2025,7 @@ func TestResolveOrdersPacksAndRejectsConflicts(t *testing.T) {
 }
 
 func TestPackCompatibilityRequirements(t *testing.T) {
-	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "close-enough", MinEngineVersion: "1.0.0", Capabilities: []string{"matcher-v1", "risk-v1"}, Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
+	pack := Pack{SchemaVersion: SchemaVersionV1, ID: "core-git", Version: "1.0.0", Publisher: "solomon", MinEngineVersion: "1.0.0", Capabilities: []string{"matcher-v1", "risk-v1"}, Rules: []Rule{{ID: "git-status", Command: "git", Pattern: "status", Replacement: "status", Cause: "typo", Risk: diagnose.RiskSafe, RiskRationale: "read-only status query"}}}
 	if err := pack.CheckCompatibility("1.0.0"); err != nil {
 		t.Fatal(err)
 	}
@@ -2087,13 +2087,13 @@ func BenchmarkLoadBundledPacks(b *testing.B) {
 
 func TestInstallPackAtomicallyWithoutOverwrite(t *testing.T) {
 	directory := t.TempDir()
-	data := []byte(`{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`)
+	data := []byte(`{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"solomon","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	keyring := Keyring{}
-	if err := keyring.Add("close-enough", publicKey); err != nil {
+	if err := keyring.Add("solomon", publicKey); err != nil {
 		t.Fatal(err)
 	}
 	signature := ed25519.Sign(privateKey, data)
@@ -2271,10 +2271,10 @@ func TestPublisherKeyringLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var keyring Keyring
-	if err := keyring.Add("close-enough", publicKey); err != nil {
+	if err := keyring.Add("solomon", publicKey); err != nil {
 		t.Fatal(err)
 	}
-	if err := keyring.Add("close-enough", publicKey); err == nil {
+	if err := keyring.Add("solomon", publicKey); err == nil {
 		t.Fatal("accepted duplicate publisher")
 	}
 	path := filepath.Join(t.TempDir(), "keyring.json")
@@ -2285,8 +2285,8 @@ func TestPublisherKeyringLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, ok := loaded.PublicKey("close-enough")
-	if !ok || !bytes.Equal(key, publicKey) || !loaded.Remove("close-enough") || loaded.Remove("close-enough") {
+	key, ok := loaded.PublicKey("solomon")
+	if !ok || !bytes.Equal(key, publicKey) || !loaded.Remove("solomon") || loaded.Remove("solomon") {
 		t.Fatalf("keyring state = %#v", loaded)
 	}
 }
@@ -2294,7 +2294,7 @@ func TestPublisherKeyringLifecycle(t *testing.T) {
 func TestKeyringRejectsMalformedKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keyring.json")
 	for _, data := range [][]byte{
-		[]byte(`{"publishers":[{"id":"close-enough","public_key":"not-base64"}]}`),
+		[]byte(`{"publishers":[{"id":"solomon","public_key":"not-base64"}]}`),
 		[]byte(`{"publishers":[{"id":"Close","public_key":""}]}`),
 		[]byte(`{"publishers":[],"unknown":true}`),
 	} {
@@ -2315,16 +2315,16 @@ func TestRevokedPublisherKeyCannotVerify(t *testing.T) {
 	payload := []byte("pack")
 	signature := ed25519.Sign(privateKey, payload)
 	var keyring Keyring
-	if err := keyring.Add("close-enough", publicKey); err != nil {
+	if err := keyring.Add("solomon", publicKey); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err != nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err != nil {
 		t.Fatal(err)
 	}
-	if !keyring.Revoke("close-enough") || keyring.Revoke("close-enough") || !keyring.RevokedFor("close-enough") {
+	if !keyring.Revoke("solomon") || keyring.Revoke("solomon") || !keyring.RevokedFor("solomon") {
 		t.Fatalf("revocations = %#v", keyring.Revoked)
 	}
-	if err := VerifyPublisherSignature(payload, signature, "close-enough", keyring); err == nil {
+	if err := VerifyPublisherSignature(payload, signature, "solomon", keyring); err == nil {
 		t.Fatal("accepted revoked publisher")
 	}
 }
@@ -2408,7 +2408,7 @@ func TestTransactionalPackDownloadStaging(t *testing.T) {
 
 func TestAtomicVerifiedPackActivation(t *testing.T) {
 	directory := t.TempDir()
-	data := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`
+	data := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"solomon","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"typo","risk":"safe","risk_rationale":"read-only status query"}]}`
 	staged, err := StageDownload(directory, strings.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
@@ -2434,8 +2434,8 @@ func TestAtomicVerifiedPackActivation(t *testing.T) {
 
 func TestPackUpdateRollsBackOnActivationFailure(t *testing.T) {
 	directory := t.TempDir()
-	previous := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"old","risk":"safe","risk_rationale":"read-only status query"}]}`
-	updated := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"close-enough","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"new","risk":"safe","risk_rationale":"read-only status query"}]}`
+	previous := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"solomon","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"old","risk":"safe","risk_rationale":"read-only status query"}]}`
+	updated := `{"schema_version":1,"id":"core-git","version":"1.0.0","publisher":"solomon","rules":[{"id":"git-status","command":"git","pattern":"status","replacement":"status","cause":"new","risk":"safe","risk_rationale":"read-only status query"}]}`
 	target := filepath.Join(directory, "core-git-1.0.0.json")
 	if err := os.WriteFile(target, []byte(previous), 0o600); err != nil {
 		t.Fatal(err)

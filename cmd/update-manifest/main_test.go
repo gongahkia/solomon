@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gongahkia/close-enough/internal/updatechannel"
+	"github.com/gongahkia/solomon/internal/updatechannel"
 )
 
 func TestManifestInput(t *testing.T) {
@@ -20,7 +20,7 @@ func TestManifestInput(t *testing.T) {
 		{os: "darwin", arch: "arm64", extension: ".tar.gz"},
 		{os: "windows", arch: "amd64", extension: ".zip"},
 	} {
-		path := filepath.Join(directory, "close-enough_v1.2.3_"+target.os+"_"+target.arch+target.extension)
+		path := filepath.Join(directory, "solomon_v1.2.3_"+target.os+"_"+target.arch+target.extension)
 		if err := os.WriteFile(path, []byte(target.os+target.arch), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestManifestInput(t *testing.T) {
 }
 
 func TestManifestInputRejectsMissingSignature(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "close-enough_v1.2.3_linux_amd64.tar.gz")
+	path := filepath.Join(t.TempDir(), "solomon_v1.2.3_linux_amd64.tar.gz")
 	if err := os.WriteFile(path, []byte("artifact"), 0o600); err != nil {
 		t.Fatal(err)
 	}

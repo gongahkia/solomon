@@ -10,7 +10,7 @@ import (
 func TestReleaseLicenseAuditScript(t *testing.T) {
 	directory := t.TempDir()
 	module := filepath.Join(directory, "module")
-	if err := os.MkdirAll(filepath.Join(module, "cmd", "close-enough"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(module, "cmd", "solomon"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	check := filepath.Join(directory, "check")
@@ -32,7 +32,7 @@ func TestReleaseLicenseAuditScript(t *testing.T) {
 func TestReleaseLicenseAuditScriptRejectsFailedCheck(t *testing.T) {
 	directory := t.TempDir()
 	module := filepath.Join(directory, "module")
-	if err := os.MkdirAll(filepath.Join(module, "cmd", "close-enough"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(module, "cmd", "solomon"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	auditor := writeLicenseAuditor(t, directory, "exit 9")

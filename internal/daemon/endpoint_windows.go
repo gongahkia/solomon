@@ -12,5 +12,5 @@ func LocalEndpoint(runtimeDirectory string) (Endpoint, error) {
 		return Endpoint{}, err
 	}
 	sum := sha256.Sum256([]byte(runtimeDirectory))
-	return Endpoint{Network: "npipe", Address: `\\.\pipe\close-enough-` + hex.EncodeToString(sum[:16])}, nil
+	return Endpoint{Network: "npipe", Address: `\\.\pipe\solomon-` + hex.EncodeToString(sum[:16])}, nil
 }

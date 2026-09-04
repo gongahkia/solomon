@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/gongahkia/close-enough/internal/diagnose"
+	"github.com/gongahkia/solomon/internal/diagnose"
 )
 
 type RuntimeMatch struct {

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gongahkia/close-enough/internal/securetemp"
+	"github.com/gongahkia/solomon/internal/securetemp"
 )
 
 type StagedDownload struct {

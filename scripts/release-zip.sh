@@ -24,6 +24,6 @@ archive="$archive_dir/$(basename "$archive")"
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 mkdir "$temporary/$root"
-cp "$binary" "$temporary/$root/close-enough.exe"
+cp "$binary" "$temporary/$root/solomon.exe"
 cd "$temporary"
 zip -q -X -r "$archive" "$root"

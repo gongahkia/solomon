@@ -31,6 +31,7 @@ contested. It does not decide the law or replace lawyer review.
 
 - [Architecture](./architecture.md)
 - [Runtime sequence diagrams](./diagrams/README.md)
+- [Reference host integration proof](./guides/reference-host-integration.md)
 - [Boundary audit checklist](./boundary-audit-checklist.md)
 - [Audit evidence and regulatory mapping](./regulatory-evidence.md)
 - [Crash consistency ADR](./adr/0010-crash-consistency-reconciliation.md)

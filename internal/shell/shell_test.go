@@ -2497,7 +2497,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "exit\r"
 expect {
@@ -2552,7 +2552,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
 expect_text {solomon [safe/1]: keep buffer}
@@ -2609,7 +2609,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
 expect_text {solomon [safe/1]: keep buffer}
@@ -2674,7 +2674,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "gti\r"
 expect_text {solomon corrected: Set-Content -NoNewline -Path $env:MARKER -Value executed (fixed; press Enter again)}
@@ -2746,7 +2746,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Set-Content -NoNewline -Path \$env:MARKER -Value executed\r"
 expect_text {solomon [high/1]: press Enter again (confirmation required)}
@@ -2815,7 +2815,7 @@ expect_before {
 }
 expect_regex {PS .*?> }
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS .*?> }
 send -- "Restore-SolomonEnterHandler; (Get-PSReadLineKeyHandler -Chord Enter).Function\r"
 expect_text {AcceptLine}
@@ -2867,19 +2867,19 @@ expect_before {
   -exact "\033\[6n" { send -- "\033\[24;80R"; exp_continue }
 }
 expect_regex {PS.*>}
-send -- "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock { Write-Host CE_CUSTOM_ENTER; \[Microsoft.PowerShell.PSConsoleReadLine\]::AcceptLine() }\r"
-expect_text {CE_CUSTOM_ENTER}
+send -- "Set-PSReadLineKeyHandler -Key Enter -ScriptBlock { Write-Host SOLOMON_CUSTOM_ENTER; \[Microsoft.PowerShell.PSConsoleReadLine\]::AcceptLine() }\r"
+expect_text {SOLOMON_CUSTOM_ENTER}
 expect_regex {PS.*>}
 send -- ". \$env:ADAPTER; Write-Output (\[Text.Encoding\]::UTF8.GetString(\[Convert\]::FromBase64String('Q0VfQURBUFRFUl9SRUFEWQ==')))\r"
-expect_text {CE_CUSTOM_ENTER}
-expect_text {CE_ADAPTER_READY}
+expect_text {SOLOMON_CUSTOM_ENTER}
+expect_text {SOLOMON_ADAPTER_READY}
 expect_regex {PS.*>}
-send -- "Restore-SolomonEnterHandler; Write-Output CE_CUSTOM_RESTORED\r"
-expect_text {CE_CUSTOM_ENTER}
-expect_text {CE_CUSTOM_RESTORED}
+send -- "Restore-SolomonEnterHandler; Write-Output SOLOMON_CUSTOM_RESTORED\r"
+expect_text {SOLOMON_CUSTOM_ENTER}
+expect_text {SOLOMON_CUSTOM_RESTORED}
 expect_regex {PS.*>}
 send -- "exit\r"
-expect_text {CE_CUSTOM_ENTER}
+expect_text {SOLOMON_CUSTOM_ENTER}
 expect {
   eof {}
   timeout { puts stderr "timed out waiting for EOF"; exit 1 }

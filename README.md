@@ -1,57 +1,173 @@
-# Decorum
+# Close Enough
 
-Decorum is an unaffiliated Manifest V3 browser extension prototype that adds restrained context cards under LinkedIn posts.
+Local, deterministic terminal repair. Close Enough diagnoses likely command mistakes before submission and after supported failures, then presents a risk-classified hint. It supports command, Git subcommand, and path typo suggestions with configurable hint, interrupt, rewrite, and off modes.
 
-The implementation keeps the core product constraints in the code and docs: no overlay, one note per post, high confidence before rendering, and an audit trail for every shown note. Open roadmap items are tracked in GitHub issues.
+License: Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-## Development
+## Quick start
 
-```sh
-npm run check
-npm test
-npm run build
-```
-
-Load the generated `dist/` folder from `chrome://extensions` with Developer Mode enabled.
-
-See [docs/implementation-notes.md](./docs/implementation-notes.md) for current architecture decisions and platform risks.
-See [docs/gateway/classifier-gateway.md](./docs/gateway/classifier-gateway.md) for the remote classifier boundary.
-See [docs/cost-model.md](./docs/cost-model.md) for remote model, retrieval, and rollout quotas.
-See [docs/note-generation.md](./docs/note-generation.md) for the AI-only note-generation decision.
-See [docs/ledger.md](./docs/ledger.md) for the shared replay ledger and false-positive surface.
-See [docs/visual-parity.md](./docs/visual-parity.md) for the X Community Notes visual comparison.
-See [docs/distribution.md](./docs/distribution.md) for the current private-prototype distribution posture.
-See [docs/private-beta.md](./docs/private-beta.md) for the 5-tester unpacked-extension beta runbook.
-See [docs/naming.md](./docs/naming.md) for naming and affiliation rules.
-
-## Current Scope
-
-The first implementation pass is intentionally local-first:
-
-- MV3 extension shell
-- LinkedIn content script entrypoint
-- Local tonal classifier rendered under detected posts that clear the confidence gate
-- Optional gateway classifier path with local fallback
-- Optional gateway factual retrieval for funding-announcement claims
-- Chrome side panel shell
-- Local settings, detected-post history, note ledger, and ratings
-- Chromium runtime fixture test for detection, insertion, gating, unique traces, and rating persistence
-- Visual snapshot test for the rendered note card
-
-Provider model calls and retrieval are not bundled into the extension client; remote classification goes through the gateway boundary.
-
-## Tests
-
-`npm test` runs:
-
-- Static manifest and JavaScript syntax checks.
-- Gateway classifier contract tests.
-- Funding retrieval contract tests.
-- A Chromium fixture test against `tests/fixtures/linkedin-feed.html`.
-- A visual snapshot comparison for the note card; the current PNG artifact is written to `.tmp/visual/note-card.png`.
-
-Update the visual baseline only after intentional visual changes:
+Close Enough currently supports source installation with Go 1.25 or newer. From a clone of this repository:
 
 ```sh
-DECORUM_UPDATE_VISUAL=1 npm run test:visual
+go install ./cmd/close-enough
+
+# add $(go env GOPATH)/bin to PATH first if Go has not already done so
+eval "$(close-enough init --shell zsh)"
+
+# make the Zsh integration persistent
+close-enough init --shell zsh >> ~/.zshrc
+
+close-enough check --format plain --command 'git sttaus'
 ```
+
+New and migrated configurations are hint-only. A bundled safe rewrite requires both `mode=rewrite` and `auto_apply_safe=true` as an explicit opt-in; it edits the shell buffer, requires another Enter to submit, and can be undone with Ctrl-G.
+
+Zsh is first-class. Fish and PowerShell support the same repair modes, with their adapter limitations reported by `close-enough doctor`; PowerShell requires PSReadLine. Bash provides non-blocking post-failure hints only: it preserves `PROMPT_COMMAND` and never installs or changes a `DEBUG` trap, so it cannot interrupt or rewrite a command before submission.
+
+Experimental failure-output capture is opt-in for Bash and Zsh only:
+
+```sh
+eval "$(close-enough init --shell zsh --experimental-output-capture)"
+```
+
+It runs the shell through the platform `script` utility. Output is relayed through a private FIFO, sanitized and redacted before Close Enough retains up to 8 KiB for the current command, and is not written as a transcript. This can affect terminal programs; if the relay is unavailable, Close Enough falls back to an exit-status-only hint.
+
+## Privacy and local learning
+
+Diagnosis runs locally and does not send command data over the network. The shell integrations do not write a general shell-history file or terminal transcript.
+
+Local learning is disabled by default. If you explicitly set `local_learning_enabled=true`, Close Enough stores a local, owner-only SQLite database under `$XDG_STATE_HOME/close-enough` (or `$HOME/.local/state/close-enough`). It records a failed/corrected command pair only when its credential detector finds no secret in either command, and stores recognized-secret-redacted failure output capped at 8 KiB. Redaction is a best-effort safeguard, not a substitute for keeping credentials out of commands and terminal output.
+
+On daemon startup, observations older than `learning_retention_days` are removed; the default is 30 days and the supported range is 1–90. Learning produces a reviewable draft after three matching pairs; it does not automatically enable a rule. Inspect drafts with `close-enough learn list`, then remove all learning data with `close-enough learn purge --confirm=PURGE`.
+
+## How this differs from The Fuck
+
+The projects share the command-repair problem space, but Close Enough is designed as a conservative shell-integrated assistant rather than a command replay tool.
+
+| | The Fuck | Close Enough |
+| --- | --- | --- |
+| Interaction | Run an explicit alias after a command fails; choose a corrected command to execute. | Diagnose before submission and after supported failures; default to a non-blocking hint. |
+| Failure data | Matches extensible Python rules against command output and shell history. | Uses exit status by default. The opt-in Bash/Zsh experiment extracts bounded, redacted evidence through a local relay; general shell history is never persisted. |
+| Applying a repair | Can execute the selected correction. | Rewrites only explicitly opted-in, bundled `safe` repairs in the shell buffer; high-risk and installed-pack repairs are never auto-applied. |
+| Extension model | Python rules, including third-party packages. | Declarative packs with strict schema validation, explicit risk metadata, and Ed25519 publisher trust. |
+| Shell command | Uses the `fuck` trigger alias in its recommended shell setup. | Uses only `close-enough`; it does not create a `fuck` or `thefuck` alias. |
+
+This lets both tools be installed while users evaluate Close Enough without alias conflicts. Close Enough's position should remain: explain a deterministic, locally evaluated repair before changing a command, and make any command-buffer rewrite explicit, reversible, and constrained by risk.
+
+## Installation from a release
+
+There is no published release yet. The release workflow is configured to produce signed archives and installers for macOS, Linux, and Windows; use the verified installer path below once a public versioned release is available.
+
+Once a public tag exists, Go users can install a versioned command directly:
+
+```sh
+go install github.com/gongahkia/close-enough/cmd/close-enough@vX.Y.Z
+```
+
+Direct signed archives remain the recommended option when you want to verify the release identity before executing an installer. Homebrew, WinGet, and AUR distribution are not yet published; their release-gated rollout is tracked in [docs/distribution.md](docs/distribution.md).
+
+`close-enough` does not send command data over the network during diagnosis. Plain diagnostics use color only on a terminal; pass `check --color=never` to disable it explicitly, or `--color=always` to force it.
+
+Pass `check --format=plain --screen-reader` for structured, ANSI-free diagnostics without visual diff markers.
+
+JSON diagnostics include stable `cause_key` and `consequence_key` fields alongside their default English text.
+
+Plain diagnostics present confidence as high, medium, low, or unknown; set `display.confidence` to `false` to hide it.
+
+Risk output includes a static rationale and never includes raw command arguments.
+
+Shell adapters render at most five hint or post-failure diagnostics per loaded shell session; interrupt and rewrite safety behavior is never rate-limited. Bash is limited to post-failure hints; initialize Zsh, Fish, or PowerShell when pre-execution protection or buffer rewrites are required.
+
+Adapters also suppress repeated hint suggestions within a loaded shell session.
+
+Configuration is read from `$XDG_CONFIG_HOME/close-enough/config.json`; an unset or relative `XDG_CONFIG_HOME` falls back to `$HOME/.config/close-enough/config.json`.
+
+Session overrides are limited to `CLOSE_ENOUGH_MODE`, `CLOSE_ENOUGH_AUTO_APPLY_SAFE`, `CLOSE_ENOUGH_CURATED_PACKS_ENABLED`, `CLOSE_ENOUGH_RISK_INTERRUPT`, `CLOSE_ENOUGH_LOCAL_LEARNING_ENABLED`, `CLOSE_ENOUGH_UNDO_ENABLED`, and `CLOSE_ENOUGH_UNDO_TTL_SECONDS`; booleans must be `true` or `false`.
+
+Curated packs are enabled by default; set `curated_packs_enabled` to `false` with `close-enough config set` to disable bundled and installed curated repairs for that configuration or session.
+
+Undo is enabled for 30 seconds by default; set `undo_enabled` or `undo_ttl_seconds` with `close-enough config set`.
+
+When an adapter displays `press Ctrl-G to undo` after a safe rewrite, Ctrl-G restores the original command buffer without submitting either command.
+
+Session overrides affect only the invoking process and never modify configuration files.
+
+Use `close-enough rule list|add|update|remove` to manage global exact-command exceptions; matching exceptions suppress diagnostics and never alter command execution.
+
+Use `close-enough inspect-decision --command '<command>'` for full structured diagnostics and redaction-safe command diffs.
+
+`close-enough doctor` includes remediation hints for shell adapter limitations.
+
+Pack schema v1 is strictly compatible only with schema version `1`; legacy and future schemas are rejected without migration.
+
+Pack and rule identifiers use lowercase kebab case; pack versions use SemVer 2.0.
+
+Pack matchers are compiled as in-process regular expressions and never execute manifest text.
+
+Transformation templates allow literal text, `$$`, and in-range `$1` capture references only. A matcher normally covers the full command argument string; a `high`-risk rule may explicitly set `preserve_tail` to carry only safely serializable trailing arguments into a hint. Tail-preserving rules are never rewrite-eligible, and safe rules never inherit unclassified trailing arguments.
+
+Explanation templates use the same capture syntax and reject control characters.
+
+Every pack rule must declare a risk class and static risk rationale.
+
+Pack fixture schema v1 runs declarative command/input cases against expected rule IDs without executing manifest content.
+
+Pack resolution sorts by pack ID and rejects duplicate IDs or duplicate command/pattern matchers.
+
+Packs can declare a minimum engine SemVer and supported capability identifiers; validation rejects unmet or unknown requirements.
+
+Bundled packs are embedded read-only and discovered deterministically at runtime.
+
+Use `close-enough pack trust add <publisher> <base64-ed25519-public-key>` to explicitly enroll a publisher key obtained out of band. Use `close-enough pack install <pack.json> <signature>` to verify and atomically install an exact signed pack without overwrite.
+
+Use `close-enough pack uninstall <id> <version>` to remove that exact managed pack file.
+
+Pack signature verification uses detached Ed25519 signatures over exact pack bytes and is repeated when installed packs load. Installed packs are hint-only: they never rewrite or interrupt commands, even when their rules declare `safe` risk.
+
+Project configuration requires `.close-enough/config.json` and a same-directory `trusted` marker owned by the current user; Unix markers must be `0600` and their directory must not be group- or world-writable.
+
+History ranking and credential-backed history keys are not shipped features. The repository retains internal research abstractions only; Close Enough does not create history keys, persist general shell history, or rank suggestions automatically from history. Optional local learning is described above.
+
+No self-update client or update channel is shipped. The update-manifest and bundled-pack archive helpers are internal release experiments and are not published as release assets.
+
+Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories; `close-enough doctor` reports these findings without blocking.
+
+Secure writes and trusted project configuration require platform support for atomic replacement, restrictive permissions, and ownership verification; unsupported platforms fail closed.
+
+Release builds report injected version and commit metadata through `close-enough version`.
+
+Run the local CI target with `make ci`.
+
+Run `make verify-local` for the Linux CI checks, latency gate, and Windows cross-compilation checks. It does not execute Windows runtime tests.
+
+Install a version-pinned macOS or Linux release with `cosign` already on `PATH`. Verify the release-attached installer before executing it:
+
+```sh
+version=vX.Y.Z
+base="https://github.com/gongahkia/close-enough/releases/download/$version"
+curl -fsSLO "$base/install.sh"
+curl -fsSLO "$base/install.sh.sigstore.json"
+cosign verify-blob install.sh --bundle install.sh.sigstore.json \
+  --certificate-identity "https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/$version" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+CLOSE_ENOUGH_VERSION="$version" sh install.sh
+```
+
+The verified installer downloads only the matching GitHub release archive, `checksums.txt`, and its Sigstore bundle; it verifies both the SHA-256 digest and the release-workflow identity before extracting. It adds one managed shell-init block for Zsh or Fish and removes legacy managed Bash blocks during upgrade. Run `CLOSE_ENOUGH_VERSION=vX.Y.Z sh install.sh --uninstall` to remove the binary and managed blocks; it does not install a background service.
+
+On Windows PowerShell, verify the release-attached installer before running it:
+
+```powershell
+$version = 'vX.Y.Z'
+$base = "https://github.com/gongahkia/close-enough/releases/download/$version"
+Invoke-WebRequest "$base/install.ps1" -OutFile install.ps1
+Invoke-WebRequest "$base/install.ps1.sigstore.json" -OutFile install.ps1.sigstore.json
+cosign verify-blob install.ps1 --bundle install.ps1.sigstore.json `
+  --certificate-identity "https://github.com/gongahkia/close-enough/.github/workflows/release.yml@refs/tags/$version" `
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version $version
+```
+
+The PowerShell installer has the same archive-verification, initialization, and `-Uninstall` behavior.
+
+Exit codes are stable: `0` success, `1` unexpected internal failure, `2` invalid CLI usage, `3` configuration failure, `4` invalid command or pack input, and `5` local operation failure.

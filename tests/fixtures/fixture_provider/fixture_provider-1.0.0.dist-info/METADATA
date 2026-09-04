@@ -1,4 +1,0 @@
-Metadata-Version: 2.3
-Name: stonks-cli-fixture-provider
-Version: 1.0.0
-Stonks-Cli-Provider-Manifest: {"identifier":"fixture","api_version":"1.0.0","capabilities":["accounts.read","corporate_actions.read","market_data.read","transactions.read"]}

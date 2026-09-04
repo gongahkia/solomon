@@ -1,196 +1,118 @@
-# SPDX-License-Identifier: Apache-2.0
-
-name: CI
+name: ci
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  lint-type-test:
-    name: Lint, type-check, and test (${{ matrix.os }}, Python ${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run ruff check .
-      - run: uv run python scripts/check_license_headers.py
-      - run: uv run python scripts/check_file_lengths.py
-      - run: uv run mypy src
-      - run: uv run bandit -r src/solomon --baseline .bandit-baseline.json
-      - name: Audit dependencies and generate SBOM
-        run: |
-          mkdir -p artifacts
-          uv run pip-audit --skip-editable
-          uv run cyclonedx-py environment --output-format json --output-file artifacts/sbom.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: artifacts/sbom.json
-      - run: uv run pytest --cov=src/solomon
-      - run: uv run python benchmarks/performance_budget.py
-      - run: uv run python benchmarks/currency_regression.py
-
-  boundary-smoke:
-    name: Vendored boundary smoke
+  quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - name: Run Solomon vendored boundary smoke
-        run: |
-          uv sync --locked --extra dev
-          uv run python scripts/boundary_smoke.py
+          go-version: '1.26.6'
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=2m ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+      - run: $(go env GOPATH)/bin/staticcheck ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: $(go env GOPATH)/bin/govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+      - run: $(go env GOPATH)/bin/gosec ./...
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+      - run: $(go env GOPATH)/bin/actionlint
+      - run: shellcheck scripts/*.sh
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-  nix-macos:
-    name: Nix development shell (macOS)
+      - run: sudo apt-get update && sudo apt-get install -y expect
+
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: make latency-gate
+
+  macos-integration:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v25
-      - run: nix flake check --all-systems
-      - run: nix develop .#default --command sh -c 'python --version && uv --version && gitleaks version'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: ./solomon version
+      - run: |
+          set +e
+          ./solomon check
+          result_code=$?
+          set -e
+          test "$result_code" -eq 2
 
-  dependency-propagation-benchmark:
-    name: Dependency propagation regression
+  linux-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run python benchmarks/perf/dependency_propagation.py --sizes 1000,10000,100000 --max-p95-ms 2000
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-  typescript-sdk:
-    name: TypeScript SDK
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/solomon-ts
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/solomon-ts/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
 
-  console-browser-smoke:
-    name: Curator console browser smoke
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: make ci
+      - run: ./solomon version
+      - run: |
+          set +e
+          ./solomon check
+          result_code=$?
+          set -e
+          test "$result_code" -eq 2
+
+  shell-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: sudo apt-get update && sudo apt-get install -y expect fish zsh
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
+          go-version: '1.26.6'
+      - run: go test -race -count=1 -timeout=2m ./internal/shell
+
+  windows-integration:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          node-version: "22"
-      - run: uv sync --locked
-      - name: Install pinned Playwright CLI and Chromium
+          go-version: '1.26.6'
+      - shell: pwsh
         run: |
-          npm install --prefix /tmp/solomon-playwright --no-save @playwright/cli@0.1.17
-          /tmp/solomon-playwright/node_modules/.bin/playwright install --with-deps chromium
-      - run: uv run python scripts/console_browser_smoke.py --playwright-cli /tmp/solomon-playwright/node_modules/.bin/playwright-cli
+          go vet ./...
+          go test -race ./...
+          go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=dev -X main.commit=unknown" -o solomon.exe ./cmd/solomon
+      - shell: pwsh
+        run: |
+          & .\solomon.exe version
+          if ($LASTEXITCODE -ne 0) { throw "version failed: $LASTEXITCODE" }
+          & .\solomon.exe check
+          if ($LASTEXITCODE -ne 2) { throw "expected invalid-input exit 2, got $LASTEXITCODE" }
 
-  local-binary-smoke:
-    name: Offline local binary smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra packaging
-      - run: uv run pyinstaller packaging/solomon-local.spec --noconfirm --clean
-      - run: uv run python scripts/smoke_local_binary.py --binary dist/solomon-local
-
-  postgres-pgvector-migrations:
-    name: PostgreSQL, pgvector, and migrations
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:0.8.2-pg16-bookworm
-        env:
-          POSTGRES_DB: solomon
-          POSTGRES_USER: solomon
-          POSTGRES_PASSWORD: test-postgres-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U solomon -d solomon"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev --extra server
-      - name: Run SQLite and live PostgreSQL migration coverage
-        env:
-          SOLOMON_TEST_POSTGRES_DSN: postgresql://solomon:test-postgres-password@localhost:5432/solomon
-        run: uv run pytest tests/test_migrations.py tests/test_postgres_live_integration.py -q
-
-  production-compose-smoke:
-    name: Production Compose smoke
+  race-leak:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: docker compose version
-      - run: scripts/production_compose_smoke.sh
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-  helm-template:
-    name: Helm template validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v5
-        with:
-          version: v4.2.3
-      - run: scripts/check_helm_chart.sh
-      - run: helm package charts/solomon --destination /tmp
+      - run: sudo apt-get update && sudo apt-get install -y expect
 
-  release-quality-gates:
-    name: Pilot-readiness quality gates
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked --extra dev
-      - run: uv run python scripts/release_quality_gates.py --output artifacts/release-quality-gates.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-quality-gates
-          path: artifacts/release-quality-gates.json
+          go-version: '1.26.6'
+      - run: go test -race -count=1 -timeout=2m ./...

@@ -1,85 +1,192 @@
-# SPDX-License-Identifier: Apache-2.0
-
-name: Release
+name: release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
+  attestations: write
 
 jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - id: matrix
+        run: |
+          targets=$(go run ./cmd/release-compatibility)
+          printf 'targets=%s\n' "$targets" >> "$GITHUB_OUTPUT"
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.26.6'
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=2m ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+      - run: $(go env GOPATH)/bin/staticcheck ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: $(go env GOPATH)/bin/govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+      - run: $(go env GOPATH)/bin/gosec ./...
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+      - run: $(go env GOPATH)/bin/actionlint
+      - run: shellcheck scripts/*.sh
   build:
-    name: Build and install smoke test
+    needs: [compatibility, verify]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v5
-      - name: Validate tag matches project version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          go-version: '1.26.6'
+      - run: mkdir -p dist && GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags "-X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" -o dist/solomon ./cmd/solomon
+      - if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          from pathlib import Path
-
-          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          expected_tag = f"v{version}"
-          if os.environ["RELEASE_TAG"] != expected_tag:
-              raise SystemExit(f"release tag must be {expected_tag}, got {os.environ['RELEASE_TAG']}")
-          PY
-      - run: uv sync --locked
-      - run: uv build --out-dir dist
-      - name: Install built wheel and run CLI smoke test
+          archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" linux amd64 tar.gz)
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
+      - if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |
-          uv venv /tmp/solomon-release-venv
-          uv pip install --python /tmp/solomon-release-venv/bin/python dist/*.whl
-          /tmp/solomon-release-venv/bin/solomon --version
-          /tmp/solomon-release-venv/bin/solomon mcp serve --help
-      - uses: actions/upload-artifact@v4
+          archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" linux arm64 tar.gz)
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
+      - if: matrix.goos == 'darwin' && matrix.goarch == 'arm64'
+        run: |
+          archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" darwin arm64 tar.gz)
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
+      - if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
+        run: |
+          archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" darwin amd64 tar.gz)
+          sh scripts/release-archive.sh dist/solomon "dist/$archive" "${archive%.tar.gz}"
+      - if: matrix.goos == 'windows' && matrix.goarch == 'amd64'
+        run: |
+          archive=$(sh scripts/release-name.sh "$GITHUB_REF_NAME" windows amd64 zip)
+          sh scripts/release-zip.sh dist/solomon "dist/$archive" "${archive%.zip}"
+      - id: release-archive
+        run: |
+          archive=$(find dist -maxdepth 1 -type f ! -name solomon -print -quit)
+          test -n "$archive"
+          printf 'path=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+      - run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+      - run: |
+          archive='${{ steps.release-archive.outputs.path }}'
+          case "$archive" in
+            *.tar.gz) sbom="${archive%.tar.gz}.cdx.json" ;;
+            *.zip) sbom="${archive%.zip}.cdx.json" ;;
+            *) exit 2 ;;
+          esac
+          sh scripts/release-sbom.sh "$(go env GOPATH)/bin/cyclonedx-gomod" . "$sbom" "${{ matrix.goos }}" "${{ matrix.goarch }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: distributions
-          path: dist/
+          name: sbom-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.cdx.json
           if-no-files-found: error
-
-  upload-release-assets:
-    name: Upload release assets
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+      - run: go install github.com/google/go-licenses/v2@v2.0.1
+      - run: |
+          archive='${{ steps.release-archive.outputs.path }}'
+          case "$archive" in
+            *.tar.gz) audit="${archive%.tar.gz}.licenses.csv" ;;
+            *.zip) audit="${archive%.zip}.licenses.csv" ;;
+            *) exit 2 ;;
+          esac
+          sh scripts/release-license-audit.sh "$(go env GOPATH)/bin/go-licenses" . "$audit" "${{ matrix.goos }}" "${{ matrix.goarch }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: distributions
-          path: dist/
-      - name: Upload distributions to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/* --clobber
-
+          name: license-audit-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.licenses.csv
+          if-no-files-found: error
+      - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+      - run: |
+          archive='${{ steps.release-archive.outputs.path }}'
+          cosign sign-blob --yes --bundle "$archive.sigstore.json" "$archive"
+          test -s "$archive.sigstore.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sigstore-bundle-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.sigstore.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+          if-no-files-found: error
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ steps.release-archive.outputs.path }}
+  smoke:
+    needs: [build, compatibility]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compatibility.outputs.targets) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release
+      - shell: bash
+        run: |
+          archive=$(find release -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
+          test -n "$archive"
+          sh scripts/release-smoke-test.sh "$archive" "${{ matrix.goos }}" "${{ matrix.goarch }}" "$GITHUB_REF_NAME"
+  bootstrap:
+    needs: compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+      - run: |
+          mkdir -p dist
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install.ps1 dist/install.ps1
+          cosign sign-blob --yes --bundle dist/install.sh.sigstore.json dist/install.sh
+          cosign sign-blob --yes --bundle dist/install.ps1.sigstore.json dist/install.ps1
+          test -s dist/install.sh.sigstore.json
+          test -s dist/install.ps1.sigstore.json
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF"
+          cosign verify-blob dist/install.sh --bundle dist/install.sh.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          cosign verify-blob dist/install.ps1 --bundle dist/install.ps1.sigstore.json --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bootstrap-${{ github.ref_name }}
+          path: dist/install.*
+          if-no-files-found: error
   publish:
-    name: Publish to PyPI
-    needs: build
+    needs: [build, smoke, bootstrap, verify]
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/solomon
-    permissions:
-      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
-          name: distributions
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          pattern: release-${{ github.ref_name }}-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
-          packages-dir: dist/
+          name: bootstrap-${{ github.ref_name }}
+          path: dist
+      - run: |
+          (
+            cd dist
+            for artifact in solomon_*.tar.gz solomon_*.zip; do
+              test -f "$artifact" || continue
+              sha256sum "$artifact"
+            done | LC_ALL=C sort
+          ) > dist/checksums.txt
+          test "$(wc -l < dist/checksums.txt | tr -d ' ')" -eq 5
+          test -s dist/checksums.txt
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*.tar.gz dist/*.zip dist/*.sigstore.json dist/*.cdx.json dist/*.licenses.csv dist/checksums.txt dist/install.sh dist/install.ps1

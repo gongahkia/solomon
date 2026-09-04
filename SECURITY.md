@@ -2,18 +2,10 @@
 
 ## Supported versions
 
-Security fixes are considered for the latest commit on `main`. Released versions are not supported indefinitely.
+Until the first public release, the current `main` branch is the supported development version. After release, security fixes will target the latest published minor version when feasible.
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability or include exploit details in public comments.
+Do not report a suspected vulnerability in a public GitHub issue, discussion, pull request, or social-media post. Email angryapplegravy@gmail.com with `Solomon security report` in the subject and include the affected revision or version, reproduction steps, impact, and any relevant environment details.
 
-Use [GitHub private vulnerability reporting](https://github.com/gongahkia/solomon/security/advisories/new) and include:
-
-- affected commit, release, or deployment mode;
-- minimal reproduction steps;
-- impact and any affected boundary, tenancy, authentication, audit, or data-egress path; and
-- a safe contact method for follow-up.
-
-Reports are reviewed on a best-effort basis. Do not rely on a response-time commitment, coordinated-disclosure
-deadline, or bounty.
+Please do not include live credentials. Use placeholders or a minimal, safe reproduction. Reports are reviewed in good faith; no response-time commitment is made.

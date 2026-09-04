@@ -1,32 +1,27 @@
 # `Solomon`
 
 <p align="center">
-  <img src="./asset/logo/solomon.png" width="35%">
+  <img src="./asset/logo/solomon.png" width="35%" alt="Solomon logo">
 </p>
 
-<h3 align="center">Self-hosted provenance and change-impact control for high-stakes AI.</h3>
+<h3 align="center">Local, deterministic terminal repair that explains before it changes a command.</h3>
 
 <p align="center">
-  <a href="./docs/index.md">Documentation</a> ·
-  <a href="./docs/positioning.md">Why Solomon</a> ·
-  <a href="./docs/deployment.md">Deployment</a> ·
-  <a href="./docs/pilot/owner-operated-protocol.md">Pilot protocol</a>
+  <a href="#-start-with-solomon">Start</a> ·
+  <a href="#-operate-it-carefully">Safety and privacy</a> ·
+  <a href="./docs/distribution.md">Distribution</a> ·
+  <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gongahkia/solomon/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/gongahkia/solomon/ci.yml?branch=main&style=flat-square"></a>
-  <img alt="MCP compatible" src="https://img.shields.io/badge/MCP-compatible-7C3AED?style=flat-square">
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square">
-  <img alt="Coverage gate 90 percent" src="https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25-brightgreen?style=flat-square">
+  <img alt="Go 1.25+" src="https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square">
   <img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square">
 </p>
 
-Solomon tells a host application whether internal knowledge is still usable, what it depends on, and what needs human
-re-verification. It is built for legal knowledge first, but its core job is general: preserve provenance, make
-dependency impact visible, and keep stale material from quietly being reused.
+Solomon diagnoses likely command mistakes before submission and after supported failures, then presents a risk-classified suggestion. It handles command, Git subcommand, and path typos, plus declarative semantic-repair packs. Its modes are hint, interrupt, rewrite, and off.
 
-**Flag, do not adjudicate.** Solomon does not decide the law, replace professional judgement, or certify that a
-position is correct.
+**Suggest, do not execute.** Solomon does not run a proposed repair. Its default is a non-blocking hint; an automatic rewrite is limited to bundled safe repairs, must be explicitly enabled, remains in the shell buffer until another Enter, and can be undone with Ctrl-G.
 
 ## Contents
 
@@ -37,145 +32,147 @@ position is correct.
 - [🧪 See it in action](#-see-it-in-action)
 - [🛟 Operate it carefully](#-operate-it-carefully)
 - [📚 Learn more](#-learn-more)
-- [🧭 Owner-operated pilot](#-owner-operated-pilot)
 - [🌟 Contributing](#-contributing)
 
 ## 🚀 Start with Solomon
 
-Install the local, offline-default profile:
+Solomon currently supports source installation with Go 1.25 or newer. From a clone of this repository:
 
-```bash
-uv sync
-uv run solomon diagnostics
-```
+~~~sh
+go install ./cmd/solomon
 
-Ingest a position and retrieve only currently usable knowledge:
+# add $(go env GOPATH)/bin to PATH first if Go has not already done so
+eval "$(solomon init --shell zsh)"
 
-```bash
-uv run solomon ingest "Structure X relies on Regulation R section 12." --source-ref memo-1
-uv run solomon recall "structure X regulation"
-```
+# make the Zsh integration persistent
+solomon init --shell zsh >> ~/.zshrc
 
-Solomon also runs as an MCP server for compatible hosts:
+solomon check --format plain --command 'git sttaus'
+~~~
 
-```bash
-uv run solomon mcp serve --help
-```
+New and migrated configurations use hint mode. For source installation, inspect adapter limitations with solomon doctor before adding an integration to a shell startup file.
 
-For SDKs, console setup, and full command reference, start with the [documentation index](./docs/index.md).
+There is no published release yet. Once a public versioned release exists, Go users can install it directly:
+
+~~~sh
+go install github.com/gongahkia/solomon/cmd/solomon@vX.Y.Z
+~~~
 
 ## 🤔 Why Solomon?
 
-Retrieval answers “what material might help?” Solomon adds the evidence needed to decide whether that material should
-still be reused.
+Shell typos are routine, but command correction can also create risk: a suggestion can expose a secret, modify a filesystem, invoke elevated privileges, or affect a remote service. Solomon makes the diagnosis and its risk visible without silently replaying the command.
 
 | When you need to… | Solomon helps by… |
 | --- | --- |
-| understand an internal position | retaining provenance, source versions, credence, and verification history |
-| record reliance on an authority or another position | keeping a proposed dependency under human review until it is confirmed |
-| respond when an authority changes | propagating `StalePendingReverification` through confirmed dependencies |
-| explain a review obligation | exposing `why`, scoped impact, timeline, and audit evidence |
-| recover after an interruption | retaining durable operation history and reconciling only defined safe states |
+| catch a likely typo before a command runs | inspecting bounded command input locally and returning a deterministic suggestion when it finds one |
+| avoid automatic command replay | defaulting to a hint, and requiring explicit rewrite and auto_apply_safe opt-ins for the narrow safe-rewrite path |
+| understand why a repair is constrained | reporting a static risk rationale without including raw command arguments in risk output |
+| adapt common development commands | loading bundled declarative packs deterministically and validating their schema, risk metadata, and transformations |
+| extend repair coverage carefully | requiring an explicitly trusted Ed25519 publisher key before an installed pack is accepted; installed packs remain hint-only |
+| learn from recurring local corrections | keeping learning disabled by default and exposing reviewable drafts rather than automatically enabling a learned rule |
 
-Solomon complements a DMS, search product, research service, drafting tool, or AI host. Those systems can provide
-documents or draft work; Solomon provides a deterministic currency gate and the evidence behind it.
+Solomon is a conservative shell-integrated assistant, not a command replay tool. It has no telemetry, remote inference, general shell-history persistence, or self-update client.
 
 ## 🔎 How it works
 
-1. **Ingest with provenance.** Knowledge records preserve where material came from and which scope owns it.
-2. **Review dependencies.** Deterministic extraction can propose cited reliance, but proposals remain unconfirmed until
-   a human curator reviews them. Human or trusted-upstream assertions follow the same governed lifecycle.
-3. **Record a change.** When an authority or upstream position changes, Solomon finds affected confirmed edges and
-   marks dependent knowledge for re-verification.
-4. **Let a human decide.** A reviewer can reaffirm, supersede, retire, or defer work with evidence; Solomon never
-   converts a flag into a legal conclusion.
-5. **Keep the trail.** Metadata-only, hash-chained audit evidence and audit packs support reconstruction of what
-   happened and why.
-
-Read the [architecture](./docs/architecture.md), [concepts](./docs/concepts.md), and
-[currency loop proof](./docs/roadmap/currency-loop-proof.md) for the full model.
+1. **Receive a shell event.** Zsh, Fish, and PowerShell adapters can ask the local daemon before submission and after a supported failure. Bash only emits non-blocking post-failure hints; it preserves PROMPT_COMMAND and does not install or change a DEBUG trap.
+2. **Diagnose locally.** The engine uses bounded input, output, and analysis-time limits. It identifies missing commands from the local PATH, unknown Git subcommands, missing paths, and matching semantic-pack rules.
+3. **Classify risk and choose an action.** Each decision is safe, unknown, or high. Configuration, shell capability, confidence, and rewrite eligibility determine whether the result is a hint, interrupt, rewrite, or no action.
+4. **Keep rewrites reversible.** A safe bundled rewrite changes only the shell buffer, requires another Enter to run, and can be reverted through the daemon-issued Ctrl-G undo path within its configured lifetime.
+5. **Keep optional state local.** The daemon maintains local session coordination. Optional learning records only qualifying failed/corrected pairs and produces a reviewable draft after three matching pairs.
 
 ## 👀 Choose an entry point
 
 | Entry point | Best for | Start here |
 | --- | --- | --- |
-| Local CLI | an offline-default single-user loop using SQLite | [`solomon` commands](./docs/index.md) |
-| MCP and SDKs | a compatible host that needs deterministic current-context, impact, `why`, and audit tools | [MCP installation](./docs/mcp/install.md) · [SDKs](./docs/sdk/index.md) |
-| Curator console | reviewing sources, dependencies, verification work, and audit packs | [Console guide](./docs/console/index.md) |
-| Server profile | authenticated tenant-aware API, pgvector retrieval, worker recovery, and operations controls | [Deployment profiles](./docs/deployment.md) |
+| Direct CLI | one-off, scriptable diagnostics | solomon check --format plain --command '<command>' |
+| Structured inspection | automation or an accessible, detailed explanation | solomon inspect-decision --command '<command>' or solomon check --format json |
+| Zsh integration | first-class pre-submission and post-failure assistance | solomon init --shell zsh |
+| Fish or PowerShell integration | the same repair modes with adapter limitations reported by doctor | solomon init --shell fish or solomon init --shell powershell |
+| Bash integration | non-blocking post-failure hints only | solomon init --shell bash |
+| Pack management | trusted, declarative repair packs | solomon pack trust, solomon pack install, and solomon pack validate |
+
+PowerShell requires PSReadLine. Plain diagnostics use color only on a terminal; pass check --color=never to disable it explicitly or --color=always to force it. Use check --format=plain --screen-reader for structured ANSI-free diagnostics without visual diff markers.
 
 ## 🧪 See it in action
 
-Run deterministic, headless proofs with fictional material:
+Check a command directly:
 
-```bash
-uv run python examples/scenarios/currency-loop-proof/run.py --workspace /tmp/solomon-currency-loop-proof
-uv run python examples/scenarios/evidence-to-dependency-proof/run.py --workspace /tmp/solomon-evidence-to-dependency-proof
-uv run python examples/scenarios/governed-dependency-assertion-proof/run.py --workspace /tmp/solomon-governed-assertions
-```
+~~~sh
+solomon check --format plain --command 'git sttaus'
+solomon inspect-decision --command 'git sttaus'
+solomon doctor
+~~~
 
-Each scenario has a declared scope and limits:
+Enable experimental failure-output capture for Bash or Zsh only:
 
-- [Currency Loop Proof](./docs/roadmap/currency-loop-proof.md): impact propagation, review, history, audit-pack, and restart behavior.
-- [Evidence-to-Dependency Proof](./docs/roadmap/evidence-to-dependency-proof.md): source spans, suggestions, human decisions, and scope boundaries.
-- [Governed Dependency Assertions](./docs/evaluations/governed-dependency-assertion-proof.md): explicit reviewed assertions and provenance-preserving edges.
-- [Adversarial Dependency Generalization](./docs/evaluations/adversarial-dependency-generalization.md): a locked synthetic challenge with explicit residual limits.
+~~~sh
+eval "$(solomon init --shell zsh --experimental-output-capture)"
+~~~
+
+The experiment runs the shell through the platform script utility. Output passes through a private FIFO and is sanitized and redacted before Solomon retains at most 8 KiB for the current command; it does not write a transcript. Terminal programs can be affected. If the relay is unavailable, Solomon falls back to an exit-status-only hint.
+
+Run the local project checks:
+
+~~~sh
+make ci
+make latency-gate
+make verify-local
+~~~
+
+make verify-local runs the Linux CI checks, the latency gate, and Windows cross-compilation checks; it does not run Windows runtime tests.
 
 ## 🛟 Operate it carefully
 
-The recommended production profile is a single-host, mixed PostgreSQL/SQLite/JSONL Compose deployment with pgvector,
-one worker, shared local durable state, and coordinated full checkpoint/restore. It is **not** a distributed
-transaction, cross-store point-in-time recovery, multi-region disaster-recovery system, or universal Kubernetes
-claim.
+### Defaults, limits, and local privacy
 
-```bash
-scripts/check_production_compose.sh
-scripts/production_compose_smoke.sh
-```
+Diagnosis runs locally and does not send command data over the network. Shell integrations do not write a general shell-history file or terminal transcript. Adapters display at most five hint or post-failure diagnostics in one loaded shell session and suppress duplicate suggestions; interrupt and rewrite safety behavior is not rate-limited.
 
-Before operating a non-disposable deployment, read the:
+Local learning is disabled by default. When local_learning_enabled=true, Solomon stores an owner-only SQLite database in $XDG_STATE_HOME/solomon or $HOME/.local/state/solomon. It records a failed/corrected pair only if its credential detector finds no secret in either command, and retains recognized-secret-redacted failure output capped at 8 KiB. Redaction is best effort, not a substitute for keeping credentials out of commands and terminal output.
 
-- [production deployment profile](./docs/deployment.md);
-- [backup, restore, and upgrade runbook](./docs/operations/production-backup-restore.md);
-- [backup security and excluded-secrets guide](./docs/operations/production-backup-security.md);
-- [operations troubleshooting guide](./docs/operations/production-troubleshooting.md); and
-- [latest redacted rehearsal evidence](./docs/evaluations/evidence/2026-09-04-production-rehearsal/README.md).
+Observations older than learning_retention_days are removed at daemon startup. The default retention is 30 days and the supported range is 1–90. After three matching pairs, learning produces a reviewable draft rather than enabling a rule. Use solomon learn list to inspect drafts and solomon learn purge --confirm=PURGE to remove learning data.
+
+### Configuration and safety boundaries
+
+Configuration is read from $XDG_CONFIG_HOME/solomon/config.json; an unset or relative XDG_CONFIG_HOME falls back to $HOME/.config/solomon/config.json. The only session overrides are SOLOMON_MODE, SOLOMON_AUTO_APPLY_SAFE, SOLOMON_CURATED_PACKS_ENABLED, SOLOMON_RISK_INTERRUPT, SOLOMON_LOCAL_LEARNING_ENABLED, SOLOMON_UNDO_ENABLED, and SOLOMON_UNDO_TTL_SECONDS. Session overrides affect only the invoking process and never change configuration files.
+
+Use solomon rule list|add|update|remove for global exact-command exceptions. They suppress diagnostics and never alter execution. Project configuration requires .solomon/config.json plus a same-directory trusted marker owned by the current user; on Unix the marker must be 0600, and its directory must not be group- or world-writable.
+
+Startup rejects privileged execution, relative or empty PATH entries, and group- or world-writable working directories. solomon doctor reports those findings without blocking. Secure writes and trusted project configuration require atomic replacement, restrictive permissions, and ownership verification; unsupported platforms fail closed.
+
+### Repair packs
+
+Pack schema v1 accepts only schema version 1; legacy and future schemas are rejected. Pack and rule identifiers use lowercase kebab case, pack versions use SemVer 2.0, and every rule declares a risk class and static rationale. Matchers are in-process regular expressions and never execute manifest text. Transformation and explanation templates accept only literal text, $$, and valid capture references; tail-preserving rules are never rewrite-eligible.
+
+Bundled packs are embedded read-only and load deterministically. Curated packs are enabled by default; disable them with solomon config set curated_packs_enabled false. To install an external pack, explicitly obtain the publisher key out of band, then run:
+
+~~~sh
+solomon pack trust add <publisher> <base64-ed25519-public-key>
+solomon pack install <pack.json> <signature>
+~~~
+
+Detached Ed25519 signatures cover the exact pack bytes and are verified again when installed packs load. Installed packs are hint-only even when a rule declares safe; use solomon pack uninstall <id> <version> to remove an exact managed pack.
+
+### Releases and installers
+
+The release workflow is configured to build signed macOS, Linux, and Windows archives, installers, checksums, SBOMs, and license-audit reports, but no public release has been published. Direct signed archives are the recommended path once one exists. Homebrew, WinGet, and AUR are not published; see the [distribution plan](./docs/distribution.md).
+
+Release builds expose their injected version and commit through solomon version. When a versioned release is available, verify its release-attached installer with cosign before executing it. The installer verifies the matching archive checksum and Sigstore workflow identity, manages Zsh or Fish initialization on macOS/Linux (or PowerShell initialization on Windows), and supports uninstall. It does not install a background service.
 
 ## 📚 Learn more
 
-- [Positioning and non-claims](./docs/positioning.md)
-- [Architecture](./docs/architecture.md) and [trust boundary](./docs/trust-boundary.md)
-- [Deployment support matrix](./docs/deployment-support-matrix.md)
-- [Audit packs](./docs/console/audit-pack.md) and [crash-consistency operations](./docs/operations/crash-consistency.md)
-- [Known limitations](./docs/known-limitations.md)
-- [API contract](./docs/api/openapi.json)
-- [Five-minute local production proof](./docs/operations/five-minute-local-production-proof.md)
-
-## 🧭 Owner-operated pilot
-
-The production rehearsal is complete; the next step is a bounded owner-operated pilot using a small,
-owner-authorized, non-sensitive corpus. It is a structured self-evaluation, not external validation, legal-accuracy
-evidence, production adoption, or reviewer-usability validation.
-
-Use the [pilot protocol](./docs/pilot/owner-operated-protocol.md) and keep raw observations outside Git with the
-[private results template](./docs/pilot/owner-operated-results-template.md). The protocol requires expected
-dependencies and expected impact to be recorded before a planned source change, and includes a comprehension check
-for “flag, not adjudicate.”
+- [Distribution plan](./docs/distribution.md)
+- [Contributing guide](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [Support guidance](./SUPPORT.md)
+- [Code of conduct](./CODE_OF_CONDUCT.md)
+- [Apache-2.0 license](./LICENSE) and [notice](./NOTICE)
 
 ## 🌟 Contributing
 
-Contributions should preserve Solomon’s core boundary: reviewed dependency evidence, scoped currency state, and human
-decision-making. Read [CONTRIBUTING.md](./CONTRIBUTING.md), then run the relevant checks:
+Contributions should preserve Solomon’s operating boundary: diagnose locally, explain the proposed repair, and leave execution to the user. Do not add automatic command replay, telemetry, remote inference, or a background service without an explicit design decision.
 
-```bash
-uv sync --extra dev
-uv run ruff check .
-uv run mypy src
-uv run pytest
-```
-
-For package, binary, Compose, Helm, and release-quality checks, see the
-[development and release documentation](./docs/index.md).
+Before opening a pull request, run the relevant checks and add the narrowest regression test for the intended change. Repair packs are declarative data, not executable code: use stable identifiers, declare their risk and rationale, and include fixture coverage. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full process.
 
 ## License
 

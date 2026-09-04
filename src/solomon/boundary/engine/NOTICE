@@ -1,7 +1,0 @@
-Solomon vendored boundary engine
-================================
-
-This module is the local Solomon boundary engine.
-
-Only the local review, pseudonymization, reidentification, volatile mapping,
-jurisdiction-pack, and client-facing surfaces Solomon calls are included here.

@@ -1,8 +1,36 @@
-# SPDX-License-Identifier: Apache-2.0
+BIN ?= solomon
+BUILD_FLAGS := -trimpath -buildvcs=false -mod=readonly
+VERSION ?= dev
+COMMIT ?= unknown
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-SOLOMON_TEST_LOCAL_MODEL_URL ?= http://127.0.0.1:11434/api/generate
-SOLOMON_TEST_LOCAL_MODEL_NAME ?= qwen2.5-coder:1.5b
+.PHONY: build test vet ci latency-gate verify-local benchmark-daemon benchmark-pre-execution benchmark-path-cache benchmark-pack-loading
 
-.PHONY: demo-local
-demo-local:
-	SOLOMON_TEST_LOCAL_MODEL_URL="$(SOLOMON_TEST_LOCAL_MODEL_URL)" SOLOMON_TEST_LOCAL_MODEL_NAME="$(SOLOMON_TEST_LOCAL_MODEL_NAME)" scripts/demo_local_model.sh
+build:
+	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/solomon
+
+test:
+	go test -race ./...
+
+vet:
+	go vet ./...
+
+ci: vet test build
+
+latency-gate:
+	go run ./cmd/latency-gate
+
+verify-local:
+	sh scripts/verify-local.sh
+
+benchmark-daemon:
+	go test -run '^$$' -bench '^BenchmarkWarmCuratedPreSend$$' -benchmem ./internal/daemon
+
+benchmark-pre-execution:
+	go test -run '^$$' -bench '^BenchmarkPreExecutionLatency$$' -benchmem ./internal/diagnose
+
+benchmark-path-cache:
+	go test -run '^$$' -bench '^BenchmarkPATHIndexCache$$' -benchmem ./internal/diagnose
+
+benchmark-pack-loading:
+	go test -run '^$$' -bench '^BenchmarkLoadBundledPacks$$' -benchmem ./internal/packs

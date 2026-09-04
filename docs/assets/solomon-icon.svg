@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">Solomon icon</title>
-  <desc id="desc">A monogram icon for Solomon.</desc>
-  <rect width="64" height="64" rx="12" fill="#111827"/>
-  <path d="M18 18h28v7H25v6h17c5 0 9 4 9 9s-4 9-9 9H18v-7h24c1 0 2-1 2-2s-1-2-2-2H25c-5 0-9-4-9-10 0-5 4-10 9-10Z" fill="#F9FAFB"/>
-  <path d="M18 51h28v3H18z" fill="#22C55E"/>
-</svg>

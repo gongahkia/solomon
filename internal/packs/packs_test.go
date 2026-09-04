@@ -123,7 +123,7 @@ func TestIdentifierAndSemanticVersionValidation(t *testing.T) {
 	for _, mutate := range []func(*Pack){
 		func(pack *Pack) { pack.ID = "Core" },
 		func(pack *Pack) { pack.Version = "1" },
-		func(pack *Pack) { pack.Publisher = "solomon" },
+		func(pack *Pack) { pack.Publisher = "invalid publisher" },
 		func(pack *Pack) { pack.Rules[0].ID = "rule_1" },
 	} {
 		pack := base

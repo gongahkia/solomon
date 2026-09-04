@@ -1,4 +1,4 @@
-# Solomon
+# `Solomon`
 
 <p align="center">
   <img src="./asset/logo/solomon.png" width="35%" alt="Solomon logo">

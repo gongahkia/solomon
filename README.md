@@ -1,7 +1,7 @@
 # Solomon
 
 <p align="center">
-  <img src="./docs/assets/stale-house-view-demo.gif" width="75%" alt="Solomon marks a house view stale after an authority changes">
+  <img src="./asset/logo/solomon.png" width="50%">
 </p>
 
 <h3 align="center">Self-hosted provenance and change-impact control for high-stakes AI.</h3>

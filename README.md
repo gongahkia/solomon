@@ -1,7 +1,7 @@
-# Solomon
+# `Solomon`
 
 <p align="center">
-  <img src="./asset/logo/solomon.png" width="50%">
+  <img src="./asset/logo/solomon.png" width="35%">
 </p>
 
 <h3 align="center">Self-hosted provenance and change-impact control for high-stakes AI.</h3>

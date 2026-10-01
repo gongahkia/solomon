@@ -150,7 +150,10 @@ func writeUnixInstallerRelease(t *testing.T, directory, version string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compressed := gzip.NewWriter(file)
+	compressed, err := gzip.NewWriterLevel(file, gzip.BestSpeed)
+	if err != nil {
+		t.Fatal(err)
+	}
 	writer := tar.NewWriter(compressed)
 	root := strings.TrimSuffix(archive, ".tar.gz")
 	if err := writer.WriteHeader(&tar.Header{Name: root + "/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
